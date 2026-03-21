@@ -7,12 +7,18 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#1a1a2e">
   <title>CrewLogic</title>
-  <link rel="manifest" href="data:application/json,{}">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
   <script>
     // Initialize on DOM ready — no GIS library needed
     window.addEventListener('DOMContentLoaded', function() {
       initAuth();
+    });
+
+    // Also try on hashchange in case hash arrives after load
+    window.addEventListener('hashchange', function() {
+      if (window.location.hash && window.location.hash.startsWith('#session=')) {
+        initAuth();
+      }
     });
 
     function triggerGoogleSignIn() {
@@ -22,7 +28,6 @@
       if (statusEl) { statusEl.textContent = 'Redirecting to Google...'; statusEl.style.color = '#94a3b8'; }
       const GOOGLE_CLIENT_ID = '619520043744-fo8rl63g45ngtgvf8bfq8vglvaej5iib.apps.googleusercontent.com';
       const OAUTH_REDIRECT = 'https://junkluggers.app.n8n.cloud/webhook/crewlogic-oauth-callback';
-    const APP_URL = 'https://ctdennis.github.io/crewlogic/';
       const APP_URL = 'https://ctdennis.github.io/crewlogic/';
       const params = new URLSearchParams({
         client_id: GOOGLE_CLIENT_ID,
@@ -1650,14 +1655,14 @@
 
     // ===== GOOGLE SIGN-IN — OAuth2 popup flow (no GIS/cookies needed) =====
     const OAUTH_REDIRECT = 'https://junkluggers.app.n8n.cloud/webhook/crewlogic-oauth-callback';
-    const APP_URL = 'https://ctdennis.github.io/crewlogic/';
 
     function initAuth() {
       // Check if returning from OAuth callback with session in hash
       const hash = window.location.hash;
       if (hash && hash.startsWith('#session=')) {
         try {
-          const session = JSON.parse(decodeURIComponent(hash.slice(9)));
+          const raw = hash.slice(9);
+          const session = JSON.parse(decodeURIComponent(raw));
           if (session && session.email) {
             currentUser = session;
             storage.set(SESSION_KEY, JSON.stringify(currentUser));
@@ -1666,7 +1671,9 @@
             showApp();
             return;
           }
-        } catch(e) {}
+        } catch(e) {
+          console.error('Session parse error:', e, 'Hash:', hash.slice(0,100));
+        }
       }
 
       // Check for existing valid session in storage
@@ -1682,6 +1689,14 @@
         } catch(e) {}
         storage.remove(SESSION_KEY);
       }
+
+      // Show login
+      showLogin();
+    }
+
+    function showLogin() {
+      document.getElementById('loginScreen').style.display = 'flex';
+      document.getElementById('appShell').classList.remove('active');
     }
 
     function triggerGoogleSignIn() {
