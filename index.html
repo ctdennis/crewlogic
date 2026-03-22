@@ -28,7 +28,7 @@
       if (statusEl) { statusEl.textContent = 'Redirecting to Google...'; statusEl.style.color = '#94a3b8'; }
       const GOOGLE_CLIENT_ID = '619520043744-fo8rl63g45ngtgvf8bfq8vglvaej5iib.apps.googleusercontent.com';
       const OAUTH_REDIRECT = 'https://junkluggers.app.n8n.cloud/webhook/crewlogic-oauth-callback';
-      const APP_URL = 'https://ctdennis.github.io/crewlogic/';
+      const APP_URL = 'https://crewlogic.pages.dev';
       const params = new URLSearchParams({
         client_id: GOOGLE_CLIENT_ID,
         redirect_uri: OAUTH_REDIRECT,
@@ -1126,6 +1126,25 @@
         </div><!-- end estMainContent -->
 
         <button class="new-estimate-btn" style="margin-top:12px;" onclick="backToEstimatesList()">← Back to Estimates</button>
+      </div>
+
+      <!-- SUBMIT TO VONIGO MODAL -->
+      <div id="submitVonigoModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:200;align-items:flex-end;justify-content:center;">
+        <div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;">
+          <div style="font-size:16px;font-weight:700;margin-bottom:4px;color:var(--text-primary);">Submit to Vonigo</div>
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:20px;" id="submitVonigoClient"></div>
+          <button class="vol-option-btn" id="submitAsDraftBtn" onclick="executeVonigoSubmit(false)">
+            Submit as Draft
+            <div class="vol-option-sub">Creates a standalone estimate in Vonigo — attach to a job later</div>
+          </button>
+          <button class="vol-option-btn" id="submitAttachBtn" onclick="executeVonigoSubmit(true)" style="display:none;">
+            <span id="submitAttachLabel">Attach to Job</span>
+            <div class="vol-option-sub">Links estimate directly to the job in Vonigo</div>
+          </button>
+          <button class="calc-btn" style="background:var(--bg-input);color:var(--text-secondary);margin-top:8px;" onclick="document.getElementById('submitVonigoModal').style.display='none'">
+            <span class="btn-text">Cancel</span>
+          </button>
+        </div>
       </div>
 
       <!-- VOLUME CHARGE OPTIONS MODAL -->
@@ -3493,18 +3512,34 @@
     }
 
     // ===== SUBMIT TO VONIGO =====
-    async function submitEstimateToVonigo() {
-      // clientID required only if jobID is provided
-      if (currentEstimate.jobID && !currentEstimate.clientID) {
-        document.getElementById('estFeedback').textContent = 'Job lookup failed — please re-enter the job number and tap Look up.';
+    function submitEstimateToVonigo() {
+      // clientID required
+      if (!currentEstimate.clientID) {
+        document.getElementById('estFeedback').textContent = 'Enter a Vonigo job number and tap Look up before submitting.';
         document.getElementById('estFeedback').className = 'settings-feedback error';
         return;
       }
-      if (!currentEstimate.clientName && !currentEstimate.jobID) {
-        document.getElementById('estFeedback').textContent = 'Please enter a client name or look up a job before submitting.';
-        document.getElementById('estFeedback').className = 'settings-feedback error';
-        return;
+
+      // Show submit modal
+      const clientLabel = document.getElementById('submitVonigoClient');
+      clientLabel.textContent = 'Client: ' + (currentEstimate.clientName || 'Unknown');
+
+      // Show/hide attach button based on whether job was looked up
+      const attachBtn = document.getElementById('submitAttachBtn');
+      if (currentEstimate.jobID) {
+        attachBtn.style.display = 'block';
+        document.getElementById('submitAttachLabel').textContent = 'Attach to Job #' + currentEstimate.jobID;
+      } else {
+        attachBtn.style.display = 'none';
       }
+
+      document.getElementById('submitVonigoModal').style.display = 'flex';
+    }
+
+    async function executeVonigoSubmit(attachToJob) {
+      // Close modal
+      document.getElementById('submitVonigoModal').style.display = 'none';
+
       const btn = document.getElementById('estSubmitBtn');
       const feedbackEl = document.getElementById('estFeedback');
       btn.classList.add('loading');
@@ -3528,7 +3563,7 @@
             clientID: currentEstimate.clientID,
             contactID: currentEstimate.contactID,
             locationID: currentEstimate.locationID,
-            jobID: currentEstimate.jobID,
+            jobID: attachToJob ? currentEstimate.jobID : null,
             serviceTypeID: '11',
             notes: currentEstimate.notes,
             charges,
