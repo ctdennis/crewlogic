@@ -3046,9 +3046,22 @@
         container.innerHTML = '<div style="font-size:13px;color:var(--text-muted);padding:8px 0;">No charges added. Load prices first, then add charges.</div>';
         return;
       }
+
+      // Build room options from current rooms
+      const roomAreas = (currentEstimate.rooms || [])
+        .filter(r => r.room || r.area)
+        .map(r => (r.room || '') + (r.area ? ' (' + r.area + ')' : ''));
+      const uniqueRooms = [...new Set(roomAreas)];
+
       container.innerHTML = currentEstimate.charges.map(function(charge, idx) {
         const lineTotal = (parseFloat(charge.qty) || 0) * (parseFloat(charge.unitPrice) || 0);
         const isNeg = lineTotal < 0;
+        const isVolume = charge.blockName && charge.blockName.toLowerCase().includes('volume');
+
+        // Room dropdown options
+        const roomOpts = '<option value="">— No room —</option>' +
+          uniqueRooms.map(r => '<option value="' + r.replace(/"/g,'&quot;') + '"' + (charge.room === r ? ' selected' : '') + '>' + r + '</option>').join('');
+
         return [
           '<div class="charge-row">',
           '<div class="charge-row-top">',
@@ -3065,7 +3078,8 @@
           '<input class="form-input charge-price-input" type="number" value="' + charge.unitPrice + '" min="0" step="0.01" data-idx="' + idx + '" data-field="unitPrice" oninput="updateChargeFromInput(this)">',
           '<div class="charge-line-total' + (isNeg ? ' negative' : '') + '">' + (isNeg ? '-' : '') + '$' + Math.abs(lineTotal).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</div>',
           '</div>',
-          (charge.description ? '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">' + charge.description + '</div>' : ''),
+          (!isVolume ? '<div style="margin-top:6px;"><select class="form-select" style="font-size:12px;padding:6px 10px;height:auto;" data-idx="' + idx + '" onchange="updateChargeRoom(this)">' + roomOpts + '</select></div>' : ''),
+          (charge.description ? '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">' + charge.description + '</div>' : ''),
           '</div>'
         ].join('');
       }).join('');
@@ -3102,6 +3116,12 @@
         }
       }
       updateTotals();
+      autoSaveDraft();
+    }
+
+    function updateChargeRoom(el) {
+      const idx = parseInt(el.dataset.idx);
+      currentEstimate.charges[idx].room = el.value;
       autoSaveDraft();
     }
 
@@ -3219,6 +3239,7 @@
           qty: line.qty,
           unitPrice: parseFloat(item.value),
           description: '',
+          room: '',
           taxID: 146
         });
       });
@@ -3337,6 +3358,7 @@
         priceBlockID: blockID,
         qty, unitPrice,
         description: desc,
+        room: '',
         taxID: 146
       });
 
