@@ -2752,6 +2752,9 @@
         html += '<div class="estimate-card-total-item">Total: <strong>$' + price.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</strong></div>';
         if (updated) html += '<div class="estimate-card-total-item" style="margin-left:auto">Updated ' + updated + '</div>';
         html += '</div>';
+        if (est.vonigoQuoteID) {
+          html += '<div style="font-size:11px;color:var(--accent-green);margin-bottom:8px;">Vonigo #' + est.vonigoQuoteID + '</div>';
+        }
         html += '<div class="estimate-card-actions">';
         html += '<div class="est-action-btn" data-action="clone" data-estimate-id="' + eid + '">Clone</div>';
         html += '<div class="est-action-btn danger" data-action="delete" data-estimate-id="' + eid + '">Delete</div>';
@@ -2896,6 +2899,20 @@
       renderRooms();
       renderCharges();
       updateTotals();
+
+      // If already submitted to Vonigo, disable submit button
+      const submitBtn = document.getElementById('estSubmitBtn');
+      const feedbackEl = document.getElementById('estFeedback');
+      if (currentEstimate.vonigoQuoteID) {
+        submitBtn.disabled = true;
+        submitBtn.querySelector('.btn-text').textContent = 'Submitted ✓';
+        feedbackEl.textContent = 'Submitted to Vonigo — Estimate #' + currentEstimate.vonigoQuoteID;
+        feedbackEl.className = 'settings-feedback ok';
+      } else {
+        submitBtn.disabled = false;
+        submitBtn.querySelector('.btn-text').textContent = 'Submit to Vonigo';
+        feedbackEl.textContent = '';
+      }
     }
 
     function backToEstimatesList() {
@@ -3467,7 +3484,12 @@
         feedbackEl.textContent = '✓ Saved locally (offline)';
         feedbackEl.className = 'settings-feedback ok';
       }
-      setTimeout(() => { feedbackEl.textContent = ''; }, 3000);
+      setTimeout(() => {
+        // Only clear if it's a save message, not a submit confirmation
+        if (feedbackEl.textContent.startsWith('✓ Draft') || feedbackEl.textContent.startsWith('✓ Saved')) {
+          feedbackEl.textContent = '';
+        }
+      }, 3000);
     }
 
     // ===== SUBMIT TO VONIGO =====
@@ -3521,9 +3543,14 @@
           currentEstimate.updatedAt = new Date().toISOString();
           saveLocalEstimate(currentEstimate);
           await saveEstimateDraft();
-          feedbackEl.textContent = '✓ Quote submitted to Vonigo — Estimate #' + data.quoteID;
+          feedbackEl.textContent = '✓ Submitted to Vonigo — Estimate #' + data.quoteID;
           feedbackEl.className = 'settings-feedback ok';
+          // Don't auto-hide — keep quote ID visible
           btn.disabled = true;
+          btn.textContent = 'Submitted ✓';
+          // Update the ZIP card to show submitted status
+          document.getElementById('estZipStatus').textContent = '✓ ' + (currentEstimate.priceListName || '') + '  |  Vonigo #' + data.quoteID;
+          document.getElementById('estZipStatus').className = 'zip-status ok';
         } else {
           feedbackEl.textContent = data.error || 'Submission failed';
           feedbackEl.className = 'settings-feedback error';
@@ -3575,4 +3602,4 @@
     // If session exists, initGoogleSignIn() handles it immediately on GIS load.
   </script>
 </body>
-</html>
+          html += '<div style="font-size:11px;color:var(--accent-green);margin-bottom:8px;">Vonigo #' + est.vonigoQuoteID + '</div>';
