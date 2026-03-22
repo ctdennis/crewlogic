@@ -3625,9 +3625,15 @@
 
     async function deleteEstimate(estimateID) {
       if (!confirm('Delete this estimate?')) return;
+
+      // Show immediate feedback
+      const listEl = document.getElementById('estimatesList');
+      listEl.innerHTML = '<div class="price-loading"><span class="spinner-inline"></span>Deleting estimate...</div>';
+
       // Remove locally
       const all = getLocalEstimates().filter(e => String(e.estimateID) !== String(estimateID));
       setLocalEstimates(all);
+
       // Remove from backend
       try {
         await apiFetch(N8N_BASE + '/crewlogic-estimate', {
@@ -3635,6 +3641,7 @@
           body: JSON.stringify({ action: 'delete', email: currentUser.email, franchiseID: currentUser.franchiseID, deleteIDs: [estimateID] })
         });
       } catch(e) {}
+
       initEstimatesList();
     }
 
