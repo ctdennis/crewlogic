@@ -2734,31 +2734,45 @@
         listEl.innerHTML = '<div class="estimates-empty">No estimates yet.<br>Tap + New to create one.</div>';
         return;
       }
-      listEl.innerHTML = estimates.map(function(est) {
+      let html = '';
+      estimates.forEach(function(est) {
         const status = est.status || 'draft';
         const updated = est.updatedAt ? new Date(est.updatedAt).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : '';
         const trucks = parseFloat(est.totalTrucks) || 0;
         const price = parseFloat(est.totalPrice) || 0;
-        const id = String(est.estimateID).replace(/'/g, "\\'");
-        return [
-          '<div class="estimate-card" onclick="openEstimate(\'' + id + '\')">',
-          '<div class="estimate-card-top">',
-          '<div class="estimate-card-label">' + (est.label || 'Untitled Estimate') + '</div>',
-          '<span class="estimate-status-badge ' + status + '">' + status + '</span>',
-          '</div>',
-          '<div class="estimate-card-meta">' + (est.clientName || '&mdash;') + (est.address ? ' &middot; ' + est.address : '') + '</div>',
-          '<div class="estimate-card-totals">',
-          '<div class="estimate-card-total-item">Trucks: <strong>' + trucks.toFixed(2) + '</strong></div>',
-          '<div class="estimate-card-total-item">Total: <strong>$' + price.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</strong></div>',
-          (updated ? '<div class="estimate-card-total-item" style="margin-left:auto">Updated ' + updated + '</div>' : ''),
-          '</div>',
-          '<div class="estimate-card-actions">',
-          '<div class="est-action-btn" onclick="event.stopPropagation();cloneEstimate(\'' + id + '\')">Clone</div>',
-          '<div class="est-action-btn danger" onclick="event.stopPropagation();deleteEstimate(\'' + id + '\')">Delete</div>',
-          '</div>',
-          '</div>'
-        ].join('');
-      }).join('');
+        const eid = String(est.estimateID);
+        html += '<div class="estimate-card" data-estimate-id="' + eid + '">';
+        html += '<div class="estimate-card-top">';
+        html += '<div class="estimate-card-label">' + (est.label || 'Untitled Estimate') + '</div>';
+        html += '<span class="estimate-status-badge ' + status + '">' + status + '</span>';
+        html += '</div>';
+        html += '<div class="estimate-card-meta">' + (est.clientName || '&mdash;') + (est.address ? ' &middot; ' + est.address : '') + '</div>';
+        html += '<div class="estimate-card-totals">';
+        html += '<div class="estimate-card-total-item">Trucks: <strong>' + trucks.toFixed(2) + '</strong></div>';
+        html += '<div class="estimate-card-total-item">Total: <strong>$' + price.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</strong></div>';
+        if (updated) html += '<div class="estimate-card-total-item" style="margin-left:auto">Updated ' + updated + '</div>';
+        html += '</div>';
+        html += '<div class="estimate-card-actions">';
+        html += '<div class="est-action-btn" data-action="clone" data-estimate-id="' + eid + '">Clone</div>';
+        html += '<div class="est-action-btn danger" data-action="delete" data-estimate-id="' + eid + '">Delete</div>';
+        html += '</div>';
+        html += '</div>';
+      });
+      listEl.innerHTML = html;
+
+      // Attach events via delegation — no inline onclick needed
+      listEl.addEventListener('click', function(e) {
+        const actionBtn = e.target.closest('[data-action]');
+        if (actionBtn) {
+          e.stopPropagation();
+          const id = actionBtn.dataset.estimateId;
+          if (actionBtn.dataset.action === 'clone') cloneEstimate(id);
+          if (actionBtn.dataset.action === 'delete') deleteEstimate(id);
+          return;
+        }
+        const card = e.target.closest('[data-estimate-id]');
+        if (card) openEstimate(card.dataset.estimateId);
+      }, { once: true });
     }    
 
     function newEstimateDoc() {
