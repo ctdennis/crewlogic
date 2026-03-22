@@ -2772,7 +2772,7 @@
         }
         const card = e.target.closest('[data-estimate-id]');
         if (card) openEstimate(card.dataset.estimateId);
-      }, { once: true });
+      });
     }    
 
     function newEstimateDoc() {
@@ -2826,11 +2826,11 @@
           body: JSON.stringify({ action: 'load', email: currentUser.email, franchiseID: currentUser.franchiseID, estimateID })
         });
         const text = await res.text();
+        console.log('Load response:', text.substring(0, 500));
         let data;
         try { data = JSON.parse(text); } catch(e) {
           console.error('Load response not JSON:', text.substring(0, 200));
-          document.getElementById('estimatesList').innerHTML = '<div class="price-error">Server error loading estimate. Check console.</div>';
-          initEstimatesList();
+          document.getElementById('estimatesList').innerHTML = '<div class="price-error">Server error: ' + text.substring(0, 100) + '</div>';
           return;
         }
         if (data.success && data.estimate) {
