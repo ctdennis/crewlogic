@@ -2719,6 +2719,23 @@
         'Garage','Exterior','Deck/Patio','Shed','Storage Unit','Commercial','Other'
       ];
 
+      // Set up event delegation once — clear previous listener first
+      const estListEl = document.getElementById('estimatesList');
+      const newListEl = estListEl.cloneNode(false);
+      estListEl.parentNode.replaceChild(newListEl, estListEl);
+      newListEl.addEventListener('click', function(e) {
+        const actionBtn = e.target.closest('[data-action]');
+        if (actionBtn) {
+          e.stopPropagation();
+          const id = actionBtn.dataset.estimateId;
+          if (actionBtn.dataset.action === 'clone') cloneEstimate(id);
+          if (actionBtn.dataset.action === 'delete') deleteEstimate(id);
+          return;
+        }
+        const card = e.target.closest('[data-estimate-id]');
+        if (card) openEstimate(card.dataset.estimateId);
+      });
+
       // Load from backend
       try {
         const res = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
@@ -2782,19 +2799,7 @@
       });
       listEl.innerHTML = html;
 
-      // Attach events via delegation — no inline onclick needed
-      listEl.addEventListener('click', function(e) {
-        const actionBtn = e.target.closest('[data-action]');
-        if (actionBtn) {
-          e.stopPropagation();
-          const id = actionBtn.dataset.estimateId;
-          if (actionBtn.dataset.action === 'clone') cloneEstimate(id);
-          if (actionBtn.dataset.action === 'delete') deleteEstimate(id);
-          return;
-        }
-        const card = e.target.closest('[data-estimate-id]');
-        if (card) openEstimate(card.dataset.estimateId);
-      });
+      // Event delegation is set up once in initEstimatesList, not here
     }    
 
     function newEstimateDoc() {
