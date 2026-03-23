@@ -9,6 +9,7 @@
   <title>CrewLogic</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBmMTkyMyIvPjx0ZXh0IHg9IjE2IiB5PSIyMiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxNCIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iIzRhZGU4MCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+Q0w8L3RleHQ+PC9zdmc+">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script>
     // Initialize on DOM ready — no GIS library needed
     window.addEventListener('DOMContentLoaded', function() {
@@ -1124,9 +1125,14 @@
           </div>
 
           <!-- Action buttons -->
-          <button class="calc-btn" style="margin-top:8px;background:var(--bg-card);color:var(--accent-green);border:1px solid var(--accent-green);" onclick="saveEstimateDraft()">
-            <span class="btn-text">Save Draft</span>
-          </button>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">
+            <button class="calc-btn" style="margin-top:0;background:var(--bg-card);color:var(--accent-green);border:1px solid var(--accent-green);" onclick="saveEstimateDraft()">
+              <span class="btn-text">Save Draft</span>
+            </button>
+            <button class="calc-btn" style="margin-top:0;background:var(--bg-card);color:var(--accent-blue);border:1px solid var(--accent-blue);" onclick="showPDFOptions()">
+              <span class="btn-text">📄 Generate PDF</span>
+            </button>
+          </div>
           <button class="est-submit-btn" id="estSubmitBtn" onclick="submitEstimateToVonigo()">
             <div class="spinner"></div>
             <span class="btn-text">Submit to Vonigo</span>
@@ -1136,6 +1142,25 @@
         </div><!-- end estMainContent -->
 
         <button class="new-estimate-btn" style="margin-top:12px;" onclick="backToEstimatesList()">← Back to Estimates</button>
+      </div>
+
+      <!-- PDF OPTIONS MODAL -->
+      <div id="pdfOptionsModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:200;align-items:flex-end;justify-content:center;">
+        <div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;">
+          <div style="font-size:16px;font-weight:700;margin-bottom:4px;color:var(--text-primary);">Generate PDF Proposal</div>
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;" id="pdfModalSubtitle"></div>
+          <button class="vol-option-btn" onclick="generateEstimatePDF('download')">
+            ⬇️ Download PDF
+            <div class="vol-option-sub">Save to your device</div>
+          </button>
+          <button class="vol-option-btn" onclick="generateEstimatePDF('tab')">
+            🔗 Open in New Tab
+            <div class="vol-option-sub">View or share from browser</div>
+          </button>
+          <button class="calc-btn" style="background:var(--bg-input);color:var(--text-secondary);margin-top:4px;" onclick="document.getElementById('pdfOptionsModal').style.display='none'">
+            <span class="btn-text">Cancel</span>
+          </button>
+        </div>
       </div>
 
       <!-- SUBMIT TO VONIGO MODAL -->
@@ -3781,6 +3806,346 @@
       } catch(e) {}
 
       initEstimatesList();
+    }
+
+
+    // ===== PDF GENERATION =====
+    function showPDFOptions() {
+      const sub = document.getElementById('pdfModalSubtitle');
+      sub.textContent = (currentEstimate.clientName || 'Estimate') + ' — ' + (currentEstimate.address || '');
+      document.getElementById('pdfOptionsModal').style.display = 'flex';
+    }
+
+    function generateEstimatePDF(mode) {
+      document.getElementById('pdfOptionsModal').style.display = 'none';
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'letter' });
+      const W = 792, H = 612;
+      const margin = 36;
+      const green = [34, 197, 94];
+      const dark = [15, 25, 35];
+      const gray = [100, 116, 139];
+      const lightgray = [226, 232, 240];
+      const white = [255, 255, 255];
+      const yellow = [251, 191, 36];
+      const blue = [96, 165, 250];
+
+      const est = currentEstimate;
+      const dateStr = new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' });
+      const clientName = est.clientName || 'Customer';
+      const address = est.address || '';
+      const franchiseName = currentUser.franchiseName || 'The Junkluggers';
+      const ownerName = currentUser.name || '';
+      const phone = currentUser.phone || '';
+
+      // ===== PAGE 1: SUMMARY =====
+      // Header bar
+      doc.setFillColor(...dark);
+      doc.rect(0, 0, W, 54, 'F');
+
+      // Green accent stripe
+      doc.setFillColor(...green);
+      doc.rect(0, 54, W, 4, 'F');
+
+      // Logo placeholder / Company name
+      doc.setTextColor(...green);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(20);
+      doc.text('JUNKLUGGERS', margin, 35);
+
+      doc.setTextColor(...white);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.text(franchiseName, margin, 48);
+
+      // Proposal title top right
+      doc.setTextColor(...white);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.text('ESTIMATE PROPOSAL', W - margin, 28, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.text(dateStr, W - margin, 42, { align: 'right' });
+
+      // Client info row
+      let y = 74;
+      doc.setTextColor(...dark);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.text(clientName, margin, y);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(...gray);
+      doc.text(address, margin, y + 14);
+
+      // Contact info right
+      doc.setTextColor(...gray);
+      doc.setFontSize(9);
+      doc.text(ownerName, W - margin, y, { align: 'right' });
+      doc.text(phone, W - margin, y + 12, { align: 'right' });
+
+      // Divider
+      y = 106;
+      doc.setDrawColor(...lightgray);
+      doc.line(margin, y, W - margin, y);
+
+      // Section title
+      y = 122;
+      doc.setTextColor(...dark);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.text('VOLUME BREAKDOWN', margin, y);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(...gray);
+      doc.text('Fees included: Removal from home, recycling & disposal', margin, y + 13);
+
+      // Volume table
+      y = 148;
+      const col = { area: margin, trucks: 340, price: 440, total: 580, right: W - margin };
+      const rowH = 22;
+
+      // Table header
+      doc.setFillColor(...dark);
+      doc.rect(margin, y - 14, W - 2 * margin, 18, 'F');
+      doc.setTextColor(...white);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.text('Area', col.area + 6, y - 2);
+      doc.text('# of Trucks', col.trucks, y - 2, { align: 'right' });
+      doc.text('Price/Truck', col.price, y - 2, { align: 'right' });
+      doc.text('Total', col.total, y - 2, { align: 'right' });
+
+      y += 6;
+
+      // Group rooms by area and sum volumes
+      const areaMap = {};
+      (est.rooms || []).forEach(r => {
+        const area = r.area || 'Other';
+        if (!areaMap[area]) areaMap[area] = 0;
+        areaMap[area] += parseFloat(r.truckVolume) || 0;
+      });
+      const areaRows = Object.entries(areaMap)
+        .filter(([, v]) => v > 0)
+        .sort((a, b) => a[0].localeCompare(b[0]));
+
+      // Find full truck price from charges
+      const volCharge = (est.charges || []).find(c => c.blockName && c.blockName.toLowerCase().includes('volume') && c.name && c.name.toLowerCase().includes('full'));
+      const pricePerTruck = volCharge ? parseFloat(volCharge.unitPrice) : 0;
+
+      let rowIdx = 0;
+      areaRows.forEach(([area, trucks]) => {
+        if (rowIdx % 2 === 0) {
+          doc.setFillColor(245, 248, 252);
+          doc.rect(margin, y - 13, W - 2 * margin, rowH - 2, 'F');
+        }
+        doc.setTextColor(...dark);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.text(area, col.area + 6, y);
+        doc.text(trucks.toFixed(3), col.trucks, y, { align: 'right' });
+        rowIdx++;
+        y += rowH;
+      });
+
+      // Subtotal row
+      const totalTrucks = parseFloat(est.totalTrucks) || 0;
+      const volTotal = totalTrucks * pricePerTruck;
+
+      doc.setFillColor(...dark);
+      doc.rect(margin, y - 13, W - 2 * margin, rowH - 2, 'F');
+      doc.setTextColor(...white);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.text('Sub Total', col.area + 6, y);
+      doc.text(totalTrucks.toFixed(3), col.trucks, y, { align: 'right' });
+      if (pricePerTruck > 0) doc.text(fmtMoney(pricePerTruck), col.price, y, { align: 'right' });
+      if (volTotal > 0) doc.text(fmtMoney(volTotal), col.total, y, { align: 'right' });
+      y += rowH + 4;
+
+      // Non-volume charges
+      const otherCharges = (est.charges || []).filter(c => !c.blockName || !c.blockName.toLowerCase().includes('volume'));
+      rowIdx = 0;
+      otherCharges.forEach(c => {
+        const lineTotal = (parseFloat(c.qty) || 0) * (parseFloat(c.unitPrice) || 0);
+        if (rowIdx % 2 === 0) {
+          doc.setFillColor(245, 248, 252);
+          doc.rect(margin, y - 13, W - 2 * margin, rowH - 2, 'F');
+        }
+        doc.setTextColor(...dark);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        const label = c.name + (parseFloat(c.qty) !== 1 ? ' × ' + c.qty : '');
+        doc.text(label, col.area + 6, y);
+        doc.text(fmtMoney(Math.abs(c.unitPrice)), col.price, y, { align: 'right' });
+        doc.setTextColor(lineTotal < 0 ? 239 : dark[0], lineTotal < 0 ? 68 : dark[1], lineTotal < 0 ? 68 : dark[2]);
+        doc.text(fmtMoney(lineTotal), col.total, y, { align: 'right' });
+        rowIdx++;
+        y += rowH;
+      });
+
+      // Grand total
+      y += 4;
+      doc.setDrawColor(...green);
+      doc.setLineWidth(1.5);
+      doc.line(margin, y - 8, W - margin, y - 8);
+      doc.setFillColor(...green);
+      doc.rect(margin, y - 6, W - 2 * margin, 24, 'F');
+      doc.setTextColor(...dark);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.text('TOTAL', col.area + 6, y + 11);
+      doc.text(fmtMoney(parseFloat(est.totalPrice) || 0), col.total, y + 11, { align: 'right' });
+
+      // Footer
+      doc.setDrawColor(...lightgray);
+      doc.setLineWidth(0.5);
+      doc.line(margin, H - 30, W - margin, H - 30);
+      doc.setTextColor(...gray);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.text('If items take up less space than anticipated, price will be reduced accordingly. Additional recycling charges may apply based on items uncovered during removal.', margin, H - 18, { maxWidth: W - 2 * margin });
+
+      // ===== PAGE 2: DETAIL =====
+      doc.addPage('letter', 'landscape');
+
+      // Header bar
+      doc.setFillColor(...dark);
+      doc.rect(0, 0, W, 54, 'F');
+      doc.setFillColor(...green);
+      doc.rect(0, 54, W, 4, 'F');
+      doc.setTextColor(...green);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(20);
+      doc.text('JUNKLUGGERS', margin, 35);
+      doc.setTextColor(...white);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.text(franchiseName, margin, 48);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.text('VOLUME DETAIL', W - margin, 28, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.text(clientName + ' — ' + dateStr, W - margin, 42, { align: 'right' });
+
+      // Detail table
+      y = 80;
+      const dcol = { room: margin, area: 160, desc: 265, excluded: 520, frac: 660, vol: 730 };
+
+      // Table header
+      doc.setFillColor(...dark);
+      doc.rect(margin, y - 14, W - 2 * margin, 18, 'F');
+      doc.setTextColor(...white);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.text('Room', dcol.room + 4, y - 2);
+      doc.text('Area', dcol.area + 4, y - 2);
+      doc.text('Description', dcol.desc + 4, y - 2);
+      doc.text('Not Included', dcol.excluded + 4, y - 2);
+      doc.text('Size', dcol.frac + 4, y - 2);
+      doc.text('Vol', dcol.vol + 4, y - 2);
+
+      y += 4;
+      const rooms = est.rooms || [];
+      rowIdx = 0;
+
+      rooms.forEach(room => {
+        // Estimate row height based on description length
+        const descWidth = dcol.excluded - dcol.desc - 8;
+        const descLines = doc.splitTextToSize(room.description || '', descWidth);
+        const rh = Math.max(18, descLines.length * 11 + 6);
+
+        // Page break if needed
+        if (y + rh > H - 40) {
+          doc.addPage('letter', 'landscape');
+          // Repeat header
+          doc.setFillColor(...dark);
+          doc.rect(0, 0, W, 40, 'F');
+          doc.setFillColor(...green);
+          doc.rect(0, 40, W, 3, 'F');
+          doc.setTextColor(...green);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(14);
+          doc.text('JUNKLUGGERS', margin, 28);
+          doc.setTextColor(...white);
+          doc.setFontSize(9);
+          doc.text('Volume Detail (continued)', W - margin, 28, { align: 'right' });
+          y = 60;
+          // Repeat column headers
+          doc.setFillColor(...dark);
+          doc.rect(margin, y - 14, W - 2 * margin, 18, 'F');
+          doc.setTextColor(...white);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(8);
+          doc.text('Room', dcol.room + 4, y - 2);
+          doc.text('Area', dcol.area + 4, y - 2);
+          doc.text('Description', dcol.desc + 4, y - 2);
+          doc.text('Not Included', dcol.excluded + 4, y - 2);
+          doc.text('Size', dcol.frac + 4, y - 2);
+          doc.text('Vol', dcol.vol + 4, y - 2);
+          y += 4;
+          rowIdx = 0;
+        }
+
+        if (rowIdx % 2 === 0) {
+          doc.setFillColor(245, 248, 252);
+          doc.rect(margin, y - 2, W - 2 * margin, rh, 'F');
+        }
+
+        doc.setTextColor(...dark);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.text(room.room || '', dcol.room + 4, y + 8, { maxWidth: dcol.area - dcol.room - 8 });
+        doc.text(room.area || '', dcol.area + 4, y + 8, { maxWidth: dcol.desc - dcol.area - 8 });
+        doc.text(descLines, dcol.desc + 4, y + 8);
+        doc.setTextColor(...gray);
+        doc.text(room.notIncluded || '', dcol.excluded + 4, y + 8, { maxWidth: dcol.frac - dcol.excluded - 8 });
+        doc.setTextColor(...dark);
+        doc.setFont('helvetica', 'bold');
+        doc.text(room.truckLabel || (room.truckVolume > 0 ? String(room.truckVolume) : 'Incl.'), dcol.frac + 4, y + 8);
+        doc.setTextColor(...green);
+        doc.text(room.truckVolume > 0 ? room.truckVolume.toFixed(3) : '-', dcol.vol + 4, y + 8);
+
+        y += rh;
+        rowIdx++;
+      });
+
+      // Total row
+      doc.setFillColor(...green);
+      doc.rect(margin, y, W - 2 * margin, 20, 'F');
+      doc.setTextColor(...dark);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.text('Total Volume (16 cubic yard trucks)', dcol.room + 4, y + 13);
+      doc.text(totalTrucks.toFixed(3), dcol.vol + 4, y + 13);
+
+      // Footer
+      doc.setDrawColor(...lightgray);
+      doc.setLineWidth(0.5);
+      doc.line(margin, H - 30, W - margin, H - 30);
+      doc.setTextColor(...gray);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.text('Page 2 of 2 — Volume Detail', margin, H - 18);
+      doc.text(franchiseName + ' | ' + phone, W - margin, H - 18, { align: 'right' });
+
+      // Output
+      const filename = (clientName.replace(/[^a-z0-9]/gi, '_') + '_Estimate_' + dateStr.replace(/\//g, '-')) + '.pdf';
+      if (mode === 'download') {
+        doc.save(filename);
+      } else {
+        const blob = doc.output('blob');
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+      }
+    }
+
+    function fmtMoney(val) {
+      const n = parseFloat(val) || 0;
+      const abs = Math.abs(n);
+      const str = '$' + abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return n < 0 ? '(' + str + ')' : str;
     }
 
     // ===== BOOT =====
