@@ -2919,7 +2919,20 @@
           currentEstimate = data.estimate;
           // Parse payload if it came back as string
           if (currentEstimate.payload && typeof currentEstimate.payload === 'string') {
-            try { const p = JSON.parse(currentEstimate.payload); currentEstimate = {...currentEstimate, ...p}; } catch(e) {}
+            try {
+              const p = JSON.parse(currentEstimate.payload);
+              currentEstimate = {...currentEstimate, ...p};
+            } catch(e) {
+              console.warn('Payload parse failed, trying localStorage fallback');
+              // Payload may be truncated — merge from localStorage if available
+              const local = getLocalEstimates().find(e => String(e.estimateID) === String(estimateID));
+              if (local) {
+                // Keep coverPhoto from server, everything else from local
+                const serverPhoto = currentEstimate.coverPhoto;
+                currentEstimate = {...local};
+                if (serverPhoto) currentEstimate.coverPhoto = serverPhoto;
+              }
+            }
           }
           restorePriceBlocks();
           openEstimateEditor();
@@ -2984,8 +2997,17 @@
         document.getElementById('estMainContent').style.display = 'block';
         document.getElementById('estPriceListDisplay').textContent = priceListName;
         const zipStatus = document.getElementById('estZipStatus');
-        zipStatus.textContent = '✓ ' + priceListName;
+        const clientLabel = currentEstimate.clientName ? currentEstimate.clientName + '  |  ' + priceListName : priceListName;
+        zipStatus.textContent = '✓ ' + clientLabel;
         zipStatus.className = 'zip-status ok';
+      } else if (currentEstimate.jobID) {
+        // Has job but no prices cached — auto-reload via job lookup
+        document.getElementById('estMainContent').style.display = 'none';
+        const statusEl = document.getElementById('estZipStatus');
+        statusEl.textContent = 'Reloading prices...';
+        statusEl.className = 'zip-status loading';
+        // Trigger job lookup which will auto-load prices
+        setTimeout(() => lookupEstimateJobStep1(), 300);
       } else {
         document.getElementById('estMainContent').style.display = 'none';
       }
