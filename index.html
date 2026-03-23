@@ -3105,15 +3105,16 @@
 
       let items = [];
       if (type === 'surcharge') {
-        // Merge both surcharge categories + fuel
-        priceBlocks.filter(b => 
-          b.name.toLowerCase().includes('surcharge') || 
-          b.name.toLowerCase().includes('fuel')
-        ).forEach(b => {
+        // All surcharge blocks (environmental, labor surcharge) + fuel
+        priceBlocks.filter(b => {
+          const n = b.name.toLowerCase();
+          return n.startsWith('surcharge') || n === 'fuel surcharge';
+        }).forEach(b => {
           b.items.forEach(item => items.push({...item, blockName: b.name, priceBlockID: b.priceBlockID}));
         });
       } else if (type === 'labor') {
-        const block = priceBlocks.find(b => b.name.toLowerCase().includes('additional labor'));
+        // Only the "Additional Labor" block (not surcharge blocks)
+        const block = priceBlocks.find(b => b.name.toLowerCase() === 'additional labor');
         if (block) items = block.items.map(i => ({...i, blockName: block.name, priceBlockID: block.priceBlockID}));
       } else if (type === 'singleitem') {
         const block = priceBlocks.find(b => b.name.toLowerCase().includes('single item'));
