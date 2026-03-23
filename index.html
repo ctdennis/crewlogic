@@ -3270,9 +3270,24 @@
 
         if (partial > 0) {
           pendingVolumeOptions.push([{fraction: 1.0, qty: wholeTrucks}, {fraction: partial, qty: 1}]);
+          // Calculate difference
+          let diffNote = '';
+          if (optAVal && optBVal) {
+            const diff = Math.abs(optAVal - optBVal);
+            const cheaper = optAVal < optBVal ? 'A' : 'B';
+            diffNote = ' <span style="font-size:11px;color:var(--accent-yellow);font-weight:600;">(' + fmtAmt(diff) + ' ' + (optAVal < optBVal ? 'less than B' : 'more than A') + ')</span>';
+            // Add note to Option A too
+            html = '<button class="vol-option-btn" data-opt="0" onclick="selectVolumeOption(this)">' +
+              'Option A &mdash; Full Truck &times; ' + total.toFixed(3) +
+              (optAVal ? ' &mdash; ' + fmtAmt(optAVal) : '') +
+              (optAVal > optBVal ? ' <span style="font-size:11px;color:var(--accent-yellow);font-weight:600;">(' + fmtAmt(diff) + ' more than B)</span>' : ' <span style="font-size:11px;color:var(--accent-green);font-weight:600;">(' + fmtAmt(diff) + ' less than B)</span>') +
+              '<div class="vol-option-sub">Single line item at full truck rate</div>' +
+              '</button>';
+          }
           html += '<button class="vol-option-btn" data-opt="1" onclick="selectVolumeOption(this)">' +
             'Option B &mdash; ' + wholeTrucks + ' Full + ' + fracLabel +
             (optBVal ? ' &mdash; ' + fmtAmt(optBVal) : '') +
+            (optBVal && optAVal ? (optBVal > optAVal ? ' <span style="font-size:11px;color:var(--accent-yellow);font-weight:600;">(' + fmtAmt(Math.abs(optAVal-optBVal)) + ' more than A)</span>' : ' <span style="font-size:11px;color:var(--accent-green);font-weight:600;">(' + fmtAmt(Math.abs(optAVal-optBVal)) + ' less than A)</span>') : '') +
             '<div class="vol-option-sub">Split into ' + wholeTrucks + ' full truck(s) + 1 ' + fracLabel + ' line</div>' +
             '</button>';
         }
