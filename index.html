@@ -1035,17 +1035,25 @@
 
         <input type="text" class="est-label-input" id="estLabel" placeholder="Estimate label (e.g. Smith - Full House)" oninput="autoSaveDraft()">
 
-        <!-- STEP 1: ZIP / PRICE LOAD — always visible, required first -->
+        <!-- STEP 1: JOB LOOKUP — required first, auto-loads pricing from ZIP -->
         <div class="est-step-card" id="estStepZip">
-          <div class="est-step-label">Step 1 — Load Pricing</div>
+          <div class="est-step-label">Step 1 — Job Lookup</div>
           <div style="display:flex;gap:8px;margin-top:8px;">
-            <input type="text" class="form-input" id="estZip" maxlength="5" inputmode="numeric" placeholder="ZIP code" style="width:130px;font-family:'Space Mono',monospace;font-size:18px;text-align:center;letter-spacing:2px;" oninput="this.value=this.value.replace(/\D/g,'')">
-            <button class="zip-lookup-btn" id="estZipBtn" onclick="loadEstimatePricing()" style="flex:1;padding:12px;background:var(--accent-green);color:var(--bg-primary);border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
+            <input type="text" class="form-input" id="estJobIDStep1" placeholder="Vonigo Job #" style="font-family:'Space Mono',monospace;font-size:18px;letter-spacing:2px;" inputmode="numeric" onkeydown="if(event.key==='Enter')lookupEstimateJobStep1()">
+            <button class="zip-lookup-btn" id="estZipBtn" onclick="lookupEstimateJobStep1()" style="flex:1;padding:12px;background:var(--accent-green);color:var(--bg-primary);border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
               <div class="spinner" style="border-top-color:var(--bg-primary);display:none;"></div>
-              <span class="btn-text">Load Prices</span>
+              <span class="btn-text">Look Up</span>
             </button>
           </div>
           <div class="zip-status" id="estZipStatus" style="margin-top:6px;"></div>
+        </div>
+
+        <!-- Manual ZIP fallback if job has no ZIP -->
+        <div id="estManualZipRow" style="display:none;gap:8px;margin-top:8px;">
+          <input type="text" class="form-input" id="estZip" maxlength="5" inputmode="numeric" placeholder="ZIP code" style="width:130px;font-family:'Space Mono',monospace;font-size:18px;text-align:center;letter-spacing:2px;" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+          <button class="zip-lookup-btn" onclick="loadEstimatePricing()" style="flex:1;padding:12px;background:var(--accent-green);color:var(--bg-primary);border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;">
+            <span class="btn-text">Load Prices</span>
+          </button>
         </div>
 
         <!-- STEPS 2-6: Hidden until prices loaded -->
@@ -1065,12 +1073,8 @@
               <input type="text" class="form-input" id="estAddress" placeholder="123 Main St, City MA 02XXX" oninput="autoSaveDraft()">
             </div>
             <div class="form-group">
-              <div class="form-label">Vonigo Job # <span style="font-size:11px;color:var(--text-muted);font-weight:400;">(optional)</span></div>
-              <div style="display:flex;gap:8px;">
-                <input type="text" class="form-input" id="estJobID" placeholder="817779" style="font-family:'Space Mono',monospace;" inputmode="numeric">
-                <button style="padding:12px 16px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-secondary);font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap;" onclick="lookupEstimateJob()">Look up</button>
-              </div>
-              <div class="zip-status" id="estJobStatus"></div>
+              <div class="form-label">Vonigo Job #</div>
+              <div style="font-family:'Space Mono',monospace;font-size:15px;color:var(--accent-green);" id="estJobIDDisplay">—</div>
             </div>
             <div class="form-group">
               <div class="form-label">Notes</div>
@@ -2909,10 +2913,15 @@
 
       // Populate fields
       document.getElementById('estLabel').value = currentEstimate.label || '';
-      document.getElementById('estZip').value = currentEstimate.zip || '';
       document.getElementById('estClientName').value = currentEstimate.clientName || '';
       document.getElementById('estAddress').value = currentEstimate.address || '';
       document.getElementById('estNotes').value = currentEstimate.notes || '';
+
+      // Populate Step 1 job ID field
+      if (currentEstimate.jobID) {
+        document.getElementById('estJobIDStep1').value = currentEstimate.jobID;
+        document.getElementById('estJobIDDisplay').textContent = currentEstimate.jobID;
+      }
 
       // If we have pricing loaded, show main content
       if (currentEstimate.priceBlocks && currentEstimate.priceBlocks.length > 0) {
@@ -3442,9 +3451,88 @@
     }
 
     // ===== SAVE =====
+    async function lookupEstimateJobStep1() {
+      const jobID = document.getElementById('estJobIDStep1').value.trim();
+      const statusEl = document.getElementById('estZipStatus');
+      const btn = document.getElementById('estZipBtn');
+      if (!jobID) { statusEl.textContent = 'Enter a Vonigo job number'; statusEl.className = 'zip-status error'; return; }
+
+      btn.classList.add('loading');
+      statusEl.textContent = 'Looking up job...';
+      statusEl.className = 'zip-status loading';
+
+      try {
+        const res = await apiFetch(N8N_BASE + '/crewlogic-job-lookup', {
+          method: 'POST',
+          body: JSON.stringify({ jobID, franchiseID: currentUser.franchiseID, email: currentUser.email })
+        });
+        const data = await res.json();
+        if (data.success) {
+          currentEstimate.jobID = data.jobID;
+          currentEstimate.clientID = data.clientID;
+          currentEstimate.contactID = data.contactID;
+          currentEstimate.locationID = data.locationID;
+          currentEstimate.clientName = data.clientName || '';
+          currentEstimate.address = data.address || '';
+
+          // Populate client info fields
+          document.getElementById('estClientName').value = data.clientName || '';
+          document.getElementById('estAddress').value = data.address || '';
+          document.getElementById('estJobIDDisplay').textContent = jobID;
+
+          // Auto-load pricing from ZIP
+          const zip = data.zip;
+          if (zip) {
+            currentEstimate.zip = zip;
+            statusEl.textContent = '✓ ' + (data.clientName || 'Job ' + jobID) + ' — Loading prices...';
+            statusEl.className = 'zip-status loading';
+
+            try {
+              const priceRes = await apiFetch(N8N_BASE + '/crewlogic-price-lookup', {
+                method: 'POST',
+                body: JSON.stringify({ zipCode: zip, franchiseID: currentUser.franchiseID, email: currentUser.email })
+              });
+              const priceData = await priceRes.json();
+              if (priceData.success) {
+                priceBlocks = priceData.blocks || [];
+                priceListID = priceData.priceListID;
+                priceListName = priceData.priceListName || '';
+                currentEstimate.priceBlocks = priceBlocks;
+                currentEstimate.priceListID = priceListID;
+                currentEstimate.priceListName = priceListName;
+                statusEl.textContent = '✓ ' + (data.clientName || 'Job ' + jobID) + '  |  ' + priceListName;
+                statusEl.className = 'zip-status ok';
+                document.getElementById('estMainContent').style.display = 'block';
+                document.getElementById('estPriceListDisplay').textContent = priceListName;
+                autoSaveDraft();
+              } else {
+                statusEl.textContent = '✓ Job found — ' + (priceData.error || 'Price lookup failed for ZIP ' + zip);
+                statusEl.className = 'zip-status error';
+              }
+            } catch(e) {
+              statusEl.textContent = '✓ Job found — price lookup connection error';
+              statusEl.className = 'zip-status error';
+            }
+          } else {
+            statusEl.textContent = '✓ ' + (data.clientName || 'Job ' + jobID) + ' — No ZIP found, enter manually below';
+            statusEl.className = 'zip-status ok';
+            // Show manual ZIP fallback
+            document.getElementById('estManualZipRow').style.display = 'flex';
+          }
+        } else {
+          statusEl.textContent = data.error || 'Job not found';
+          statusEl.className = 'zip-status error';
+        }
+      } catch(e) {
+        statusEl.textContent = 'Connection error';
+        statusEl.className = 'zip-status error';
+      }
+      btn.classList.remove('loading');
+    }
+
     async function lookupEstimateJob() {
-      const jobID = document.getElementById('estJobID').value.trim();
-      const statusEl = document.getElementById('estJobStatus');
+      const jobID = document.getElementById('estJobID') ? document.getElementById('estJobID').value.trim() : '';
+      const statusEl = document.getElementById('estJobStatus') || document.getElementById('estZipStatus');
       if (!jobID) { statusEl.textContent = 'Enter a job number'; statusEl.className = 'zip-status error'; return; }
       statusEl.textContent = 'Looking up...'; statusEl.className = 'zip-status loading';
       try {
