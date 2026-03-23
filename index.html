@@ -3556,10 +3556,14 @@
       const volDisplay = document.getElementById('estVolumeTotalDisplay');
       if (volDisplay) volDisplay.textContent = currentEstimate.totalTrucks.toFixed(3) + ' trucks';
 
-      // Price total from non-volume charges only
-      const totalPrice = charges
+      // Price total = (total trucks × full truck rate) + all non-volume charges
+      const fullTruckItem = findVolumeItem(1.0);
+      const fullTruckPrice = fullTruckItem ? parseFloat(fullTruckItem.value) : 0;
+      const volumeTotal = totalTrucks * fullTruckPrice;
+      const surchargeTotal = charges
         .filter(c => c.type !== 'volume')
         .reduce((s, c) => s + ((parseFloat(c.qty) || 0) * (parseFloat(c.unitPrice) || 0)), 0);
+      const totalPrice = volumeTotal + surchargeTotal;
       currentEstimate.totalPrice = Math.round(totalPrice * 100) / 100;
       document.getElementById('estGrandTotal').textContent = (totalPrice < 0 ? '-' : '') + '$' + Math.abs(totalPrice).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     }
@@ -4277,11 +4281,10 @@
         .filter(([, v]) => v > 0)
         .sort((a, b) => a[0].localeCompare(b[0]));
 
-      // Find full truck price
-      const volCharge = (est.charges || []).find(c =>
-        c.blockName && c.blockName.toLowerCase().includes('volume') &&
-        c.name && c.name.toLowerCase().includes('full'));
-      const pricePerTruck = volCharge ? parseFloat(volCharge.unitPrice) : 0;
+      // Find full truck price from estimate's own priceBlocks
+      const estVolBlock = (est.priceBlocks || []).find(b => b.name && b.name.toLowerCase().includes('volume'));
+      const fullTruckItemPDF = estVolBlock ? estVolBlock.items.find(i => i.name && i.name.toLowerCase().includes('full')) : null;
+      const pricePerTruck = fullTruckItemPDF ? parseFloat(fullTruckItemPDF.value) : 0;
 
       let rowIdx = 0;
       areaRows.forEach(([area, trucks]) => {
@@ -4336,7 +4339,13 @@
         y += 20;
       });
 
-      // Grand total
+      // Grand total — recalculate from trucks + surcharges for accuracy
+      const pdfVolumeTotal = totalTrucks * pricePerTruck;
+      const pdfSurchargeTotal = (est.charges || [])
+        .filter(c => c.type !== 'volume')
+        .reduce((s, c) => s + ((parseFloat(c.qty)||0) * (parseFloat(c.unitPrice)||0)), 0);
+      const pdfGrandTotal = pdfVolumeTotal + pdfSurchargeTotal;
+
       y += 6;
       doc.setFillColor(...green);
       doc.rect(margin, y, W - 2 * margin, 28, 'F');
@@ -4344,7 +4353,7 @@
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(13);
       doc.text('TOTAL', col.area, y + 19);
-      doc.text(fmtMoney(parseFloat(est.totalPrice) || 0), col.total, y + 19, { align: 'right' });
+      doc.text(fmtMoney(pdfGrandTotal), col.total, y + 19, { align: 'right' });
 
       // Fine print footer
       doc.setDrawColor(...lightgray);
