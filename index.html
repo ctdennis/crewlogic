@@ -2898,17 +2898,8 @@
       document.getElementById('estimatesScreen').classList.add('active');
       document.getElementById('estimatesList').innerHTML = '<div class="price-loading"><span class="spinner-inline"></span>Loading estimate...</div>';
 
-      // Try local in-memory first (works within same session)
-      const local = getLocalEstimates().find(e => String(e.estimateID) === String(estimateID));
-      if (local && local.priceBlocks) {
-        currentEstimate = local;
-        if (local.payload && typeof local.payload === 'string') {
-          try { const p = JSON.parse(local.payload); currentEstimate = {...local, ...p}; } catch(e) {}
-        }
-        restorePriceBlocks();
-        openEstimateEditor();
-        return;
-      }
+      // Always fetch from backend to get latest data (including coverPhoto from other devices)
+      // Local cache used only as fallback if backend fails
 
       // Always try backend (required when localStorage is sandboxed)
       try {
@@ -3694,8 +3685,9 @@
           feedbackEl.className = 'settings-feedback error';
         }
       } catch(e) {
-        feedbackEl.textContent = '✓ Saved locally (offline)';
-        feedbackEl.className = 'settings-feedback ok';
+        feedbackEl.textContent = 'Connection error — saved locally only. Check network.';
+        feedbackEl.className = 'settings-feedback error';
+        console.error('Save error:', e);
       }
       setTimeout(() => {
         // Only clear if it's a save message, not a submit confirmation
