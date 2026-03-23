@@ -1097,11 +1097,12 @@
 
           <hr class="form-divider">
 
-          <!-- STEP 3: ROOMS -->
+          <!-- UNIFIED CHARGES SECTION -->
           <div class="est-section-header" style="margin-bottom:12px;">
-            <div class="est-section-title">Rooms / Areas <span style="font-size:10px;color:var(--text-muted);font-weight:400;letter-spacing:0;">(PDF only)</span></div>
+            <div class="est-section-title">Charges</div>
+            <button class="est-add-btn" id="addChargeBtn" onclick="showAddCharge()">+ Add Charge</button>
           </div>
-          <div id="estRoomsList"></div>
+          <div id="estChargesList"></div>
 
           <!-- Volume summary footer -->
           <div id="estVolumeFooter" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-top:4px;display:flex;align-items:center;justify-content:space-between;">
@@ -1109,22 +1110,11 @@
               <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Total Volume</div>
               <div id="estVolumeTotalDisplay" style="font-family:'Space Mono',monospace;font-size:20px;font-weight:700;color:var(--accent-green);">0.000 trucks</div>
             </div>
-            <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
-              <button class="est-add-btn" onclick="addRoom()">+ Add Room</button>
-              <button class="est-add-btn" id="addVolumeChargeBtn" onclick="showVolumeChargeOptions()" style="background:rgba(74,222,128,0.1);border-color:var(--accent-green);color:var(--accent-green);padding:8px 14px;display:none;">→ Add Volume Charge</button>
-            </div>
           </div>
 
           <hr class="form-divider">
 
-          <!-- STEP 4: CHARGES -->
-          <div class="est-section-header">
-            <div class="est-section-title">Charges (Vonigo Quote)</div>
-            <button class="est-add-btn" id="addChargeBtn" onclick="showAddCharge()">+ Add Charge</button>
-          </div>
-          <div id="estChargesList"></div>
-
-          <!-- Total bar -->
+                    <!-- Total bar -->
           <div class="est-total-bar">
             <div>
               <div class="est-total-label" style="font-size:11px;">Price List</div>
@@ -1206,51 +1196,90 @@
         </div>
       </div>
 
-      <!-- ADD CHARGE MODAL (inline) -->
+      <!-- ADD CHARGE MODAL -->
       <div id="addChargeModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:200;align-items:flex-end;justify-content:center;">
-        <div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;max-height:80vh;overflow-y:auto;">
+        <div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;">
           <div style="font-size:16px;font-weight:700;margin-bottom:16px;color:var(--text-primary);">Add Charge</div>
 
+          <!-- Type selector -->
           <div class="form-group">
-            <div class="form-label">Category</div>
-            <select class="form-select" id="chargeCategorySelect" onchange="filterChargeItems()">
-              <option value="">Select category...</option>
-            </select>
-          </div>
-
-          <div class="form-group" id="chargeItemGroup" style="display:none;">
-            <div class="form-label">Item</div>
-            <select class="form-select" id="chargeItemSelect" onchange="onChargeItemSelected()">
-              <option value="">Select item...</option>
-            </select>
-          </div>
-
-          <div id="chargeVolumeGroup" style="display:none;">
-            <div class="form-label" style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">Truck Size</div>
-            <div class="vol-fraction-grid" id="volFractionGrid"></div>
-          </div>
-
-          <div class="form-row" id="chargeQtyPriceRow" style="display:none;margin-top:8px;">
-            <div class="form-group">
-              <div class="form-label">Quantity</div>
-              <input type="number" class="form-input" id="chargeQty" value="1" min="0" step="0.5" inputmode="decimal">
-            </div>
-            <div class="form-group">
-              <div class="form-label">Unit Price</div>
-              <input type="number" class="form-input" id="chargeUnitPrice" value="0" min="0" step="0.01" inputmode="decimal">
+            <div class="form-label">Type</div>
+            <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:4px;">
+              <button class="vol-fraction-btn" id="typeBtn-volume" onclick="selectChargeType('volume')">Volume</button>
+              <button class="vol-fraction-btn" id="typeBtn-surcharge" onclick="selectChargeType('surcharge')">Surcharge</button>
+              <button class="vol-fraction-btn" id="typeBtn-labor" onclick="selectChargeType('labor')">Labor</button>
+              <button class="vol-fraction-btn" id="typeBtn-singleitem" onclick="selectChargeType('singleitem')">Single Item</button>
+              <button class="vol-fraction-btn" id="typeBtn-discount" onclick="selectChargeType('discount')">Discount</button>
             </div>
           </div>
 
-          <div class="form-group" id="chargeRoomGroup" style="margin-top:4px;">
-            <div class="form-label">Room <span style="font-size:11px;color:var(--text-muted);font-weight:400;">(optional)</span></div>
-            <select class="form-select" id="chargeRoomSelect">
-              <option value="">— No room —</option>
-            </select>
+          <!-- VOLUME fields -->
+          <div id="chargeFields-volume" style="display:none;">
+            <div class="form-group">
+              <div class="form-label">Room Name</div>
+              <input type="text" class="form-input" id="vol-room" placeholder="e.g. Bedroom 1">
+            </div>
+            <div class="form-group">
+              <div class="form-label">Area</div>
+              <select class="form-select" id="vol-area">
+                <option value="">Select area...</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Description</div>
+              <input type="text" class="form-input" id="vol-desc" placeholder="Items in this area">
+            </div>
+            <div class="form-group">
+              <div class="form-label">Not Included</div>
+              <input type="text" class="form-input" id="vol-excluded" placeholder="e.g. Curtains">
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <div class="form-label">Volume</div>
+                <select class="form-select" id="vol-label">
+                  <option value="">Select...</option>
+                  <option value="Included">Included</option>
+                  <option value="1/8">1/8</option>
+                  <option value="1/4">1/4</option>
+                  <option value="3/8">3/8</option>
+                  <option value="1/2">1/2</option>
+                  <option value="5/8">5/8</option>
+                  <option value="3/4">3/4</option>
+                  <option value="7/8">7/8</option>
+                  <option value="Full">Full</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <div class="form-label">Qty</div>
+                <input type="number" class="form-input" id="vol-qty" value="1" min="0.125" step="0.125" inputmode="decimal">
+              </div>
+            </div>
           </div>
 
-          <div class="form-group" id="chargeDescGroup" style="display:none;margin-top:4px;">
-            <div class="form-label">Description (optional)</div>
-            <input type="text" class="form-input" id="chargeDesc" placeholder="e.g. Donations discount">
+          <!-- SURCHARGE / LABOR / SINGLE ITEM / DISCOUNT fields -->
+          <div id="chargeFields-priced" style="display:none;">
+            <div class="form-group">
+              <div class="form-label">Item</div>
+              <select class="form-select" id="priced-item" onchange="onPricedItemSelected()">
+                <option value="">Select item...</option>
+              </select>
+            </div>
+            <div class="form-row" id="priced-qty-row" style="display:none;">
+              <div class="form-group">
+                <div class="form-label">Quantity</div>
+                <input type="number" class="form-input" id="priced-qty" value="1" min="0" step="0.5" inputmode="decimal">
+              </div>
+              <div class="form-group">
+                <div class="form-label">Unit Price</div>
+                <input type="number" class="form-input" id="priced-price" value="0" min="0" step="0.01" inputmode="decimal">
+              </div>
+            </div>
+            <div class="form-group" id="priced-area-row" style="display:none;">
+              <div class="form-label">Area <span style="font-size:11px;color:var(--text-muted);font-weight:400;">(optional)</span></div>
+              <select class="form-select" id="priced-area">
+                <option value="">— No area —</option>
+              </select>
+            </div>
           </div>
 
           <div style="display:flex;gap:10px;margin-top:16px;">
@@ -1264,7 +1293,7 @@
         </div>
       </div>
 
-      <!-- SHED ESTIMATOR -->
+            <!-- SHED ESTIMATOR -->
       <div class="estimator-section" id="estimatorScreen">
         <div class="section-title fade-in">Shed Estimator</div>
         <div class="section-desc fade-in fade-in-delay-1">Enter building measurements to estimate demolition debris volume.</div>
@@ -3010,7 +3039,6 @@
         document.getElementById('estMainContent').style.display = 'none';
       }
 
-      renderRooms();
       renderCharges();
       updateTotals();
 
@@ -3036,180 +3064,162 @@
       initEstimatesList();
     }
 
-    // ===== ROOMS =====
-    function addRoom() {
-      if (!currentEstimate.rooms) currentEstimate.rooms = [];
-      currentEstimate.rooms.push({ room: '', area: '', description: '', notIncluded: '', truckVolume: 0 });
-      renderRooms();
-      autoSaveDraft();
-    }
+    // ===== UNIFIED CHARGES =====
+    let currentChargeType = null;
 
-    function deleteRoom(idx) {
-      currentEstimate.rooms.splice(idx, 1);
-      renderRooms();
-      updateTotals();
-      autoSaveDraft();
-    }
+    function selectChargeType(type) {
+      currentChargeType = type;
+      // Update type buttons
+      ['volume','surcharge','labor','singleitem','discount'].forEach(t => {
+        const btn = document.getElementById('typeBtn-' + t);
+        if (btn) btn.classList.toggle('selected', t === type);
+      });
+      // Show/hide field groups
+      document.getElementById('chargeFields-volume').style.display = type === 'volume' ? 'block' : 'none';
+      document.getElementById('chargeFields-priced').style.display = type !== 'volume' ? 'block' : 'none';
 
-    function renderRooms() {
-      const container = document.getElementById('estRoomsList');
-      if (!currentEstimate.rooms || currentEstimate.rooms.length === 0) {
-        container.innerHTML = '<div style="font-size:13px;color:var(--text-muted);padding:8px 0;">No rooms added yet.</div>';
-        return;
+      if (type === 'volume') {
+        // Populate area dropdown
+        const areaEl = document.getElementById('vol-area');
+        areaEl.innerHTML = '<option value="">Select area...</option>' +
+          (availableAreas || []).map(a => '<option value="' + a + '">' + a + '</option>').join('');
+        document.getElementById('addChargeConfirmBtn').disabled = false;
+      } else {
+        // Populate item dropdown based on type
+        populatePricedItems(type);
+        document.getElementById('priced-qty-row').style.display = 'none';
+        document.getElementById('priced-area-row').style.display = type !== 'discount' ? 'block' : 'none';
+        // Populate area dropdown
+        const areaEl = document.getElementById('priced-area');
+        areaEl.innerHTML = '<option value="">— No area —</option>' +
+          (availableAreas || []).map(a => '<option value="' + a + '">' + a + '</option>').join('');
+        document.getElementById('addChargeConfirmBtn').disabled = true;
       }
-      container.innerHTML = currentEstimate.rooms.map(function(room, idx) {
-        const areaOptions = availableAreas.map(function(a) {
-          return '<option value="' + a + '"' + (room.area === a ? ' selected' : '') + '>' + a + '</option>';
-        }).join('');
-        const volOptions = ['1/8','1/4','3/8','1/2','5/8','3/4','7/8','Full'].map(function(v) {
-          return '<option value="' + v + '"' + (room.truckLabel === v ? ' selected' : '') + '>' + v + '</option>';
-        }).join('');
-        const qty = room.truckQty !== undefined ? room.truckQty : 1;
-        return [
-          '<div class="room-row">',
-          '<div class="room-row-top">',
-          '<input class="form-input" style="flex:1" placeholder="Room name" value="' + (room.room||'').replace(/"/g,'&quot;') + '" data-idx="' + idx + '" data-field="room" oninput="updateRoomFromInput(this)">',
-          '<select class="form-select" style="flex:1" data-idx="' + idx + '" data-field="area" onchange="updateRoomFromInput(this)"><option value="">Area...</option>' + areaOptions + '</select>',
-          '<button class="room-delete-btn" onclick="deleteRoom(' + idx + ')">&#215;</button>',
-          '</div>',
-          '<div class="room-row-bottom">',
-          '<input class="form-input" style="flex:2" placeholder="Description" value="' + (room.description||'').replace(/"/g,'&quot;') + '" data-idx="' + idx + '" data-field="description" oninput="updateRoomFromInput(this)">',
-          '<input class="form-input" style="flex:1" placeholder="Excluded" value="' + (room.notIncluded||'').replace(/"/g,'&quot;') + '" data-idx="' + idx + '" data-field="notIncluded" oninput="updateRoomFromInput(this)">',
-          '<select class="form-select" style="width:72px;flex-shrink:0" data-idx="' + idx + '" onchange="updateRoomVolumeFromInput(this)"><option value="">Vol...</option>' + volOptions + '</select>',
-          '<input class="form-input" type="number" min="0.125" step="0.125" value="' + qty + '" style="width:56px;flex-shrink:0;text-align:center;padding:12px 6px;" data-idx="' + idx + '" data-field="truckQty" oninput="updateRoomFromInput(this);updateRoomVolumeCalc(' + idx + ')">',
-          '</div>',
-          '</div>'
-        ].join('');
-      }).join('');
     }
 
-    function updateRoom(idx, field, value) {
-      currentEstimate.rooms[idx][field] = value;
-      autoSaveDraft();
-    }
+    function populatePricedItems(type) {
+      const itemSel = document.getElementById('priced-item');
+      itemSel.innerHTML = '<option value="">Select item...</option>';
+      if (!priceBlocks || !priceBlocks.length) return;
 
-    function updateRoomFromInput(el) {
-      const idx = parseInt(el.dataset.idx);
-      const field = el.dataset.field;
-      currentEstimate.rooms[idx][field] = el.value;
-      if (field === 'truckQty') updateRoomVolumeCalc(idx);
-      else autoSaveDraft();
-    }
-
-    function updateRoomVolumeFromInput(el) {
-      const idx = parseInt(el.dataset.idx);
-      const label = el.value;
-      currentEstimate.rooms[idx].truckLabel = label;
-      updateRoomVolumeCalc(idx);
-    }
-
-    function updateRoomVolumeCalc(idx) {
-      const room = currentEstimate.rooms[idx];
-      const baseVol = volLabelMap[room.truckLabel] || 0;
-      const qty = parseFloat(room.truckQty) || 1;
-      room.truckVolume = Math.round(baseVol * qty * 1000) / 1000;
-      updateTotals();
-      autoSaveDraft();
-    }
-
-    const volLabelMap = {'Included':0,'1/8':0.125,'1/4':0.25,'3/8':0.375,'1/2':0.5,'5/8':0.625,'3/4':0.75,'7/8':0.875,'Full':1};
-    function updateRoomVolume(idx, label) {
-      currentEstimate.rooms[idx].truckLabel = label;
-      currentEstimate.rooms[idx].truckVolume = volLabelMap[label] || 0;
-      updateTotals();
-      autoSaveDraft();
-    }
-
-    // ===== PRICING =====
-    async function loadEstimatePricing() {
-      const zip = document.getElementById('estZip').value.trim();
-      const statusEl = document.getElementById('estZipStatus');
-      const btn = document.getElementById('estZipBtn');
-      if (!zip || zip.length !== 5) { statusEl.textContent = 'Enter a valid 5-digit ZIP'; statusEl.className = 'zip-status error'; return; }
-
-      btn.classList.add('loading');
-      statusEl.textContent = 'Loading prices...';
-      statusEl.className = 'zip-status loading';
-
-      try {
-        const res = await apiFetch(N8N_BASE + '/crewlogic-price-lookup', {
-          method: 'POST',
-          body: JSON.stringify({ zipCode: zip, franchiseID: currentUser.franchiseID, email: currentUser.email })
+      let items = [];
+      if (type === 'surcharge') {
+        // Merge both surcharge categories + fuel
+        priceBlocks.filter(b => 
+          b.name.toLowerCase().includes('surcharge') || 
+          b.name.toLowerCase().includes('fuel')
+        ).forEach(b => {
+          b.items.forEach(item => items.push({...item, blockName: b.name, priceBlockID: b.priceBlockID}));
         });
-        const data = await res.json();
-        if (data.success) {
-          priceBlocks = data.blocks || [];
-          priceListID = data.priceListID;
-          priceListName = data.priceListName || '';
-          currentEstimate.zip = zip;
-          currentEstimate.priceBlocks = priceBlocks;
-          currentEstimate.priceListID = priceListID;
-          currentEstimate.priceListName = priceListName;
-          statusEl.textContent = '✓ ' + priceListName;
-          statusEl.className = 'zip-status ok';
-          // Unlock main content
-          document.getElementById('estMainContent').style.display = 'block';
-          document.getElementById('estPriceListDisplay').textContent = priceListName;
-          autoSaveDraft();
-        } else {
-          statusEl.textContent = data.error || 'ZIP not found in any service zone';
-          statusEl.className = 'zip-status error';
-        }
-      } catch(e) {
-        statusEl.textContent = 'Connection error';
-        statusEl.className = 'zip-status error';
+      } else if (type === 'labor') {
+        const block = priceBlocks.find(b => b.name.toLowerCase().includes('additional labor'));
+        if (block) items = block.items.map(i => ({...i, blockName: block.name, priceBlockID: block.priceBlockID}));
+      } else if (type === 'singleitem') {
+        const block = priceBlocks.find(b => b.name.toLowerCase().includes('single item'));
+        if (block) items = block.items.map(i => ({...i, blockName: block.name, priceBlockID: block.priceBlockID}));
+      } else if (type === 'discount') {
+        const block = priceBlocks.find(b => b.name.toLowerCase().includes('discount'));
+        if (block) items = block.items.map(i => ({...i, blockName: block.name, priceBlockID: block.priceBlockID}));
       }
-      btn.classList.remove('loading');
+
+      itemSel.innerHTML = '<option value="">Select item...</option>' +
+        items.map(item => 
+          '<option value="' + item.priceItemID + '" data-price="' + item.value + 
+          '" data-name="' + (item.name || '').replace(/"/g,'&quot;') + 
+          '" data-block="' + (item.blockName || '').replace(/"/g,'&quot;') + 
+          '" data-blockid="' + item.priceBlockID + '">' +
+          item.name + (item.value !== 0 ? ' — $' + Math.abs(parseFloat(item.value)).toFixed(2) : '') +
+          '</option>'
+        ).join('');
     }
 
-    // ===== CHARGES =====
-    function isWholeNumberBlock(blockName) {
-      if (!blockName) return false;
-      const name = blockName.toLowerCase();
-      // Surcharges and single items = whole numbers only
-      // Labor, discounts, fuel = decimals allowed
-      return name.includes('surcharge') || name.includes('single item');
-    }
-
-    function renderCharges() {
-      const container = document.getElementById('estChargesList');
-      if (!currentEstimate.charges || currentEstimate.charges.length === 0) {
-        container.innerHTML = '<div style="font-size:13px;color:var(--text-muted);padding:8px 0;">No charges added. Load prices first, then add charges.</div>';
+    function onPricedItemSelected() {
+      const sel = document.getElementById('priced-item');
+      const opt = sel.options[sel.selectedIndex];
+      if (!opt.value) {
+        document.getElementById('priced-qty-row').style.display = 'none';
+        document.getElementById('addChargeConfirmBtn').disabled = true;
         return;
       }
+      const price = parseFloat(opt.dataset.price) || 0;
+      document.getElementById('priced-price').value = price.toFixed(2);
+      document.getElementById('priced-qty-row').style.display = 'grid';
+      document.getElementById('addChargeConfirmBtn').disabled = false;
+    }
 
-      container.innerHTML = currentEstimate.charges.map(function(charge, idx) {
-        const lineTotal = (parseFloat(charge.qty) || 0) * (parseFloat(charge.unitPrice) || 0);
-        const isNeg = lineTotal < 0;
-        const isVolume = charge.blockName && charge.blockName.toLowerCase().includes('volume');
+    function showAddCharge() {
+      if (!priceBlocks || !priceBlocks.length) {
+        document.getElementById('estFeedback').textContent = 'Load prices first before adding charges.';
+        document.getElementById('estFeedback').className = 'settings-feedback error';
+        return;
+      }
+      // Reset modal
+      currentChargeType = null;
+      ['volume','surcharge','labor','singleitem','discount'].forEach(t => {
+        const btn = document.getElementById('typeBtn-' + t);
+        if (btn) btn.classList.remove('selected');
+      });
+      document.getElementById('chargeFields-volume').style.display = 'none';
+      document.getElementById('chargeFields-priced').style.display = 'none';
+      document.getElementById('addChargeConfirmBtn').disabled = true;
+      // Reset volume fields
+      document.getElementById('vol-room').value = '';
+      document.getElementById('vol-desc').value = '';
+      document.getElementById('vol-excluded').value = '';
+      document.getElementById('vol-qty').value = '1';
+      // Reset priced fields
+      document.getElementById('priced-item').innerHTML = '<option value="">Select item...</option>';
+      document.getElementById('priced-qty').value = '1';
+      document.getElementById('priced-price').value = '0';
+      document.getElementById('addChargeModal').style.display = 'flex';
+    }
 
-        // Room dropdown options from EstimateAreas list
-        const roomOpts = '<option value="">— No room —</option>' +
-          (availableAreas || []).map(function(a) {
-            return '<option value="' + a.replace(/"/g,'&quot;') + '"' + (charge.room === a ? ' selected' : '') + '>' + a + '</option>';
-          }).join('');
+    function closeAddCharge() {
+      document.getElementById('addChargeModal').style.display = 'none';
+    }
 
-        return [
-          '<div class="charge-row">',
-          '<div class="charge-row-top">',
-          '<div style="flex:1">',
-          '<div style="font-size:13px;font-weight:600;color:var(--text-primary)">' + charge.name + '</div>',
-          '<div style="font-size:11px;color:var(--text-muted)">' + charge.blockName + '</div>',
-          '</div>',
-          '<button class="room-delete-btn" onclick="deleteCharge(' + idx + ')">&#215;</button>',
-          '</div>',
-          '<div class="charge-row-bottom">',
-          '<div style="font-size:12px;color:var(--text-muted);margin-right:4px;">Qty</div>',
-          '<input class="form-input charge-qty-input" type="number" value="' + charge.qty + '" min="0" step="' + (isWholeNumberBlock(charge.blockName) ? '1' : '0.25') + '" data-idx="' + idx + '" data-field="qty" oninput="updateChargeFromInput(this)">',
-          '<div style="font-size:12px;color:var(--text-muted);margin:0 4px;">@</div>',
-          '<input class="form-input charge-price-input" type="number" value="' + charge.unitPrice + '" min="0" step="0.01" data-idx="' + idx + '" data-field="unitPrice" oninput="updateChargeFromInput(this)">',
-          '<div class="charge-line-total' + (isNeg ? ' negative' : '') + '">' + (isNeg ? '-' : '') + '$' + Math.abs(lineTotal).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</div>',
-          '</div>',
-          (!isVolume ? '<div style="margin-top:6px;"><select class="form-select" style="font-size:12px;padding:6px 10px;height:auto;" data-idx="' + idx + '" onchange="updateChargeRoom(this)">' + roomOpts + '</select></div>' : ''),
-          (charge.description ? '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">' + charge.description + '</div>' : ''),
-          '</div>'
-        ].join('');
-      }).join('');
+    function confirmAddCharge() {
+      if (!currentChargeType) return;
+      if (!currentEstimate.charges) currentEstimate.charges = [];
+
+      if (currentChargeType === 'volume') {
+        const label = document.getElementById('vol-label').value;
+        const qty = parseFloat(document.getElementById('vol-qty').value) || 1;
+        const vol = volLabelMap[label] || 0;
+        currentEstimate.charges.push({
+          type: 'volume',
+          room: document.getElementById('vol-room').value.trim(),
+          area: document.getElementById('vol-area').value,
+          description: document.getElementById('vol-desc').value.trim(),
+          notIncluded: document.getElementById('vol-excluded').value.trim(),
+          truckLabel: label,
+          truckQty: qty,
+          truckVolume: Math.round(vol * qty * 1000) / 1000
+        });
+      } else {
+        const sel = document.getElementById('priced-item');
+        const opt = sel.options[sel.selectedIndex];
+        if (!opt.value) return;
+        const qty = parseFloat(document.getElementById('priced-qty').value) || 1;
+        const price = parseFloat(document.getElementById('priced-price').value) || 0;
+        const area = document.getElementById('priced-area') ? document.getElementById('priced-area').value : '';
+        currentEstimate.charges.push({
+          type: currentChargeType,
+          priceItemID: parseInt(opt.value),
+          name: opt.dataset.name,
+          blockName: opt.dataset.block,
+          priceBlockID: parseInt(opt.dataset.blockid),
+          qty,
+          unitPrice: price,
+          area,
+          taxID: 146
+        });
+      }
+
+      closeAddCharge();
+      renderCharges();
+      updateTotals();
+      autoSaveDraft();
     }
 
     function deleteCharge(idx) {
@@ -3219,27 +3229,28 @@
       autoSaveDraft();
     }
 
-    function updateCharge(idx, field, value) {
-      currentEstimate.charges[idx][field] = parseFloat(value) || 0;
-      renderCharges();
-      updateTotals();
-      autoSaveDraft();
-    }
-
     function updateChargeFromInput(el) {
       const idx = parseInt(el.dataset.idx);
       const field = el.dataset.field;
-      currentEstimate.charges[idx][field] = parseFloat(el.value) || 0;
-      // Update line total display without re-rendering
-      const row = el.closest('.charge-row');
-      if (row) {
-        const qty = parseFloat(currentEstimate.charges[idx].qty) || 0;
-        const price = parseFloat(currentEstimate.charges[idx].unitPrice) || 0;
-        const total = qty * price;
-        const totalEl = row.querySelector('.charge-line-total');
-        if (totalEl) {
-          totalEl.textContent = (total < 0 ? '-' : '') + '$' + Math.abs(total).toFixed(2);
-          totalEl.className = 'charge-line-total' + (total < 0 ? ' negative' : '');
+      currentEstimate.charges[idx][field] = el.value;
+      if (field === 'truckLabel' || field === 'truckQty') {
+        const charge = currentEstimate.charges[idx];
+        const vol = volLabelMap[charge.truckLabel] || 0;
+        const qty = parseFloat(charge.truckQty) || 1;
+        charge.truckVolume = Math.round(vol * qty * 1000) / 1000;
+      }
+      if (field === 'qty' || field === 'unitPrice') {
+        currentEstimate.charges[idx][field] = parseFloat(el.value) || 0;
+        // Update line total display
+        const row = el.closest('.charge-row');
+        if (row) {
+          const c = currentEstimate.charges[idx];
+          const total = (parseFloat(c.qty) || 0) * (parseFloat(c.unitPrice) || 0);
+          const totalEl = row.querySelector('.charge-line-total');
+          if (totalEl) {
+            totalEl.textContent = (total < 0 ? '-' : '') + '$' + Math.abs(total).toFixed(2);
+            totalEl.className = 'charge-line-total' + (total < 0 ? ' negative' : '');
+          }
         }
       }
       updateTotals();
@@ -3248,8 +3259,82 @@
 
     function updateChargeRoom(el) {
       const idx = parseInt(el.dataset.idx);
-      currentEstimate.charges[idx].room = el.value;
+      currentEstimate.charges[idx].area = el.value;
       autoSaveDraft();
+    }
+
+    function renderCharges() {
+      const container = document.getElementById('estChargesList');
+      const charges = currentEstimate.charges || [];
+      if (charges.length === 0) {
+        container.innerHTML = '<div style="font-size:13px;color:var(--text-muted);padding:8px 0;">No charges yet. Tap + Add Charge to begin.</div>';
+        return;
+      }
+
+      // Separate volume and non-volume
+      const volumeCharges = charges.filter(c => c.type === 'volume');
+      const otherCharges = charges.filter(c => c.type !== 'volume');
+
+      let html = '';
+
+      // Volume section header if any
+      if (volumeCharges.length > 0) {
+        html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin:8px 0 6px 0;">Volume</div>';
+        volumeCharges.forEach((charge, i) => {
+          const globalIdx = charges.indexOf(charge);
+          const volOptions = ['Included','1/8','1/4','3/8','1/2','5/8','3/4','7/8','Full'].map(v =>
+            '<option value="' + v + '"' + (charge.truckLabel === v ? ' selected' : '') + '>' + v + '</option>'
+          ).join('');
+          const areaOptions = (availableAreas || []).map(a =>
+            '<option value="' + a + '"' + (charge.area === a ? ' selected' : '') + '>' + a + '</option>'
+          ).join('');
+          html += '<div class="room-row">';
+          html += '<div class="room-row-top">';
+          html += '<input class="form-input" style="flex:1" placeholder="Room" value="' + (charge.room||'').replace(/"/g,'&quot;') + '" data-idx="' + globalIdx + '" data-field="room" oninput="updateChargeFromInput(this)">';
+          html += '<select class="form-select" style="flex:1" data-idx="' + globalIdx + '" data-field="area" onchange="updateChargeFromInput(this)"><option value="">Area...</option>' + areaOptions + '</select>';
+          html += '<button class="room-delete-btn" onclick="deleteCharge(' + globalIdx + ')">&#215;</button>';
+          html += '</div>';
+          html += '<div class="room-row-bottom">';
+          html += '<input class="form-input" style="flex:2" placeholder="Description" value="' + (charge.description||'').replace(/"/g,'&quot;') + '" data-idx="' + globalIdx + '" data-field="description" oninput="updateChargeFromInput(this)">';
+          html += '<input class="form-input" style="flex:1" placeholder="Excluded" value="' + (charge.notIncluded||'').replace(/"/g,'&quot;') + '" data-idx="' + globalIdx + '" data-field="notIncluded" oninput="updateChargeFromInput(this)">';
+          html += '<select class="form-select" style="width:72px;flex-shrink:0" data-idx="' + globalIdx + '" data-field="truckLabel" onchange="updateChargeFromInput(this)"><option value="">Vol...</option>' + volOptions + '</select>';
+          html += '<input class="form-input" type="number" min="0.125" step="0.125" value="' + (charge.truckQty || 1) + '" style="width:56px;flex-shrink:0;text-align:center;padding:12px 6px;" data-idx="' + globalIdx + '" data-field="truckQty" oninput="updateChargeFromInput(this)">';
+          html += '</div>';
+          html += '</div>';
+        });
+      }
+
+      // Other charges
+      if (otherCharges.length > 0) {
+        html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin:12px 0 6px 0;">Surcharges & Other</div>';
+        otherCharges.forEach(charge => {
+          const globalIdx = charges.indexOf(charge);
+          const lineTotal = (parseFloat(charge.qty) || 0) * (parseFloat(charge.unitPrice) || 0);
+          const isNeg = lineTotal < 0;
+          const areaOptions = '<option value="">— No area —</option>' +
+            (availableAreas || []).map(a => '<option value="' + a + '"' + (charge.area === a ? ' selected' : '') + '>' + a + '</option>').join('');
+          const isWholeNum = charge.type === 'singleitem' || charge.type === 'surcharge';
+          html += '<div class="charge-row">';
+          html += '<div class="charge-row-top">';
+          html += '<div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--text-primary)">' + (charge.name || '') + '</div>';
+          html += '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">' + (charge.type || '') + '</div></div>';
+          html += '<button class="room-delete-btn" onclick="deleteCharge(' + globalIdx + ')">&#215;</button>';
+          html += '</div>';
+          html += '<div class="charge-row-bottom">';
+          html += '<div style="font-size:12px;color:var(--text-muted);margin-right:4px;">Qty</div>';
+          html += '<input class="form-input charge-qty-input" type="number" value="' + charge.qty + '" min="0" step="' + (isWholeNum ? '1' : '0.25') + '" data-idx="' + globalIdx + '" data-field="qty" oninput="updateChargeFromInput(this)">';
+          html += '<div style="font-size:12px;color:var(--text-muted);margin:0 4px;">@</div>';
+          html += '<input class="form-input charge-price-input" type="number" value="' + charge.unitPrice + '" min="0" step="0.01" data-idx="' + globalIdx + '" data-field="unitPrice" oninput="updateChargeFromInput(this)">';
+          html += '<div class="charge-line-total' + (isNeg ? ' negative' : '') + '">' + (isNeg ? '-' : '') + '$' + Math.abs(lineTotal).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</div>';
+          html += '</div>';
+          if (charge.type !== 'discount') {
+            html += '<div style="margin-top:6px;"><select class="form-select" style="font-size:12px;padding:6px 10px;height:auto;" data-idx="' + globalIdx + '" onchange="updateChargeRoom(this)">' + areaOptions + '</select></div>';
+          }
+          html += '</div>';
+        });
+      }
+
+      container.innerHTML = html;
     }
 
     // ===== VOLUME CHARGE AUTO-CALC =====
@@ -3518,27 +3603,21 @@
 
     // ===== TOTALS =====
     function updateTotals() {
-      // Room trucks total
-      const totalTrucks = (currentEstimate.rooms || []).reduce((s, r) => s + (parseFloat(r.truckVolume) || 0), 0);
+      const charges = currentEstimate.charges || [];
+
+      // Volume total from type:volume charges
+      const totalTrucks = charges
+        .filter(c => c.type === 'volume')
+        .reduce((s, c) => s + (parseFloat(c.truckVolume) || 0), 0);
       currentEstimate.totalTrucks = Math.round(totalTrucks * 1000) / 1000;
 
-      // Update volume display
       const volDisplay = document.getElementById('estVolumeTotalDisplay');
-      if (volDisplay) {
-        volDisplay.textContent = currentEstimate.totalTrucks.toFixed(3) + ' trucks';
-      }
+      if (volDisplay) volDisplay.textContent = currentEstimate.totalTrucks.toFixed(3) + ' trucks';
 
-      // Show/hide volume footer and add volume charge button
-      const footer = document.getElementById('estVolumeFooter');
-      const addVolBtn = document.getElementById('addVolumeChargeBtn');
-      const hasRooms = currentEstimate.rooms && currentEstimate.rooms.length > 0;
-      if (footer) footer.style.display = hasRooms ? 'flex' : 'none';
-      if (addVolBtn) {
-        addVolBtn.style.display = currentEstimate.totalTrucks > 0 && priceBlocks.length > 0 ? 'block' : 'none';
-      }
-
-      // Charges total
-      const totalPrice = (currentEstimate.charges || []).reduce((s, c) => s + ((parseFloat(c.qty) || 0) * (parseFloat(c.unitPrice) || 0)), 0);
+      // Price total from non-volume charges only
+      const totalPrice = charges
+        .filter(c => c.type !== 'volume')
+        .reduce((s, c) => s + ((parseFloat(c.qty) || 0) * (parseFloat(c.unitPrice) || 0)), 0);
       currentEstimate.totalPrice = Math.round(totalPrice * 100) / 100;
       document.getElementById('estGrandTotal').textContent = (totalPrice < 0 ? '-' : '') + '$' + Math.abs(totalPrice).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     }
@@ -3719,18 +3798,91 @@
 
     // ===== SUBMIT TO VONIGO =====
     function submitEstimateToVonigo() {
-      // clientID required
       if (!currentEstimate.clientID) {
         document.getElementById('estFeedback').textContent = 'Enter a Vonigo job number and tap Look up before submitting.';
         document.getElementById('estFeedback').className = 'settings-feedback error';
         return;
       }
 
-      // Show submit modal
+      const volumeCharges = (currentEstimate.charges || []).filter(c => c.type === 'volume');
+      if (volumeCharges.length > 0) {
+        // Show volume conversion modal first
+        showVolumeConversionModal();
+      } else {
+        showSubmitModal();
+      }
+    }
+
+    function showVolumeConversionModal() {
+      const modal = document.getElementById('volChargeModal');
+      const subtitle = document.getElementById('volChargeModalSubtitle');
+      const optionsEl = document.getElementById('volChargeOptions');
+      const total = currentEstimate.totalTrucks;
+
+      subtitle.textContent = 'Volume total: ' + total.toFixed(3) + ' trucks — how should this be priced in Vonigo?';
+
+      const fractionLabels = {0.125:'1/8', 0.25:'1/4', 0.375:'3/8', 0.5:'1/2', 0.625:'5/8', 0.75:'3/4', 0.875:'7/8'};
+      const fmtAmt = n => '$' + Math.abs(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+      pendingVolumeOptions = [];
+
+      if (total <= 0) {
+        // No volume — go straight to submit
+        showSubmitModal();
+        return;
+      }
+
+      if (total < 1) {
+        const rounded = roundToNearestEighth(total);
+        const item = findVolumeItem(rounded);
+        const price = item ? parseFloat(item.value) : 0;
+        const fracLabel = fractionLabels[rounded] || String(rounded);
+        pendingVolumeOptions.push({ lines: [{fraction: rounded, qty: 1}], then: 'submit' });
+        optionsEl.innerHTML = '<button class="vol-option-btn" data-opt="0" onclick="selectVolumeConversion(this)">' +
+          fracLabel + ' Truckload × 1' + (price > 0 ? ' — ' + fmtAmt(price) : '') +
+          '<div class="vol-option-sub">Maps ' + total.toFixed(3) + ' trucks → ' + fracLabel + '</div></button>';
+      } else {
+        const wholeTrucks = Math.floor(total);
+        const partial = roundToNearestEighth(total - wholeTrucks);
+        const fullItem = findVolumeItem(1.0);
+        const partialItem = partial > 0 ? findVolumeItem(partial) : null;
+        const fullPrice = fullItem ? parseFloat(fullItem.value) : 0;
+        const partialPrice = partialItem ? parseFloat(partialItem.value) : 0;
+        const optAVal = fullPrice > 0 ? total * fullPrice : null;
+        const optBVal = (fullPrice > 0 && partialPrice > 0) ? (wholeTrucks * fullPrice + partialPrice) : null;
+        const fracLabel = fractionLabels[partial] || String(partial);
+
+        pendingVolumeOptions.push({ lines: [{fraction: 1.0, qty: total}], then: 'submit' });
+        let html = '<button class="vol-option-btn" data-opt="0" onclick="selectVolumeConversion(this)">' +
+          'Option A — Full Truck × ' + total.toFixed(3) + (optAVal ? ' — ' + fmtAmt(optAVal) : '') +
+          (optAVal && optBVal ? (optAVal < optBVal ? ' <span style="font-size:11px;color:var(--accent-green);">(' + fmtAmt(Math.abs(optAVal-optBVal)) + ' less)</span>' : ' <span style="font-size:11px;color:var(--accent-yellow);">(' + fmtAmt(Math.abs(optAVal-optBVal)) + ' more)</span>') : '') +
+          '<div class="vol-option-sub">Single line item at full truck rate</div></button>';
+
+        if (partial > 0) {
+          pendingVolumeOptions.push({ lines: [{fraction: 1.0, qty: wholeTrucks}, {fraction: partial, qty: 1}], then: 'submit' });
+          html += '<button class="vol-option-btn" data-opt="1" onclick="selectVolumeConversion(this)">' +
+            'Option B — ' + wholeTrucks + ' Full + ' + fracLabel + (optBVal ? ' — ' + fmtAmt(optBVal) : '') +
+            (optAVal && optBVal ? (optBVal < optAVal ? ' <span style="font-size:11px;color:var(--accent-green);">(' + fmtAmt(Math.abs(optAVal-optBVal)) + ' less)</span>' : ' <span style="font-size:11px;color:var(--accent-yellow);">(' + fmtAmt(Math.abs(optAVal-optBVal)) + ' more)</span>') : '') +
+            '<div class="vol-option-sub">Split into ' + wholeTrucks + ' full + 1 ' + fracLabel + '</div></button>';
+        }
+        optionsEl.innerHTML = html;
+      }
+
+      modal.style.display = 'flex';
+    }
+
+    function selectVolumeConversion(btn) {
+      const idx = parseInt(btn.dataset.opt);
+      const option = pendingVolumeOptions[idx];
+      document.getElementById('volChargeModal').style.display = 'none';
+      // Store selected volume lines for submission
+      currentEstimate._pendingVolumeLines = option.lines;
+      showSubmitModal();
+    }
+
+    function showSubmitModal() {
       const clientLabel = document.getElementById('submitVonigoClient');
       clientLabel.textContent = 'Client: ' + (currentEstimate.clientName || 'Unknown');
-
-      // Show/hide attach button based on whether job was looked up
       const attachBtn = document.getElementById('submitAttachBtn');
       if (currentEstimate.jobID) {
         attachBtn.style.display = 'block';
@@ -3738,7 +3890,6 @@
       } else {
         attachBtn.style.display = 'none';
       }
-
       document.getElementById('submitVonigoModal').style.display = 'flex';
     }
 
@@ -3751,16 +3902,37 @@
       btn.classList.add('loading');
       feedbackEl.textContent = '';
 
-      const charges = (currentEstimate.charges || []).map(c => ({
-        priceItemID: String(c.priceItemID),
-        taxID: String(c.taxID || 146),
-        Fields: [
-          { fieldID: 9290, fieldValue: c.name },
-          { fieldID: 9289, fieldValue: c.description || '' },
-          { fieldID: 9288, fieldValue: String(c.qty) },
-          { fieldID: 9287, fieldValue: String(Math.abs(c.unitPrice).toFixed(2)) }
-        ]
-      }));
+      // Build Vonigo charges: volume lines from conversion + all non-volume charges
+      const volBlock = priceBlocks.find(b => b.name.toLowerCase().includes('volume'));
+      const volLines = (currentEstimate._pendingVolumeLines || []).map(line => {
+        const item = findVolumeItem(line.fraction);
+        if (!item) return null;
+        return {
+          priceItemID: String(item.priceItemID),
+          taxID: '146',
+          Fields: [
+            { fieldID: 9290, fieldValue: item.name },
+            { fieldID: 9289, fieldValue: '' },
+            { fieldID: 9288, fieldValue: String(line.qty) },
+            { fieldID: 9287, fieldValue: String(parseFloat(item.value).toFixed(2)) }
+          ]
+        };
+      }).filter(Boolean);
+
+      const otherLines = (currentEstimate.charges || [])
+        .filter(c => c.type !== 'volume')
+        .map(c => ({
+          priceItemID: String(c.priceItemID),
+          taxID: String(c.taxID || 146),
+          Fields: [
+            { fieldID: 9290, fieldValue: c.name },
+            { fieldID: 9289, fieldValue: c.description || '' },
+            { fieldID: 9288, fieldValue: String(c.qty) },
+            { fieldID: 9287, fieldValue: String(Math.abs(c.unitPrice).toFixed(2)) }
+          ]
+        }));
+
+      const charges = [...volLines, ...otherLines];
 
       try {
         const res = await apiFetch(N8N_BASE + '/crewlogic-submit-quote', {
@@ -3966,7 +4138,7 @@
       doc.line(lx, 192, rCol - 20, 192);
 
       const areaMap = {};
-      (est.rooms || []).forEach(r => { if (r.area) areaMap[r.area] = true; });
+      (est.charges || []).filter(c => c.type === 'volume' && c.area).forEach(r => { areaMap[r.area] = true; });
       const areas = Object.keys(areaMap);
       let scopeY = 208;
       if (areas.length > 0) {
@@ -4152,9 +4324,9 @@
       doc.text('Total', col.total, y - 1, { align: 'right' });
       y += 10;
 
-      // Group rooms by area
+      // Group volume charges by area
       const areaTotals = {};
-      (est.rooms || []).forEach(r => {
+      (est.charges || []).filter(c => c.type === 'volume').forEach(r => {
         const area = r.area || 'Other';
         if (!areaTotals[area]) areaTotals[area] = 0;
         areaTotals[area] += parseFloat(r.truckVolume) || 0;
@@ -4199,8 +4371,7 @@
       y += 28;
 
       // Non-volume charges
-      const otherCharges = (est.charges || []).filter(c =>
-        !c.blockName || !c.blockName.toLowerCase().includes('volume'));
+      const otherCharges = (est.charges || []).filter(c => c.type !== 'volume');
       rowIdx = 0;
       otherCharges.forEach(c => {
         const qty = parseFloat(c.qty) || 0;
@@ -4294,7 +4465,7 @@
       y = 72;
       y = addDetailTableHeader(y);
 
-      const rooms = (est.rooms || []).slice().sort((a, b) => {
+      const rooms = (est.charges || []).filter(c => c.type === 'volume').slice().sort((a, b) => {
         const aArea = (a.area || '').toLowerCase();
         const bArea = (b.area || '').toLowerCase();
         if (aArea < bArea) return -1;
