@@ -3914,147 +3914,168 @@
       const phone = currentUser.phone || '';
       const website = currentUser.website || '';
 
-      // ===== PAGE 1: COVER PAGE =====
-      // Full dark background
+      // ===== PAGE 1: COVER PAGE — single panel, full width =====
       doc.setFillColor(...dark);
       doc.rect(0, 0, W, H, 'F');
-
-      // Green accent band at top
       doc.setFillColor(...green);
       doc.rect(0, 0, W, 6, 'F');
 
-       // Left panel - property photo via n8n proxy (avoids CORS)
-      doc.setFillColor(25, 40, 55);
-      doc.rect(0, 6, 460, H - 6, 'F');
+      const lx = margin;
+      const rCol = 420;
 
-      if (est.coverPhoto) {
-        // Use crew-captured property photo — maintain aspect ratio (letterbox/pillarbox)
-        const tmpImg = new Image();
-        tmpImg.src = est.coverPhoto;
-        const panelW = 460, panelH = H - 6;
-        const imgW = tmpImg.naturalWidth || 480;
-        const imgH = tmpImg.naturalHeight || 300;
-        const scale = Math.min(panelW / imgW, panelH / imgH);
-        const drawW = imgW * scale;
-        const drawH = imgH * scale;
-        const drawX = (panelW - drawW) / 2;
-        const drawY = 6 + (panelH - drawH) / 2;
-        // Fill panel background first
-        doc.setFillColor(20, 35, 50);
-        doc.rect(0, 6, panelW, panelH, 'F');
-        doc.addImage(est.coverPhoto, 'JPEG', drawX, drawY, drawW, drawH);
-      } else {
-        // Fallback — styled dark panel with JL branding
-        doc.setFillColor(20, 35, 50);
-        doc.rect(0, 6, 460, H - 6, 'F');
-        doc.setDrawColor(30, 50, 70);
-        doc.setLineWidth(0.5);
-        for (let gx = 0; gx < 460; gx += 46) doc.line(gx, 6, gx, H);
-        for (let gy = 6; gy < H; gy += 46) doc.line(0, gy, 460, gy);
-        // JL watermark text on placeholder
-        doc.setTextColor(35, 60, 80);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(42);
-        doc.text('JUNK', 115, H/2 - 10);
-        doc.text('LUGGERS', 60, H/2 + 38);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(11);
-        doc.setTextColor(30, 55, 75);
-        doc.text('Saving the world, one lug at a time.', 230, H/2 + 58, { align: 'center' });
-      }
-
-      // Address overlay on photo
-      doc.setFillColor(0, 0, 0);
-      doc.setGState(new doc.GState({ opacity: 0.55 }));
-      doc.rect(0, H - 70, 460, 70, 'F');
-      doc.setGState(new doc.GState({ opacity: 1 }));
-      doc.setTextColor(...white);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(16);
-      const addrParts = address.split(',');
-      doc.text(addrParts[0] || address, 230, H - 44, { align: 'center' });
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(11);
-      doc.setTextColor(200, 220, 200);
-      doc.text((addrParts.slice(1).join(',').trim()), 230, H - 26, { align: 'center' });
-
-      // Right panel - branding
-      const rx = 480;
-      const rw = W - rx - margin;
-
-      // Logo - text based (CORS prevents external image loading)
+      // Logo
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(32);
       doc.setTextColor(...green);
-      doc.text('JUNK', rx, 80);
+      doc.text('JUNK', lx, 60);
       const junkWidth = doc.getTextWidth('JUNK');
       doc.setTextColor(...white);
-      doc.text('LUGGERS', rx + junkWidth, 80);
+      doc.text('LUGGERS', lx + junkWidth, 60);
       doc.setFont('helvetica', 'italic');
       doc.setFontSize(9);
       doc.setTextColor(150, 220, 150);
-      doc.text('Saving the world, one lug at a time.', rx, 96);
+      doc.text('Saving the world, one lug at a time.', lx, 75);
 
-      // Proposal label
-      doc.setTextColor(180, 200, 180);
+      doc.setDrawColor(40, 65, 80);
+      doc.setLineWidth(0.5);
+      doc.line(lx, 88, rCol - 20, 88);
+
+      doc.setTextColor(150, 180, 160);
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(11);
-      doc.text('ESTIMATE PROPOSAL', rx, 155);
+      doc.setFontSize(9);
+      doc.text('ESTIMATE PROPOSAL', lx, 104);
 
-      // Client name
       doc.setTextColor(...white);
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(22);
-      doc.text(clientName, rx, 185, { maxWidth: rw + margin });
+      doc.setFontSize(26);
+      doc.text(clientName, lx, 132, { maxWidth: rCol - lx - 20 });
 
-      // Date
-      doc.setTextColor(...green);
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(10);
-      doc.text(dateStr, rx, 202);
+      doc.setFontSize(11);
+      doc.setTextColor(180, 210, 190);
+      const addrParts = address.split(',');
+      doc.text(addrParts[0] || address, lx, 150);
+      if (addrParts.length > 1) doc.text(addrParts.slice(1).join(',').trim(), lx, 164);
 
-      // Divider
+      doc.setTextColor(...green);
+      doc.setFontSize(10);
+      doc.text(dateStr, lx, 180);
+
       doc.setDrawColor(...green);
       doc.setLineWidth(1);
-      doc.line(rx, 215, W - margin, 215);
+      doc.line(lx, 192, rCol - 20, 192);
 
-      // Areas covered
       const areaMap = {};
-      (est.rooms || []).forEach(r => {
-        if (r.area) areaMap[r.area] = true;
-      });
+      (est.rooms || []).forEach(r => { if (r.area) areaMap[r.area] = true; });
       const areas = Object.keys(areaMap);
+      let scopeY = 208;
       if (areas.length > 0) {
-        doc.setTextColor(180, 200, 180);
+        doc.setTextColor(150, 180, 160);
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(9);
-        doc.text('SCOPE OF REMOVAL', rx, 232);
+        doc.setFontSize(8);
+        doc.text('SCOPE OF REMOVAL', lx, scopeY);
+        scopeY += 14;
         doc.setTextColor(...white);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(10);
-        areas.forEach((area, i) => {
-          doc.text('• ' + area, rx, 248 + i * 16);
-        });
+        areas.forEach(area => { doc.text('• ' + area, lx, scopeY); scopeY += 15; });
       }
 
-      // Quote total box
+      // Photo inset below scope
+      const photoY = scopeY + 12;
+      const photoW = rCol - lx - 20;
+      const photoH = Math.min(180, H - photoY - 110);
+
+      if (est.coverPhoto && photoH > 60) {
+        const tmpImg = new Image();
+        tmpImg.src = est.coverPhoto;
+        const imgW = tmpImg.naturalWidth || 480;
+        const imgH = tmpImg.naturalHeight || 300;
+        const scale = Math.min(photoW / imgW, photoH / imgH);
+        const drawW = imgW * scale;
+        const drawH = imgH * scale;
+        doc.setFillColor(20, 35, 50);
+        doc.rect(lx, photoY, photoW, photoH, 'F');
+        doc.addImage(est.coverPhoto, 'JPEG', lx + (photoW - drawW) / 2, photoY + (photoH - drawH) / 2, drawW, drawH);
+        doc.setDrawColor(50, 80, 100);
+        doc.setLineWidth(0.5);
+        doc.rect(lx, photoY, photoW, photoH);
+      } else if (!est.coverPhoto) {
+        doc.setFillColor(20, 35, 50);
+        doc.rect(lx, photoY, photoW, photoH, 'F');
+        doc.setDrawColor(30, 55, 70);
+        doc.setLineWidth(0.5);
+        for (let gx = lx; gx < lx + photoW; gx += 40) doc.line(gx, photoY, gx, photoY + photoH);
+        for (let gy = photoY; gy < photoY + photoH; gy += 40) doc.line(lx, gy, lx + photoW, gy);
+      }
+
+      // Total box
       const totalPrice = parseFloat(est.totalPrice) || 0;
       if (totalPrice > 0) {
         doc.setFillColor(...green);
-        doc.roundedRect(rx, H - 110, rw + margin - 4, 55, 4, 4, 'F');
+        doc.roundedRect(lx, H - 90, photoW, 50, 4, 4, 'F');
         doc.setTextColor(...dark);
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10);
-        doc.text('ESTIMATED TOTAL', rx + 10, H - 90);
-        doc.setFontSize(22);
-        doc.text(fmtMoney(totalPrice), rx + 10, H - 68);
+        doc.setFontSize(9);
+        doc.text('ESTIMATED TOTAL', lx + 10, H - 70);
+        doc.setFontSize(20);
+        doc.text(fmtMoney(totalPrice), lx + 10, H - 50);
       }
 
-      // Contact footer
-      doc.setTextColor(150, 170, 150);
+      doc.setTextColor(100, 130, 110);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
-      doc.text(ownerName + (phone ? ' | ' + phone : ''), rx, H - 20);
+      doc.text(ownerName + (phone ? '  |  ' + phone : ''), lx, H - 18);
+
+      // Right column
+      const rx = rCol;
+      const rxW = W - rx - margin;
+      doc.setFillColor(22, 40, 55);
+      doc.rect(rx, 6, rxW + margin, H - 6, 'F');
+
+      doc.setTextColor(150, 180, 160);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.text('FRANCHISE', rx + 10, 40);
+      doc.setTextColor(...white);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      const fnLines = doc.splitTextToSize(franchiseName, rxW);
+      fnLines.forEach((line, i) => doc.text(line, rx + 10, 54 + i * 13));
+
+      doc.setDrawColor(40, 70, 60);
+      doc.setLineWidth(0.5);
+      doc.line(rx + 10, 90, W - margin, 90);
+
+      if (phone) {
+        doc.setTextColor(150, 180, 160);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.text('PHONE', rx + 10, 108);
+        doc.setTextColor(...white);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.text(phone, rx + 10, 120);
+      }
+
+      if (website) {
+        doc.setTextColor(150, 180, 160);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.text('WEBSITE', rx + 10, 140);
+        doc.setTextColor(...green);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        const webShort = website.replace('https://','').replace('http://','');
+        doc.text(doc.splitTextToSize(webShort, rxW), rx + 10, 152);
+      }
+
+      doc.setFillColor(...green);
+      doc.rect(rx, H - 30, rxW + margin, 30, 'F');
+      doc.setTextColor(...dark);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text('JL', rx + rxW / 2, H - 12, { align: 'center' });
 
       // ===== PAGE 2: SUMMARY =====
       doc.addPage('letter', 'landscape');
