@@ -4268,8 +4268,8 @@
 
       // Detail table columns - right-align vol numbers
       const dc = {
-        room: margin + 4,
-        area: 168,
+        area: margin + 4,
+        room: 168,
         desc: 272,
         excluded: 530,
         frac: 672,
@@ -4282,8 +4282,8 @@
         doc.setTextColor(...white);
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(8);
-        doc.text('Room', dc.room, startY - 1);
         doc.text('Area', dc.area, startY - 1);
+        doc.text('Room', dc.room, startY - 1);
         doc.text('Description', dc.desc, startY - 1);
         doc.text('Not Included', dc.excluded, startY - 1);
         doc.text('Size', dc.frac, startY - 1, { align: 'right' });
@@ -4294,7 +4294,15 @@
       y = 72;
       y = addDetailTableHeader(y);
 
-      const rooms = est.rooms || [];
+      const rooms = (est.rooms || []).slice().sort((a, b) => {
+        const aArea = (a.area || '').toLowerCase();
+        const bArea = (b.area || '').toLowerCase();
+        if (aArea < bArea) return -1;
+        if (aArea > bArea) return 1;
+        const aRoom = (a.room || '').toLowerCase();
+        const bRoom = (b.room || '').toLowerCase();
+        return aRoom < bRoom ? -1 : aRoom > bRoom ? 1 : 0;
+      });
       rowIdx = 0;
 
       rooms.forEach(room => {
@@ -4319,9 +4327,9 @@
         doc.setTextColor(...dark);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(8);
-        doc.text(room.room || '', dc.room, y + 12, { maxWidth: dc.area - dc.room - 6 });
-        doc.setTextColor(...gray);
-        doc.text(room.area || '', dc.area, y + 12, { maxWidth: dc.desc - dc.area - 6 });
+        doc.text(room.area || '', dc.area, y + 12, { maxWidth: dc.room - dc.area - 6 });
+        doc.setTextColor(...dark);
+        doc.text(room.room || '', dc.room, y + 12, { maxWidth: dc.desc - dc.room - 6 });
         doc.setTextColor(...dark);
         doc.text(descLines, dc.desc, y + 12);
         doc.setTextColor(...gray);
