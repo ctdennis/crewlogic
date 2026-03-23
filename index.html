@@ -3928,8 +3928,21 @@
       doc.rect(0, 6, 460, H - 6, 'F');
 
       if (est.coverPhoto) {
-        // Use crew-captured property photo
-        doc.addImage(est.coverPhoto, 'JPEG', 0, 6, 460, H - 6);
+        // Use crew-captured property photo — maintain aspect ratio (letterbox/pillarbox)
+        const tmpImg = new Image();
+        tmpImg.src = est.coverPhoto;
+        const panelW = 460, panelH = H - 6;
+        const imgW = tmpImg.naturalWidth || 480;
+        const imgH = tmpImg.naturalHeight || 300;
+        const scale = Math.min(panelW / imgW, panelH / imgH);
+        const drawW = imgW * scale;
+        const drawH = imgH * scale;
+        const drawX = (panelW - drawW) / 2;
+        const drawY = 6 + (panelH - drawH) / 2;
+        // Fill panel background first
+        doc.setFillColor(20, 35, 50);
+        doc.rect(0, 6, panelW, panelH, 'F');
+        doc.addImage(est.coverPhoto, 'JPEG', drawX, drawY, drawW, drawH);
       } else {
         // Fallback — styled dark panel with JL branding
         doc.setFillColor(20, 35, 50);
