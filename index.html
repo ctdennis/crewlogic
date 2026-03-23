@@ -2812,11 +2812,9 @@
             }
             return est;
           });
-          // Merge with local drafts
-          const local = getLocalEstimates();
-          const serverIDs = new Set(serverEstimates.map(e => String(e.estimateID)));
-          const localOnly = local.filter(e => !serverIDs.has(String(e.estimateID)));
-          renderEstimatesList([...localOnly, ...serverEstimates]);
+          // Replace local cache with server data — server is source of truth
+          setLocalEstimates(serverEstimates);
+          renderEstimatesList(serverEstimates);
           return;
         }
       } catch(e) {}
