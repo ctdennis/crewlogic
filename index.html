@@ -3148,29 +3148,32 @@
     }
 
     function showAddCharge() {
-      if (!priceBlocks || !priceBlocks.length) {
-        document.getElementById('estFeedback').textContent = 'Load prices first before adding charges.';
-        document.getElementById('estFeedback').className = 'settings-feedback error';
-        return;
-      }
-      // Reset modal
+      // Reset modal state
       currentChargeType = null;
       ['volume','surcharge','labor','singleitem','discount'].forEach(t => {
         const btn = document.getElementById('typeBtn-' + t);
         if (btn) btn.classList.remove('selected');
       });
-      document.getElementById('chargeFields-volume').style.display = 'none';
-      document.getElementById('chargeFields-priced').style.display = 'none';
-      document.getElementById('addChargeConfirmBtn').disabled = true;
+
+      const volFields = document.getElementById('chargeFields-volume');
+      const pricedFields = document.getElementById('chargeFields-priced');
+      const confirmBtn = document.getElementById('addChargeConfirmBtn');
+      if (volFields) volFields.style.display = 'none';
+      if (pricedFields) pricedFields.style.display = 'none';
+      if (confirmBtn) confirmBtn.disabled = true;
+
       // Reset volume fields
-      document.getElementById('vol-room').value = '';
-      document.getElementById('vol-desc').value = '';
-      document.getElementById('vol-excluded').value = '';
-      document.getElementById('vol-qty').value = '1';
+      ['vol-room','vol-desc','vol-excluded'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+      const volQty = document.getElementById('vol-qty'); if (volQty) volQty.value = '1';
+      const volLabel = document.getElementById('vol-label'); if (volLabel) volLabel.value = '';
+
       // Reset priced fields
-      document.getElementById('priced-item').innerHTML = '<option value="">Select item...</option>';
-      document.getElementById('priced-qty').value = '1';
-      document.getElementById('priced-price').value = '0';
+      const pricedItem = document.getElementById('priced-item');
+      if (pricedItem) pricedItem.innerHTML = '<option value="">Select item...</option>';
+      const pricedQty = document.getElementById('priced-qty'); if (pricedQty) pricedQty.value = '1';
+      const pricedPrice = document.getElementById('priced-price'); if (pricedPrice) pricedPrice.value = '0';
+      const pricedQtyRow = document.getElementById('priced-qty-row'); if (pricedQtyRow) pricedQtyRow.style.display = 'none';
+
       document.getElementById('addChargeModal').style.display = 'flex';
     }
 
