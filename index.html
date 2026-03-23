@@ -1086,16 +1086,19 @@
 
           <!-- STEP 3: ROOMS -->
           <div class="est-section-header">
-            <div>
-              <div class="est-section-title">Rooms / Areas <span style="font-size:10px;color:var(--text-muted);font-weight:400;letter-spacing:0;">(PDF only)</span></div>
-              <div id="estVolumeTotalDisplay" style="font-family:'Space Mono',monospace;font-size:20px;font-weight:700;color:var(--accent-green);margin-top:2px;">0.000 trucks</div>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
-              <button class="est-add-btn" onclick="addRoom()">+ Add Room</button>
-              <button class="est-add-btn" id="addVolumeChargeBtn" onclick="showVolumeChargeOptions()" style="display:none;background:rgba(74,222,128,0.1);border-color:var(--accent-green);color:var(--accent-green);">→ Add Volume Charge</button>
-            </div>
+            <div class="est-section-title">Rooms / Areas <span style="font-size:10px;color:var(--text-muted);font-weight:400;letter-spacing:0;">(PDF only)</span></div>
+            <button class="est-add-btn" onclick="addRoom()">+ Add Room</button>
           </div>
           <div id="estRoomsList"></div>
+
+          <!-- Volume summary footer -->
+          <div id="estVolumeFooter" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-top:4px;display:flex;align-items:center;justify-content:space-between;">
+            <div>
+              <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Total Volume</div>
+              <div id="estVolumeTotalDisplay" style="font-family:'Space Mono',monospace;font-size:20px;font-weight:700;color:var(--accent-green);">0.000 trucks</div>
+            </div>
+            <button class="est-add-btn" id="addVolumeChargeBtn" onclick="showVolumeChargeOptions()" style="background:rgba(74,222,128,0.1);border-color:var(--accent-green);color:var(--accent-green);padding:8px 14px;display:none;">→ Add Volume Charge</button>
+          </div>
 
           <hr class="form-divider">
 
@@ -3438,8 +3441,11 @@
         volDisplay.textContent = currentEstimate.totalTrucks.toFixed(3) + ' trucks';
       }
 
-      // Show/hide add volume charge button
+      // Show/hide volume footer and add volume charge button
+      const footer = document.getElementById('estVolumeFooter');
       const addVolBtn = document.getElementById('addVolumeChargeBtn');
+      const hasRooms = currentEstimate.rooms && currentEstimate.rooms.length > 0;
+      if (footer) footer.style.display = hasRooms ? 'flex' : 'none';
       if (addVolBtn) {
         addVolBtn.style.display = currentEstimate.totalTrucks > 0 && priceBlocks.length > 0 ? 'block' : 'none';
       }
