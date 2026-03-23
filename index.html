@@ -4041,24 +4041,18 @@
       const lx = margin;
       const rCol = 420;
 
-      // Logo — load from same-origin assets
-      try {
-        const logoImg = await loadImageFromUrl('/assets/logo1.png');
-        doc.addImage(logoImg, 'PNG', lx, 10, 140, 82);
-      } catch(e) {
-        // Text fallback
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(32);
-        doc.setTextColor(...green);
-        doc.text('JUNK', lx, 60);
-        const junkWidthFb = doc.getTextWidth('JUNK');
-        doc.setTextColor(...white);
-        doc.text('LUGGERS', lx + junkWidthFb, 60);
-        doc.setFont('helvetica', 'italic');
-        doc.setFontSize(9);
-        doc.setTextColor(150, 220, 150);
-        doc.text('Saving the world, one lug at a time.', lx, 75);
-      }
+      // Logo — text only on left panel
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(32);
+      doc.setTextColor(...green);
+      doc.text('JUNK', lx, 60);
+      const junkWidth = doc.getTextWidth('JUNK');
+      doc.setTextColor(...white);
+      doc.text('LUGGERS', lx + junkWidth, 60);
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(9);
+      doc.setTextColor(150, 220, 150);
+      doc.text('Saving the world, one lug at a time.', lx, 75);
 
       doc.setDrawColor(40, 65, 80);
       doc.setLineWidth(0.5);
@@ -4194,6 +4188,22 @@
         doc.text(doc.splitTextToSize(webShort, rxW), rx + 10, 152);
       }
 
+      // Logo image in right column
+      const logoAreaY = website ? 175 : 145;
+      const logoAreaH = H - 40 - logoAreaY;
+      const logoW = rxW;
+      const logoH = Math.round(logoW / 1.71); // maintain 2971:1738 ratio
+      const logoFitH = Math.min(logoH, logoAreaH);
+      const logoFitW = Math.round(logoFitH * 1.71);
+      const logoX = rx + 10 + (logoW - logoFitW) / 2;
+      const logoY = logoAreaY + (logoAreaH - logoFitH) / 2;
+      try {
+        const logoImg = await loadImageFromUrl('/assets/logo1.png');
+        doc.addImage(logoImg, 'PNG', logoX, logoY, logoFitW, logoFitH);
+      } catch(e) {
+        // silent fallback — text logo already shown on left
+      }
+
       doc.setFillColor(...green);
       doc.rect(rx, H - 30, rxW + margin, 30, 'F');
       doc.setTextColor(...dark);
@@ -4209,15 +4219,10 @@
       doc.rect(0, 0, W, 52, 'F');
       doc.setFillColor(...green);
       doc.rect(0, 52, W, 4, 'F');
-      try {
-        const hdrLogo = await loadImageFromUrl('/assets/logo1.png');
-        doc.addImage(hdrLogo, 'PNG', margin, 3, 80, 47);
-      } catch(e) {
-        doc.setTextColor(...green);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(18);
-        doc.text('JUNKLUGGERS', margin, 32);
-      }
+      doc.setTextColor(...green);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(18);
+      doc.text('JUNKLUGGERS', margin, 32);
       doc.setTextColor(...white);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
