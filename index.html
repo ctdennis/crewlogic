@@ -3117,20 +3117,16 @@
         return;
       }
 
-      // Build room options from current rooms
-      const roomAreas = (currentEstimate.rooms || [])
-        .filter(r => r.room || r.area)
-        .map(r => (r.room || '') + (r.area ? ' (' + r.area + ')' : ''));
-      const uniqueRooms = [...new Set(roomAreas)];
-
       container.innerHTML = currentEstimate.charges.map(function(charge, idx) {
         const lineTotal = (parseFloat(charge.qty) || 0) * (parseFloat(charge.unitPrice) || 0);
         const isNeg = lineTotal < 0;
         const isVolume = charge.blockName && charge.blockName.toLowerCase().includes('volume');
 
-        // Room dropdown options
+        // Room dropdown options from EstimateAreas list
         const roomOpts = '<option value="">— No room —</option>' +
-          uniqueRooms.map(r => '<option value="' + r.replace(/"/g,'&quot;') + '"' + (charge.room === r ? ' selected' : '') + '>' + r + '</option>').join('');
+          (availableAreas || []).map(function(a) {
+            return '<option value="' + a.replace(/"/g,'&quot;') + '"' + (charge.room === a ? ' selected' : '') + '>' + a + '</option>';
+          }).join('');
 
         return [
           '<div class="charge-row">',
@@ -3340,14 +3336,10 @@
       document.getElementById('chargeUnitPrice').value = '0';
       document.getElementById('chargeDesc').value = '';
 
-      // Populate room dropdown from current rooms
+      // Populate room dropdown from EstimateAreas list
       const roomSel = document.getElementById('chargeRoomSelect');
-      const roomAreas = (currentEstimate.rooms || [])
-        .filter(r => r.room || r.area)
-        .map(r => (r.room || '') + (r.area ? ' (' + r.area + ')' : ''));
-      const uniqueRooms = [...new Set(roomAreas)];
       roomSel.innerHTML = '<option value="">— No room —</option>' +
-        uniqueRooms.map(r => '<option value="' + r.replace(/"/g, '&quot;') + '">' + r + '</option>').join('');
+        (availableAreas || []).map(a => '<option value="' + a.replace(/"/g, '&quot;') + '">' + a + '</option>').join('');
 
       const modal = document.getElementById('addChargeModal');
       modal.style.display = 'flex';
