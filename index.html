@@ -1036,6 +1036,18 @@
 
         <input type="text" class="est-label-input" id="estLabel" placeholder="Estimate label (e.g. Smith - Full House)" oninput="autoSaveDraft()">
 
+        <!-- COVER PHOTO -->
+        <div style="margin-bottom:16px;">
+          <div id="coverPhotoPreview" style="display:none;position:relative;margin-bottom:8px;">
+            <img id="coverPhotoImg" style="width:100%;height:160px;object-fit:cover;border-radius:var(--radius-sm);border:1px solid var(--border);" />
+            <button onclick="removeCoverPhoto()" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.6);border:none;border-radius:50%;width:26px;height:26px;color:white;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;">&#215;</button>
+          </div>
+          <label id="coverPhotoBtn" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;background:var(--bg-card);border:1px dashed var(--border);border-radius:var(--radius-sm);cursor:pointer;font-size:13px;color:var(--text-muted);">
+            <span>📷 Add Cover Photo</span>
+            <input type="file" id="coverPhotoInput" accept="image/*" capture="environment" style="display:none;" onchange="handleCoverPhoto(this)">
+          </label>
+        </div>
+
         <!-- STEP 1: JOB LOOKUP — required first, auto-loads pricing from ZIP -->
         <div class="est-step-card" id="estStepZip">
           <div class="est-step-label">Step 1 — Job Lookup</div>
@@ -2827,6 +2839,9 @@
         const price = parseFloat(est.totalPrice) || 0;
         const eid = String(est.estimateID);
         html += '<div class="estimate-card" data-estimate-id="' + eid + '">';
+        if (est.coverPhoto) {
+          html += '<img src="' + est.coverPhoto + '" style="width:100%;height:100px;object-fit:cover;border-radius:var(--radius-sm) var(--radius-sm) 0 0;margin-bottom:10px;display:block;">';
+        }
         html += '<div class="estimate-card-top">';
         html += '<div class="estimate-card-label">' + (est.label || 'Untitled Estimate') + '</div>';
         html += '<span class="estimate-status-badge ' + status + '">' + status + '</span>';
@@ -2958,6 +2973,16 @@
       if (currentEstimate.jobID) {
         document.getElementById('estJobIDStep1').value = currentEstimate.jobID;
         document.getElementById('estJobIDDisplay').textContent = currentEstimate.jobID;
+      }
+
+      // Restore cover photo
+      if (currentEstimate.coverPhoto) {
+        document.getElementById('coverPhotoImg').src = currentEstimate.coverPhoto;
+        document.getElementById('coverPhotoPreview').style.display = 'block';
+        document.getElementById('coverPhotoBtn').style.display = 'none';
+      } else {
+        document.getElementById('coverPhotoPreview').style.display = 'none';
+        document.getElementById('coverPhotoBtn').style.display = 'flex';
       }
 
       // If we have pricing loaded, show main content
@@ -3809,6 +3834,43 @@
     }
 
 
+    // ===== COVER PHOTO =====
+    function handleCoverPhoto(input) {
+      if (!input.files || !input.files[0]) return;
+      const file = input.files[0];
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        // Resize to max 800px wide
+        const img = new Image();
+        img.onload = function() {
+          const canvas = document.createElement('canvas');
+          const maxW = 800, maxH = 500;
+          let w = img.width, h = img.height;
+          if (w > maxW) { h = h * maxW / w; w = maxW; }
+          if (h > maxH) { w = w * maxH / h; h = maxH; }
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          const base64 = canvas.toDataURL('image/jpeg', 0.82);
+          currentEstimate.coverPhoto = base64;
+          document.getElementById('coverPhotoImg').src = base64;
+          document.getElementById('coverPhotoPreview').style.display = 'block';
+          document.getElementById('coverPhotoBtn').style.display = 'none';
+          autoSaveDraft();
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function removeCoverPhoto() {
+      currentEstimate.coverPhoto = null;
+      document.getElementById('coverPhotoImg').src = '';
+      document.getElementById('coverPhotoPreview').style.display = 'none';
+      document.getElementById('coverPhotoBtn').style.display = 'flex';
+      document.getElementById('coverPhotoInput').value = '';
+      autoSaveDraft();
+    }
+
     // ===== PDF GENERATION =====
     function showPDFOptions() {
       const sub = document.getElementById('pdfModalSubtitle');
@@ -3853,23 +3915,27 @@
       doc.setFillColor(25, 40, 55);
       doc.rect(0, 6, 460, H - 6, 'F');
 
-      try {
-        const proxyRes = await apiFetch(N8N_BASE + '/crewlogic-streetview', {
-          method: 'POST',
-          body: JSON.stringify({ address: address })
-        });
-        const proxyData = await proxyRes.json();
-        if (proxyData.imageBase64) {
-          doc.addImage('data:image/jpeg;base64,' + proxyData.imageBase64, 'JPEG', 0, 6, 460, H - 6);
-        }
-      } catch(e) {
-        // Photo not available — styled placeholder with grid
+      if (est.coverPhoto) {
+        // Use crew-captured property photo
+        doc.addImage(est.coverPhoto, 'JPEG', 0, 6, 460, H - 6);
+      } else {
+        // Fallback — styled dark panel with JL branding
         doc.setFillColor(20, 35, 50);
         doc.rect(0, 6, 460, H - 6, 'F');
         doc.setDrawColor(30, 50, 70);
         doc.setLineWidth(0.5);
         for (let gx = 0; gx < 460; gx += 46) doc.line(gx, 6, gx, H);
         for (let gy = 6; gy < H; gy += 46) doc.line(0, gy, 460, gy);
+        // JL watermark text on placeholder
+        doc.setTextColor(35, 60, 80);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(42);
+        doc.text('JUNK', 115, H/2 - 10);
+        doc.text('LUGGERS', 60, H/2 + 38);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(11);
+        doc.setTextColor(30, 55, 75);
+        doc.text('Saving the world, one lug at a time.', 230, H/2 + 58, { align: 'center' });
       }
 
       // Address overlay on photo
