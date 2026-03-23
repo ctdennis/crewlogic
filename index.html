@@ -3840,17 +3840,17 @@
       const file = input.files[0];
       const reader = new FileReader();
       reader.onload = function(e) {
-        // Resize to max 800px wide
+        // Resize to max 480px wide and compress for Sheets cell limit (~50k chars)
         const img = new Image();
         img.onload = function() {
           const canvas = document.createElement('canvas');
-          const maxW = 800, maxH = 500;
+          const maxW = 480, maxH = 300;
           let w = img.width, h = img.height;
-          if (w > maxW) { h = h * maxW / w; w = maxW; }
-          if (h > maxH) { w = w * maxH / h; h = maxH; }
+          if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
+          if (h > maxH) { w = Math.round(w * maxH / h); h = maxH; }
           canvas.width = w; canvas.height = h;
           canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-          const base64 = canvas.toDataURL('image/jpeg', 0.82);
+          const base64 = canvas.toDataURL('image/jpeg', 0.55);
           currentEstimate.coverPhoto = base64;
           document.getElementById('coverPhotoImg').src = base64;
           document.getElementById('coverPhotoPreview').style.display = 'block';
