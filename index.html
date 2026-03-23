@@ -3849,29 +3849,27 @@
       doc.setFillColor(...green);
       doc.rect(0, 0, W, 6, 'F');
 
-      // Try to load Street View photo for left side
-      const svKey = 'AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY';
-      const svUrl = 'https://maps.googleapis.com/maps/api/streetview?size=460x450&location=' +
-        encodeURIComponent(address) + '&key=' + svKey;
-
-      // Left panel - property photo area
+       // Left panel - property photo via n8n proxy (avoids CORS)
       doc.setFillColor(25, 40, 55);
       doc.rect(0, 6, 460, H - 6, 'F');
 
       try {
-        const img = await loadImageFromUrl(svUrl);
-        doc.addImage(img, 'JPEG', 0, 6, 460, H - 6);
-        // Gradient overlay on photo
-        doc.setFillColor(15, 25, 35);
-        doc.setGState(new doc.GState({ opacity: 0.35 }));
-        doc.rect(0, 6, 460, H - 6, 'F');
-        doc.setGState(new doc.GState({ opacity: 1 }));
+        const proxyRes = await apiFetch(N8N_BASE + '/crewlogic-streetview', {
+          method: 'POST',
+          body: JSON.stringify({ address: address })
+        });
+        const proxyData = await proxyRes.json();
+        if (proxyData.imageBase64) {
+          doc.addImage('data:image/jpeg;base64,' + proxyData.imageBase64, 'JPEG', 0, 6, 460, H - 6);
+        }
       } catch(e) {
-        // Photo failed — show placeholder
-        doc.setTextColor(50, 70, 90);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(11);
-        doc.text(address, 230, H / 2, { align: 'center' });
+        // Photo not available — styled placeholder with grid
+        doc.setFillColor(20, 35, 50);
+        doc.rect(0, 6, 460, H - 6, 'F');
+        doc.setDrawColor(30, 50, 70);
+        doc.setLineWidth(0.5);
+        for (let gx = 0; gx < 460; gx += 46) doc.line(gx, 6, gx, H);
+        for (let gy = 6; gy < H; gy += 46) doc.line(0, gy, 460, gy);
       }
 
       // Address overlay on photo
@@ -3893,23 +3891,18 @@
       const rx = 480;
       const rw = W - rx - margin;
 
-      // Logo area - try to load logo
-      try {
-        const logoImg = await loadImageFromUrl('https://www.junkluggers.com/wp-content/uploads/2022/09/JL_logo_tagline.png');
-        doc.addImage(logoImg, 'PNG', rx, 40, 260, 80);
-      } catch(e) {
-        // Text fallback
-        doc.setTextColor(...green);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(28);
-        doc.text('JUNK', rx, 80);
-        doc.setTextColor(...white);
-        doc.text('LUGGERS', rx + 70, 80);
-        doc.setTextColor(...green);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9);
-        doc.text('Saving the world, one lug at a time.', rx, 96);
-      }
+      // Logo - text based (CORS prevents external image loading)
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(32);
+      doc.setTextColor(...green);
+      doc.text('JUNK', rx, 80);
+      const junkWidth = doc.getTextWidth('JUNK');
+      doc.setTextColor(...white);
+      doc.text('LUGGERS', rx + junkWidth, 80);
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(9);
+      doc.setTextColor(150, 220, 150);
+      doc.text('Saving the world, one lug at a time.', rx, 96);
 
       // Proposal label
       doc.setTextColor(180, 200, 180);
@@ -4032,7 +4025,7 @@
         area: margin + 4,
         trucks: 370,
         price: 510,
-        total: W - margin
+        total: W - margin - 8
       };
 
       // Table header
@@ -4168,7 +4161,7 @@
         desc: 272,
         excluded: 530,
         frac: 672,
-        vol: W - margin
+        vol: W - margin - 8
       };
 
       const addDetailTableHeader = (startY) => {
@@ -4287,4 +4280,3 @@
     // If session exists, initGoogleSignIn() handles it immediately on GIS load.
   </script>
 </body>
-          html += '<div style="font-size:11px;color:var(--accent-green);margin-bottom:8px;">Vonigo #' + est.vonigoQuoteID + '</div>';
