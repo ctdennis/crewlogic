@@ -3526,6 +3526,8 @@
               });
               const priceData = await priceRes.json();
               if (priceData.success) {
+                const oldPriceListID = currentEstimate.priceListID;
+                const oldPriceListName = currentEstimate.priceListName;
                 priceBlocks = priceData.blocks || [];
                 priceListID = priceData.priceListID;
                 priceListName = priceData.priceListName || '';
@@ -3536,6 +3538,15 @@
                 statusEl.className = 'zip-status ok';
                 document.getElementById('estMainContent').style.display = 'block';
                 document.getElementById('estPriceListDisplay').textContent = priceListName;
+
+                // Warn if price list changed and there are existing charges
+                if (oldPriceListID && oldPriceListID !== priceListID &&
+                    currentEstimate.charges && currentEstimate.charges.length > 0) {
+                  const feedbackEl = document.getElementById('estFeedback');
+                  feedbackEl.textContent = '⚠️ Price list changed from "' + oldPriceListName + '" to "' + priceListName + '" — existing charges may need to be updated.';
+                  feedbackEl.className = 'settings-feedback error';
+                }
+
                 autoSaveDraft();
               } else {
                 statusEl.textContent = '✓ Job found — ' + (priceData.error || 'Price lookup failed for ZIP ' + zip);
