@@ -4140,10 +4140,7 @@
         doc.text(fmtMoney(totalPrice), lx + 10, H - 50);
       }
 
-      doc.setTextColor(100, 130, 110);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.text(ownerName + (phone ? '  |  ' + phone : ''), lx, H - 18);
+      // Contact info moved to right column
 
       // Right column
       const rx = rCol;
@@ -4165,31 +4162,44 @@
       doc.setLineWidth(0.5);
       doc.line(rx + 10, 90, W - margin, 90);
 
+      // Owner name
+      if (ownerName) {
+        doc.setTextColor(150, 180, 160);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.text('CONTACT', rx + 10, 108);
+        doc.setTextColor(...white);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.text(ownerName, rx + 10, 120);
+      }
+
       if (phone) {
         doc.setTextColor(150, 180, 160);
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(8);
-        doc.text('PHONE', rx + 10, 108);
+        doc.text('PHONE', rx + 10, ownerName ? 136 : 108);
         doc.setTextColor(...white);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
-        doc.text(phone, rx + 10, 120);
+        doc.text(phone, rx + 10, ownerName ? 148 : 120);
       }
 
       if (website) {
+        const webY = ownerName && phone ? 164 : ownerName || phone ? 148 : 136;
         doc.setTextColor(150, 180, 160);
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(8);
-        doc.text('WEBSITE', rx + 10, 140);
+        doc.text('WEBSITE', rx + 10, webY);
         doc.setTextColor(...green);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(8);
         const webShort = website.replace('https://','').replace('http://','');
-        doc.text(doc.splitTextToSize(webShort, rxW), rx + 10, 152);
+        doc.text(doc.splitTextToSize(webShort, rxW), rx + 10, webY + 12);
       }
 
       // Logo image in right column
-      const logoAreaY = website ? 175 : 145;
+      const logoAreaY = website ? 200 : ownerName && phone ? 185 : 170;
       const logoAreaH = H - 40 - logoAreaY;
       const logoW = rxW;
       const logoH = Math.round(logoW / 1.71); // maintain 2971:1738 ratio
