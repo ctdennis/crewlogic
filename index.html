@@ -1204,6 +1204,13 @@
             </div>
           </div>
 
+          <div class="form-group" id="chargeRoomGroup" style="margin-top:4px;">
+            <div class="form-label">Room <span style="font-size:11px;color:var(--text-muted);font-weight:400;">(optional)</span></div>
+            <select class="form-select" id="chargeRoomSelect">
+              <option value="">— No room —</option>
+            </select>
+          </div>
+
           <div class="form-group" id="chargeDescGroup" style="display:none;margin-top:4px;">
             <div class="form-label">Description (optional)</div>
             <input type="text" class="form-input" id="chargeDesc" placeholder="e.g. Donations discount">
@@ -3333,6 +3340,15 @@
       document.getElementById('chargeUnitPrice').value = '0';
       document.getElementById('chargeDesc').value = '';
 
+      // Populate room dropdown from current rooms
+      const roomSel = document.getElementById('chargeRoomSelect');
+      const roomAreas = (currentEstimate.rooms || [])
+        .filter(r => r.room || r.area)
+        .map(r => (r.room || '') + (r.area ? ' (' + r.area + ')' : ''));
+      const uniqueRooms = [...new Set(roomAreas)];
+      roomSel.innerHTML = '<option value="">— No room —</option>' +
+        uniqueRooms.map(r => '<option value="' + r.replace(/"/g, '&quot;') + '">' + r + '</option>').join('');
+
       const modal = document.getElementById('addChargeModal');
       modal.style.display = 'flex';
     }
@@ -3414,6 +3430,7 @@
         name = opt.dataset.name;
       }
 
+      const selectedRoom = document.getElementById('chargeRoomSelect').value;
       if (!currentEstimate.charges) currentEstimate.charges = [];
       currentEstimate.charges.push({
         priceItemID, name,
@@ -3421,7 +3438,7 @@
         priceBlockID: blockID,
         qty, unitPrice,
         description: desc,
-        room: '',
+        room: selectedRoom,
         taxID: 146
       });
 
