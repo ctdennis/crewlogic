@@ -3002,6 +3002,12 @@
               }
             }
           }
+          // If this is a clone, clear submission state
+          if (currentEstimate.clonedFrom) {
+            currentEstimate.vonigoQuoteID = null;
+            currentEstimate['vonigo QuoteID'] = null;
+            currentEstimate._pendingVolumeLines = null;
+          }
           restorePriceBlocks();
           openEstimateEditor();
           return;
@@ -3808,7 +3814,9 @@
           currentEstimate.address = data.address || '';
           statusEl.textContent = '✓ Linked to ' + (data.clientName || 'job ' + jobID);
           statusEl.className = 'zip-status ok';
-          document.getElementById('estSubmitBtn').disabled = false;
+          const submitBtnEl = document.getElementById('estSubmitBtn');
+          submitBtnEl.disabled = false;
+          submitBtnEl.querySelector('.btn-text').textContent = 'Submit to Vonigo';
           autoSaveDraft();
         } else {
           statusEl.textContent = data.error || 'Job not found';
@@ -4086,15 +4094,25 @@
       const listEl = document.getElementById('estimatesList');
       listEl.innerHTML = '<div class="price-loading"><span class="spinner-inline"></span>Deleting estimate...</div>';
 
+      // Find vonigoQuoteID from local cache
+      const all = getLocalEstimates();
+      const est = all.find(e => String(e.estimateID) === String(estimateID));
+      const vonigoQuoteID = est ? (est.vonigoQuoteID || est['vonigo QuoteID'] || null) : null;
+
       // Remove locally
-      const all = getLocalEstimates().filter(e => String(e.estimateID) !== String(estimateID));
-      setLocalEstimates(all);
+      setLocalEstimates(all.filter(e => String(e.estimateID) !== String(estimateID)));
 
       // Remove from backend
       try {
         await apiFetch(N8N_BASE + '/crewlogic-estimate', {
           method: 'POST',
-          body: JSON.stringify({ action: 'delete', email: currentUser.email, franchiseID: currentUser.franchiseID, deleteIDs: [estimateID] })
+          body: JSON.stringify({
+            action: 'delete',
+            email: currentUser.email,
+            franchiseID: currentUser.franchiseID,
+            deleteIDs: [estimateID],
+            vonigoQuoteID
+          })
         });
       } catch(e) {}
 
