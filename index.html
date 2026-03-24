@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="crewlogic-version" content="v1.1 | 2026-03-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -3084,6 +3085,11 @@
       // If already submitted to Vonigo, disable submit button
       const submitBtn = document.getElementById('estSubmitBtn');
       const feedbackEl = document.getElementById('estFeedback');
+      // Resolve vonigoQuoteID from top-level or nested payload
+      if (!currentEstimate.vonigoQuoteID && currentEstimate.payload && typeof currentEstimate.payload === 'object') {
+        currentEstimate.vonigoQuoteID = currentEstimate.payload.vonigoQuoteID || currentEstimate.payload['vonigo QuoteID'] || null;
+      }
+
       if (currentEstimate.vonigoQuoteID) {
         submitBtn.disabled = true;
         submitBtn.querySelector('.btn-text').textContent = 'Submitted ✓';
@@ -4054,9 +4060,16 @@
       clone.clonedFrom = original.estimateID;
       clone.jobID = null; clone.clientID = null; clone.contactID = null; clone.locationID = null;
       clone.vonigoQuoteID = null;
+      clone['vonigo QuoteID'] = null;
+      clone._pendingVolumeLines = null;
       clone.clientName = ''; clone.address = '';
       clone.createdAt = new Date().toISOString();
       clone.updatedAt = new Date().toISOString();
+      // Strip submitted state from payload too
+      if (clone.payload && typeof clone.payload === 'object') {
+        clone.payload.vonigoQuoteID = null;
+        clone.payload['vonigo QuoteID'] = null;
+      }
       saveLocalEstimate(clone);
       currentEstimate = clone;
       openEstimateEditor();
