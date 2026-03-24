@@ -1306,6 +1306,10 @@
                 <input type="number" class="form-input" id="priced-price" value="0" min="0" step="0.01" inputmode="decimal">
               </div>
             </div>
+            <div class="form-group" id="priced-desc-row" style="display:none;">
+              <div class="form-label">Description <span style="font-size:11px;color:var(--text-muted);font-weight:400;">(e.g. Jane Smith, Coldwell Banker)</span></div>
+              <input type="text" class="form-input" id="priced-desc" placeholder="Referral name & company">
+            </div>
             <div class="form-group" id="priced-area-row" style="display:none;">
               <div class="form-label">Area <span style="font-size:11px;color:var(--text-muted);font-weight:400;">(optional)</span></div>
               <select class="form-select" id="priced-area">
@@ -3124,6 +3128,7 @@
         // Populate item dropdown based on type
         populatePricedItems(type);
         document.getElementById('priced-qty-row').style.display = 'none';
+        document.getElementById('priced-desc-row').style.display = type === 'discount' ? 'block' : 'none';
         document.getElementById('priced-area-row').style.display = type !== 'discount' ? 'block' : 'none';
         // Populate area dropdown
         const areaEl = document.getElementById('priced-area');
@@ -3210,6 +3215,8 @@
       const pricedQty = document.getElementById('priced-qty'); if (pricedQty) pricedQty.value = '1';
       const pricedPrice = document.getElementById('priced-price'); if (pricedPrice) pricedPrice.value = '0';
       const pricedQtyRow = document.getElementById('priced-qty-row'); if (pricedQtyRow) pricedQtyRow.style.display = 'none';
+      const pricedDescRow = document.getElementById('priced-desc-row'); if (pricedDescRow) pricedDescRow.style.display = 'none';
+      const pricedDesc = document.getElementById('priced-desc'); if (pricedDesc) pricedDesc.value = '';
 
       document.getElementById('addChargeModal').style.display = 'flex';
     }
@@ -3243,6 +3250,7 @@
         const qty = parseFloat(document.getElementById('priced-qty').value) || 1;
         const price = parseFloat(document.getElementById('priced-price').value) || 0;
         const area = document.getElementById('priced-area') ? document.getElementById('priced-area').value : '';
+        const desc = document.getElementById('priced-desc') ? document.getElementById('priced-desc').value.trim() : '';
         currentEstimate.charges.push({
           type: currentChargeType,
           priceItemID: parseInt(opt.value),
@@ -3252,6 +3260,7 @@
           qty,
           unitPrice: price,
           area,
+          description: desc,
           taxID: 146
         });
       }
@@ -3351,12 +3360,16 @@
           const globalIdx = charges.indexOf(charge);
           const lineTotal = (parseFloat(charge.qty) || 0) * (parseFloat(charge.unitPrice) || 0);
           const isNeg = lineTotal < 0;
+          const isDiscount = charge.type === 'discount';
           const areaOptions = '<option value="">— No area —</option>' +
             (availableAreas || []).map(a => '<option value="' + a + '"' + (charge.area === a ? ' selected' : '') + '>' + a + '</option>').join('');
           const isWholeNum = charge.type === 'singleitem' || charge.type === 'surcharge';
           html += '<div class="charge-row">';
           html += '<div class="charge-row-top">';
           html += '<div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--text-primary)">' + (charge.name || '') + '</div>';
+          if (charge.description) {
+            html += '<div style="font-size:11px;color:var(--text-secondary);margin-top:1px;">' + charge.description + '</div>';
+          }
           html += '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">' + (charge.type || '') + '</div></div>';
           html += '<button class="room-delete-btn" onclick="deleteCharge(' + globalIdx + ')">&#215;</button>';
           html += '</div>';
@@ -3365,7 +3378,8 @@
           html += '<input class="form-input charge-qty-input" type="number" value="' + charge.qty + '" min="0" step="' + (isWholeNum ? '1' : '0.25') + '" data-idx="' + globalIdx + '" data-field="qty" oninput="updateChargeFromInput(this)">';
           html += '<div style="font-size:12px;color:var(--text-muted);margin:0 4px;">@</div>';
           html += '<input class="form-input charge-price-input" type="number" value="' + charge.unitPrice + '" min="0" step="0.01" data-idx="' + globalIdx + '" data-field="unitPrice" oninput="updateChargeFromInput(this)">';
-          html += '<div class="charge-line-total' + (isNeg ? ' negative' : '') + '">' + (isNeg ? '-' : '') + '$' + Math.abs(lineTotal).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</div>';
+          const totalColor = isDiscount ? 'var(--accent-green)' : isNeg ? '#ef4444' : 'var(--accent-green)';
+          html += '<div class="charge-line-total" style="color:' + totalColor + '">' + (isNeg ? '-' : '') + '$' + Math.abs(lineTotal).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</div>';
           html += '</div>';
           if (charge.type !== 'discount') {
             html += '<div style="margin-top:6px;"><select class="form-select" style="font-size:12px;padding:6px 10px;height:auto;" data-idx="' + globalIdx + '" onchange="updateChargeRoom(this)">' + areaOptions + '</select></div>';
@@ -3655,10 +3669,15 @@
       // Update toggle UI
       updateSplitToggleUI();
 
-      const surchargeTotal = charges
-        .filter(c => c.type !== 'volume')
+      const nonVolumeCharges = charges.filter(c => c.type !== 'volume');
+      const surchargeTotal = nonVolumeCharges
+        .filter(c => c.type !== 'discount')
         .reduce((s, c) => s + ((parseFloat(c.qty) || 0) * (parseFloat(c.unitPrice) || 0)), 0);
-      const totalPrice = volumeTotal + surchargeTotal;
+      const discountTotal = nonVolumeCharges
+        .filter(c => c.type === 'discount')
+        .reduce((s, c) => s + ((parseFloat(c.qty) || 0) * (parseFloat(c.unitPrice) || 0)), 0);
+      const subtotal = volumeTotal + surchargeTotal;
+      const totalPrice = subtotal + discountTotal;
       currentEstimate.totalPrice = Math.round(totalPrice * 100) / 100;
       document.getElementById('estGrandTotal').textContent = (totalPrice < 0 ? '-' : '') + '$' + Math.abs(totalPrice).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     }
@@ -4537,29 +4556,72 @@
       }
       y += 28;
 
-      // Non-volume charges
-      const otherCharges = (est.charges || []).filter(c => c.type !== 'volume');
-      rowIdx = 0;
-      otherCharges.forEach(c => {
+      // Non-volume, non-discount charges
+      const surchargeCharges = (est.charges || []).filter(c => c.type !== 'volume' && c.type !== 'discount');
+      const discountCharges = (est.charges || []).filter(c => c.type === 'discount');
+
+      const renderPDFChargeRow = (c, i) => {
         const qty = parseFloat(c.qty) || 0;
         const unit = parseFloat(c.unitPrice) || 0;
         const lineTotal = qty * unit;
-        if (rowIdx % 2 === 0) {
+        if (i % 2 === 0) {
           doc.setFillColor(...offwhite);
           doc.rect(margin, y - 2, W - 2 * margin, 18, 'F');
         }
         doc.setTextColor(...dark);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
-        const label = c.name + (qty !== 1 ? ' \u00d7 ' + qty : '') + (c.room ? '  [' + c.room + ']' : '');
+        const label = (c.name || '') + (qty !== 1 ? ' × ' + qty : '');
         doc.text(label, col.area, y + 10);
         doc.text(fmtMoney(Math.abs(unit)), col.price, y + 10, { align: 'right' });
         const isNeg = lineTotal < 0;
         doc.setTextColor(isNeg ? 220 : dark[0], isNeg ? 50 : dark[1], isNeg ? 50 : dark[2]);
         doc.text(fmtMoney(lineTotal), col.total, y + 10, { align: 'right' });
-        rowIdx++;
         y += 20;
-      });
+      };
+
+      surchargeCharges.forEach((c, i) => renderPDFChargeRow(c, i));
+
+      // Sub Total (volume + surcharges, before discounts)
+      const pdfSurchargeSum = surchargeCharges.reduce((s, c) => s + ((parseFloat(c.qty)||0) * (parseFloat(c.unitPrice)||0)), 0);
+      const pdfSubTotal = pdfVolumePrice + pdfSurchargeSum;
+
+      if (discountCharges.length > 0) {
+        y += 4;
+        doc.setFillColor(...dark);
+        doc.rect(margin, y, W - 2 * margin, 22, 'F');
+        doc.setTextColor(...white);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text('Sub Total', col.area, y + 15);
+        doc.text(fmtMoney(pdfSubTotal), col.total, y + 15, { align: 'right' });
+        y += 28;
+
+        // Discount rows
+        discountCharges.forEach((c, i) => {
+          const qty = parseFloat(c.qty) || 0;
+          const unit = parseFloat(c.unitPrice) || 0;
+          const lineTotal = qty * unit;
+          if (i % 2 === 0) {
+            doc.setFillColor(...offwhite);
+            doc.rect(margin, y - 2, W - 2 * margin, c.description ? 24 : 18, 'F');
+          }
+          doc.setTextColor(...dark);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9);
+          const label = (c.name || '') + (qty !== 1 ? ' × ' + qty : '');
+          doc.text(label, col.area, y + 10);
+          if (c.description) {
+            doc.setFontSize(8);
+            doc.setTextColor(...gray);
+            doc.text(c.description, col.area + 8, y + 20);
+            doc.setFontSize(9);
+          }
+          doc.setTextColor(...green);
+          doc.text(fmtMoney(lineTotal), col.total, y + 10, { align: 'right' });
+          y += c.description ? 26 : 20;
+        });
+      }
 
       // Grand total — uses split or simple volume price
       const pdfSurchargeTotal = (est.charges || [])
