@@ -3885,17 +3885,19 @@
 
       const volumeCharges = (currentEstimate.charges || []).filter(c => c.type === 'volume');
       if (volumeCharges.length === 0) {
+        currentEstimate._pendingVolumeLines = [];
         showSubmitModal();
       } else if (currentEstimate.splitPricing) {
-        // Split pricing on — use split lines directly, skip modal
+        // Split pricing ON — use split lines
         const calc = calcVolumePriceSplit(currentEstimate.totalTrucks);
         currentEstimate._pendingVolumeLines = (calc.lines || []).map(l => ({
           fraction: l.fraction, qty: l.qty
         }));
         showSubmitModal();
       } else {
-        // Split pricing off — show conversion modal
-        showVolumeConversionModal();
+        // Split pricing OFF — single line at full truck rate × total trucks
+        currentEstimate._pendingVolumeLines = [{ fraction: 1.0, qty: currentEstimate.totalTrucks }];
+        showSubmitModal();
       }
     }
 
@@ -4046,7 +4048,7 @@
           feedbackEl.className = 'settings-feedback ok';
           // Don't auto-hide — keep quote ID visible
           btn.disabled = true;
-          btn.textContent = 'Submitted ✓';
+          btn.querySelector('.btn-text').textContent = 'Submitted ✓';
           // Update the ZIP card to show submitted status
           document.getElementById('estZipStatus').textContent = '✓ ' + (currentEstimate.priceListName || '') + '  |  Vonigo #' + data.quoteID;
           document.getElementById('estZipStatus').className = 'zip-status ok';
