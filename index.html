@@ -1146,6 +1146,22 @@
         <button class="new-estimate-btn" style="margin-top:12px;" onclick="backToEstimatesList()">← Back to Estimates</button>
       </div>
 
+      <!-- PRICE UPDATE MODAL -->
+      <div id="priceUpdateModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:200;align-items:flex-end;justify-content:center;">
+        <div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;">
+          <div style="font-size:16px;font-weight:700;margin-bottom:6px;color:var(--text-primary);">Price List Changed</div>
+          <div id="priceUpdateMsg" style="font-size:13px;color:var(--text-muted);margin-bottom:16px;"></div>
+          <button class="vol-option-btn" onclick="applyPriceUpdate()">
+            🔄 Update Pricing
+            <div class="vol-option-sub">Re-price existing charges to new rate schedule</div>
+          </button>
+          <button class="vol-option-btn" onclick="keepExistingPrices()">
+            🔒 Keep Existing Charges
+            <div class="vol-option-sub">Leave charges at original prices</div>
+          </button>
+        </div>
+      </div>
+
       <!-- PDF OPTIONS MODAL -->
       <div id="pdfOptionsModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:200;align-items:flex-end;justify-content:center;">
         <div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;">
@@ -3625,12 +3641,12 @@
                 document.getElementById('estMainContent').style.display = 'block';
                 document.getElementById('estPriceListDisplay').textContent = priceListName;
 
-                // Warn if price list changed and there are existing charges
+                // Offer price update if price list changed and there are non-volume charges
                 if (oldPriceListID && oldPriceListID !== priceListID &&
-                    currentEstimate.charges && currentEstimate.charges.length > 0) {
-                  statusEl.innerHTML = '✓ ' + (data.clientName || 'Job ' + jobID) + '  |  ' + priceListName +
-                    '<br><span style="color:var(--accent-yellow);font-size:11px;">⚠️ Price list changed from &quot;' + oldPriceListName + '&quot; — existing charges may need to be updated.</span>';
-                  statusEl.className = 'zip-status ok';
+                    currentEstimate.charges && currentEstimate.charges.some(c => c.type !== 'volume')) {
+                  const msgEl = document.getElementById('priceUpdateMsg');
+                  msgEl.textContent = 'Price list changed from "' + oldPriceListName + '" to "' + priceListName + '". Would you like to update existing charge prices to the new rate schedule?';
+                  document.getElementById('priceUpdateModal').style.display = 'flex';
                 }
 
                 autoSaveDraft();
@@ -3999,6 +4015,45 @@
       document.getElementById('coverPhotoBtn').style.display = 'flex';
       document.getElementById('coverPhotoInput').value = '';
       autoSaveDraft();
+    }
+
+    // ===== PRICE UPDATE =====
+    function applyPriceUpdate() {
+      document.getElementById('priceUpdateModal').style.display = 'none';
+      if (!currentEstimate.charges || !priceBlocks.length) return;
+
+      // Build lookup of priceItemID -> new value from current priceBlocks
+      const newPrices = {};
+      priceBlocks.forEach(block => {
+        (block.items || []).forEach(item => {
+          newPrices[item.priceItemID] = parseFloat(item.value);
+        });
+      });
+
+      let updatedCount = 0;
+      currentEstimate.charges.forEach(charge => {
+        if (charge.type !== 'volume' && charge.priceItemID && newPrices[charge.priceItemID] !== undefined) {
+          charge.unitPrice = newPrices[charge.priceItemID];
+          updatedCount++;
+        }
+      });
+
+      renderCharges();
+      updateTotals();
+      autoSaveDraft();
+
+      const feedbackEl = document.getElementById('estFeedback');
+      feedbackEl.textContent = '✓ Updated ' + updatedCount + ' charge' + (updatedCount !== 1 ? 's' : '') + ' to new pricing.';
+      feedbackEl.className = 'settings-feedback ok';
+      setTimeout(() => { feedbackEl.textContent = ''; feedbackEl.className = ''; }, 3000);
+    }
+
+    function keepExistingPrices() {
+      document.getElementById('priceUpdateModal').style.display = 'none';
+      const feedbackEl = document.getElementById('estFeedback');
+      feedbackEl.textContent = '⚠️ Price list changed — existing charges kept at original prices.';
+      feedbackEl.className = 'settings-feedback error';
+      setTimeout(() => { feedbackEl.textContent = ''; feedbackEl.className = ''; }, 4000);
     }
 
     // ===== PDF GENERATION =====
