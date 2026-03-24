@@ -2985,10 +2985,11 @@
           if (currentEstimate.payload && typeof currentEstimate.payload === 'string') {
             try {
               const p = JSON.parse(currentEstimate.payload);
-              // Strip submission state — row-level fields are source of truth
-              delete p.vonigoQuoteID;
-              delete p['vonigo QuoteID'];
-              delete p._pendingVolumeLines;
+              // Strip ALL row-identity and submission fields — row-level columns are source of truth
+              ['estimateID','row_number','ownerEmail','franchiseID','status','vonigoQuoteID',
+               'vonigo QuoteID','_pendingVolumeLines','clonedFrom','createdAt','updatedAt',
+               'label','totalTrucks','totalPrice','splitPricing','coverPhoto','payload']
+              .forEach(k => delete p[k]);
               currentEstimate = {...currentEstimate, ...p};
             } catch(e) {
               console.warn('Payload parse failed, trying localStorage fallback');
@@ -4104,7 +4105,7 @@
 
       // Remove from backend
       try {
-        await apiFetch(N8N_BASE + '/crewlogic-estimate', {
+        const delRes = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
           method: 'POST',
           body: JSON.stringify({
             action: 'delete',
@@ -4114,7 +4115,15 @@
             vonigoQuoteID
           })
         });
-      } catch(e) {}
+        const delData = await delRes.json();
+        if (!delData.success) {
+          console.error('Delete failed on server:', delData);
+          alert('Warning: estimate may not have been deleted from server. Please try again.');
+        }
+      } catch(e) {
+        console.error('Delete network error:', e);
+        alert('Network error during delete. The estimate may still exist on the server.');
+      }
 
       initEstimatesList();
     }
