@@ -1105,11 +1105,27 @@
           <div id="estChargesList"></div>
 
           <!-- Volume summary footer -->
-          <div id="estVolumeFooter" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-top:4px;display:flex;align-items:center;justify-content:space-between;">
-            <div>
-              <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Total Volume</div>
-              <div id="estVolumeTotalDisplay" style="font-family:'Space Mono',monospace;font-size:20px;font-weight:700;color:var(--accent-green);">0.000 trucks</div>
+          <div id="estVolumeFooter" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-top:4px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+              <div>
+                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;">Total Volume</div>
+                <div id="estVolumeTotalDisplay" style="font-family:'Space Mono',monospace;font-size:20px;font-weight:700;color:var(--accent-green);">0.000 trucks</div>
+              </div>
+              <div style="position:relative;display:inline-block;">
+                <button id="splitPricingToggle" onclick="toggleSplitPricing()" 
+                  style="padding:8px 14px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg-input);color:var(--text-muted);font-size:12px;font-weight:600;cursor:pointer;transition:all 0.2s;"
+                  onmouseenter="document.getElementById('splitTooltip').style.opacity='1';document.getElementById('splitTooltip').style.pointerEvents='auto';"
+                  onmouseleave="document.getElementById('splitTooltip').style.opacity='0';document.getElementById('splitTooltip').style.pointerEvents='none';">
+                  Split Pricing: OFF
+                </button>
+                <div id="splitTooltip" style="opacity:0;pointer-events:none;transition:opacity 0.2s;position:absolute;bottom:calc(100% + 8px);right:0;width:220px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;font-size:11px;color:var(--text-secondary);line-height:1.6;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,0.4);">
+                  <div style="font-weight:700;color:var(--text-primary);margin-bottom:4px;">Split Pricing</div>
+                  <div style="margin-bottom:6px;"><span style="color:var(--text-muted);">OFF —</span> Total trucks × full truck rate<br><span style="color:var(--accent-green);font-family:'Space Mono',monospace;font-size:10px;">2.875 × $899 = $2,584.63</span></div>
+                  <div><span style="color:var(--text-muted);">ON —</span> Whole trucks + fractional tier<br><span style="color:var(--accent-green);font-family:'Space Mono',monospace;font-size:10px;">2×$899 + 7/8×$825 = $2,623.00</span></div>
+                </div>
+              </div>
             </div>
+            <div id="splitPricingBreakdown" style="display:none;font-size:12px;color:var(--text-secondary);font-family:'Space Mono',monospace;border-top:1px solid var(--border);padding-top:8px;line-height:1.8;"></div>
           </div>
 
           <hr class="form-divider">
@@ -3022,6 +3038,9 @@
         document.getElementById('estJobIDDisplay').textContent = currentEstimate.jobID;
       }
 
+      // Restore split pricing toggle
+      updateSplitToggleUI();
+
       // Restore cover photo
       if (currentEstimate.coverPhoto) {
         document.getElementById('coverPhotoImg').src = currentEstimate.coverPhoto;
@@ -3559,6 +3578,48 @@
 
     
 
+    // ===== SPLIT PRICING =====
+    function toggleSplitPricing() {
+      currentEstimate.splitPricing = !currentEstimate.splitPricing;
+      updateSplitToggleUI();
+      updateTotals();
+      autoSaveDraft();
+    }
+
+    function updateSplitToggleUI() {
+      const btn = document.getElementById('splitPricingToggle');
+      if (!btn) return;
+      const on = !!currentEstimate.splitPricing;
+      btn.textContent = 'Split Pricing: ' + (on ? 'ON' : 'OFF');
+      btn.style.background = on ? 'rgba(74,222,128,0.15)' : 'var(--bg-input)';
+      btn.style.borderColor = on ? 'var(--accent-green)' : 'var(--border)';
+      btn.style.color = on ? 'var(--accent-green)' : 'var(--text-muted)';
+    }
+
+    function calcVolumePrice(totalTrucks) {
+      // Simple: totalTrucks * full truck rate
+      const fullItem = findVolumeItem(1.0);
+      const fullRate = fullItem ? parseFloat(fullItem.value) : 0;
+      return { total: totalTrucks * fullRate, fullRate, lines: null };
+    }
+
+    function calcVolumePriceSplit(totalTrucks) {
+      const fullItem = findVolumeItem(1.0);
+      const fullRate = fullItem ? parseFloat(fullItem.value) : 0;
+      const wholeTrucks = Math.floor(totalTrucks);
+      const partial = Math.round((totalTrucks - wholeTrucks) * 1000) / 1000;
+      const roundedPartial = roundToNearestEighth(partial);
+      const partialItem = roundedPartial > 0 ? findVolumeItem(roundedPartial) : null;
+      const partialRate = partialItem ? parseFloat(partialItem.value) : 0;
+      const fractionLabels = {0.125:'1/8',0.25:'1/4',0.375:'3/8',0.5:'1/2',0.625:'5/8',0.75:'3/4',0.875:'7/8',1.0:'Full'};
+      const fracLabel = fractionLabels[roundedPartial] || String(roundedPartial);
+      const total = (wholeTrucks * fullRate) + (roundedPartial > 0 ? partialRate : 0);
+      const lines = [];
+      if (wholeTrucks > 0) lines.push({ label: wholeTrucks + ' Full × $' + fullRate.toFixed(2), amount: wholeTrucks * fullRate, priceItemID: fullItem ? fullItem.priceItemID : null, qty: wholeTrucks, fraction: 1.0 });
+      if (roundedPartial > 0 && partialItem) lines.push({ label: fracLabel + ' × $' + partialRate.toFixed(2), amount: partialRate, priceItemID: partialItem.priceItemID, qty: 1, fraction: roundedPartial });
+      return { total, fullRate, lines };
+    }
+
     // ===== TOTALS =====
     function updateTotals() {
       const charges = currentEstimate.charges || [];
@@ -3572,10 +3633,28 @@
       const volDisplay = document.getElementById('estVolumeTotalDisplay');
       if (volDisplay) volDisplay.textContent = currentEstimate.totalTrucks.toFixed(3) + ' trucks';
 
-      // Price total = (total trucks × full truck rate) + all non-volume charges
-      const fullTruckItem = findVolumeItem(1.0);
-      const fullTruckPrice = fullTruckItem ? parseFloat(fullTruckItem.value) : 0;
-      const volumeTotal = totalTrucks * fullTruckPrice;
+      // Calculate volume price based on split toggle
+      const splitOn = !!currentEstimate.splitPricing;
+      const volCalc = splitOn ? calcVolumePriceSplit(totalTrucks) : calcVolumePrice(totalTrucks);
+      const volumeTotal = volCalc.total;
+
+      // Show/hide split breakdown
+      const breakdownEl = document.getElementById('splitPricingBreakdown');
+      if (breakdownEl) {
+        if (splitOn && volCalc.lines && volCalc.lines.length > 0) {
+          breakdownEl.style.display = 'block';
+          breakdownEl.innerHTML = volCalc.lines.map(l =>
+            '<div style="display:flex;justify-content:space-between;"><span>' + l.label + '</span><span style="color:var(--accent-green)">$' + l.amount.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</span></div>'
+          ).join('') +
+          '<div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);margin-top:4px;padding-top:4px;font-weight:700;"><span>Volume Total</span><span style="color:var(--accent-green)">$' + volumeTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</span></div>';
+        } else {
+          breakdownEl.style.display = 'none';
+        }
+      }
+
+      // Update toggle UI
+      updateSplitToggleUI();
+
       const surchargeTotal = charges
         .filter(c => c.type !== 'volume')
         .reduce((s, c) => s + ((parseFloat(c.qty) || 0) * (parseFloat(c.unitPrice) || 0)), 0);
@@ -3767,11 +3846,18 @@
       }
 
       const volumeCharges = (currentEstimate.charges || []).filter(c => c.type === 'volume');
-      if (volumeCharges.length > 0) {
-        // Show volume conversion modal first
-        showVolumeConversionModal();
-      } else {
+      if (volumeCharges.length === 0) {
         showSubmitModal();
+      } else if (currentEstimate.splitPricing) {
+        // Split pricing on — use split lines directly, skip modal
+        const calc = calcVolumePriceSplit(currentEstimate.totalTrucks);
+        currentEstimate._pendingVolumeLines = (calc.lines || []).map(l => ({
+          fraction: l.fraction, qty: l.qty
+        }));
+        showSubmitModal();
+      } else {
+        // Split pricing off — show conversion modal
+        showVolumeConversionModal();
       }
     }
 
@@ -4362,6 +4448,31 @@
       const fullTruckItemPDF = estVolBlock ? estVolBlock.items.find(i => i.name && i.name.toLowerCase().includes('full')) : null;
       const pricePerTruck = fullTruckItemPDF ? parseFloat(fullTruckItemPDF.value) : 0;
 
+      // Helper to find item in est.priceBlocks by fraction
+      const findEstVolItem = (frac) => {
+        if (!estVolBlock) return null;
+        const labels = {0:'Included',0.125:'1/8',0.25:'1/4',0.375:'3/8',0.5:'1/2',0.625:'5/8',0.75:'3/4',0.875:'7/8',1.0:'Full'};
+        const label = labels[frac];
+        return label ? estVolBlock.items.find(i => i.name && i.name.includes(label)) : null;
+      };
+
+      // Calculate volume pricing based on split flag
+      const pdfSplit = !!est.splitPricing;
+      let pdfVolumePrice, pdfVolumeLines;
+      if (pdfSplit && totalTrucks > 0) {
+        const whole = Math.floor(totalTrucks);
+        const partial = Math.round((totalTrucks - whole) * 8) / 8;
+        const partialItem = partial > 0 ? findEstVolItem(partial) : null;
+        const fractionLabels = {0.125:'1/8',0.25:'1/4',0.375:'3/8',0.5:'1/2',0.625:'5/8',0.75:'3/4',0.875:'7/8'};
+        pdfVolumeLines = [];
+        if (whole > 0) pdfVolumeLines.push({ label: whole + ' Full Truck' + (whole > 1 ? 's' : ''), qty: whole, rate: pricePerTruck, total: whole * pricePerTruck });
+        if (partial > 0 && partialItem) pdfVolumeLines.push({ label: fractionLabels[partial] + ' Truckload', qty: 1, rate: parseFloat(partialItem.value), total: parseFloat(partialItem.value) });
+        pdfVolumePrice = pdfVolumeLines.reduce((s, l) => s + l.total, 0);
+      } else {
+        pdfVolumeLines = null;
+        pdfVolumePrice = totalTrucks * pricePerTruck;
+      }
+
       let rowIdx = 0;
       areaRows.forEach(([area, trucks]) => {
         if (rowIdx % 2 === 0) {
@@ -4377,18 +4488,40 @@
         y += 20;
       });
 
-      // Sub total row
-      const totalTrucks = parseFloat(est.totalTrucks) || 0;
-      const volTotal = totalTrucks * pricePerTruck;
-      doc.setFillColor(...dark);
-      doc.rect(margin, y - 2, W - 2 * margin, 22, 'F');
-      doc.setTextColor(...white);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.text('Sub Total', col.area, y + 13);
-      doc.text(totalTrucks.toFixed(3), col.trucks, y + 13, { align: 'right' });
-      if (pricePerTruck > 0) doc.text(fmtMoney(pricePerTruck), col.price, y + 13, { align: 'right' });
-      if (volTotal > 0) doc.text(fmtMoney(volTotal), col.total, y + 13, { align: 'right' });
+      // Sub total row(s)
+      if (pdfSplit && pdfVolumeLines && pdfVolumeLines.length > 0) {
+        // Show split lines
+        pdfVolumeLines.forEach((line, i) => {
+          if (i % 2 === 0) { doc.setFillColor(...offwhite); doc.rect(margin, y - 2, W - 2 * margin, 18, 'F'); }
+          doc.setTextColor(...dark);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9);
+          doc.text(line.label, col.area, y + 10);
+          doc.text(String(line.qty), col.trucks, y + 10, { align: 'right' });
+          doc.text(fmtMoney(line.rate), col.price, y + 10, { align: 'right' });
+          doc.text(fmtMoney(line.total), col.total, y + 10, { align: 'right' });
+          y += 20;
+        });
+        // Split sub total
+        doc.setFillColor(...dark);
+        doc.rect(margin, y - 2, W - 2 * margin, 22, 'F');
+        doc.setTextColor(...white);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text('Volume Sub Total', col.area, y + 13);
+        doc.text(fmtMoney(pdfVolumePrice), col.total, y + 13, { align: 'right' });
+      } else {
+        // Simple sub total
+        doc.setFillColor(...dark);
+        doc.rect(margin, y - 2, W - 2 * margin, 22, 'F');
+        doc.setTextColor(...white);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text('Sub Total', col.area, y + 13);
+        doc.text(totalTrucks.toFixed(3), col.trucks, y + 13, { align: 'right' });
+        if (pricePerTruck > 0) doc.text(fmtMoney(pricePerTruck), col.price, y + 13, { align: 'right' });
+        if (pdfVolumePrice > 0) doc.text(fmtMoney(pdfVolumePrice), col.total, y + 13, { align: 'right' });
+      }
       y += 28;
 
       // Non-volume charges
@@ -4415,12 +4548,11 @@
         y += 20;
       });
 
-      // Grand total — recalculate from trucks + surcharges for accuracy
-      const pdfVolumeTotal = totalTrucks * pricePerTruck;
+      // Grand total — uses split or simple volume price
       const pdfSurchargeTotal = (est.charges || [])
         .filter(c => c.type !== 'volume')
         .reduce((s, c) => s + ((parseFloat(c.qty)||0) * (parseFloat(c.unitPrice)||0)), 0);
-      const pdfGrandTotal = pdfVolumeTotal + pdfSurchargeTotal;
+      const pdfGrandTotal = pdfVolumePrice + pdfSurchargeTotal;
 
       y += 6;
       doc.setFillColor(...green);
