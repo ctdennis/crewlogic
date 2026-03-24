@@ -2916,7 +2916,7 @@
         html += '<div class="estimate-card-total-item">Total: <strong>$' + price.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</strong></div>';
         if (updated) html += '<div class="estimate-card-total-item" style="margin-left:auto">Updated ' + updated + '</div>';
         html += '</div>';
-        if (est.vonigoQuoteID) {
+        if (est.vonigoQuoteID && !est.clonedFrom) {
           html += '<div style="font-size:11px;color:var(--accent-green);margin-bottom:8px;">Vonigo #' + est.vonigoQuoteID + '</div>';
         }
         html += '<div class="estimate-card-actions">';
@@ -3096,10 +3096,10 @@
       // If already submitted to Vonigo, disable submit button
       const submitBtn = document.getElementById('estSubmitBtn');
       const feedbackEl = document.getElementById('estFeedback');
-      // Resolve vonigoQuoteID from top-level or nested payload
-      if (!currentEstimate.vonigoQuoteID && currentEstimate.payload && typeof currentEstimate.payload === 'object') {
-        currentEstimate.vonigoQuoteID = currentEstimate.payload.vonigoQuoteID || currentEstimate.payload['vonigo QuoteID'] || null;
-      }
+      // vonigoQuoteID comes ONLY from the row-level column — never from nested payload
+      // Clones always have null here; only submitted originals have a value
+      const quoteID = currentEstimate.vonigoQuoteID || currentEstimate['vonigo QuoteID'] || null;
+      currentEstimate.vonigoQuoteID = currentEstimate.clonedFrom ? null : quoteID;
 
       if (currentEstimate.vonigoQuoteID) {
         submitBtn.disabled = true;
