@@ -11,6 +11,7 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBmMTkyMyIvPjx0ZXh0IHg9IjE2IiB5PSIyMiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxNCIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iIzRhZGU4MCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+Q0w8L3RleHQ+PC9zdmc+">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
   <script>
     // Initialize on DOM ready — no GIS library needed
     window.addEventListener('DOMContentLoaded', function() {
@@ -4890,12 +4891,46 @@
 
       // Output
       const filename = (clientName.replace(/[^a-z0-9]/gi, '_') + '_Estimate_' + dateStr.replace(/\//g, '-')) + '.pdf';
-      if (mode === 'download') {
-        doc.save(filename);
-      } else {
-        const blob = doc.output('blob');
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank');
+      // Merge with boilerplate pages
+      try {
+        const [estimateBytes, boilerplateBytes] = await Promise.all([
+          doc.output('arraybuffer'),
+          fetch('/assets/boilerplate.pdf').then(r => r.arrayBuffer())
+        ]);
+
+        const { PDFDocument } = PDFLib;
+        const mergedPdf = await PDFDocument.create();
+
+        const estimatePdf = await PDFDocument.load(estimateBytes);
+        const boilerplatePdf = await PDFDocument.load(boilerplateBytes);
+
+        const estPages = await mergedPdf.copyPages(estimatePdf, estimatePdf.getPageIndices());
+        estPages.forEach(p => mergedPdf.addPage(p));
+
+        const bpPages = await mergedPdf.copyPages(boilerplatePdf, boilerplatePdf.getPageIndices());
+        bpPages.forEach(p => mergedPdf.addPage(p));
+
+        const mergedBytes = await mergedPdf.save();
+        const mergedBlob = new Blob([mergedBytes], { type: 'application/pdf' });
+        const mergedUrl = URL.createObjectURL(mergedBlob);
+
+        if (mode === 'download') {
+          const a = document.createElement('a');
+          a.href = mergedUrl;
+          a.download = filename;
+          a.click();
+        } else {
+          window.open(mergedUrl, '_blank');
+        }
+      } catch(e) {
+        console.warn('Boilerplate merge failed, falling back:', e);
+        if (mode === 'download') {
+          doc.save(filename);
+        } else {
+          const blob = doc.output('blob');
+          const url = URL.createObjectURL(blob);
+          window.open(url, '_blank');
+        }
       }
     }
 
