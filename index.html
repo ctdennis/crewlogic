@@ -2987,7 +2987,7 @@
               const p = JSON.parse(currentEstimate.payload);
               // Strip ALL row-identity and submission fields — row-level columns are source of truth
               ['estimateID','row_number','ownerEmail','franchiseID','status','vonigoQuoteID',
-               'vonigo QuoteID','_pendingVolumeLines','clonedFrom','createdAt','updatedAt',
+               'vonigoQuoteID','_pendingVolumeLines','clonedFrom','createdAt','updatedAt',
                'label','totalTrucks','totalPrice','splitPricing','coverPhoto','payload']
               .forEach(k => delete p[k]);
               currentEstimate = {...currentEstimate, ...p};
@@ -3006,7 +3006,7 @@
           // If this is a clone, clear submission state
           if (currentEstimate.clonedFrom) {
             currentEstimate.vonigoQuoteID = null;
-            currentEstimate['vonigo QuoteID'] = null;
+            currentEstimate['vonigoQuoteID'] = null;
             currentEstimate._pendingVolumeLines = null;
           }
           restorePriceBlocks();
@@ -3098,7 +3098,7 @@
       const feedbackEl = document.getElementById('estFeedback');
       // vonigoQuoteID comes ONLY from the row-level column — never from nested payload
       // Clones always have null here; only submitted originals have a value
-      const quoteID = currentEstimate.vonigoQuoteID || currentEstimate['vonigo QuoteID'] || null;
+      const quoteID = currentEstimate.vonigoQuoteID || currentEstimate['vonigoQuoteID'] || null;
       currentEstimate.vonigoQuoteID = currentEstimate.clonedFrom ? null : quoteID;
       const isSubmitted = !!currentEstimate.vonigoQuoteID ||
         (!currentEstimate.clonedFrom && currentEstimate.status === 'submitted');
@@ -4079,7 +4079,7 @@
       clone.clonedFrom = original.estimateID;
       clone.jobID = null; clone.clientID = null; clone.contactID = null; clone.locationID = null;
       clone.vonigoQuoteID = null;
-      clone['vonigo QuoteID'] = null;
+      clone['vonigoQuoteID'] = null;
       clone._pendingVolumeLines = null;
       clone.clientName = ''; clone.address = '';
       clone.createdAt = new Date().toISOString();
@@ -4087,7 +4087,7 @@
       // Strip submitted state from payload too
       if (clone.payload && typeof clone.payload === 'object') {
         clone.payload.vonigoQuoteID = null;
-        clone.payload['vonigo QuoteID'] = null;
+        clone.payload['vonigoQuoteID'] = null;
       }
       saveLocalEstimate(clone);
       currentEstimate = clone;
@@ -4104,7 +4104,7 @@
       // Find vonigoQuoteID from local cache
       const all = getLocalEstimates();
       const est = all.find(e => String(e.estimateID) === String(estimateID));
-      const vonigoQuoteID = est ? (est.vonigoQuoteID || est['vonigo QuoteID'] || null) : null;
+      const vonigoQuoteID = est ? (est.vonigoQuoteID || est['vonigoQuoteID'] || null) : null;
 
       // Remove locally
       setLocalEstimates(all.filter(e => String(e.estimateID) !== String(estimateID)));
