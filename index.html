@@ -4497,7 +4497,7 @@
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8.5);
       doc.text('Area (includes labor, disposal & recycling)', col.area, y - 1);
-      doc.text('# of Trucks', col.trucks, y - 1, { align: 'right' });
+      doc.text('# of Trucks / CY', col.trucks, y - 1, { align: 'right' });
       doc.text('Price / Truck', col.price, y - 1, { align: 'right' });
       doc.text('Total', col.total, y - 1, { align: 'right' });
       y += 10;
@@ -4556,7 +4556,7 @@
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
         doc.text(area, col.area, y + 10);
-        doc.text(trucks.toFixed(3), col.trucks, y + 10, { align: 'right' });
+        doc.text(trucks.toFixed(3) + ' / ' + (trucks * 16).toFixed(1) + ' cy', col.trucks, y + 10, { align: 'right' });
         rowIdx++;
         y += 20;
       });
@@ -4592,6 +4592,7 @@
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(9);
         doc.text('Volume Sub Total', col.area, y + 13);
+        doc.text(totalTrucks.toFixed(3) + ' / ' + (totalTrucks * 16).toFixed(1) + ' cy', col.trucks, y + 13, { align: 'right' });
         doc.text(fmtMoney(pdfVolumePrice), col.total, y + 13, { align: 'right' });
       } else {
         // Simple sub total
@@ -4601,7 +4602,7 @@
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(9);
         doc.text('Sub Total', col.area, y + 13);
-        doc.text(totalTrucks.toFixed(3), col.trucks, y + 13, { align: 'right' });
+        doc.text(totalTrucks.toFixed(3) + ' / ' + (totalTrucks * 16).toFixed(1) + ' cy', col.trucks, y + 13, { align: 'right' });
         if (pricePerTruck > 0) doc.text(fmtMoney(pricePerTruck), col.price, y + 13, { align: 'right' });
         if (pdfVolumePrice > 0) doc.text(fmtMoney(pdfVolumePrice), col.total, y + 13, { align: 'right' });
       }
@@ -4743,7 +4744,7 @@
         doc.text('Description', dc.desc, startY - 1);
         doc.text('Not Included', dc.excluded, startY - 1);
         doc.text('Size', dc.frac, startY - 1, { align: 'right' });
-        doc.text('Vol', dc.vol, startY - 1, { align: 'right' });
+        doc.text('Vol / CY', dc.vol, startY - 1, { align: 'right' });
         return startY + 8;
       };
 
@@ -4795,7 +4796,8 @@
         const fracLabel = room.truckLabel || (parseFloat(room.truckVolume) > 0 ? String(room.truckVolume) : 'Incl.');
         doc.text(fracLabel, dc.frac, y + 12, { align: 'right' });
         doc.setTextColor(...green);
-        const volStr = parseFloat(room.truckVolume) > 0 ? parseFloat(room.truckVolume).toFixed(3) : '-';
+        const tv = parseFloat(room.truckVolume) || 0;
+        const volStr = tv > 0 ? tv.toFixed(3) + ' / ' + (tv * 16).toFixed(1) + ' cy' : '-';
         doc.text(volStr, dc.vol, y + 12, { align: 'right' });
 
         y += rh;
@@ -4808,8 +4810,8 @@
       doc.setTextColor(...dark);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
-      doc.text('Total Volume (16 cubic yard trucks)', dc.room, y + 17);
-      doc.text(totalTrucks.toFixed(3), dc.vol, y + 17, { align: 'right' });
+      doc.text('Total Volume', dc.room, y + 17);
+      doc.text(totalTrucks.toFixed(3) + ' trucks / ' + (totalTrucks * 16).toFixed(1) + ' cy', dc.vol, y + 17, { align: 'right' });
 
       // Footer
       doc.setDrawColor(...lightgray);
