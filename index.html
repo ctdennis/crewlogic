@@ -1256,6 +1256,7 @@
           <!-- Type selector -->
           <div class="form-group">
             <div class="form-label">Type</div>
+
             <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:4px;">
               <button class="vol-fraction-btn" id="typeBtn-volume" onclick="selectChargeType('volume')">Volume</button>
               <button class="vol-fraction-btn" id="typeBtn-surcharge" onclick="selectChargeType('surcharge')">Surcharge</button>
@@ -3893,7 +3894,13 @@
             action: 'save',
             email: currentUser.email,
             franchiseID: currentUser.franchiseID,
-            payload: currentEstimate
+            payload: (function() {
+              const p = Object.assign({}, currentEstimate);
+              delete p.priceBlocks; // stored in priceBook column
+              delete p.coverPhoto;  // stored in coverPhoto column
+              return p;
+            })(),
+            priceBook: currentEstimate.priceBlocks || []
           })
         });
         const data = await res.json();
