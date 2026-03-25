@@ -3896,8 +3896,12 @@
             franchiseID: currentUser.franchiseID,
             payload: (function() {
               const p = Object.assign({}, currentEstimate);
-              delete p.priceBlocks; // stored in priceBook column
-              delete p.coverPhoto;  // stored in coverPhoto column
+              // Strip fields stored in their own columns or that cause nesting bloat
+              delete p.priceBlocks;
+              delete p.coverPhoto;
+              delete p.payload;      // prevent nested payload string
+              delete p.priceBook;
+              delete p.row_number;
               return p;
             })(),
             priceBook: currentEstimate.priceBlocks || []
