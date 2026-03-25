@@ -1160,7 +1160,7 @@
 
         </div><!-- end estMainContent -->
 
-        <button class="new-estimate-btn" style="margin-top:12px;" onclick="backToEstimatesList()">← Back to Estimates</button>
+        <button class="new-estimate-btn" style="margin-top:12px;" onclick="promptSaveBeforeLeaving()">← Back to Estimates</button>
       </div>
 
       <!-- PRICE UPDATE MODAL -->
@@ -1175,6 +1175,25 @@
           <button class="vol-option-btn" onclick="keepExistingPrices()">
             🔒 Keep Existing Charges
             <div class="vol-option-sub">Leave charges at original prices</div>
+          </button>
+        </div>
+      </div>
+
+      <!-- SAVE PROMPT MODAL -->
+      <div id="savePromptModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:200;align-items:flex-end;justify-content:center;">
+        <div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;">
+          <div style="font-size:16px;font-weight:700;margin-bottom:6px;color:var(--text-primary);">Save before leaving?</div>
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Any unsaved changes will be lost.</div>
+          <button class="vol-option-btn" onclick="saveAndLeave()">
+            💾 Save Draft &amp; Exit
+            <div class="vol-option-sub">Save changes then return to estimates</div>
+          </button>
+          <button class="vol-option-btn" onclick="leaveWithoutSaving()">
+            ✕ Exit Without Saving
+            <div class="vol-option-sub">Discard any unsaved changes</div>
+          </button>
+          <button class="calc-btn" style="background:var(--bg-input);color:var(--text-secondary);margin-top:4px;" onclick="document.getElementById('savePromptModal').style.display='none'">
+            <span class="btn-text">Cancel</span>
           </button>
         </div>
       </div>
@@ -1931,7 +1950,7 @@
       // If in estimate editor, go back to estimates list
       const editorScreen = document.getElementById('estimateEditorScreen');
       if (editorScreen && editorScreen.classList.contains('active')) {
-        backToEstimatesList();
+        promptSaveBeforeLeaving();
         return;
       }
       hideAll();
@@ -3116,6 +3135,21 @@
         submitBtn.querySelector('.btn-text').textContent = 'Submit to Vonigo';
         feedbackEl.textContent = '';
       }
+    }
+
+    function promptSaveBeforeLeaving() {
+      document.getElementById('savePromptModal').style.display = 'flex';
+    }
+
+    async function saveAndLeave() {
+      document.getElementById('savePromptModal').style.display = 'none';
+      await saveEstimateDraft();
+      backToEstimatesList();
+    }
+
+    function leaveWithoutSaving() {
+      document.getElementById('savePromptModal').style.display = 'none';
+      backToEstimatesList();
     }
 
     function backToEstimatesList() {
