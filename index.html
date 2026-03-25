@@ -3100,12 +3100,16 @@
       // Clones always have null here; only submitted originals have a value
       const quoteID = currentEstimate.vonigoQuoteID || currentEstimate['vonigo QuoteID'] || null;
       currentEstimate.vonigoQuoteID = currentEstimate.clonedFrom ? null : quoteID;
+      const isSubmitted = !!currentEstimate.vonigoQuoteID ||
+        (!currentEstimate.clonedFrom && currentEstimate.status === 'submitted');
 
-      if (currentEstimate.vonigoQuoteID) {
+      if (isSubmitted) {
         submitBtn.disabled = true;
         submitBtn.querySelector('.btn-text').textContent = 'Submitted ✓';
-        feedbackEl.textContent = 'Submitted to Vonigo — Estimate #' + currentEstimate.vonigoQuoteID;
-        feedbackEl.className = 'settings-feedback ok';
+        if (currentEstimate.vonigoQuoteID) {
+          feedbackEl.textContent = 'Submitted to Vonigo — Estimate #' + currentEstimate.vonigoQuoteID;
+          feedbackEl.className = 'settings-feedback ok';
+        }
       } else {
         submitBtn.disabled = false;
         submitBtn.querySelector('.btn-text').textContent = 'Submit to Vonigo';
