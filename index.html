@@ -1252,7 +1252,14 @@
       <!-- ADD CHARGE MODAL -->
       <div id="addChargeModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:200;align-items:flex-end;justify-content:center;">
         <div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;">
-          <div style="font-size:16px;font-weight:700;margin-bottom:16px;color:var(--text-primary);">Add Charge</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <div style="font-size:16px;font-weight:700;color:var(--text-primary);">Add Charge</div>
+            <button id="voiceInputBtn" onclick="startVoiceInput()" style="display:flex;align-items:center;gap:6px;background:var(--accent-green);color:#000;border:none;border-radius:20px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;">
+              🎤 Describe Room
+            </button>
+          </div>
+          <!-- VOICE STATUS -->
+          <div id="voiceStatus" style="display:none;margin-bottom:12px;padding:10px 14px;border-radius:var(--radius-sm);font-size:13px;"></div>
 
           <!-- Type selector -->
           <div class="form-group">
@@ -3247,6 +3254,146 @@
       document.getElementById('priced-price').value = price.toFixed(2);
       document.getElementById('priced-qty-row').style.display = 'grid';
       document.getElementById('addChargeConfirmBtn').disabled = false;
+    }
+
+    // ===== VOICE INPUT =====
+    let voiceRecognition = null;
+    let voiceTranscript = '';
+
+    function startVoiceInput() {
+      const btn = document.getElementById('voiceInputBtn');
+      const status = document.getElementById('voiceStatus');
+
+      // Check browser support
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        status.style.display = 'block';
+        status.style.background = 'rgba(239,68,68,0.15)';
+        status.style.color = '#ef4444';
+        status.textContent = '⚠️ Voice input not supported in this browser. Try Chrome on Android or Safari on iOS.';
+        return;
+      }
+
+      if (voiceRecognition) {
+        voiceRecognition.stop();
+        return;
+      }
+
+      voiceRecognition = new SpeechRecognition();
+      voiceRecognition.continuous = true;
+      voiceRecognition.interimResults = true;
+      voiceRecognition.lang = 'en-US';
+
+      btn.textContent = '⏹ Stop Listening';
+      btn.style.background = '#ef4444';
+      btn.style.color = '#fff';
+      status.style.display = 'block';
+      status.style.background = 'rgba(0,238,118,0.1)';
+      status.style.color = 'var(--text-primary)';
+      status.textContent = '🎤 Listening... describe the room and its contents.';
+      voiceTranscript = '';
+
+      voiceRecognition.onresult = (e) => {
+        let interim = '';
+        let final = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) {
+            final += e.results[i][0].transcript;
+          } else {
+            interim += e.results[i][0].transcript;
+          }
+        }
+        voiceTranscript += final;
+        status.textContent = '🎤 ' + (voiceTranscript + interim) || 'Listening...';
+      };
+
+      voiceRecognition.onerror = (e) => {
+        console.error('Voice error:', e.error);
+        stopVoiceInput();
+        status.style.background = 'rgba(239,68,68,0.15)';
+        status.style.color = '#ef4444';
+        status.textContent = '⚠️ Voice error: ' + e.error + '. Please try again.';
+      };
+
+      voiceRecognition.onend = () => {
+        voiceRecognition = null;
+        btn.textContent = '🎤 Describe Room';
+        btn.style.background = 'var(--accent-green)';
+        btn.style.color = '#000';
+        if (voiceTranscript.trim()) {
+          analyzeVoiceTranscript(voiceTranscript.trim());
+        }
+      };
+
+      voiceRecognition.start();
+    }
+
+    function stopVoiceInput() {
+      if (voiceRecognition) {
+        voiceRecognition.stop();
+      }
+    }
+
+    async function analyzeVoiceTranscript(transcript) {
+      const status = document.getElementById('voiceStatus');
+      status.style.background = 'rgba(0,238,118,0.1)';
+      status.style.color = 'var(--text-primary)';
+      status.textContent = '🤖 Analyzing... "' + transcript + '"';
+
+      try {
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 1000,
+            system: `You are helping a junk removal estimator fill in a charge row. A full truck holds 16 cubic yards.
+Volume fractions available: Included (0), 1/8 (0.125), 1/4 (0.25), 3/8 (0.375), 1/2 (0.5), 5/8 (0.625), 3/4 (0.75), 7/8 (0.875), Full (1.0). For multiple trucks use qty > 1.
+Available areas: ${availableAreas.join(', ')}.
+Return ONLY valid JSON with no markdown, no explanation:
+{"room":"room name","area":"area from list","description":"comma separated items","notIncluded":"anything excluded if mentioned","truckLabel":"fraction label e.g. 1/2","truckQty":1,"truckVolume":0.5,"confidence":"low|medium|high","reasoning":"one sentence"}`,
+            messages: [{
+              role: 'user',
+              content: transcript
+            }]
+          })
+        });
+
+        const data = await response.json();
+        const text = data.content[0].text.replace(/```json|```/g, '').trim();
+        const result = JSON.parse(text);
+
+        // Pre-fill the volume form fields
+        selectChargeType('volume');
+
+        const roomEl = document.getElementById('vol-room');
+        const areaEl = document.getElementById('vol-area');
+        const descEl = document.getElementById('vol-desc');
+        const excludedEl = document.getElementById('vol-excluded');
+        const labelEl = document.getElementById('vol-label');
+        const qtyEl = document.getElementById('vol-qty');
+
+        if (roomEl) roomEl.value = result.room || '';
+        if (areaEl) areaEl.value = result.area || '';
+        if (descEl) descEl.value = result.description || '';
+        if (excludedEl) excludedEl.value = result.notIncluded || '';
+        if (labelEl) labelEl.value = result.truckLabel || '';
+        if (qtyEl) qtyEl.value = result.truckQty || 1;
+
+        // Trigger volume calc update
+        updateVolumeFraction();
+
+        const confidenceColor = result.confidence === 'high' ? '#00EE76' : result.confidence === 'medium' ? '#fb923c' : '#ef4444';
+        status.style.background = 'rgba(0,238,118,0.1)';
+        status.style.color = 'var(--text-primary)';
+        status.innerHTML = '<span style="color:' + confidenceColor + ';font-weight:600;">✓ ' + result.confidence.toUpperCase() + ' confidence</span> — ' + result.reasoning + '<br><span style="font-size:11px;color:var(--text-muted);margin-top:4px;display:block;">Review and adjust before saving.</span>';
+
+      } catch(e) {
+        console.error('Voice analyze error:', e);
+        status.style.background = 'rgba(239,68,68,0.15)';
+        status.style.color = '#ef4444';
+        status.textContent = '⚠️ Could not analyze transcript. Fields not filled. Please enter manually.';
+      }
     }
 
     function showAddCharge() {
