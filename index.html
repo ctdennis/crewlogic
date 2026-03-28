@@ -1102,8 +1102,13 @@
           <!-- UNIFIED CHARGES SECTION -->
           <div class="est-section-header" style="margin-bottom:12px;">
             <div class="est-section-title">Charges</div>
-            <button class="est-add-btn" id="addChargeBtn" onclick="showAddCharge()">+ Add Area</button>
+            <div style="display:flex;gap:6px;">
+              <button class="est-add-btn" id="voiceRoomBtn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe Room</button>
+              <button class="est-add-btn" id="addChargeBtn" onclick="showAddCharge()">+ Manual</button>
+            </div>
           </div>
+          <!-- Room voice status -->
+          <div id="roomVoiceStatus" style="display:none;margin-bottom:12px;padding:10px 14px;border-radius:var(--radius-sm);font-size:13px;"></div>
           <div id="estChargesList"></div>
 
           <!-- Volume summary footer -->
@@ -3257,6 +3262,270 @@
       document.getElementById('addChargeConfirmBtn').disabled = false;
     }
 
+    // ===== ROOM VOICE CAPTURE =====
+    let roomVoiceRecognition = null;
+    let roomVoiceTranscript = '';
+
+    function startRoomVoice() {
+      const btn = document.getElementById('voiceRoomBtn');
+      const status = document.getElementById('roomVoiceStatus');
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+      if (!SpeechRecognition) {
+        status.style.display = 'block';
+        status.style.background = 'rgba(239,68,68,0.15)';
+        status.style.color = '#ef4444';
+        status.textContent = '⚠️ Voice not supported. Use Chrome on Android or Safari on iOS.';
+        return;
+      }
+
+      if (roomVoiceRecognition) {
+        roomVoiceRecognition.stop();
+        return;
+      }
+
+      roomVoiceRecognition = new SpeechRecognition();
+      roomVoiceRecognition.continuous = true;
+      roomVoiceRecognition.interimResults = true;
+      roomVoiceRecognition.lang = 'en-US';
+      roomVoiceTranscript = '';
+
+      btn.innerHTML = '⏹ Done — Process Room';
+      btn.style.background = '#ef4444';
+      btn.style.color = '#fff';
+
+      status.style.display = 'block';
+      status.style.background = 'rgba(0,238,118,0.1)';
+      status.style.color = 'var(--text-primary)';
+      status.textContent = '🎤 Listening... describe the room and everything in it.';
+
+      roomVoiceRecognition.onresult = (e) => {
+        let interim = '';
+        let final = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) final += e.results[i][0].transcript;
+          else interim += e.results[i][0].transcript;
+        }
+        roomVoiceTranscript += final;
+        status.textContent = '🎤 ' + (roomVoiceTranscript + interim || 'Listening...');
+      };
+
+      roomVoiceRecognition.onerror = (e) => {
+        roomVoiceRecognition = null;
+        btn.innerHTML = '🎤 Describe Room';
+        btn.style.background = 'var(--accent-green)';
+        btn.style.color = '#000';
+        status.style.background = 'rgba(239,68,68,0.15)';
+        status.style.color = '#ef4444';
+        status.textContent = '⚠️ Voice error: ' + e.error;
+      };
+
+      roomVoiceRecognition.onend = () => {
+        roomVoiceRecognition = null;
+        btn.innerHTML = '<span class="spinner-inline" style="display:inline-block;margin-right:6px;"></span> Analyzing room...';
+        btn.style.background = 'var(--accent-green)';
+        btn.style.color = '#000';
+        btn.disabled = true;
+        if (roomVoiceTranscript.trim()) {
+          status.textContent = '"' + roomVoiceTranscript.trim() + '"';
+          analyzeRoomTranscript(roomVoiceTranscript.trim());
+        } else {
+          btn.innerHTML = '🎤 Describe Room';
+          btn.disabled = false;
+          status.style.display = 'none';
+        }
+      };
+
+      roomVoiceRecognition.start();
+    }
+
+    async function analyzeRoomTranscript(transcript) {
+      const btn = document.getElementById('voiceRoomBtn');
+      const status = document.getElementById('roomVoiceStatus');
+      try {
+        const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'analyzeVoice',
+            email: currentUser.email,
+            franchiseID: currentUser.franchiseID,
+            transcript,
+            areas: availableAreas
+          })
+        });
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'Analysis failed');
+
+        const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
+
+        // Find first volume charge for confidence display
+        const volCharge = charges.find(c => c.type === 'volume');
+
+        // Add all charges to estimate
+        let addedCount = 0;
+        charges.forEach(charge => {
+          if (charge.type === 'volume') {
+            currentEstimate.charges.push({
+              type: 'volume',
+              room: charge.room || '',
+              area: charge.area || '',
+              description: charge.description || '',
+              notIncluded: charge.notIncluded || '',
+              truckLabel: charge.truckLabel || '',
+              truckQty: charge.truckQty || 1,
+              truckVolume: charge.truckVolume || 0
+            });
+            addedCount++;
+          } else if (charge.type === 'surcharge') {
+            // Match against loaded priceBlocks
+            const matched = matchSurchargeItem(charge.name);
+            if (matched) {
+              currentEstimate.charges.push({
+                type: 'surcharge',
+                priceItemID: matched.priceItemID,
+                name: matched.name,
+                blockName: matched.blockName,
+                priceBlockID: matched.priceBlockID,
+                qty: charge.qty || 1,
+                unitPrice: matched.value,
+                area: charge.area || '',
+                description: charge.description || '',
+                taxID: matched.taxID || 146
+              });
+              addedCount++;
+            }
+          }
+        });
+
+        updateTotals();
+        renderCharges();
+        autoSaveDraft();
+
+        const confidenceColor = volCharge && volCharge.confidence === 'high' ? '#00EE76' :
+                                volCharge && volCharge.confidence === 'medium' ? '#fb923c' : '#ef4444';
+        const reasoning = volCharge ? volCharge.reasoning : '';
+        status.style.background = 'rgba(0,238,118,0.1)';
+        status.innerHTML = '<span style="color:' + confidenceColor + ';font-weight:600;">✓ ' + addedCount + ' row' + (addedCount !== 1 ? 's' : '') + ' added</span>' +
+          (reasoning ? ' — ' + reasoning : '') +
+          '<br><span style="font-size:11px;color:var(--text-muted);margin-top:2px;display:block;">Review and adjust before saving.</span>';
+
+        setTimeout(() => { status.style.display = 'none'; }, 6000);
+
+      } catch(e) {
+        console.error('Room voice analyze error:', e);
+        status.style.background = 'rgba(239,68,68,0.15)';
+        status.style.color = '#ef4444';
+        status.textContent = '⚠️ Error: ' + (e.message || e);
+      } finally {
+        btn.innerHTML = '🎤 Describe Room';
+        btn.style.background = 'var(--accent-green)';
+        btn.style.color = '#000';
+        btn.disabled = false;
+      }
+    }
+
+    function matchSurchargeItem(name) {
+      if (!priceBlocks || !name) return null;
+      const search = name.toLowerCase();
+      for (const block of priceBlocks) {
+        if (!block.items) continue;
+        for (const item of block.items) {
+          if (item.name.toLowerCase().includes(search) || search.includes(item.name.toLowerCase().split('(')[0].trim().toLowerCase())) {
+            return { ...item, blockName: block.name, priceBlockID: block.priceBlockID };
+          }
+        }
+      }
+      return null;
+    }
+
+    // ===== CHARGE PHOTO CAPTURE =====
+    function captureChargePhoto(chargeIdx) {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.capture = 'environment';
+      input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const base64 = await new Promise((res, rej) => {
+          const reader = new FileReader();
+          reader.onload = () => res(reader.result);
+          reader.onerror = rej;
+          reader.readAsDataURL(file);
+        });
+        // Compress
+        const compressed = await compressChargePhoto(base64);
+        currentEstimate.charges[chargeIdx].photo = compressed;
+        renderCharges();
+        autoSaveDraft();
+        // Upload to Google Drive in background
+        uploadChargePhotoToDrive(chargeIdx, compressed);
+      };
+      input.click();
+    }
+
+    async function compressChargePhoto(base64) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const maxW = 640, maxH = 480;
+          let w = img.width, h = img.height;
+          if (w > maxW) { h = h * maxW / w; w = maxW; }
+          if (h > maxH) { w = w * maxH / h; h = maxH; }
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', 0.6));
+        };
+        img.src = base64;
+      });
+    }
+
+    async function uploadChargePhotoToDrive(chargeIdx, base64) {
+      try {
+        const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'uploadPhoto',
+            email: currentUser.email,
+            franchiseID: currentUser.franchiseID,
+            estimateID: currentEstimate.estimateID,
+            chargeIdx,
+            photo: base64,
+            label: currentEstimate.charges[chargeIdx].room || 'Room ' + (chargeIdx + 1)
+          })
+        });
+        const data = await response.json();
+        if (data.success && data.photoUrl) {
+          currentEstimate.charges[chargeIdx].photoUrl = data.photoUrl;
+          autoSaveDraft();
+        }
+      } catch(e) {
+        console.warn('Photo upload failed, stored locally only:', e);
+      }
+    }
+
+    function removeChargePhoto(chargeIdx) {
+      currentEstimate.charges[chargeIdx].photo = null;
+      currentEstimate.charges[chargeIdx].photoUrl = null;
+      renderCharges();
+      autoSaveDraft();
+    }
+
+    function viewChargePhoto(chargeIdx) {
+      const charge = currentEstimate.charges[chargeIdx];
+      const src = charge.photoUrl || charge.photo;
+      if (!src) return;
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:999;display:flex;align-items:center;justify-content:center;';
+      overlay.onclick = () => document.body.removeChild(overlay);
+      const img = document.createElement('img');
+      img.src = src;
+      img.style.cssText = 'max-width:95vw;max-height:90vh;object-fit:contain;border-radius:8px;';
+      overlay.appendChild(img);
+      document.body.appendChild(overlay);
+    }
+
     // ===== VOICE INPUT =====
     let voiceRecognition = null;
     let voiceTranscript = '';
@@ -3324,11 +3593,12 @@
         if (voiceTranscript.trim()) {
           // Show processing indicator immediately
           btn.disabled = true;
-          btn.style.opacity = '0.5';
+          btn.style.opacity = '0.6';
+          btn.innerHTML = '<span class="spinner-inline" style="display:inline-block;margin-right:6px;"></span> Analyzing...';
           status.style.display = 'block';
           status.style.background = 'rgba(0,238,118,0.1)';
           status.style.color = 'var(--text-primary)';
-          status.innerHTML = '<span style="display:flex;align-items:center;gap:8px;"><span class="spinner-inline"></span> Processing with AI — please wait...</span>';
+          status.textContent = '"' + voiceTranscript.trim() + '"';
           analyzeVoiceTranscript(voiceTranscript.trim());
         }
       };
@@ -3386,7 +3656,11 @@
         status.style.color = 'var(--text-primary)';
         status.innerHTML = '<span style="color:' + confidenceColor + ';font-weight:600;">✓ ' + result.confidence.toUpperCase() + ' confidence</span> — ' + result.reasoning + '<br><span style="font-size:11px;color:var(--text-muted);margin-top:4px;display:block;">Review and adjust before saving.</span>';
         const voiceBtn = document.getElementById('voiceInputBtn');
-        if (voiceBtn) { voiceBtn.disabled = false; voiceBtn.style.opacity = '1'; }
+        if (voiceBtn) {
+          voiceBtn.disabled = false;
+          voiceBtn.style.opacity = '1';
+          voiceBtn.innerHTML = '🎤 Describe Room';
+        }
 
       } catch(e) {
         console.error('Voice analyze error:', e);
@@ -3394,7 +3668,11 @@
         status.style.color = '#ef4444';
         status.textContent = '⚠️ Error: ' + (e.message || e) + ' — check console for details.';
         const voiceBtnErr = document.getElementById('voiceInputBtn');
-        if (voiceBtnErr) { voiceBtnErr.disabled = false; voiceBtnErr.style.opacity = '1'; }
+        if (voiceBtnErr) {
+          voiceBtnErr.disabled = false;
+          voiceBtnErr.style.opacity = '1';
+          voiceBtnErr.innerHTML = '🎤 Describe Room';
+        }
       }
     }
 
@@ -3540,7 +3818,7 @@
         html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin:8px 0 6px 0;">Volume</div>';
         volumeCharges.forEach((charge, i) => {
           const globalIdx = charges.indexOf(charge);
-          const volOptions = ['Included','1/8','1/4','3/8','1/2','5/8','3/4','7/8','Full'].map(v =>
+          const volOptions = ['Included','Minimum','1/8','1/4','3/8','1/2','5/8','3/4','7/8','Full'].map(v =>
             '<option value="' + v + '"' + (charge.truckLabel === v ? ' selected' : '') + '>' + v + '</option>'
           ).join('');
           const areaOptions = (availableAreas || []).map(a =>
@@ -3557,6 +3835,19 @@
           html += '<input class="form-input" style="flex:1" placeholder="Excluded" value="' + (charge.notIncluded||'').replace(/"/g,'&quot;') + '" data-idx="' + globalIdx + '" data-field="notIncluded" oninput="updateChargeFromInput(this)">';
           html += '<select class="form-select" style="width:72px;flex-shrink:0" data-idx="' + globalIdx + '" data-field="truckLabel" onchange="updateChargeFromInput(this)"><option value="">Vol...</option>' + volOptions + '</select>';
           html += '<input class="form-input" type="number" min="0.125" step="0.125" value="' + (charge.truckQty || 1) + '" style="width:56px;flex-shrink:0;text-align:center;padding:12px 6px;" data-idx="' + globalIdx + '" data-field="truckQty" oninput="updateChargeFromInput(this)">';
+          // Photo row
+          const photoData = charge.photo || null;
+          html += '<div style="display:flex;align-items:center;gap:8px;margin-top:8px;">';
+          if (photoData) {
+            html += '<img src="' + photoData + '" style="width:60px;height:45px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer;" onclick="viewChargePhoto(' + globalIdx + ')" />';
+          }
+          html += '<button onclick="captureChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:var(--text-secondary);cursor:pointer;">';
+          html += photoData ? '📷 Replace Photo' : '📷 Add Photo';
+          html += '</button>';
+          if (photoData) {
+            html += '<button onclick="removeChargePhoto(' + globalIdx + ')" style="background:none;border:none;color:var(--text-muted);font-size:11px;cursor:pointer;padding:4px;">✕ Remove</button>';
+          }
+          html += '</div>';
           html += '</div>';
           html += '</div>';
         });
