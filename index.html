@@ -3341,27 +3341,20 @@
       status.textContent = '🤖 Analyzing... "' + transcript + '"';
 
       try {
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
+        const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 1000,
-            system: `You are helping a junk removal estimator fill in a charge row. A full truck holds 16 cubic yards.
-Volume fractions available: Included (0), 1/8 (0.125), 1/4 (0.25), 3/8 (0.375), 1/2 (0.5), 5/8 (0.625), 3/4 (0.75), 7/8 (0.875), Full (1.0). For multiple trucks use qty > 1.
-Available areas: ${availableAreas.join(', ')}.
-Return ONLY valid JSON with no markdown, no explanation:
-{"room":"room name","area":"area from list","description":"comma separated items","notIncluded":"anything excluded if mentioned","truckLabel":"fraction label e.g. 1/2","truckQty":1,"truckVolume":0.5,"confidence":"low|medium|high","reasoning":"one sentence"}`,
-            messages: [{
-              role: 'user',
-              content: transcript
-            }]
+            action: 'analyzeVoice',
+            email: currentUser.email,
+            franchiseID: currentUser.franchiseID,
+            transcript,
+            areas: availableAreas
           })
         });
 
         const data = await response.json();
-        const text = data.content[0].text.replace(/```json|```/g, '').trim();
-        const result = JSON.parse(text);
+        if (!data.success) throw new Error(data.error || 'Analysis failed');
+        const result = data.result;
 
         // Pre-fill the volume form fields
         selectChargeType('volume');
