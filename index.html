@@ -5518,20 +5518,28 @@
             const x = pmarg + col * (photoW + colGap);
             const img = photoCache[url];
             if (img) {
-              // Fit image maintaining aspect ratio within photoW x photoH box
+              // Fill cell — crop using canvas to avoid black bars
               const aspect = img.width / img.height;
-              let drawW = photoW, drawH = photoH;
-              if (aspect > photoW / photoH) {
-                drawH = Math.round(photoW / aspect);
+              const cellAspect = photoW / photoH;
+              let sx, sy, sw, sh;
+              if (aspect > cellAspect) {
+                // Wider than cell — crop sides
+                sh = img.height;
+                sw = Math.round(img.height * cellAspect);
+                sx = Math.round((img.width - sw) / 2);
+                sy = 0;
               } else {
-                drawW = Math.round(photoH * aspect);
+                // Taller than cell — crop top/bottom
+                sw = img.width;
+                sh = Math.round(img.width / cellAspect);
+                sx = 0;
+                sy = Math.round((img.height - sh) / 2);
               }
-              const xOff = Math.round((photoW - drawW) / 2);
-              const yOff = Math.round((photoH - drawH) / 2);
-              // Draw placeholder rect
-              doc.setFillColor(30, 30, 30);
-              doc.rect(x, py, photoW, photoH, 'F');
-              doc.addImage(img, 'JPEG', x + xOff, py + yOff, drawW, drawH);
+              const cropCanvas = document.createElement('canvas');
+              cropCanvas.width = photoW * 2;
+              cropCanvas.height = photoH * 2;
+              cropCanvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, cropCanvas.width, cropCanvas.height);
+              doc.addImage(cropCanvas, 'JPEG', x, py, photoW, photoH);
             } else {
               // Placeholder for failed loads
               doc.setFillColor(50, 50, 50);
