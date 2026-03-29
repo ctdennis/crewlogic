@@ -5417,12 +5417,20 @@
         const PW = 960, PH = 540;
         const pmarg = 36;
         const headerH = 56; // dark header height
-        const subH = 28;    // room label bar height
-        const photoW = Math.floor((PW - pmarg * 2 - 16) / 3); // 3 across
-        const photoH = Math.round(photoW * 0.67); // ~3:2 ratio
-        const colGap = 8;
-        const rowGap = 10;
-        const labelPad = 6;
+        const subH = 22;    // room label bar height
+        const photoW = Math.floor((PW - pmarg * 2 - 12) / 3); // 3 across
+        const photoH = Math.round(photoW * 0.58); // tighter ratio to fit more per page
+        const colGap = 6;
+        const rowGap = 6;
+        const labelPad = 4;
+
+        // Convert Google Drive uc?export=view URLs to lh3 format (bypasses CORS)
+        const toDriveImgUrl = (url) => {
+          const m = url.match(/[?&]id=([^&]+)/);
+          if (m) return 'https://lh3.googleusercontent.com/d/' + m[1];
+          // Already lh3 or other format — return as-is
+          return url;
+        };
 
         // Add page header (reusable)
         const addPhotoPageHeader = () => {
@@ -5447,11 +5455,12 @@
           doc.text(clientName + '  —  ' + dateStr, PW - pmarg, 40, { align: 'right' });
         };
 
-        // Load all photos first
+        // Load all photos first using lh3 URLs to avoid CORS issues
         const photoCache = {};
         await Promise.all(photoCharges.map(async c => {
           try {
-            photoCache[c.photoUrl] = await loadImageFromUrl(c.photoUrl);
+            const fetchUrl = toDriveImgUrl(c.photoUrl);
+            photoCache[c.photoUrl] = await loadImageFromUrl(fetchUrl);
           } catch(e) {
             console.warn('Photo load failed:', c.photoUrl, e);
           }
