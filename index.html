@@ -4586,13 +4586,14 @@
       const charges = [...volLines, ...otherLines];
 
       try {
-        // Generate PDF and convert to base64 for Vonigo document upload
+        // Generate PDF without photos for Vonigo upload (keep payload small)
         let pdfBase64 = null;
         let pdfFileName = null;
         try {
-          const pdfBytes = await generateEstimatePDF('base64');
+          const pdfBytes = await generateEstimatePDF('base64', { skipPhotos: true });
           if (pdfBytes) {
             pdfBase64 = pdfBytes;
+            console.log('PDF base64 size (chars):', pdfBase64.length, '~', Math.round(pdfBase64.length / 1024), 'KB');
             const clientName = (currentEstimate.clientName || 'Estimate').replace(/[^a-z0-9]/gi, '_');
             const dateStr = new Date().toLocaleDateString('en-US').replace(/\//g, '-');
             pdfFileName = clientName + '_Estimate_' + dateStr + '.pdf';
@@ -4794,7 +4795,7 @@
       document.getElementById('pdfOptionsModal').style.display = 'flex';
     }
 
-    async function generateEstimatePDF(mode) {
+    async function generateEstimatePDF(mode, opts = {}) {
       document.getElementById('pdfOptionsModal').style.display = 'none';
 
       const { jsPDF } = window.jspdf;
@@ -5415,6 +5416,7 @@
       // Output
       const filename = (clientName.replace(/[^a-z0-9]/gi, '_') + '_Estimate_' + dateStr.replace(/\//g, '-')) + '.pdf';
       // ===== PHOTO PAGES =====
+      if (!opts.skipPhotos) {
       // Group volume charges that have photoUrl by room
       const photoCharges = (est.charges || []).filter(c => c.type === 'volume' && c.photoUrl);
       if (photoCharges.length > 0) {
@@ -5576,7 +5578,8 @@
           if (col > 0) py += photoH + rowGap;
           py += rowGap; // extra gap between rooms
         }
-      }
+      } // end photoCharges.length > 0
+      } // end if (!opts.skipPhotos)
 
       // Merge with boilerplate pages
       try {
@@ -5629,7 +5632,7 @@
           window.open(url, '_blank');
         }
       }
-    }
+    } // end generateEstimatePDF
 
     function loadImageFromUrl(url) {
       return new Promise((resolve, reject) => {
