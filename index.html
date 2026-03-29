@@ -5602,7 +5602,13 @@
         const mergedUrl = URL.createObjectURL(mergedBlob);
 
         if (mode === 'base64') {
-          return btoa(String.fromCharCode(...new Uint8Array(mergedBytes)));
+          const bytes = new Uint8Array(mergedBytes);
+          let binary = '';
+          const chunkSize = 8192;
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+          }
+          return btoa(binary);
         } else if (mode === 'download') {
           const a = document.createElement('a');
           a.href = mergedUrl;
@@ -5614,7 +5620,7 @@
       } catch(e) {
         console.warn('Boilerplate merge failed, falling back:', e);
         if (mode === 'base64') {
-          return btoa(doc.output());
+          return doc.output('datauristring').split(',')[1];
         } else if (mode === 'download') {
           doc.save(filename);
         } else {
