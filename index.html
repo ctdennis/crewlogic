@@ -4586,6 +4586,21 @@
       const charges = [...volLines, ...otherLines];
 
       try {
+        // Generate PDF and convert to base64 for Vonigo document upload
+        let pdfBase64 = null;
+        let pdfFileName = null;
+        try {
+          const pdfBytes = await generateEstimatePDF('base64');
+          if (pdfBytes) {
+            pdfBase64 = pdfBytes;
+            const clientName = (currentEstimate.clientName || 'Estimate').replace(/[^a-z0-9]/gi, '_');
+            const dateStr = new Date().toLocaleDateString('en-US').replace(/\//g, '-');
+            pdfFileName = clientName + '_Estimate_' + dateStr + '.pdf';
+          }
+        } catch(e) {
+          console.warn('PDF generation for upload failed:', e);
+        }
+
         const res = await apiFetch(N8N_BASE + '/crewlogic-submit-quote', {
           method: 'POST',
           body: JSON.stringify({
@@ -4597,7 +4612,9 @@
             notes: currentEstimate.notes,
             charges,
             franchiseID: currentUser.franchiseID,
-            email: currentUser.email
+            email: currentUser.email,
+            pdfBase64,
+            pdfFileName
           })
         });
         const data = await res.json();
@@ -5584,7 +5601,9 @@
         const mergedBlob = new Blob([mergedBytes], { type: 'application/pdf' });
         const mergedUrl = URL.createObjectURL(mergedBlob);
 
-        if (mode === 'download') {
+        if (mode === 'base64') {
+          return btoa(String.fromCharCode(...new Uint8Array(mergedBytes)));
+        } else if (mode === 'download') {
           const a = document.createElement('a');
           a.href = mergedUrl;
           a.download = filename;
@@ -5594,7 +5613,9 @@
         }
       } catch(e) {
         console.warn('Boilerplate merge failed, falling back:', e);
-        if (mode === 'download') {
+        if (mode === 'base64') {
+          return btoa(doc.output());
+        } else if (mode === 'download') {
           doc.save(filename);
         } else {
           const blob = doc.output('blob');
