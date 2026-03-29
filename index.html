@@ -4586,21 +4586,14 @@
       const charges = [...volLines, ...otherLines];
 
       try {
-        // Generate PDF without photos for Vonigo upload (keep payload small)
-        let pdfBase64 = null;
-        let pdfFileName = null;
-        try {
-          const pdfBytes = await generateEstimatePDF('base64', { skipPhotos: true });
-          if (pdfBytes) {
-            pdfBase64 = pdfBytes;
-            console.log('PDF base64 size (chars):', pdfBase64.length, '~', Math.round(pdfBase64.length / 1024), 'KB');
-            const clientName = (currentEstimate.clientName || 'Estimate').replace(/[^a-z0-9]/gi, '_');
-            const dateStr = new Date().toLocaleDateString('en-US').replace(/\//g, '-');
-            pdfFileName = clientName + '_Estimate_' + dateStr + '.pdf';
-          }
-        } catch(e) {
-          console.warn('PDF generation for upload failed:', e);
-        }
+        // Collect photos from charges to upload to Vonigo via n8n
+        const photos = (currentEstimate.charges || [])
+          .filter(c => c.type === 'volume' && c.photoUrl)
+          .map(c => {
+            const m = c.photoUrl.match(/[?&]id=([^&]+)/);
+            return m ? { fileId: m[1], room: c.room || '', area: c.area || '' } : null;
+          })
+          .filter(Boolean);
 
         const res = await apiFetch(N8N_BASE + '/crewlogic-submit-quote', {
           method: 'POST',
@@ -4614,8 +4607,7 @@
             charges,
             franchiseID: currentUser.franchiseID,
             email: currentUser.email,
-            pdfBase64,
-            pdfFileName
+            photos
           })
         });
         const data = await res.json();
@@ -5582,6 +5574,24 @@
       } // end if (!opts.skipPhotos)
 
       // Merge with boilerplate pages
+      if (opts.skipBoilerplate) {
+        // Return estimate-only PDF (no boilerplate, no photos) — used for Vonigo upload
+        if (mode === 'base64') {
+          const bytes = new Uint8Array(doc.output('arraybuffer'));
+          let binary = '';
+          const chunkSize = 8192;
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+          }
+          return btoa(binary);
+        } else if (mode === 'download') {
+          doc.save(filename);
+        } else {
+          const blob = doc.output('blob');
+          const url = URL.createObjectURL(blob);
+          window.open(url, '_blank');
+        }
+      } else {
       try {
         const [estimateBytes, boilerplateBytes] = await Promise.all([
           doc.output('arraybuffer'),
@@ -5632,6 +5642,7 @@
           window.open(url, '_blank');
         }
       }
+      } // end else (not skipBoilerplate)
     } // end generateEstimatePDF
 
     function loadImageFromUrl(url) {
