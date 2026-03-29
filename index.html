@@ -3451,6 +3451,40 @@
       return null;
     }
 
+    // ===== CHARGE PHOTO ANALYSIS =====
+    async function analyzeChargePhoto(chargeIdx) {
+      const charge = currentEstimate.charges[chargeIdx];
+      const photoSrc = charge.photoUrl || charge.photo;
+      if (!photoSrc) return;
+
+      // Show analyzing state on the button
+      renderCharges(); // re-render to show spinner would require more work, just proceed
+
+      try {
+        const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'analyzePhoto',
+            email: currentUser.email,
+            franchiseID: currentUser.franchiseID,
+            photoUrl: photoSrc,
+            description: charge.description || '',
+            room: charge.room || '',
+            area: charge.area || '',
+            currentVolume: charge.truckLabel || ''
+          })
+        });
+        const data = await response.json();
+        if (data.success) {
+          currentEstimate.charges[chargeIdx].photoAnalysis = data.analysis;
+          renderCharges();
+          autoSaveDraft();
+        }
+      } catch(e) {
+        console.error('Photo analysis error:', e);
+      }
+    }
+
     // ===== CHARGE PHOTO CAPTURE =====
     function captureChargePhoto(chargeIdx) {
       const input = document.createElement('input');
@@ -3838,29 +3872,42 @@
             '<option value="' + a + '"' + (charge.area === a ? ' selected' : '') + '>' + a + '</option>'
           ).join('');
           html += '<div class="room-row">';
+
+          // Row 1: Room + Area + Delete
           html += '<div class="room-row-top">';
           html += '<input class="form-input" style="flex:1" placeholder="Room" value="' + (charge.room||'').replace(/"/g,'&quot;') + '" data-idx="' + globalIdx + '" data-field="room" oninput="updateChargeFromInput(this)">';
           html += '<select class="form-select" style="flex:1" data-idx="' + globalIdx + '" data-field="area" onchange="updateChargeFromInput(this)"><option value="">Area...</option>' + areaOptions + '</select>';
           html += '<button class="room-delete-btn" onclick="deleteCharge(' + globalIdx + ')">&#215;</button>';
           html += '</div>';
-          html += '<div class="room-row-bottom">';
-          html += '<input class="form-input" style="flex:2" placeholder="Description" value="' + (charge.description||'').replace(/"/g,'&quot;') + '" data-idx="' + globalIdx + '" data-field="description" oninput="updateChargeFromInput(this)">';
-          html += '<input class="form-input" style="flex:1" placeholder="Excluded" value="' + (charge.notIncluded||'').replace(/"/g,'&quot;') + '" data-idx="' + globalIdx + '" data-field="notIncluded" oninput="updateChargeFromInput(this)">';
-          html += '<select class="form-select" style="width:72px;flex-shrink:0" data-idx="' + globalIdx + '" data-field="truckLabel" onchange="updateChargeFromInput(this)"><option value="">Vol...</option>' + volOptions + '</select>';
-          html += '<input class="form-input" type="number" min="0.125" step="0.125" value="' + (charge.truckQty || 1) + '" style="width:56px;flex-shrink:0;text-align:center;padding:12px 6px;" data-idx="' + globalIdx + '" data-field="truckQty" oninput="updateChargeFromInput(this)">';
-          // Photo row
-          const photoData = charge.photo || null;
-          html += '<div style="display:flex;align-items:center;gap:8px;margin-top:8px;">';
+
+          // Row 2: Volume selector + Qty
+          html += '<div style="display:flex;gap:8px;margin-top:6px;">';
+          html += '<select class="form-select" style="flex:1" data-idx="' + globalIdx + '" data-field="truckLabel" onchange="updateChargeFromInput(this)"><option value="">Vol...</option>' + volOptions + '</select>';
+          html += '<input class="form-input" type="number" min="0.125" step="0.125" value="' + (charge.truckQty || 1) + '" style="width:64px;flex-shrink:0;text-align:center;padding:12px 6px;" data-idx="' + globalIdx + '" data-field="truckQty" oninput="updateChargeFromInput(this)">';
+          html += '</div>';
+
+          // Row 3: Description
+          html += '<input class="form-input" style="width:100%;margin-top:6px;" placeholder="Description" value="' + (charge.description||'').replace(/"/g,'&quot;') + '" data-idx="' + globalIdx + '" data-field="description" oninput="updateChargeFromInput(this)">';
+
+          // Row 4: Excluded
+          html += '<input class="form-input" style="width:100%;margin-top:6px;" placeholder="Not included" value="' + (charge.notIncluded||'').replace(/"/g,'&quot;') + '" data-idx="' + globalIdx + '" data-field="notIncluded" oninput="updateChargeFromInput(this)">';
+
+          // Row 5: Photo + Analyze
+          const photoData = charge.photo || charge.photoUrl || null;
+          html += '<div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">';
           if (photoData) {
-            html += '<img src="' + photoData + '" style="width:60px;height:45px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer;" onclick="viewChargePhoto(' + globalIdx + ')" />';
+            html += '<img src="' + (charge.photoUrl || charge.photo) + '" style="width:64px;height:48px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer;flex-shrink:0;" onclick="viewChargePhoto(' + globalIdx + ')" />';
           }
-          html += '<button onclick="captureChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:var(--text-secondary);cursor:pointer;">';
-          html += photoData ? '📷 Replace Photo' : '📷 Add Photo';
+          html += '<button onclick="captureChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;font-size:12px;color:var(--text-secondary);cursor:pointer;">';
+          html += photoData ? '📷 Replace' : '📷 Add Photo';
           html += '</button>';
           if (photoData) {
-            html += '<button onclick="removeChargePhoto(' + globalIdx + ')" style="background:none;border:none;color:var(--text-muted);font-size:11px;cursor:pointer;padding:4px;">✕ Remove</button>';
+            html += '<button onclick="analyzeChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);padding:6px 10px;font-size:12px;color:#000;font-weight:600;cursor:pointer;">🤖 Analyze</button>';
+            html += '<button onclick="removeChargePhoto(' + globalIdx + ')" style="background:none;border:none;color:var(--text-muted);font-size:11px;cursor:pointer;padding:4px;">✕</button>';
           }
-          html += '</div>';
+          if (charge.photoAnalysis) {
+            html += '<div style="width:100%;margin-top:6px;font-size:11px;padding:6px 10px;border-radius:var(--radius-sm);background:rgba(0,238,118,0.08);color:var(--text-primary);">🤖 ' + charge.photoAnalysis + '</div>';
+          }
           html += '</div>';
           html += '</div>';
         });
