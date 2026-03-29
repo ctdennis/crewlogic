@@ -3426,11 +3426,24 @@
 
     function matchSurchargeItem(name) {
       if (!priceBlocks || !name) return null;
-      const search = name.toLowerCase();
+      const search = name.toLowerCase().replace(/\(s\)/g, '').replace(/[^a-z0-9 ]/g, '').trim();
+
+      // Keyword aliases for common AI variations
+      const aliases = {
+        'tv': 'tv/monitor', 'television': 'tv/monitor', 'monitor': 'tv/monitor',
+        'mattress': 'mattress/box spring', 'box spring': 'mattress/box spring',
+        'fridge': 'freon', 'refrigerator': 'freon', 'freezer': 'freon',
+        'ac': 'freon', 'air conditioner': 'freon',
+        'tire': 'tire', 'paint': 'paint can'
+      };
+      const resolved = aliases[search] || search;
+
       for (const block of priceBlocks) {
         if (!block.items) continue;
         for (const item of block.items) {
-          if (item.name.toLowerCase().includes(search) || search.includes(item.name.toLowerCase().split('(')[0].trim().toLowerCase())) {
+          const itemName = item.name.toLowerCase().replace(/\(s\)/g, '').replace(/[^a-z0-9 ]/g, '').trim();
+          if (itemName.includes(resolved) || resolved.includes(itemName) ||
+              itemName.includes(search) || search.includes(itemName.split(' ')[0])) {
             return { ...item, blockName: block.name, priceBlockID: block.priceBlockID };
           }
         }
