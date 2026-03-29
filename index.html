@@ -3563,7 +3563,10 @@
 
     function viewChargePhoto(chargeIdx) {
       const charge = currentEstimate.charges[chargeIdx];
-      const src = charge.photoUrl || charge.photo;
+      const rawUrl = charge.photoUrl || charge.photo;
+      const src = charge.photo || (rawUrl && rawUrl.includes('drive.google.com') 
+        ? rawUrl.replace('uc?export=view&id=', 'thumbnail?id=&sz=w1000').replace('drive.google.com/uc', 'drive.google.com/thumbnail')
+        : rawUrl);
       if (!src) return;
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:999;display:flex;align-items:center;justify-content:center;';
@@ -3896,9 +3899,10 @@
 
           // Row 5: Photo + Analyze
           const photoData = charge.photo || charge.photoUrl || null;
+          const photoSrc = charge.photo || (charge.photoUrl ? charge.photoUrl.replace('uc?export=view&id=', 'thumbnail?id=').replace('drive.google.com/uc', 'drive.google.com/thumbnail') : null);
           html += '<div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">';
           if (photoData) {
-            html += '<img src="' + (charge.photo || charge.photoUrl) + '" style="width:80px;height:64px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer;flex-shrink:0;" onclick="viewChargePhoto(' + globalIdx + ')" />';
+            html += '<img src="' + photoSrc + '" style="width:80px;height:64px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer;flex-shrink:0;" onclick="viewChargePhoto(' + globalIdx + ')" />';
             html += '<div style="display:flex;flex-direction:column;gap:5px;">';
             html += '<button onclick="captureChargePhoto(' + globalIdx + ')" style="background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:var(--text-secondary);cursor:pointer;">📷 Replace</button>';
             html += '<button onclick="removeChargePhoto(' + globalIdx + ')" style="background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:var(--text-secondary);cursor:pointer;">✕ Remove</button>';
