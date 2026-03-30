@@ -3574,13 +3574,17 @@
 
     function viewChargePhoto(chargeIdx) {
       const charge = currentEstimate.charges[chargeIdx];
-      const rawUrl = charge.photoUrl || charge.photo;
-      const src = charge.photo || (rawUrl && rawUrl.includes('drive.google.com') 
-        ? rawUrl.replace('uc?export=view&id=', 'thumbnail?id=&sz=w1000').replace('drive.google.com/uc', 'drive.google.com/thumbnail')
-        : rawUrl);
+      // Use lh3 URL for Drive photos (works cross-origin), fall back to inline base64
+      let src = null;
+      if (charge.photo) {
+        src = charge.photo; // inline base64
+      } else if (charge.photoUrl) {
+        const m = charge.photoUrl.match(/[?&]id=([^&]+)/);
+        src = m ? 'https://lh3.googleusercontent.com/d/' + m[1] : charge.photoUrl;
+      }
       if (!src) return;
       const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:999;display:flex;align-items:center;justify-content:center;';
+      overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:999;display:flex;align-items:center;justify-content:center;cursor:pointer;';
       overlay.onclick = () => document.body.removeChild(overlay);
       const img = document.createElement('img');
       img.src = src;
@@ -5542,22 +5546,24 @@
             const x = pmarg + col * (photoW + colGap);
             const img = photoCache[url];
             if (img) {
-              // Fill cell — crop using canvas to avoid black bars
-              const aspect = img.width / img.height;
+              // Fill cell — crop using canvas, EXIF orientation handled by ImageBitmap
+              const trueW = img.width;
+              const trueH = img.height;
+              const aspect = trueW / trueH;
               const cellAspect = photoW / photoH;
               let sx, sy, sw, sh;
               if (aspect > cellAspect) {
                 // Wider than cell — crop sides
-                sh = img.height;
-                sw = Math.round(img.height * cellAspect);
-                sx = Math.round((img.width - sw) / 2);
+                sh = trueH;
+                sw = Math.round(trueH * cellAspect);
+                sx = Math.round((trueW - sw) / 2);
                 sy = 0;
               } else {
                 // Taller than cell — crop top/bottom
-                sw = img.width;
-                sh = Math.round(img.width / cellAspect);
+                sw = trueW;
+                sh = Math.round(trueW / cellAspect);
                 sx = 0;
-                sy = Math.round((img.height - sh) / 2);
+                sy = Math.round((trueH - sh) / 2);
               }
               const cropCanvas = document.createElement('canvas');
               cropCanvas.width = photoW * 2;
@@ -5660,12 +5666,19 @@
 
     function loadImageFromUrl(url) {
       return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error('Failed to load: ' + url));
-        img.src = url;
-        setTimeout(() => reject(new Error('Timeout')), 8000);
+        fetch(url)
+          .then(r => r.blob())
+          .then(blob => createImageBitmap(blob, { imageOrientation: 'from-image' }))
+          .then(bitmap => resolve(bitmap))
+          .catch(() => {
+            // Fallback to img element if fetch/createImageBitmap fails
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => resolve(img);
+            img.onerror = () => reject(new Error('Failed to load: ' + url));
+            img.src = url;
+          });
+        setTimeout(() => reject(new Error('Timeout')), 12000);
       });
     }
 
