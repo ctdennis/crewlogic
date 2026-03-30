@@ -5498,18 +5498,7 @@
         addPhotoPageHeader();
         let py = headerH + 4 + rowGap; // start below header + green bar
 
-        for (const group of roomGroups) {
-          // Room label bar
-          const labelNeeded = subH + labelPad;
-          const firstPhotoRowH = photoH + rowGap;
-
-          // Check if room label + at least one row of photos fits on current page
-          if (py + labelNeeded + firstPhotoRowH > PH - pmarg) {
-            addPhotoPageHeader();
-            py = headerH + 4 + rowGap;
-          }
-
-          // Draw room label bar
+        const drawRoomLabel = (room, area, cont) => {
           doc.setFillColor(40, 40, 40);
           doc.rect(pmarg, py, PW - pmarg * 2, subH, 'F');
           doc.setFillColor(...green);
@@ -5517,76 +5506,72 @@
           doc.setTextColor(...white);
           doc.setFont('helvetica', 'bold');
           doc.setFontSize(10);
-          doc.text(group.room.toUpperCase(), pmarg + 10, py + subH / 2 + 4);
+          const label = room.toUpperCase() + (cont ? ' (cont.)' : '');
+          doc.text(label, pmarg + 10, py + subH / 2 + 4);
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(8);
           doc.setTextColor(180, 180, 180);
-          if (group.area) doc.text(group.area, pmarg + 10 + doc.getTextWidth(group.room.toUpperCase()) + 12, py + subH / 2 + 4);
-          py += subH + labelPad;
+          if (area) doc.text(area, pmarg + 10 + doc.getTextWidth(label) + 12, py + subH / 2 + 4);
+        };
 
-          // Draw photos 3 across
-          let col = 0;
-          for (const url of group.photos) {
-            if (py + photoH > PH - pmarg) {
+        for (const group of roomGroups) {
+          // Split photos into rows of 3
+          const rows = [];
+          for (let i = 0; i < group.photos.length; i += 3) {
+            rows.push(group.photos.slice(i, i + 3));
+          }
+
+          let firstRow = true;
+          for (const rowPhotos of rows) {
+            // Calculate natural fit dimensions for each photo in this row (fit within photoW x maxRowH)
+            const maxRowH = PH - pmarg - headerH - 4 - rowGap - subH - labelPad - rowGap;
+            const fitted = rowPhotos.map(url => {
+              const img = photoCache[url];
+              if (!img) return { w: photoW, h: photoW * 0.67 };
+              const aspect = img.width / img.height;
+              let w = photoW, h = photoW / aspect;
+              // Cap height at maxRowH
+              if (h > maxRowH) { h = maxRowH; w = h * aspect; }
+              return { w: Math.round(w), h: Math.round(h), img, url };
+            });
+            const rowH = Math.max(...fitted.map(f => f.h));
+
+            // Check if label + this row fits on current page
+            const labelH = firstRow ? subH + labelPad : 0;
+            if (py + labelH + rowH + rowGap > PH - pmarg) {
               addPhotoPageHeader();
               py = headerH + 4 + rowGap;
-              // Re-draw room label after page break within same room
-              doc.setFillColor(40, 40, 40);
-              doc.rect(pmarg, py, PW - pmarg * 2, subH, 'F');
-              doc.setFillColor(...green);
-              doc.rect(pmarg, py, 3, subH, 'F');
-              doc.setTextColor(...white);
-              doc.setFont('helvetica', 'bold');
-              doc.setFontSize(10);
-              doc.text(group.room.toUpperCase() + ' (cont.)', pmarg + 10, py + subH / 2 + 4);
+              drawRoomLabel(group.room, group.area, !firstRow);
               py += subH + labelPad;
-              col = 0;
+              firstRow = false;
+            } else if (firstRow) {
+              drawRoomLabel(group.room, group.area, false);
+              py += subH + labelPad;
+              firstRow = false;
             }
 
-            const x = pmarg + col * (photoW + colGap);
-            const img = photoCache[url];
-            if (img) {
-              // Fill cell — crop using canvas, EXIF orientation handled by ImageBitmap
-              const trueW = img.width;
-              const trueH = img.height;
-              const aspect = trueW / trueH;
-              const cellAspect = photoW / photoH;
-              let sx, sy, sw, sh;
-              if (aspect > cellAspect) {
-                // Wider than cell — crop sides
-                sh = trueH;
-                sw = Math.round(trueH * cellAspect);
-                sx = Math.round((trueW - sw) / 2);
-                sy = 0;
+            // Draw photos in this row, centered vertically within rowH
+            const totalW = fitted.reduce((sum, f) => sum + f.w, 0) + colGap * (fitted.length - 1);
+            let x = pmarg + Math.round((PW - pmarg * 2 - totalW) / 2); // center row
+            for (const f of fitted) {
+              const yOff = Math.round((rowH - f.h) / 2); // center vertically
+              if (f.img) {
+                const fitCanvas = document.createElement('canvas');
+                fitCanvas.width = f.w * 2;
+                fitCanvas.height = f.h * 2;
+                fitCanvas.getContext('2d').drawImage(f.img, 0, 0, fitCanvas.width, fitCanvas.height);
+                doc.addImage(fitCanvas, 'JPEG', x, py + yOff, f.w, f.h);
               } else {
-                // Taller than cell — crop top/bottom
-                sw = trueW;
-                sh = Math.round(trueW / cellAspect);
-                sx = 0;
-                sy = Math.round((trueH - sh) / 2);
+                doc.setFillColor(50, 50, 50);
+                doc.rect(x, py + yOff, f.w, f.h, 'F');
+                doc.setTextColor(120, 120, 120);
+                doc.setFontSize(8);
+                doc.text('Photo unavailable', x + f.w / 2, py + yOff + f.h / 2, { align: 'center' });
               }
-              const cropCanvas = document.createElement('canvas');
-              cropCanvas.width = photoW * 2;
-              cropCanvas.height = photoH * 2;
-              cropCanvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, cropCanvas.width, cropCanvas.height);
-              doc.addImage(cropCanvas, 'JPEG', x, py, photoW, photoH);
-            } else {
-              // Placeholder for failed loads
-              doc.setFillColor(50, 50, 50);
-              doc.rect(x, py, photoW, photoH, 'F');
-              doc.setTextColor(120, 120, 120);
-              doc.setFontSize(8);
-              doc.text('Photo unavailable', x + photoW / 2, py + photoH / 2, { align: 'center' });
+              x += f.w + colGap;
             }
-
-            col++;
-            if (col >= 3) {
-              col = 0;
-              py += photoH + rowGap;
-            }
+            py += rowH + rowGap;
           }
-          // If last row wasn't full, advance y
-          if (col > 0) py += photoH + rowGap;
           py += rowGap; // extra gap between rooms
         }
       } // end photoCharges.length > 0
