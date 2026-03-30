@@ -5429,16 +5429,16 @@
       // Group volume charges that have photoUrl by room
       const photoCharges = (est.charges || []).filter(c => c.type === 'volume' && c.photoUrl);
       if (photoCharges.length > 0) {
-        // Group by room name preserving order
+        // Group by area preserving order
         const roomGroups = [];
-        const roomSeen = {};
+        const areaSeen = {};
         photoCharges.forEach(c => {
-          const key = (c.room || 'Unknown') + '|' + (c.area || '');
-          if (!roomSeen[key]) {
-            roomSeen[key] = true;
-            roomGroups.push({ room: c.room || 'Unknown', area: c.area || '', photos: [] });
+          const key = c.area || 'General';
+          if (!areaSeen[key]) {
+            areaSeen[key] = true;
+            roomGroups.push({ area: key, photos: [] });
           }
-          roomGroups[roomGroups.length - 1].photos.push(c.photoUrl);
+          roomGroups[roomGroups.length - 1].photos.push({ url: c.photoUrl, room: c.room || '' });
         });
 
         // Photo page layout constants
@@ -5496,9 +5496,11 @@
 
         // Now lay out pages
         addPhotoPageHeader();
-        let py = headerH + 4 + rowGap; // start below header + green bar
+        let py = headerH + 4 + rowGap;
 
-        const drawRoomLabel = (room, area, cont) => {
+        const captionH = 16; // height reserved below each photo for room name
+
+        const drawAreaLabel = (area, cont) => {
           doc.setFillColor(40, 40, 40);
           doc.rect(pmarg, py, PW - pmarg * 2, subH, 'F');
           doc.setFillColor(...green);
@@ -5506,12 +5508,8 @@
           doc.setTextColor(...white);
           doc.setFont('helvetica', 'bold');
           doc.setFontSize(10);
-          const label = room.toUpperCase() + (cont ? ' (cont.)' : '');
+          const label = area.toUpperCase() + (cont ? ' (cont.)' : '');
           doc.text(label, pmarg + 10, py + subH / 2 + 4);
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(8);
-          doc.setTextColor(180, 180, 180);
-          if (area) doc.text(area, pmarg + 10 + doc.getTextWidth(label) + 12, py + subH / 2 + 4);
         };
 
         for (const group of roomGroups) {
@@ -5523,38 +5521,39 @@
 
           let firstRow = true;
           for (const rowPhotos of rows) {
-            // Calculate natural fit dimensions for each photo in this row (fit within photoW x maxRowH)
-            const maxRowH = PH - pmarg - headerH - 4 - rowGap - subH - labelPad - rowGap;
-            const fitted = rowPhotos.map(url => {
-              const img = photoCache[url];
-              if (!img) return { w: photoW, h: photoW * 0.67 };
+            const maxRowH = PH - pmarg - headerH - 4 - rowGap - subH - labelPad - captionH - rowGap;
+
+            // Calculate fit dimensions for each photo
+            const fitted = rowPhotos.map(p => {
+              const img = photoCache[p.url];
+              if (!img) return { w: photoW, h: Math.round(photoW * 0.67), img: null, room: p.room, url: p.url };
               const aspect = img.width / img.height;
               let w = photoW, h = photoW / aspect;
-              // Cap height at maxRowH
-              if (h > maxRowH) { h = maxRowH; w = h * aspect; }
-              return { w: Math.round(w), h: Math.round(h), img, url };
+              if (h > maxRowH) { h = maxRowH; w = Math.round(h * aspect); }
+              return { w: Math.round(w), h: Math.round(h), img, room: p.room, url: p.url };
             });
             const rowH = Math.max(...fitted.map(f => f.h));
+            const totalRowH = rowH + captionH + rowGap;
 
-            // Check if label + this row fits on current page
+            // Check if label + row fits
             const labelH = firstRow ? subH + labelPad : 0;
-            if (py + labelH + rowH + rowGap > PH - pmarg) {
+            if (py + labelH + totalRowH > PH - pmarg) {
               addPhotoPageHeader();
               py = headerH + 4 + rowGap;
-              drawRoomLabel(group.room, group.area, !firstRow);
+              drawAreaLabel(group.area, !firstRow);
               py += subH + labelPad;
               firstRow = false;
             } else if (firstRow) {
-              drawRoomLabel(group.room, group.area, false);
+              drawAreaLabel(group.area, false);
               py += subH + labelPad;
               firstRow = false;
             }
 
-            // Draw photos in this row, centered vertically within rowH
+            // Draw photos centered in row
             const totalW = fitted.reduce((sum, f) => sum + f.w, 0) + colGap * (fitted.length - 1);
-            let x = pmarg + Math.round((PW - pmarg * 2 - totalW) / 2); // center row
+            let x = pmarg + Math.round((PW - pmarg * 2 - totalW) / 2);
             for (const f of fitted) {
-              const yOff = Math.round((rowH - f.h) / 2); // center vertically
+              const yOff = Math.round((rowH - f.h) / 2);
               if (f.img) {
                 const fitCanvas = document.createElement('canvas');
                 fitCanvas.width = f.w * 2;
@@ -5568,11 +5567,18 @@
                 doc.setFontSize(8);
                 doc.text('Photo unavailable', x + f.w / 2, py + yOff + f.h / 2, { align: 'center' });
               }
+              // Room name caption below photo
+              if (f.room) {
+                doc.setTextColor(...white);
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(7);
+                doc.text(f.room, x + f.w / 2, py + rowH + captionH - 4, { align: 'center' });
+              }
               x += f.w + colGap;
             }
-            py += rowH + rowGap;
+            py += rowH + captionH + rowGap;
           }
-          py += rowGap; // extra gap between rooms
+          py += rowGap; // extra gap between areas
         }
       } // end photoCharges.length > 0
       } // end if (!opts.skipPhotos)
