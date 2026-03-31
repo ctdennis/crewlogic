@@ -3666,10 +3666,16 @@
         // Compress
         const compressed = await compressChargePhoto(base64);
         currentEstimate.charges[chargeIdx].photo = compressed;
+        // Push inline base64 immediately so thumbnail shows right away
+        if (!currentEstimate.charges[chargeIdx].photos) {
+          currentEstimate.charges[chargeIdx].photos = [];
+        }
+        const tempIdx = currentEstimate.charges[chargeIdx].photos.length;
+        currentEstimate.charges[chargeIdx].photos.push(compressed);
         renderCharges();
         autoSaveDraft();
-        // Upload to Google Drive in background
-        uploadChargePhotoToDrive(chargeIdx, compressed);
+        // Upload to Google Drive in background, replace temp with Drive URL
+        uploadChargePhotoToDrive(chargeIdx, compressed, tempIdx);
       };
       input.click();
     }
@@ -3691,7 +3697,7 @@
       });
     }
 
-    async function uploadChargePhotoToDrive(chargeIdx, base64) {
+    async function uploadChargePhotoToDrive(chargeIdx, base64, tempIdx) {
       try {
         const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
           method: 'POST',
@@ -3708,17 +3714,23 @@
         const data = await response.json();
         if (data.success && data.photoUrl) {
           if (!currentEstimate.charges[chargeIdx].photos) {
-            currentEstimate.charges[chargeIdx].photos = currentEstimate.charges[chargeIdx].photoUrl 
-              ? [currentEstimate.charges[chargeIdx].photoUrl] : [];
+            currentEstimate.charges[chargeIdx].photos = [];
           }
-          currentEstimate.charges[chargeIdx].photos.push(data.photoUrl);
+          // Replace the temp base64 with the Drive URL
+          if (tempIdx !== undefined && currentEstimate.charges[chargeIdx].photos[tempIdx]) {
+            currentEstimate.charges[chargeIdx].photos[tempIdx] = data.photoUrl;
+          } else {
+            currentEstimate.charges[chargeIdx].photos.push(data.photoUrl);
+          }
           currentEstimate.charges[chargeIdx].photoUrl = data.photoUrl; // keep for backwards compat
+          renderCharges();
           autoSaveDraft();
         }
       } catch(e) {
-        console.warn('Photo upload failed, stored locally only:', e);
+        console.warn('Photo upload failed:', e);
       }
     }
+
 
     function removeChargePhotoIdx(chargeIdx, photoIdx) {
       const charge = currentEstimate.charges[chargeIdx];
