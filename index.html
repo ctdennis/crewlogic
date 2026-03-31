@@ -3499,15 +3499,23 @@
     }
 
     // ===== CHARGE DESCRIPTION VOICE & RE-ANALYZE =====
+    let activeChargeVoice = null; // { recognition, chargeIdx, append, btnIds }
+
     function reRecordChargeDescription(chargeIdx) {
-      // Clear existing description then start voice
+      if (activeChargeVoice && activeChargeVoice.chargeIdx === chargeIdx) {
+        activeChargeVoice.recognition.stop();
+        return;
+      }
       currentEstimate.charges[chargeIdx].description = '';
       renderCharges();
       _startChargeVoice(chargeIdx, false);
     }
 
     function appendRecordChargeDescription(chargeIdx) {
-      // Keep existing description and append new voice input
+      if (activeChargeVoice && activeChargeVoice.chargeIdx === chargeIdx) {
+        activeChargeVoice.recognition.stop();
+        return;
+      }
       _startChargeVoice(chargeIdx, true);
     }
 
@@ -3516,33 +3524,72 @@
       if (!SpeechRecognition) { alert('Voice not supported. Use Chrome or Safari.'); return; }
 
       const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = false;
+      recognition.continuous = true;
+      recognition.interimResults = true;
       recognition.lang = 'en-US';
 
+      // Mark buttons as active
+      const reRecordBtn = document.querySelector(`[data-voice-rerecord="${chargeIdx}"]`);
+      const appendBtn = document.querySelector(`[data-voice-append="${chargeIdx}"]`);
+      const activeBtn = append ? appendBtn : reRecordBtn;
+      if (activeBtn) {
+        activeBtn.textContent = '⏹ Stop Recording';
+        activeBtn.style.background = '#ef4444';
+        activeBtn.style.color = '#fff';
+        activeBtn.style.borderColor = '#ef4444';
+      }
+      // Grey out the other button
+      const otherBtn = append ? reRecordBtn : appendBtn;
+      if (otherBtn) { otherBtn.disabled = true; otherBtn.style.opacity = '0.4'; }
+
+      const baseText = append ? (currentEstimate.charges[chargeIdx].description || '').trim() : '';
+      let finalTranscript = '';
+
       recognition.onresult = (e) => {
-        const transcript = e.results[0][0].transcript;
-        const charge = currentEstimate.charges[chargeIdx];
-        if (append && charge.description) {
-          charge.description = charge.description.trim() + ', ' + transcript;
-        } else {
-          charge.description = transcript;
+        let interim = '';
+        let final = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) final += e.results[i][0].transcript + ' ';
+          else interim += e.results[i][0].transcript;
         }
-        renderCharges();
-        autoSaveDraft();
+        finalTranscript += final;
+        const combined = baseText ? baseText + ', ' + (finalTranscript + interim).trim() : (finalTranscript + interim).trim();
+        currentEstimate.charges[chargeIdx].description = combined;
+        // Update textarea live without full re-render
+        const textarea = document.querySelector(`textarea[data-idx="${chargeIdx}"][data-field="description"]`);
+        if (textarea) textarea.value = combined;
       };
 
-      recognition.onerror = (e) => console.warn('Voice error:', e.error);
+      recognition.onend = () => {
+        activeChargeVoice = null;
+        // Reset buttons
+        if (activeBtn) {
+          activeBtn.textContent = append ? '🎤 Add to description' : '🎤 Re-record';
+          activeBtn.style.background = '';
+          activeBtn.style.color = '';
+          activeBtn.style.borderColor = '';
+        }
+        if (otherBtn) { otherBtn.disabled = false; otherBtn.style.opacity = '1'; }
+        autoSaveDraft();
+        renderCharges();
+      };
+
+      recognition.onerror = (e) => {
+        console.warn('Voice error:', e.error);
+        recognition.stop();
+      };
+
       recognition.start();
+      activeChargeVoice = { recognition, chargeIdx, append };
     }
 
     async function reanalyzeChargeDescription(chargeIdx) {
       const charge = currentEstimate.charges[chargeIdx];
       if (!charge.description) return;
 
-      // Show analyzing state
-      charge.photoAnalysis = '⏳ Re-analyzing volume...';
-      renderCharges();
+      // Show a temporary status — don't touch photoAnalysis
+      const reanalyzeBtn = document.querySelector(`[data-reanalyze="${chargeIdx}"]`);
+      if (reanalyzeBtn) { reanalyzeBtn.textContent = '⏳ Analyzing...'; reanalyzeBtn.disabled = true; }
 
       try {
         const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
@@ -3562,16 +3609,11 @@
           if (vol && vol.truckLabel) {
             charge.truckLabel = vol.truckLabel;
             charge.truckVolume = vol.truckVolume || 0;
-            charge.photoAnalysis = '🤖 Re-analyzed: suggested ' + vol.truckLabel + ' truck' + (vol.truckVolume >= 1 ? 's' : '');
-          } else {
-            charge.photoAnalysis = null;
+            // DO NOT touch charge.photoAnalysis
           }
-        } else {
-          charge.photoAnalysis = null;
         }
       } catch(e) {
         console.error('Re-analyze error:', e);
-        charge.photoAnalysis = null;
       }
       renderCharges();
       updateTotals();
@@ -3992,10 +4034,10 @@
           html += '<div style="margin-top:6px;position:relative;">';
           html += '<textarea class="form-input" style="width:100%;min-height:56px;resize:vertical;font-size:12px;line-height:1.5;padding:8px 10px;box-sizing:border-box;" placeholder="Description" data-idx="' + globalIdx + '" data-field="description" oninput="updateChargeFromInput(this)">' + (charge.description||'').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</textarea>';
           html += '<div style="display:flex;gap:5px;margin-top:4px;">';
-          html += '<button onclick="reRecordChargeDescription(' + globalIdx + ')" style="background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:11px;color:var(--text-secondary);cursor:pointer;">🎤 Re-record</button>';
-          html += '<button onclick="appendRecordChargeDescription(' + globalIdx + ')" style="background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:11px;color:var(--text-secondary);cursor:pointer;">🎤 Add to description</button>';
+          html += '<button data-voice-rerecord="' + globalIdx + '" onclick="reRecordChargeDescription(' + globalIdx + ')" style="background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:11px;color:var(--text-secondary);cursor:pointer;">🎤 Re-record</button>';
+          html += '<button data-voice-append="' + globalIdx + '" onclick="appendRecordChargeDescription(' + globalIdx + ')" style="background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:11px;color:var(--text-secondary);cursor:pointer;">🎤 Add to description</button>';
           if (charge.description) {
-            html += '<button onclick="reanalyzeChargeDescription(' + globalIdx + ')" style="background:rgba(0,238,118,0.15);border:1px solid var(--accent-green);border-radius:var(--radius-sm);padding:4px 8px;font-size:11px;color:var(--accent-green);cursor:pointer;">↻ Re-analyze volume</button>';
+            html += '<button data-reanalyze="' + globalIdx + '" onclick="reanalyzeChargeDescription(' + globalIdx + ')" style="background:rgba(0,238,118,0.15);border:1px solid var(--accent-green);border-radius:var(--radius-sm);padding:4px 8px;font-size:11px;color:var(--accent-green);cursor:pointer;">↻ Re-analyze volume</button>';
           }
           html += '</div>';
           html += '</div>';
