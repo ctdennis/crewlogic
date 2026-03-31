@@ -1103,7 +1103,7 @@
           <div class="est-section-header" style="margin-bottom:12px;">
             <div class="est-section-title">Charges</div>
             <div style="display:flex;gap:6px;">
-              <button class="est-add-btn" id="voiceRoomBtn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe Room</button>
+              <button class="est-add-btn voice-room-btn" id="voiceRoomBtn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe Room</button>
               <button class="est-add-btn" id="addChargeBtn" onclick="showAddCharge()">+ Manual</button>
             </div>
           </div>
@@ -1113,7 +1113,7 @@
 
           <!-- Add charge buttons (repeated below charges for convenience) -->
           <div id="estChargesBottomBtns" style="display:flex;gap:6px;margin:10px 0 4px 0;">
-            <button class="est-add-btn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe Room</button>
+            <button class="est-add-btn voice-room-btn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe Room</button>
             <button class="est-add-btn" onclick="showAddCharge()">+ Manual</button>
           </div>
 
@@ -3274,6 +3274,7 @@
 
     function startRoomVoice() {
       const btn = document.getElementById('voiceRoomBtn');
+      const allVoiceBtns = document.querySelectorAll('.voice-room-btn');
       const status = document.getElementById('roomVoiceStatus');
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -3296,9 +3297,14 @@
       roomVoiceRecognition.lang = 'en-US';
       roomVoiceTranscript = '';
 
-      btn.innerHTML = '⏹ Done — Process Room';
+      btn.innerHTML = '⏹ Tap to Stop Recording';
       btn.style.background = '#ef4444';
       btn.style.color = '#fff';
+      allVoiceBtns.forEach(b => {
+        b.innerHTML = '⏹ Tap to Stop Recording';
+        b.style.background = '#ef4444';
+        b.style.color = '#fff';
+      });
 
       status.style.display = 'block';
       status.style.background = 'rgba(0,238,118,0.1)';
@@ -3318,9 +3324,7 @@
 
       roomVoiceRecognition.onerror = (e) => {
         roomVoiceRecognition = null;
-        btn.innerHTML = '🎤 Describe Room';
-        btn.style.background = 'var(--accent-green)';
-        btn.style.color = '#000';
+        allVoiceBtns.forEach(b => { b.innerHTML = '🎤 Describe Room'; b.style.background = 'var(--accent-green)'; b.style.color = '#000'; b.disabled = false; });
         status.style.background = 'rgba(239,68,68,0.15)';
         status.style.color = '#ef4444';
         status.textContent = '⚠️ Voice error: ' + e.error;
@@ -3329,15 +3333,12 @@
       roomVoiceRecognition.onend = () => {
         roomVoiceRecognition = null;
         btn.innerHTML = '<span class="spinner-inline" style="display:inline-block;margin-right:6px;"></span> Analyzing room...';
-        btn.style.background = 'var(--accent-green)';
-        btn.style.color = '#000';
-        btn.disabled = true;
+        allVoiceBtns.forEach(b => { b.style.background = 'var(--accent-green)'; b.style.color = '#000'; b.disabled = true; });
         if (roomVoiceTranscript.trim()) {
           status.textContent = '"' + roomVoiceTranscript.trim() + '"';
           analyzeRoomTranscript(roomVoiceTranscript.trim());
         } else {
-          btn.innerHTML = '🎤 Describe Room';
-          btn.disabled = false;
+          allVoiceBtns.forEach(b => { b.innerHTML = '🎤 Describe Room'; b.style.background = 'var(--accent-green)'; b.style.color = '#000'; b.disabled = false; });
           status.style.display = 'none';
         }
       };
@@ -3347,6 +3348,7 @@
 
     async function analyzeRoomTranscript(transcript) {
       const btn = document.getElementById('voiceRoomBtn');
+      const allVoiceBtns = document.querySelectorAll('.voice-room-btn');
       const status = document.getElementById('roomVoiceStatus');
       try {
         const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
@@ -3423,9 +3425,7 @@
         status.style.color = '#ef4444';
         status.textContent = '⚠️ Error: ' + (e.message || e);
       } finally {
-        btn.innerHTML = '🎤 Describe Room';
-        btn.style.background = 'var(--accent-green)';
-        btn.style.color = '#000';
+        allVoiceBtns.forEach(b => { b.innerHTML = '🎤 Describe Room'; b.style.background = 'var(--accent-green)'; b.style.color = '#000'; b.disabled = false; });
         btn.disabled = false;
       }
     }
