@@ -4881,26 +4881,158 @@
       const file = input.files[0];
       const reader = new FileReader();
       reader.onload = function(e) {
-        // Resize to max 480px wide and compress for Sheets cell limit (~50k chars)
-        const img = new Image();
-        img.onload = function() {
-          const canvas = document.createElement('canvas');
-          const maxW = 480, maxH = 300;
-          let w = img.width, h = img.height;
-          if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
-          if (h > maxH) { w = Math.round(w * maxH / h); h = maxH; }
-          canvas.width = w; canvas.height = h;
-          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-          const base64 = canvas.toDataURL('image/jpeg', 0.55);
-          currentEstimate.coverPhoto = base64;
-          document.getElementById('coverPhotoImg').src = base64;
-          document.getElementById('coverPhotoPreview').style.display = 'block';
-          document.getElementById('coverPhotoBtn').style.display = 'none';
-          autoSaveDraft();
-        };
-        img.src = e.target.result;
+        // Open crop tool with the raw image
+        openCoverPhotoCrop(e.target.result);
       };
       reader.readAsDataURL(file);
+    }
+
+    // ===== COVER PHOTO CROP TOOL =====
+    let cropState = { startX: 0, startY: 0, endX: 0, endY: 0, dragging: false, imgNaturalW: 0, imgNaturalH: 0, displayW: 0, displayH: 0, offsetX: 0, offsetY: 0, rawSrc: null };
+
+    function openCoverPhotoCrop(src) {
+      cropState.rawSrc = src;
+      const overlay = document.getElementById('cropOverlay');
+      const cropImg = document.getElementById('cropImg');
+      const cropCanvas = document.getElementById('cropSelectionCanvas');
+
+      overlay.style.display = 'flex';
+      cropImg.src = src;
+      cropImg.onload = () => {
+        cropState.imgNaturalW = cropImg.naturalWidth;
+        cropState.imgNaturalH = cropImg.naturalHeight;
+        // Reset selection to full image
+        setTimeout(() => {
+          const rect = cropImg.getBoundingClientRect();
+          cropState.displayW = rect.width;
+          cropState.displayH = rect.height;
+          cropState.offsetX = rect.left;
+          cropState.offsetY = rect.top;
+          cropCanvas.width = rect.width;
+          cropCanvas.height = rect.height;
+          cropState.startX = 0; cropState.startY = 0;
+          cropState.endX = rect.width; cropState.endY = rect.height;
+          drawCropSelection();
+        }, 50);
+      };
+    }
+
+    function drawCropSelection() {
+      const canvas = document.getElementById('cropSelectionCanvas');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const x = Math.min(cropState.startX, cropState.endX);
+      const y = Math.min(cropState.startY, cropState.endY);
+      const w = Math.abs(cropState.endX - cropState.startX);
+      const h = Math.abs(cropState.endY - cropState.startY);
+      // Dark overlay outside selection
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(x, y, w, h);
+      // Selection border
+      ctx.strokeStyle = '#00EE76';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, w, h);
+      // Corner handles
+      const hs = 8;
+      ctx.fillStyle = '#00EE76';
+      [[x,y],[x+w,y],[x,y+h],[x+w,y+h]].forEach(([cx,cy]) => {
+        ctx.fillRect(cx - hs/2, cy - hs/2, hs, hs);
+      });
+    }
+
+    function cropMouseDown(e) {
+      const canvas = document.getElementById('cropSelectionCanvas');
+      const rect = canvas.getBoundingClientRect();
+      cropState.startX = e.clientX - rect.left;
+      cropState.startY = e.clientY - rect.top;
+      cropState.endX = cropState.startX;
+      cropState.endY = cropState.startY;
+      cropState.dragging = true;
+    }
+
+    function cropMouseMove(e) {
+      if (!cropState.dragging) return;
+      const canvas = document.getElementById('cropSelectionCanvas');
+      const rect = canvas.getBoundingClientRect();
+      cropState.endX = Math.max(0, Math.min(e.clientX - rect.left, canvas.width));
+      cropState.endY = Math.max(0, Math.min(e.clientY - rect.top, canvas.height));
+      drawCropSelection();
+    }
+
+    function cropMouseUp(e) {
+      cropState.dragging = false;
+    }
+
+    // Touch support
+    function cropTouchStart(e) { e.preventDefault(); cropMouseDown(e.touches[0]); }
+    function cropTouchMove(e) { e.preventDefault(); cropMouseMove(e.touches[0]); }
+    function cropTouchEnd(e) { cropMouseUp(e); }
+
+    function applyCrop() {
+      const x = Math.min(cropState.startX, cropState.endX);
+      const y = Math.min(cropState.startY, cropState.endY);
+      const w = Math.abs(cropState.endX - cropState.startX);
+      const h = Math.abs(cropState.endY - cropState.startY);
+
+      if (w < 10 || h < 10) {
+        // No meaningful crop — use full image
+        saveCoverPhotoFromSrc(cropState.rawSrc);
+        closeCropOverlay();
+        return;
+      }
+
+      // Scale from display coords to natural image coords
+      const scaleX = cropState.imgNaturalW / cropState.displayW;
+      const scaleY = cropState.imgNaturalH / cropState.displayH;
+      const sx = x * scaleX, sy = y * scaleY;
+      const sw = w * scaleX, sh = h * scaleY;
+
+      const img = document.getElementById('cropImg');
+      const canvas = document.createElement('canvas');
+      const maxW = 960, maxH = 640;
+      let outW = sw, outH = sh;
+      if (outW > maxW) { outH = outH * maxW / outW; outW = maxW; }
+      if (outH > maxH) { outW = outW * maxH / outH; outH = maxH; }
+      canvas.width = Math.round(outW);
+      canvas.height = Math.round(outH);
+      canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      const base64 = canvas.toDataURL('image/jpeg', 0.82);
+      saveCoverPhotoBase64(base64);
+      closeCropOverlay();
+    }
+
+    function skipCrop() {
+      // Use full image at good quality
+      saveCoverPhotoFromSrc(cropState.rawSrc);
+      closeCropOverlay();
+    }
+
+    function saveCoverPhotoFromSrc(src) {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxW = 960, maxH = 640;
+        let w = img.width, h = img.height;
+        if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
+        if (h > maxH) { w = Math.round(w * maxH / h); h = maxH; }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        saveCoverPhotoBase64(canvas.toDataURL('image/jpeg', 0.82));
+      };
+      img.src = src;
+    }
+
+    function saveCoverPhotoBase64(base64) {
+      currentEstimate.coverPhoto = base64;
+      document.getElementById('coverPhotoImg').src = base64;
+      document.getElementById('coverPhotoPreview').style.display = 'block';
+      document.getElementById('coverPhotoBtn').style.display = 'none';
+      autoSaveDraft();
+    }
+
+    function closeCropOverlay() {
+      document.getElementById('cropOverlay').style.display = 'none';
     }
 
     function removeCoverPhoto() {
@@ -5839,4 +5971,20 @@
     // If GIS script hasn't loaded by DOMContentLoaded, we wait for the onload callback.
     // If session exists, initGoogleSignIn() handles it immediately on GIS load.
   </script>
+  <!-- Cover Photo Crop Overlay -->
+  <div id="cropOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.92);z-index:1000;flex-direction:column;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;">
+    <div style="color:var(--text-muted);font-size:12px;margin-bottom:10px;">Drag to select crop area &nbsp;|&nbsp; Leave as-is to use full photo</div>
+    <div style="position:relative;max-width:100%;max-height:65vh;display:flex;align-items:center;justify-content:center;">
+      <img id="cropImg" style="max-width:100%;max-height:65vh;display:block;user-select:none;-webkit-user-drag:none;" draggable="false" />
+      <canvas id="cropSelectionCanvas" style="position:absolute;top:0;left:0;cursor:crosshair;"
+        onmousedown="cropMouseDown(event)" onmousemove="cropMouseMove(event)" onmouseup="cropMouseUp(event)"
+        ontouchstart="cropTouchStart(event)" ontouchmove="cropTouchMove(event)" ontouchend="cropTouchEnd(event)">
+      </canvas>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px;">
+      <button onclick="skipCrop()" style="background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 20px;color:var(--text-secondary);cursor:pointer;font-size:14px;">Use Full Photo</button>
+      <button onclick="applyCrop()" style="background:var(--accent-green);border:none;border-radius:var(--radius-sm);padding:10px 24px;color:#000;font-weight:700;cursor:pointer;font-size:14px;">✓ Apply Crop</button>
+      <button onclick="closeCropOverlay()" style="background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 16px;color:var(--text-muted);cursor:pointer;font-size:14px;">✕ Cancel</button>
+    </div>
+  </div>
 </body>
