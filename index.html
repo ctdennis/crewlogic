@@ -3462,27 +3462,35 @@
       const charge = currentEstimate.charges[chargeIdx];
       // Migrate legacy single photo
       if (!charge.photos) charge.photos = charge.photoUrl ? [charge.photoUrl] : [];
-      if (charge.photos.length === 0) return;
+      
+      // Only send Drive URLs — filter out any inline base64 placeholders
+      const drivePhotos = charge.photos.filter(p => p && !p.startsWith('data:'));
+      if (drivePhotos.length === 0) {
+        alert('Photos are still uploading to Drive. Please wait a moment and try again.');
+        return;
+      }
 
-      const photoCount = charge.photos.length;
+      const photoCount = drivePhotos.length;
       currentEstimate.charges[chargeIdx].photoAnalysis = '⏳ Analyzing ' + (photoCount > 1 ? photoCount + ' photos' : 'photo') + ' with AI...';
       renderCharges();
 
       try {
-        const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
-          method: 'POST',
-          body: JSON.stringify({
+        const payload = {
             action: 'analyzePhoto',
             email: currentUser.email,
             franchiseID: currentUser.franchiseID,
-            photos: charge.photos, // array of URLs
-            photoUrl: charge.photos[0], // backwards compat
-            photo: charge.photo || null,
+            photos: drivePhotos,
+            photoUrl: drivePhotos[0],
+            photo: null,
             description: charge.description || '',
             room: charge.room || '',
             area: charge.area || '',
             currentVolume: charge.truckLabel || ''
-          })
+        };
+        console.log('analyzePhoto payload size:', JSON.stringify(payload).length, 'action:', payload.action, 'photos:', payload.photos);
+        const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
+          method: 'POST',
+          body: JSON.stringify(payload)
         });
         const data = await response.json();
         if (data.success) {
@@ -4828,7 +4836,8 @@
         (currentEstimate.charges || [])
           .filter(c => c.type === 'volume')
           .forEach(c => {
-            const urls = c.photos || (c.photoUrl ? [c.photoUrl] : []);
+            const urls = (c.photos || (c.photoUrl ? [c.photoUrl] : []))
+              .filter(u => u && !u.startsWith('data:')); // Drive URLs only
             urls.forEach(url => {
               const m = url.match(/[?&]id=([^&]+)/);
               if (m) photos.push({ fileId: m[1], room: c.room || '', area: c.area || '' });
