@@ -3460,11 +3460,12 @@
     // ===== CHARGE PHOTO ANALYSIS =====
     async function analyzeChargePhoto(chargeIdx) {
       const charge = currentEstimate.charges[chargeIdx];
-      const photoSrc = charge.photoUrl || charge.photo;
-      if (!photoSrc) return;
+      // Migrate legacy single photo
+      if (!charge.photos) charge.photos = charge.photoUrl ? [charge.photoUrl] : [];
+      if (charge.photos.length === 0) return;
 
-      // Show analyzing state inline
-      currentEstimate.charges[chargeIdx].photoAnalysis = '⏳ Analyzing photo with AI...';
+      const photoCount = charge.photos.length;
+      currentEstimate.charges[chargeIdx].photoAnalysis = '⏳ Analyzing ' + (photoCount > 1 ? photoCount + ' photos' : 'photo') + ' with AI...';
       renderCharges();
 
       try {
@@ -3474,7 +3475,8 @@
             action: 'analyzePhoto',
             email: currentUser.email,
             franchiseID: currentUser.franchiseID,
-            photoUrl: photoSrc,
+            photos: charge.photos, // array of URLs
+            photoUrl: charge.photos[0], // backwards compat
             photo: charge.photo || null,
             description: charge.description || '',
             room: charge.room || '',
@@ -3645,6 +3647,9 @@
 
     // ===== CHARGE PHOTO CAPTURE =====
     function captureChargePhoto(chargeIdx) {
+      const charge = currentEstimate.charges[chargeIdx];
+      if (!charge.photos) charge.photos = charge.photoUrl ? [charge.photoUrl] : [];
+      if (charge.photos.length >= 4) { alert('Maximum 4 photos per room.'); return; }
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = 'image/*';
@@ -3702,7 +3707,12 @@
         });
         const data = await response.json();
         if (data.success && data.photoUrl) {
-          currentEstimate.charges[chargeIdx].photoUrl = data.photoUrl;
+          if (!currentEstimate.charges[chargeIdx].photos) {
+            currentEstimate.charges[chargeIdx].photos = currentEstimate.charges[chargeIdx].photoUrl 
+              ? [currentEstimate.charges[chargeIdx].photoUrl] : [];
+          }
+          currentEstimate.charges[chargeIdx].photos.push(data.photoUrl);
+          currentEstimate.charges[chargeIdx].photoUrl = data.photoUrl; // keep for backwards compat
           autoSaveDraft();
         }
       } catch(e) {
@@ -3710,11 +3720,39 @@
       }
     }
 
-    function removeChargePhoto(chargeIdx) {
-      currentEstimate.charges[chargeIdx].photo = null;
-      currentEstimate.charges[chargeIdx].photoUrl = null;
+    function removeChargePhotoIdx(chargeIdx, photoIdx) {
+      const charge = currentEstimate.charges[chargeIdx];
+      if (!charge.photos) charge.photos = charge.photoUrl ? [charge.photoUrl] : [];
+      charge.photos.splice(photoIdx, 1);
+      if (charge.photos.length === 0) {
+        charge.photoUrl = null;
+        charge.photo = null;
+      } else {
+        charge.photoUrl = charge.photos[0];
+      }
       renderCharges();
       autoSaveDraft();
+    }
+
+    function removeChargePhoto(chargeIdx) {
+      removeChargePhotoIdx(chargeIdx, 0);
+    }
+
+    function viewChargePhotoIdx(chargeIdx, photoIdx) {
+      const charge = currentEstimate.charges[chargeIdx];
+      if (!charge.photos) charge.photos = charge.photoUrl ? [charge.photoUrl] : [];
+      const url = charge.photos[photoIdx];
+      if (!url) return;
+      const m = url.match(/[?&]id=([^&]+)/);
+      const src = m ? 'https://lh3.googleusercontent.com/d/' + m[1] : url;
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:999;display:flex;align-items:center;justify-content:center;cursor:pointer;';
+      overlay.onclick = () => document.body.removeChild(overlay);
+      const img = document.createElement('img');
+      img.src = src;
+      img.style.cssText = 'max-width:95vw;max-height:90vh;object-fit:contain;border-radius:8px;';
+      overlay.appendChild(img);
+      document.body.appendChild(overlay);
     }
 
     function viewChargePhoto(chargeIdx) {
@@ -4068,20 +4106,36 @@
           // Row 4: Excluded
           html += '<input class="form-input" style="width:100%;margin-top:6px;" placeholder="Not included" value="' + (charge.notIncluded||'').replace(/"/g,'&quot;') + '" data-idx="' + globalIdx + '" data-field="notIncluded" oninput="updateChargeFromInput(this)">';
 
-          // Row 5: Photo + Analyze
-          const photoData = charge.photo || charge.photoUrl || null;
-          const photoSrc = charge.photo || (charge.photoUrl ? charge.photoUrl.replace('uc?export=view&id=', 'thumbnail?id=').replace('drive.google.com/uc', 'drive.google.com/thumbnail') : null);
-          html += '<div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">';
-          if (photoData) {
-            html += '<img src="' + photoSrc + '" style="width:80px;height:64px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer;flex-shrink:0;" onclick="viewChargePhoto(' + globalIdx + ')" />';
-            html += '<div style="display:flex;flex-direction:column;gap:5px;">';
-            html += '<button onclick="captureChargePhoto(' + globalIdx + ')" style="background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:var(--text-secondary);cursor:pointer;">📷 Replace</button>';
-            html += '<button onclick="removeChargePhoto(' + globalIdx + ')" style="background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:var(--text-secondary);cursor:pointer;">✕ Remove</button>';
-            html += '</div>';
-            html += '<button onclick="analyzeChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);padding:6px 10px;font-size:12px;color:#000;font-weight:600;cursor:pointer;align-self:center;">🤖 Analyze</button>';
-          } else {
-            html += '<button onclick="captureChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;font-size:12px;color:var(--text-secondary);cursor:pointer;">📷 Add Photo</button>';
+          // Row 5: Photo Gallery (up to 4) + Analyze
+          // Migrate legacy single photoUrl to photos array
+          if (!charge.photos) {
+            charge.photos = charge.photoUrl ? [charge.photoUrl] : [];
           }
+          const photos = charge.photos;
+          html += '<div style="margin-top:8px;">';
+          // Thumbnail strip
+          if (photos.length > 0) {
+            html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">';
+            photos.forEach((url, pi) => {
+              const thumbSrc = url.includes('drive.google.com') 
+                ? url.replace('uc?export=view&id=', 'thumbnail?id=').replace('drive.google.com/uc', 'drive.google.com/thumbnail')
+                : url;
+              html += '<div style="position:relative;flex-shrink:0;">';
+              html += '<img src="' + thumbSrc + '" style="width:72px;height:56px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer;" onclick="viewChargePhotoIdx(' + globalIdx + ',' + pi + ')" />';
+              html += '<button onclick="removeChargePhotoIdx(' + globalIdx + ',' + pi + ')" style="position:absolute;top:-4px;right:-4px;background:#ef4444;border:none;border-radius:50%;width:16px;height:16px;color:#fff;font-size:10px;cursor:pointer;line-height:16px;text-align:center;padding:0;">✕</button>';
+              html += '</div>';
+            });
+            html += '</div>';
+          }
+          // Action buttons row
+          html += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">';
+          if (photos.length < 4) {
+            html += '<button onclick="captureChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:var(--text-secondary);cursor:pointer;">📷 ' + (photos.length === 0 ? 'Add Photo' : 'Add Photo') + '</button>';
+          }
+          if (photos.length > 0) {
+            html += '<button onclick="analyzeChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:#000;font-weight:600;cursor:pointer;">🤖 Analyze ' + (photos.length > 1 ? '(' + photos.length + ' photos)' : '') + '</button>';
+          }
+          html += '</div>';
           if (charge.photoAnalysis) {
             html += '<div style="width:100%;margin-top:6px;font-size:11px;padding:6px 10px;border-radius:var(--radius-sm);background:rgba(0,238,118,0.08);color:var(--text-primary);">🤖 ' + charge.photoAnalysis + '</div>';
           }
@@ -4758,13 +4812,16 @@
 
       try {
         // Collect photos from charges to upload to Vonigo via n8n
-        const photos = (currentEstimate.charges || [])
-          .filter(c => c.type === 'volume' && c.photoUrl)
-          .map(c => {
-            const m = c.photoUrl.match(/[?&]id=([^&]+)/);
-            return m ? { fileId: m[1], room: c.room || '', area: c.area || '' } : null;
-          })
-          .filter(Boolean);
+        const photos = [];
+        (currentEstimate.charges || [])
+          .filter(c => c.type === 'volume')
+          .forEach(c => {
+            const urls = c.photos || (c.photoUrl ? [c.photoUrl] : []);
+            urls.forEach(url => {
+              const m = url.match(/[?&]id=([^&]+)/);
+              if (m) photos.push({ fileId: m[1], room: c.room || '', area: c.area || '' });
+            });
+          });
 
         const res = await apiFetch(N8N_BASE + '/crewlogic-submit-quote', {
           method: 'POST',
@@ -4861,7 +4918,8 @@
             vonigoQuoteID
           })
         });
-        const delData = await delRes.json();
+        const delText = await delRes.text();
+        const delData = delText ? JSON.parse(delText) : { success: true };
         if (!delData.success) {
           console.error('Delete failed on server:', delData);
           alert('Warning: estimate may not have been deleted from server. Please try again.');
@@ -5714,18 +5772,25 @@
       // ===== PHOTO PAGES =====
       if (!opts.skipPhotos) {
       // Group volume charges that have photoUrl by room
-      const photoCharges = (est.charges || []).filter(c => c.type === 'volume' && c.photoUrl);
+      const photoCharges = (est.charges || []).filter(c => {
+          if (!c.photos) c.photos = c.photoUrl ? [c.photoUrl] : [];
+          return c.type === 'volume' && c.photos && c.photos.length > 0;
+        });
       if (photoCharges.length > 0) {
         // Group by area preserving order
         const roomGroups = [];
         const areaSeen = {};
         photoCharges.forEach(c => {
+          if (!c.photos) c.photos = c.photoUrl ? [c.photoUrl] : [];
           const key = c.area || 'General';
           if (!areaSeen[key]) {
             areaSeen[key] = true;
             roomGroups.push({ area: key, photos: [] });
           }
-          roomGroups[roomGroups.length - 1].photos.push({ url: c.photoUrl, room: c.room || '' });
+          // Push all photos from this charge
+          (c.photos || (c.photoUrl ? [c.photoUrl] : [])).forEach(url => {
+            roomGroups[roomGroups.length - 1].photos.push({ url, room: c.room || '' });
+          });
         });
 
         // Photo page layout constants
@@ -5772,12 +5837,18 @@
 
         // Load all photos first using lh3 URLs to avoid CORS issues
         const photoCache = {};
-        await Promise.all(photoCharges.map(async c => {
+        const allPhotoUrls = [];
+        photoCharges.forEach(c => {
+          (c.photos || (c.photoUrl ? [c.photoUrl] : [])).forEach(url => {
+            if (!allPhotoUrls.includes(url)) allPhotoUrls.push(url);
+          });
+        });
+        await Promise.all(allPhotoUrls.map(async url => {
           try {
-            const fetchUrl = toDriveImgUrl(c.photoUrl);
-            photoCache[c.photoUrl] = await loadImageFromUrl(fetchUrl);
+            const fetchUrl = toDriveImgUrl(url);
+            photoCache[url] = await loadImageFromUrl(fetchUrl);
           } catch(e) {
-            console.warn('Photo load failed:', c.photoUrl, e);
+            console.warn('Photo load failed:', url, e);
           }
         }));
 
