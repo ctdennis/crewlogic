@@ -3603,17 +3603,37 @@
           })
         });
         const data = await response.json();
-        console.log('Re-analyze response:', JSON.stringify(data).substring(0, 500));
         if (data.success) {
           const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
-          console.log('Re-analyze charges:', JSON.stringify(charges).substring(0, 300));
           const vol = charges.find(c => c.type === 'volume');
-          console.log('Re-analyze vol:', vol);
           if (vol && vol.truckLabel) {
             charge.truckLabel = vol.truckLabel;
             charge.truckVolume = vol.truckVolume || 0;
             // DO NOT touch charge.photoAnalysis
           }
+          // Add any surcharges identified that aren't already on the estimate
+          const surcharges = charges.filter(c => c.type === 'surcharge');
+          surcharges.forEach(s => {
+            const matched = matchSurchargeItem(s.name);
+            if (matched) {
+              const alreadyExists = currentEstimate.charges.some(
+                ec => ec.type === 'surcharge' && ec.priceItemID === matched.priceItemID
+              );
+              if (!alreadyExists) {
+                currentEstimate.charges.push({
+                  type: 'surcharge',
+                  priceItemID: matched.priceItemID,
+                  name: matched.name,
+                  blockName: matched.blockName,
+                  priceBlockID: matched.priceBlockID,
+                  qty: s.qty || 1,
+                  unitPrice: matched.value,
+                  area: charge.area || '',
+                  taxID: matched.taxID || 146
+                });
+              }
+            }
+          });
         }
       } catch(e) {
         console.error('Re-analyze error:', e);
