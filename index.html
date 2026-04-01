@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v1.4.1 | 2026-04-01">
+  <meta name="crewlogic-version" content="v1.5 | 2026-04-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1252,6 +1252,15 @@
               <option value="Packed full">Packed full</option>
             </select>
           </div>
+          <div class="form-group">
+            <div class="form-label">Pack Factor</div>
+            <select class="form-select" id="shedPackFactor">
+              <option value="1.1">Manageable — mostly panels, clean demo (1.1×)</option>
+              <option value="1.3" selected>Typical — mixed lumber, standard demo (1.3×)</option>
+              <option value="1.5">Nightmare — irregular framing, lots of rafters (1.5×)</option>
+            </select>
+          </div>
+
           <div id="shedCalcResult" style="display:none;background:var(--bg-card);border:1px solid var(--accent-orange);border-radius:var(--radius-sm);padding:12px;margin-bottom:12px;">
             <div style="font-size:11px;color:var(--accent-orange);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Estimated Volume</div>
             <div id="shedCalcVolume" style="font-family:'Space Mono',monospace;font-size:20px;font-weight:700;color:var(--accent-green);"></div>
@@ -1318,59 +1327,115 @@
 
       <!-- MATTRESS WIZARD MODAL -->
       <div id="mattressWizardModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:200;align-items:flex-end;justify-content:center;">
-        <div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;max-height:92vh;overflow-y:auto;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
             <div style="font-size:16px;font-weight:700;color:var(--accent-yellow);">🛏️ Mattress Calculator</div>
             <button onclick="document.getElementById('mattressWizardModal').style.display='none'" style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;">✕</button>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
-            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;">
-              <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;font-weight:600;">Twin</div>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <button onclick="mattressAdj('twin',-1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
-                <span id="mattCount_twin" style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--accent-green);min-width:24px;text-align:center;">0</span>
-                <button onclick="mattressAdj('twin',1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
-              </div>
-            </div>
-            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;">
-              <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;font-weight:600;">Full</div>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <button onclick="mattressAdj('full',-1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
-                <span id="mattCount_full" style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--accent-green);min-width:24px;text-align:center;">0</span>
-                <button onclick="mattressAdj('full',1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
-              </div>
-            </div>
-            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;">
-              <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;font-weight:600;">Queen</div>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <button onclick="mattressAdj('queen',-1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
-                <span id="mattCount_queen" style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--accent-green);min-width:24px;text-align:center;">0</span>
-                <button onclick="mattressAdj('queen',1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
-              </div>
-            </div>
-            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;">
-              <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;font-weight:600;">King</div>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <button onclick="mattressAdj('king',-1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
-                <span id="mattCount_king" style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--accent-green);min-width:24px;text-align:center;">0</span>
-                <button onclick="mattressAdj('king',1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
-              </div>
-            </div>
-            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;">
-              <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;font-weight:600;">Box Spring</div>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <button onclick="mattressAdj('boxspring',-1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
-                <span id="mattCount_boxspring" style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--accent-green);min-width:24px;text-align:center;">0</span>
-                <button onclick="mattressAdj('boxspring',1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
-              </div>
-            </div>
+
+          <!-- Truck selector -->
+          <div style="margin-bottom:12px;">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:6px;">Truck Size</div>
+            <select class="form-select" id="mattTruckSize" onchange="renderMattressDiagram()" style="font-size:13px;padding:8px 12px;">
+              <option value="jl" selected>Junkluggers (8×12×5 ft)</option>
+              <option value="10">10-12 ft Box Truck (7.5×11×6.25 ft)</option>
+              <option value="16">15-17 ft Box Truck (7.5×16×7.2 ft)</option>
+              <option value="24">22-26 ft Box Truck (8×24×8.3 ft)</option>
+            </select>
           </div>
+
+          <!-- Per-size rows: mattress + box spring counts with depth -->
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:8px;">Mattresses &amp; Box Springs</div>
+
+          <!-- Header row -->
+          <div style="display:grid;grid-template-columns:80px 1fr 60px 1fr 60px;gap:4px;align-items:center;margin-bottom:4px;">
+            <div></div>
+            <div style="font-size:10px;color:var(--text-muted);text-align:center;font-weight:600;">MATTRESSES</div>
+            <div style="font-size:10px;color:var(--text-muted);text-align:center;">DEPTH</div>
+            <div style="font-size:10px;color:var(--text-muted);text-align:center;font-weight:600;">BOX SPRINGS</div>
+            <div style="font-size:10px;color:var(--text-muted);text-align:center;">DEPTH</div>
+          </div>
+
+          <!-- Twin -->
+          <div style="display:grid;grid-template-columns:80px 1fr 60px 1fr 60px;gap:4px;align-items:center;padding:6px 0;border-top:1px solid var(--border);">
+            <div style="font-size:12px;font-weight:600;color:var(--text-secondary);">Twin<br><span style="font-size:10px;color:var(--text-muted);font-weight:400;">38″×75″</span></div>
+            <div style="display:flex;align-items:center;justify-content:center;gap:6px;">
+              <button onclick="mattAdj('mTwin',-1)" style="width:26px;height:26px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
+              <span id="mattCount_mTwin" style="font-family:'Space Mono',monospace;font-size:16px;font-weight:700;color:var(--accent-green);min-width:20px;text-align:center;">0</span>
+              <button onclick="mattAdj('mTwin',1)" style="width:26px;height:26px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
+            </div>
+            <select id="mattDepth_mTwin" class="form-select" style="font-size:11px;padding:4px 6px;"><option value="8" selected>8″</option><option value="10">10″</option><option value="12">12″</option><option value="14">14″</option></select>
+            <div style="display:flex;align-items:center;justify-content:center;gap:6px;">
+              <button onclick="mattAdj('bTwin',-1)" style="width:26px;height:26px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
+              <span id="mattCount_bTwin" style="font-family:'Space Mono',monospace;font-size:16px;font-weight:700;color:var(--accent-yellow);min-width:20px;text-align:center;">0</span>
+              <button onclick="mattAdj('bTwin',1)" style="width:26px;height:26px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
+            </div>
+            <select id="mattDepth_bTwin" class="form-select" style="font-size:11px;padding:4px 6px;"><option value="6">6″</option><option value="7" selected>7″</option><option value="8">8″</option><option value="9">9″</option></select>
+          </div>
+
+          <!-- Full -->
+          <div style="display:grid;grid-template-columns:80px 1fr 60px 1fr 60px;gap:4px;align-items:center;padding:6px 0;border-top:1px solid var(--border);">
+            <div style="font-size:12px;font-weight:600;color:var(--text-secondary);">Full<br><span style="font-size:10px;color:var(--text-muted);font-weight:400;">54″×75″</span></div>
+            <div style="display:flex;align-items:center;justify-content:center;gap:6px;">
+              <button onclick="mattAdj('mFull',-1)" style="width:26px;height:26px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
+              <span id="mattCount_mFull" style="font-family:'Space Mono',monospace;font-size:16px;font-weight:700;color:var(--accent-green);min-width:20px;text-align:center;">0</span>
+              <button onclick="mattAdj('mFull',1)" style="width:26px;height:26px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
+            </div>
+            <select id="mattDepth_mFull" class="form-select" style="font-size:11px;padding:4px 6px;"><option value="8">8″</option><option value="10" selected>10″</option><option value="12">12″</option><option value="14">14″</option></select>
+            <div style="display:flex;align-items:center;justify-content:center;gap:6px;">
+              <button onclick="mattAdj('bFull',-1)" style="width:26px;height:26px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
+              <span id="mattCount_bFull" style="font-family:'Space Mono',monospace;font-size:16px;font-weight:700;color:var(--accent-yellow);min-width:20px;text-align:center;">0</span>
+              <button onclick="mattAdj('bFull',1)" style="width:26px;height:26px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
+            </div>
+            <select id="mattDepth_bFull" class="form-select" style="font-size:11px;padding:4px 6px;"><option value="6">6″</option><option value="7">7″</option><option value="8" selected>8″</option><option value="9">9″</option></select>
+          </div>
+
+          <!-- Queen -->
+          <div style="display:grid;grid-template-columns:80px 1fr 60px 1fr 60px;gap:4px;align-items:center;padding:6px 0;border-top:1px solid var(--border);">
+            <div style="font-size:12px;font-weight:600;color:var(--text-secondary);">Queen<br><span style="font-size:10px;color:var(--text-muted);font-weight:400;">60″×80″</span></div>
+            <div style="display:flex;align-items:center;justify-content:center;gap:6px;">
+              <button onclick="mattAdj('mQueen',-1)" style="width:26px;height:26px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
+              <span id="mattCount_mQueen" style="font-family:'Space Mono',monospace;font-size:16px;font-weight:700;color:var(--accent-green);min-width:20px;text-align:center;">0</span>
+              <button onclick="mattAdj('mQueen',1)" style="width:26px;height:26px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
+            </div>
+            <select id="mattDepth_mQueen" class="form-select" style="font-size:11px;padding:4px 6px;"><option value="8">8″</option><option value="10">10″</option><option value="12" selected>12″</option><option value="14">14″</option></select>
+            <div style="display:flex;align-items:center;justify-content:center;gap:6px;">
+              <button onclick="mattAdj('bQueen',-1)" style="width:26px;height:26px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
+              <span id="mattCount_bQueen" style="font-family:'Space Mono',monospace;font-size:16px;font-weight:700;color:var(--accent-yellow);min-width:20px;text-align:center;">0</span>
+              <button onclick="mattAdj('bQueen',1)" style="width:26px;height:26px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
+            </div>
+            <select id="mattDepth_bQueen" class="form-select" style="font-size:11px;padding:4px 6px;"><option value="6">6″</option><option value="7">7″</option><option value="8" selected>8″</option><option value="9">9″</option></select>
+          </div>
+
+          <!-- King -->
+          <div style="display:grid;grid-template-columns:80px 1fr 60px 1fr 60px;gap:4px;align-items:center;padding:6px 0;border-top:1px solid var(--border);margin-bottom:12px;">
+            <div style="font-size:12px;font-weight:600;color:var(--text-secondary);">King<br><span style="font-size:10px;color:var(--text-muted);font-weight:400;">76″×80″</span></div>
+            <div style="display:flex;align-items:center;justify-content:center;gap:6px;">
+              <button onclick="mattAdj('mKing',-1)" style="width:26px;height:26px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
+              <span id="mattCount_mKing" style="font-family:'Space Mono',monospace;font-size:16px;font-weight:700;color:var(--accent-green);min-width:20px;text-align:center;">0</span>
+              <button onclick="mattAdj('mKing',1)" style="width:26px;height:26px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
+            </div>
+            <select id="mattDepth_mKing" class="form-select" style="font-size:11px;padding:4px 6px;"><option value="8">8″</option><option value="10">10″</option><option value="12" selected>12″</option><option value="14">14″</option></select>
+            <div style="display:flex;align-items:center;justify-content:center;gap:6px;">
+              <button onclick="mattAdj('bKing',-1)" style="width:26px;height:26px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
+              <span id="mattCount_bKing" style="font-family:'Space Mono',monospace;font-size:16px;font-weight:700;color:var(--accent-yellow);min-width:20px;text-align:center;">0</span>
+              <button onclick="mattAdj('bKing',1)" style="width:26px;height:26px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
+            </div>
+            <select id="mattDepth_bKing" class="form-select" style="font-size:11px;padding:4px 6px;"><option value="6">6″</option><option value="7">7″</option><option value="8" selected>8″</option><option value="9">9″</option></select>
+          </div>
+
+          <!-- Packing diagram canvas -->
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:6px;">Packing Diagram</div>
+          <canvas id="mattPackCanvas" width="440" height="160" style="width:100%;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:12px;display:block;"></canvas>
+          <div id="mattPackNote" style="font-size:11px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;"></div>
+
+          <!-- Results -->
           <div id="mattressCalcResult" style="display:none;background:var(--bg-card);border:1px solid var(--accent-yellow);border-radius:var(--radius-sm);padding:12px;margin-bottom:12px;">
             <div style="font-size:11px;color:var(--accent-yellow);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Summary</div>
             <div id="mattressCalcVolume" style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--accent-green);margin-bottom:4px;"></div>
             <div id="mattressCalcDetail" style="font-size:11px;color:var(--text-muted);line-height:1.6;"></div>
           </div>
-          <button onclick="calcMattress()" style="width:100%;padding:13px;background:var(--bg-input);border:1px solid var(--accent-yellow);border-radius:var(--radius-sm);color:var(--accent-yellow);font-weight:700;font-size:14px;cursor:pointer;margin-bottom:8px;">Calculate</button>
+          <button onclick="calcMattress()" style="width:100%;padding:13px;background:var(--bg-input);border:1px solid var(--accent-yellow);border-radius:var(--radius-sm);color:var(--accent-yellow);font-weight:700;font-size:14px;cursor:pointer;margin-bottom:8px;">Calculate &amp; Draw Diagram</button>
           <button id="mattressAddBtn" onclick="addMattressToEstimate()" disabled style="width:100%;padding:13px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);color:#000;font-weight:700;font-size:14px;cursor:pointer;opacity:0.4;">Add to Estimate</button>
         </div>
       </div>
@@ -6322,10 +6387,8 @@
       const contentsCubicFt = cubicFt * fillPct;
       const totalCubicFt = structureCubicFt + contentsCubicFt;
 
-      // Packing inefficiency factor — demolished shed lumber (irregular boards, rafters,
-      // roofing) loads very loosely in the truck. 1.3x brings geometric math in line
-      // with real-world crew experience. Tune this value based on field results.
-      const SHED_PACK_FACTOR = 1.3;
+      // Packing inefficiency factor — read from user-selected dropdown
+      const SHED_PACK_FACTOR = parseFloat(document.getElementById('shedPackFactor').value) || 1.3;
       const truckFraction = (totalCubicFt * SHED_PACK_FACTOR) / 400;
       const snapped = snapToEighth(truckFraction);
 
@@ -6443,54 +6506,242 @@
     }
 
     // ===== MATTRESS WIZARD =====
-    const mattressCounts = { twin: 0, full: 0, queen: 0, king: 0, boxspring: 0 };
-    // Truck volume per item (fraction of a truck)
-    const mattressVol = { twin: 0.0625, full: 0.0625, queen: 0.125, king: 0.125, boxspring: 0.0625 };
+    // Sizes: width (in), length (in)
+    const MATT_DIMS = {
+      mTwin:  { w: 38, l: 75, label: 'Twin',  color: '#60a5fa' },
+      mFull:  { w: 54, l: 75, label: 'Full',  color: '#a78bfa' },
+      mQueen: { w: 60, l: 80, label: 'Queen', color: '#34d399' },
+      mKing:  { w: 76, l: 80, label: 'King',  color: '#f87171' },
+      bTwin:  { w: 38, l: 75, label: 'BS Twin',  color: '#93c5fd', isBox: true },
+      bFull:  { w: 54, l: 75, label: 'BS Full',  color: '#c4b5fd', isBox: true },
+      bQueen: { w: 60, l: 80, label: 'BS Queen', color: '#6ee7b7', isBox: true },
+      bKing:  { w: 76, l: 80, label: 'BS King',  color: '#fca5a5', isBox: true }
+    };
+
+    const TRUCK_DIMS = {
+      jl: { wIn: 96,  lIn: 144, hIn: 60,  label: "Junkluggers (8×12×5 ft)" },
+      10: { wIn: 90,  lIn: 132, hIn: 75,  label: "10-12 ft Truck (7.5×11×6.25 ft)" },
+      16: { wIn: 90,  lIn: 192, hIn: 86,  label: "15-17 ft Truck (7.5×16×7.2 ft)" },
+      24: { wIn: 96,  lIn: 288, hIn: 100, label: "22-26 ft Truck (8×24×8.3 ft)" }
+    };
+
+    const mattCounts = {};
     let mattressCalcData = null;
 
     function showMattressWizard() {
       mattressCalcData = null;
-      Object.keys(mattressCounts).forEach(k => { mattressCounts[k] = 0; document.getElementById('mattCount_' + k).textContent = '0'; });
+      Object.keys(MATT_DIMS).forEach(k => {
+        mattCounts[k] = 0;
+        const el = document.getElementById('mattCount_' + k);
+        if (el) el.textContent = '0';
+      });
       document.getElementById('mattressAddBtn').disabled = true;
       document.getElementById('mattressAddBtn').style.opacity = '0.4';
       document.getElementById('mattressCalcResult').style.display = 'none';
+      document.getElementById('mattPackNote').textContent = '';
+      renderMattressDiagram(); // draw empty truck
       document.getElementById('mattressWizardModal').style.display = 'flex';
     }
 
-    function mattressAdj(type, delta) {
-      mattressCounts[type] = Math.max(0, (mattressCounts[type] || 0) + delta);
-      document.getElementById('mattCount_' + type).textContent = mattressCounts[type];
+    function mattAdj(key, delta) {
+      mattCounts[key] = Math.max(0, (mattCounts[key] || 0) + delta);
+      document.getElementById('mattCount_' + key).textContent = mattCounts[key];
+    }
+
+    function getDepth(key) {
+      const el = document.getElementById('mattDepth_' + key);
+      return el ? parseInt(el.value) : (key.startsWith('b') ? 7 : 10);
     }
 
     function calcMattress() {
-      const total = Object.values(mattressCounts).reduce((s, v) => s + v, 0);
-      if (total === 0) { alert('Add at least one mattress or box spring.'); return; }
+      const truck = TRUCK_DIMS[document.getElementById('mattTruckSize').value] || TRUCK_DIMS.jl;
+      const tW = truck.wIn, tL = truck.lIn, tH = truck.hIn;
 
-      let trucks = 0;
-      Object.keys(mattressCounts).forEach(k => { trucks += (mattressCounts[k] || 0) * (mattressVol[k] || 0); });
-      const snapped = snapToEighth(trucks);
+      // Build item list: each piece as {w, l, d, label, color}
+      // Mattresses stand on their width edge (width becomes height in truck)
+      // Box springs lay flat or stand — they're thinner, we stand them too
+      const items = [];
+      Object.keys(MATT_DIMS).forEach(key => {
+        const cnt = mattCounts[key] || 0;
+        if (!cnt) return;
+        const dim = MATT_DIMS[key];
+        const depth = getDepth(key);
+        for (let i = 0; i < cnt; i++) {
+          // Standing on short edge: height in truck = width of mattress
+          // footprint along truck length = mattress length, depth = thickness
+          items.push({ w: dim.w, l: dim.l, d: depth, label: dim.label, color: dim.color, isBox: dim.isBox });
+        }
+      });
+
+      if (!items.length) { alert('Add at least one mattress or box spring.'); return; }
+
+      // Pack greedily along truck length, standing items on width edge
+      // Each item takes up 'depth' inches along truck length
+      // Can fit multiple items side-by-side if widths sum <= truck width
+      // Sort by width descending for better packing
+      items.sort((a, b) => b.w - a.w);
+
+      const rows = []; // each row: array of items packed side-by-side
+      let lengthUsed = 0;
+      let overflow = [];
+
+      for (const item of items) {
+        if (item.w > tH) {
+          // Even standing up, too tall — lay flat (uses length of mattress as height)
+          // Check if it fits laying flat
+          overflow.push(item.label + ' too tall standing (' + item.w + '″ > ' + tH + '″ ceiling)');
+        }
+        // Try to fit in an existing row (same depth, width fits)
+        let placed = false;
+        for (const row of rows) {
+          const rowDepth = row[0].d;
+          const rowWidthUsed = row.reduce((s, i) => s + i.w, 0);
+          if (Math.abs(item.d - rowDepth) <= 2 && rowWidthUsed + item.w <= tW) {
+            row.push(item);
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          // New row
+          const rowDepth = item.d;
+          if (lengthUsed + rowDepth <= tL) {
+            rows.push([item]);
+            lengthUsed += rowDepth;
+          } else {
+            overflow.push(item.label);
+          }
+        }
+      }
+
+      // Total volume in cubic inches → cubic feet → truck fraction
+      let totalCubicIn = 0;
+      items.forEach(item => { totalCubicIn += item.w * item.l * item.d; });
+      const cubicFt = totalCubicIn / 1728;
+      const truckCubicFt = (tW * tL * tH) / 1728;
+      const truckFraction = cubicFt / 400; // standard 400 cu ft/truck
+      const snapped = snapToEighth(truckFraction);
 
       // Build description
       const parts = [];
-      if (mattressCounts.twin) parts.push(mattressCounts.twin + ' Twin');
-      if (mattressCounts.full) parts.push(mattressCounts.full + ' Full');
-      if (mattressCounts.queen) parts.push(mattressCounts.queen + ' Queen');
-      if (mattressCounts.king) parts.push(mattressCounts.king + ' King');
-      if (mattressCounts.boxspring) parts.push(mattressCounts.boxspring + ' Box Spring');
+      if (mattCounts.mTwin)  parts.push(mattCounts.mTwin + ' Twin');
+      if (mattCounts.mFull)  parts.push(mattCounts.mFull + ' Full');
+      if (mattCounts.mQueen) parts.push(mattCounts.mQueen + ' Queen');
+      if (mattCounts.mKing)  parts.push(mattCounts.mKing + ' King');
+      const bsParts = [];
+      if (mattCounts.bTwin)  bsParts.push(mattCounts.bTwin + ' Twin');
+      if (mattCounts.bFull)  bsParts.push(mattCounts.bFull + ' Full');
+      if (mattCounts.bQueen) bsParts.push(mattCounts.bQueen + ' Queen');
+      if (mattCounts.bKing)  bsParts.push(mattCounts.bKing + ' King');
+      if (bsParts.length) parts.push('BS: ' + bsParts.join(', '));
       const desc = parts.join(', ');
 
-      mattressCalcData = { trucks: snapped, description: desc, total };
+      const totalPieces = Object.values(mattCounts).reduce((s,v) => s+v, 0);
+      // Count just mattresses (not box springs) for recycling fee
+      const mattPieces = ['mTwin','mFull','mQueen','mKing'].reduce((s,k) => s + (mattCounts[k]||0), 0);
+
+      mattressCalcData = { trucks: snapped, description: desc, totalPieces, mattPieces };
 
       document.getElementById('mattressCalcVolume').textContent = formatTrucks(snapped);
-      document.getElementById('mattressCalcDetail').textContent = desc + ' • Mattress recycling fee applies';
+      let detailText = desc + ' • Recycling fee applies';
+      if (overflow.length) detailText += ' ⚠️ May not all fit: ' + overflow.join(', ');
+      document.getElementById('mattressCalcDetail').textContent = detailText;
       document.getElementById('mattressCalcResult').style.display = 'block';
       document.getElementById('mattressAddBtn').disabled = false;
       document.getElementById('mattressAddBtn').style.opacity = '1';
+
+      // Draw packing diagram
+      renderMattressDiagram(rows, truck, overflow);
+
+      const noteLines = [
+        '📐 ' + truck.label,
+        '📦 ' + items.length + ' piece' + (items.length !== 1 ? 's' : '') + ' · ' + cubicFt.toFixed(1) + ' cu ft · ' + formatTrucks(snapped),
+      ];
+      if (overflow.length) noteLines.push('⚠️ Overflow: ' + overflow.join(', '));
+      else noteLines.push('✓ All pieces fit standing on edge');
+      document.getElementById('mattPackNote').textContent = noteLines.join('  |  ');
+    }
+
+    function renderMattressDiagram(rows, truck, overflow) {
+      const canvas = document.getElementById('mattPackCanvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const CW = canvas.width, CH = canvas.height;
+      ctx.clearRect(0, 0, CW, CH);
+
+      // Background
+      ctx.fillStyle = '#1e2f40';
+      ctx.fillRect(0, 0, CW, CH);
+
+      if (!rows || !rows.length || !truck) {
+        ctx.fillStyle = '#64748b';
+        ctx.font = '13px DM Sans, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Enter counts and tap Calculate to see packing diagram', CW/2, CH/2);
+        return;
+      }
+
+      const PAD = 12;
+      // Scale: map truck length → canvas width, truck width → canvas height
+      const scaleX = (CW - PAD*2) / truck.lIn;
+      const scaleY = (CH - PAD*2) / truck.wIn;
+
+      // Draw truck outline
+      ctx.strokeStyle = '#2d4050';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(PAD, PAD, truck.lIn * scaleX, truck.wIn * scaleY);
+
+      // Draw packed items
+      let xPos = 0;
+      rows.forEach(row => {
+        const rowDepth = row[0].d * scaleX;
+        let yPos = 0;
+        row.forEach(item => {
+          const x = PAD + xPos;
+          const y = PAD + yPos;
+          const iw = item.d * scaleX;
+          const ih = item.w * scaleY;
+
+          ctx.fillStyle = item.color + '33'; // 20% opacity fill
+          ctx.fillRect(x, y, iw, ih);
+          ctx.strokeStyle = item.color;
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(x, y, iw, ih);
+
+          // Label if wide enough
+          if (iw > 20 && ih > 14) {
+            ctx.fillStyle = item.color;
+            ctx.font = 'bold 9px Space Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(item.label, x + iw/2, y + ih/2);
+          }
+          yPos += item.w * scaleY;
+        });
+        xPos += rowDepth;
+      });
+
+      // Overflow indicator
+      if (overflow && overflow.length) {
+        ctx.fillStyle = 'rgba(248,113,113,0.15)';
+        ctx.fillRect(PAD + xPos, PAD, (truck.lIn * scaleX) - xPos, truck.wIn * scaleY);
+        ctx.fillStyle = '#f87171';
+        ctx.font = '10px DM Sans, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('OVERFLOW', PAD + xPos + ((truck.lIn * scaleX - xPos) / 2), CH/2);
+      }
+
+      // Length used indicator
+      ctx.fillStyle = '#64748b';
+      ctx.font = '9px Space Mono, monospace';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(Math.round(xPos / scaleX) + '″ used / ' + truck.lIn + '″ total', CW - PAD, CH - 2);
     }
 
     function addMattressToEstimate() {
       if (!mattressCalcData) return;
-      // Row 1: volume charge
       const truckLabel = trucksToLabel(mattressCalcData.trucks);
       currentEstimate.charges.push({
         type: 'volume',
@@ -6501,7 +6752,7 @@
         truckQty: 1,
         truckVolume: mattressCalcData.trucks
       });
-      // Row 2: mattress recycling surcharge — use existing price book item if available
+      // Recycling surcharge — by number of mattress pieces (not box springs)
       const recycleItem = findPriceItem('mattress');
       if (recycleItem) {
         currentEstimate.charges.push({
@@ -6510,21 +6761,20 @@
           name: recycleItem.name,
           blockName: recycleItem.blockName,
           priceBlockID: recycleItem.priceBlockID,
-          qty: mattressCalcData.total,
+          qty: mattressCalcData.mattPieces,
           unitPrice: recycleItem.value,
           area: 'Bedroom',
           description: 'Mattress recycling — ' + mattressCalcData.description,
           taxID: recycleItem.taxID || 146
         });
       } else {
-        // No price book match — add a placeholder surcharge at $0 for the crew to price manually
         currentEstimate.charges.push({
           type: 'surcharge',
           priceItemID: null,
           name: 'Mattress Recycling Fee',
           blockName: '',
           priceBlockID: null,
-          qty: mattressCalcData.total,
+          qty: mattressCalcData.mattPieces,
           unitPrice: 0,
           area: 'Bedroom',
           description: 'Mattress recycling — ' + mattressCalcData.description,
