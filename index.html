@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v1.7.1 | 2026-04-01">
+  <meta name="crewlogic-version" content="v1.7.2 | 2026-04-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -6585,14 +6585,29 @@
       const allFit = remaining.length === 0;
       const desc = descParts.join(', ') + (bsDescParts.length ? ' + BS: ' + bsDescParts.join(', ') : '');
 
-      mattWizardCalcData = { trucksNeeded, allFit, desc, mattPieces, bsPieces, totalPieces: mattPieces + bsPieces, truckResults };
+      // Floor-area based volume: sum actual footprint of every placed item across all trucks
+      // divided by truck floor area. Mattresses extend above the walls so cubic volume
+      // is meaningless — floor occupancy is the correct measure.
+      const truckFloor = truck.w * truck.l;
+      let totalFloorUsed = 0;
+      truckResults.forEach(r => {
+        r.placed.forEach(p => {
+          const w = p.rotatedW !== undefined ? p.rotatedW : p.item.depth;
+          const h = p.rotatedH !== undefined ? p.rotatedH : p.item.itemWidth;
+          totalFloorUsed += w * h;
+        });
+      });
+      const rawFraction = totalFloorUsed / truckFloor;
+      const actualTrucks = Math.round(rawFraction * 8) / 8; // snap to nearest 1/8
+
+      mattWizardCalcData = { trucksNeeded, actualTrucks, allFit, desc, mattPieces, bsPieces, totalPieces: mattPieces + bsPieces, truckResults };
 
       // Build summary
       const summaryEl = document.getElementById('mattWizardResultSummary');
       summaryEl.innerHTML =
         '<div style="background:var(--bg-card);border:1px solid var(--accent-yellow);border-radius:var(--radius-sm);padding:12px;">' +
         '<div style="font-size:11px;color:var(--accent-yellow);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Result</div>' +
-        '<div style="font-family:monospace;font-size:20px;font-weight:700;color:var(--accent-green);margin-bottom:4px;">' + trucksNeeded + ' truck' + (trucksNeeded > 1 ? 's' : '') + '</div>' +
+        '<div style="font-family:monospace;font-size:20px;font-weight:700;color:var(--accent-green);margin-bottom:4px;">' + formatTrucks(actualTrucks) + '</div>' +
         '<div style="font-size:12px;color:var(--text-muted);">' + (allFit ? '✓ All ' + totalItems + ' items fit' : '⚠️ ' + remaining.length + ' items overflow') + ' &bull; ' + desc + '</div>' +
         '</div>';
 
@@ -6623,22 +6638,39 @@
 
     function addMattressWizardToEstimate() {
       if (!mattWizardCalcData) return;
-      const { trucksNeeded, desc, mattPieces, bsPieces, totalPieces } = mattWizardCalcData;
+      const { actualTrucks, desc, mattPieces, bsPieces, totalPieces } = mattWizardCalcData;
 
-      // Volume row(s) — Full truck × whole trucks, then fractional if needed
-      // Since packTruck fills complete trucks, trucksNeeded is always whole trucks
-      if (trucksNeeded === 1) {
+      // Volume — use actual floor-area fraction snapped to nearest 1/8
+      const wholeTrucks = Math.floor(actualTrucks);
+      const remainder   = Math.round((actualTrucks - wholeTrucks) * 8) / 8;
+
+      if (actualTrucks <= 1) {
+        // Single fractional row
+        const label = trucksToLabel(actualTrucks);
         currentEstimate.charges.push({
           type: 'volume', room: 'Mattress', area: 'Bedroom',
           description: 'Mattress removal — ' + desc,
-          truckLabel: 'Full', truckQty: 1, truckVolume: 1
+          truckLabel: label, truckQty: 1,
+          truckVolume: Math.round(actualTrucks * 1000) / 1000
         });
       } else {
-        currentEstimate.charges.push({
-          type: 'volume', room: 'Mattress', area: 'Bedroom',
-          description: 'Mattress removal — ' + desc,
-          truckLabel: 'Full', truckQty: trucksNeeded, truckVolume: trucksNeeded
-        });
+        // Whole trucks row
+        if (wholeTrucks > 0) {
+          currentEstimate.charges.push({
+            type: 'volume', room: 'Mattress', area: 'Bedroom',
+            description: 'Mattress removal — ' + desc,
+            truckLabel: 'Full', truckQty: wholeTrucks, truckVolume: wholeTrucks
+          });
+        }
+        // Remainder row if any
+        if (remainder > 0) {
+          currentEstimate.charges.push({
+            type: 'volume', room: 'Mattress', area: 'Bedroom',
+            description: 'Mattress removal (continued) — ' + desc,
+            truckLabel: trucksToLabel(remainder), truckQty: 1,
+            truckVolume: Math.round(remainder * 1000) / 1000
+          });
+        }
       }
 
       // Recycling surcharge — mattresses + box springs
