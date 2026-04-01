@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v1.7 | 2026-04-01">
+  <meta name="crewlogic-version" content="v1.7.1 | 2026-04-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1335,8 +1335,8 @@
 
           <!-- INPUT PANEL -->
           <div id="mattWizardInputPanel">
-            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:6px;">Truck Size</div>
-            <div class="form-group">
+            <!-- Truck selector -->
+            <div class="form-group" style="margin-bottom:10px;">
               <select class="form-select" id="mattTruckSizeW" onchange="updateTruckDimsW()" style="font-size:13px;padding:8px 12px;">
                 <option value="jl" selected>Junkluggers Truck (8' x 12' x 5')</option>
                 <option value="10">10-12' Box Truck (7.5' x 11' x 6'3")</option>
@@ -1345,40 +1345,86 @@
               </select>
               <div class="form-hint" id="mattTruckDimsW">Interior: 8' wide x 12' long x 5' high</div>
             </div>
-            <hr class="form-divider">
-            <div class="form-section-label">Twin (38" x 75")</div>
-            <div class="form-row">
-              <div class="form-group" style="flex:1"><div class="form-label">Mattresses</div><div class="count-stepper"><button class="stepper-btn" onclick="mattAdjust('mTwinW',-1)">−</button><span class="stepper-value" id="mTwinW">0</span><button class="stepper-btn" onclick="mattAdjust('mTwinW',1)">+</button></div></div>
-              <div class="form-group" style="flex:0.6"><div class="form-label">Depth</div><select class="form-select" id="mTwinDW"><option value="8" selected>8"</option><option value="10">10"</option><option value="12">12"</option><option value="14">14"</option></select></div>
-              <div class="form-group" style="flex:1"><div class="form-label">Box Springs</div><div class="count-stepper"><button class="stepper-btn" onclick="mattAdjust('bTwinW',-1)">−</button><span class="stepper-value" id="bTwinW">0</span><button class="stepper-btn" onclick="mattAdjust('bTwinW',1)">+</button></div></div>
-              <div class="form-group" style="flex:0.6"><div class="form-label">Depth</div><select class="form-select" id="bTwinDW"><option value="6">6"</option><option value="7" selected>7"</option><option value="8">8"</option><option value="9">9"</option></select></div>
+
+            <!-- Compact grid: SIZE | MATTRESSES (count + depth) | BOX SPRINGS (count + depth) -->
+            <div style="display:grid;grid-template-columns:52px 1fr 44px 1fr 44px;gap:4px;align-items:center;margin-bottom:4px;padding:0 2px;">
+              <div></div>
+              <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent-green);text-align:center;">Mattresses</div>
+              <div style="font-size:9px;color:var(--text-muted);text-align:center;">Depth</div>
+              <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent-blue);text-align:center;">Box Springs</div>
+              <div style="font-size:9px;color:var(--text-muted);text-align:center;">Depth</div>
             </div>
-            <hr class="form-divider">
-            <div class="form-section-label">Full (54" x 75")</div>
-            <div class="form-row">
-              <div class="form-group" style="flex:1"><div class="form-label">Mattresses</div><div class="count-stepper"><button class="stepper-btn" onclick="mattAdjust('mFullW',-1)">−</button><span class="stepper-value" id="mFullW">0</span><button class="stepper-btn" onclick="mattAdjust('mFullW',1)">+</button></div></div>
-              <div class="form-group" style="flex:0.6"><div class="form-label">Depth</div><select class="form-select" id="mFullDW"><option value="8">8"</option><option value="10" selected>10"</option><option value="12">12"</option><option value="14">14"</option></select></div>
-              <div class="form-group" style="flex:1"><div class="form-label">Box Springs</div><div class="count-stepper"><button class="stepper-btn" onclick="mattAdjust('bFullW',-1)">−</button><span class="stepper-value" id="bFullW">0</span><button class="stepper-btn" onclick="mattAdjust('bFullW',1)">+</button></div></div>
-              <div class="form-group" style="flex:0.6"><div class="form-label">Depth</div><select class="form-select" id="bFullDW"><option value="6">6"</option><option value="7">7"</option><option value="8" selected>8"</option><option value="9">9"</option></select></div>
+
+            <!-- Twin -->
+            <div style="display:grid;grid-template-columns:52px 1fr 44px 1fr 44px;gap:4px;align-items:center;padding:6px 2px;border-top:1px solid var(--border);">
+              <div style="font-size:11px;font-weight:600;color:var(--text-secondary);">Twin<br><span style="font-size:9px;color:var(--text-muted);font-weight:400;">38"×75"</span></div>
+              <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
+                <button class="stepper-btn" onclick="mattAdjust('mTwinW',-1)" style="width:24px;height:24px;font-size:14px;">−</button>
+                <span class="stepper-value" id="mTwinW" style="font-size:16px;min-width:22px;">0</span>
+                <button class="stepper-btn" onclick="mattAdjust('mTwinW',1)" style="width:24px;height:24px;font-size:14px;">+</button>
+              </div>
+              <select class="form-select" id="mTwinDW" style="font-size:11px;padding:4px 2px;text-align:center;"><option value="8" selected>8"</option><option value="10">10"</option><option value="12">12"</option><option value="14">14"</option></select>
+              <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
+                <button class="stepper-btn" onclick="mattAdjust('bTwinW',-1)" style="width:24px;height:24px;font-size:14px;">−</button>
+                <span class="stepper-value" id="bTwinW" style="font-size:16px;min-width:22px;">0</span>
+                <button class="stepper-btn" onclick="mattAdjust('bTwinW',1)" style="width:24px;height:24px;font-size:14px;">+</button>
+              </div>
+              <select class="form-select" id="bTwinDW" style="font-size:11px;padding:4px 2px;text-align:center;"><option value="6">6"</option><option value="7" selected>7"</option><option value="8">8"</option><option value="9">9"</option></select>
             </div>
-            <hr class="form-divider">
-            <div class="form-section-label">Queen (60" x 80")</div>
-            <div class="form-row">
-              <div class="form-group" style="flex:1"><div class="form-label">Mattresses</div><div class="count-stepper"><button class="stepper-btn" onclick="mattAdjust('mQueenW',-1)">−</button><span class="stepper-value" id="mQueenW">0</span><button class="stepper-btn" onclick="mattAdjust('mQueenW',1)">+</button></div></div>
-              <div class="form-group" style="flex:0.6"><div class="form-label">Depth</div><select class="form-select" id="mQueenDW"><option value="8">8"</option><option value="10">10"</option><option value="12" selected>12"</option><option value="14">14"</option></select></div>
-              <div class="form-group" style="flex:1"><div class="form-label">Box Springs</div><div class="count-stepper"><button class="stepper-btn" onclick="mattAdjust('bQueenW',-1)">−</button><span class="stepper-value" id="bQueenW">0</span><button class="stepper-btn" onclick="mattAdjust('bQueenW',1)">+</button></div></div>
-              <div class="form-group" style="flex:0.6"><div class="form-label">Depth</div><select class="form-select" id="bQueenDW"><option value="6">6"</option><option value="7">7"</option><option value="8">8"</option><option value="9" selected>9"</option></select></div>
+
+            <!-- Full -->
+            <div style="display:grid;grid-template-columns:52px 1fr 44px 1fr 44px;gap:4px;align-items:center;padding:6px 2px;border-top:1px solid var(--border);">
+              <div style="font-size:11px;font-weight:600;color:var(--text-secondary);">Full<br><span style="font-size:9px;color:var(--text-muted);font-weight:400;">54"×75"</span></div>
+              <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
+                <button class="stepper-btn" onclick="mattAdjust('mFullW',-1)" style="width:24px;height:24px;font-size:14px;">−</button>
+                <span class="stepper-value" id="mFullW" style="font-size:16px;min-width:22px;">0</span>
+                <button class="stepper-btn" onclick="mattAdjust('mFullW',1)" style="width:24px;height:24px;font-size:14px;">+</button>
+              </div>
+              <select class="form-select" id="mFullDW" style="font-size:11px;padding:4px 2px;text-align:center;"><option value="8">8"</option><option value="10" selected>10"</option><option value="12">12"</option><option value="14">14"</option></select>
+              <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
+                <button class="stepper-btn" onclick="mattAdjust('bFullW',-1)" style="width:24px;height:24px;font-size:14px;">−</button>
+                <span class="stepper-value" id="bFullW" style="font-size:16px;min-width:22px;">0</span>
+                <button class="stepper-btn" onclick="mattAdjust('bFullW',1)" style="width:24px;height:24px;font-size:14px;">+</button>
+              </div>
+              <select class="form-select" id="bFullDW" style="font-size:11px;padding:4px 2px;text-align:center;"><option value="6">6"</option><option value="7">7"</option><option value="8" selected>8"</option><option value="9">9"</option></select>
             </div>
-            <hr class="form-divider">
-            <div class="form-section-label">King (76" x 80")</div>
-            <div class="form-row">
-              <div class="form-group" style="flex:1"><div class="form-label">Mattresses</div><div class="count-stepper"><button class="stepper-btn" onclick="mattAdjust('mKingW',-1)">−</button><span class="stepper-value" id="mKingW">0</span><button class="stepper-btn" onclick="mattAdjust('mKingW',1)">+</button></div></div>
-              <div class="form-group" style="flex:0.6"><div class="form-label">Depth</div><select class="form-select" id="mKingDW"><option value="8">8"</option><option value="10">10"</option><option value="12" selected>12"</option><option value="14">14"</option></select></div>
-              <div class="form-group" style="flex:1"><div class="form-label">Box Springs</div><div class="count-stepper"><button class="stepper-btn" onclick="mattAdjust('bKingW',-1)">−</button><span class="stepper-value" id="bKingW">0</span><button class="stepper-btn" onclick="mattAdjust('bKingW',1)">+</button></div></div>
-              <div class="form-group" style="flex:0.6"><div class="form-label">Depth</div><select class="form-select" id="bKingDW"><option value="6">6"</option><option value="7">7"</option><option value="8">8"</option><option value="9" selected>9"</option></select></div>
+
+            <!-- Queen -->
+            <div style="display:grid;grid-template-columns:52px 1fr 44px 1fr 44px;gap:4px;align-items:center;padding:6px 2px;border-top:1px solid var(--border);">
+              <div style="font-size:11px;font-weight:600;color:var(--text-secondary);">Queen<br><span style="font-size:9px;color:var(--text-muted);font-weight:400;">60"×80"</span></div>
+              <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
+                <button class="stepper-btn" onclick="mattAdjust('mQueenW',-1)" style="width:24px;height:24px;font-size:14px;">−</button>
+                <span class="stepper-value" id="mQueenW" style="font-size:16px;min-width:22px;">0</span>
+                <button class="stepper-btn" onclick="mattAdjust('mQueenW',1)" style="width:24px;height:24px;font-size:14px;">+</button>
+              </div>
+              <select class="form-select" id="mQueenDW" style="font-size:11px;padding:4px 2px;text-align:center;"><option value="8">8"</option><option value="10">10"</option><option value="12" selected>12"</option><option value="14">14"</option></select>
+              <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
+                <button class="stepper-btn" onclick="mattAdjust('bQueenW',-1)" style="width:24px;height:24px;font-size:14px;">−</button>
+                <span class="stepper-value" id="bQueenW" style="font-size:16px;min-width:22px;">0</span>
+                <button class="stepper-btn" onclick="mattAdjust('bQueenW',1)" style="width:24px;height:24px;font-size:14px;">+</button>
+              </div>
+              <select class="form-select" id="bQueenDW" style="font-size:11px;padding:4px 2px;text-align:center;"><option value="6">6"</option><option value="7">7"</option><option value="8">8"</option><option value="9" selected>9"</option></select>
             </div>
-            <div id="mattWizardValidationError" style="color:var(--accent-red);font-size:13px;text-align:center;margin-top:8px;min-height:18px;"></div>
-            <button onclick="calculateMattressWizard()" style="width:100%;padding:14px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);color:#000;font-weight:700;font-size:15px;cursor:pointer;margin-top:12px;">
+
+            <!-- King -->
+            <div style="display:grid;grid-template-columns:52px 1fr 44px 1fr 44px;gap:4px;align-items:center;padding:6px 2px;border-top:1px solid var(--border);margin-bottom:10px;">
+              <div style="font-size:11px;font-weight:600;color:var(--text-secondary);">King<br><span style="font-size:9px;color:var(--text-muted);font-weight:400;">76"×80"</span></div>
+              <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
+                <button class="stepper-btn" onclick="mattAdjust('mKingW',-1)" style="width:24px;height:24px;font-size:14px;">−</button>
+                <span class="stepper-value" id="mKingW" style="font-size:16px;min-width:22px;">0</span>
+                <button class="stepper-btn" onclick="mattAdjust('mKingW',1)" style="width:24px;height:24px;font-size:14px;">+</button>
+              </div>
+              <select class="form-select" id="mKingDW" style="font-size:11px;padding:4px 2px;text-align:center;"><option value="8">8"</option><option value="10">10"</option><option value="12" selected>12"</option><option value="14">14"</option></select>
+              <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
+                <button class="stepper-btn" onclick="mattAdjust('bKingW',-1)" style="width:24px;height:24px;font-size:14px;">−</button>
+                <span class="stepper-value" id="bKingW" style="font-size:16px;min-width:22px;">0</span>
+                <button class="stepper-btn" onclick="mattAdjust('bKingW',1)" style="width:24px;height:24px;font-size:14px;">+</button>
+              </div>
+              <select class="form-select" id="bKingDW" style="font-size:11px;padding:4px 2px;text-align:center;"><option value="6">6"</option><option value="7">7"</option><option value="8">8"</option><option value="9" selected>9"</option></select>
+            </div>
+
+            <div id="mattWizardValidationError" style="color:var(--accent-red);font-size:13px;text-align:center;margin-bottom:8px;min-height:18px;"></div>
+            <button onclick="calculateMattressWizard()" style="width:100%;padding:14px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);color:#000;font-weight:700;font-size:15px;cursor:pointer;">
               Calculate Fit
             </button>
           </div>
