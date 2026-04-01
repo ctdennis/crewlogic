@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v1.8.1 | 2026-04-01">
+  <meta name="crewlogic-version" content="v1.9 | 2026-04-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1097,7 +1097,8 @@
                 <div id="wizardMenu" style="display:none;position:absolute;top:calc(100% + 4px);left:0;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);z-index:50;min-width:160px;box-shadow:var(--shadow);">
                   <button onclick="closeWizardMenu();showShedWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🏚️ Shed</button>
                   <button onclick="closeWizardMenu();showStorageWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">📦 Storage Unit</button>
-                  <button onclick="closeWizardMenu();showMattressWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;">🛏️ Mattress</button>
+                  <button onclick="closeWizardMenu();showMattressWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🛏️ Mattress</button>
+                  <button onclick="closeWizardMenu();showPalletWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;">🪵 Pallets</button>
                 </div>
               </div>
             </div>
@@ -1120,7 +1121,8 @@
               <div id="wizardMenuBottom" style="display:none;position:absolute;bottom:calc(100% + 4px);left:0;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);z-index:50;min-width:160px;box-shadow:var(--shadow);">
                 <button onclick="closeWizardMenu();showShedWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🏚️ Shed</button>
                 <button onclick="closeWizardMenu();showStorageWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">📦 Storage Unit</button>
-                <button onclick="closeWizardMenu();showMattressWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;">🛏️ Mattress</button>
+                <button onclick="closeWizardMenu();showMattressWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🛏️ Mattress</button>
+                <button onclick="closeWizardMenu();showPalletWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;">🪵 Pallets</button>
               </div>
             </div>
           </div>
@@ -1432,6 +1434,49 @@
         </div>
       </div>
 
+
+
+      <!-- PALLET WIZARD MODAL -->
+      <div id="palletWizardModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:200;align-items:flex-end;justify-content:center;">
+        <div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;max-height:92vh;overflow-y:auto;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+            <div style="font-size:16px;font-weight:700;color:var(--accent-green);">🪵 Pallet Calculator</div>
+            <button onclick="document.getElementById('palletWizardModal').style.display='none'" style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;">✕</button>
+          </div>
+
+          <!-- Number of sizes selector -->
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:10px 14px;background:var(--bg-card);border-radius:var(--radius-sm);border:1px solid var(--border);">
+            <div style="font-size:13px;color:var(--text-secondary);flex:1;">How many different sizes?</div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <button onclick="palletSizeAdj(-1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
+              <span id="palletSizeCount" style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--accent-green);min-width:20px;text-align:center;">1</span>
+              <button onclick="palletSizeAdj(1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
+            </div>
+          </div>
+
+          <!-- Column headers -->
+          <div style="display:grid;grid-template-columns:60px 1fr 52px 52px 52px;gap:4px;align-items:center;margin-bottom:4px;padding:0 2px;">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);">Qty</div>
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);">Area</div>
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);text-align:center;">L"</div>
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);text-align:center;">W"</div>
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);text-align:center;">H"</div>
+          </div>
+
+          <!-- Dynamic pallet rows -->
+          <div id="palletRows"></div>
+
+          <!-- Result -->
+          <div id="palletCalcResult" style="display:none;background:var(--bg-card);border:1px solid var(--accent-green);border-radius:var(--radius-sm);padding:12px;margin-bottom:12px;">
+            <div style="font-size:11px;color:var(--accent-green);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Estimated Volume</div>
+            <div id="palletCalcVolume" style="font-family:'Space Mono',monospace;font-size:20px;font-weight:700;color:var(--accent-green);"></div>
+            <div id="palletCalcDetail" style="font-size:11px;color:var(--text-muted);margin-top:4px;line-height:1.6;"></div>
+          </div>
+
+          <button onclick="calcPallets()" style="width:100%;padding:13px;background:var(--bg-input);border:1px solid var(--accent-green);border-radius:var(--radius-sm);color:var(--accent-green);font-weight:700;font-size:14px;cursor:pointer;margin-bottom:8px;">Calculate Volume</button>
+          <button id="palletAddBtn" onclick="addPalletsToEstimate()" disabled style="width:100%;padding:13px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);color:#000;font-weight:700;font-size:14px;cursor:pointer;opacity:0.4;">Add to Estimate</button>
+        </div>
+      </div>
 
       <!-- SAVE PROMPT MODAL -->
       <div id="savePromptModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:200;align-items:flex-end;justify-content:center;">
@@ -6345,6 +6390,132 @@
       } else {
         collapseClientInfo();
       }
+    }
+
+    // ===== PALLET WIZARD =====
+    const PALLET_AREAS = ['Loading Dock','Exterior','Warehouse','Commercial','Storage Unit','Office'];
+    let palletCalcData = null;
+    let palletNumSizes = 1;
+
+    function showPalletWizard() {
+      palletCalcData = null;
+      palletNumSizes = 1;
+      document.getElementById('palletSizeCount').textContent = '1';
+      document.getElementById('palletCalcResult').style.display = 'none';
+      document.getElementById('palletAddBtn').disabled = true;
+      document.getElementById('palletAddBtn').style.opacity = '0.4';
+      renderPalletRows();
+      document.getElementById('palletWizardModal').style.display = 'flex';
+    }
+
+    function palletSizeAdj(delta) {
+      palletNumSizes = Math.min(5, Math.max(1, palletNumSizes + delta));
+      document.getElementById('palletSizeCount').textContent = palletNumSizes;
+      renderPalletRows();
+    }
+
+    function renderPalletRows() {
+      const container = document.getElementById('palletRows');
+      // Preserve existing values before re-rendering
+      const existing = [];
+      container.querySelectorAll('.pallet-row').forEach((row, i) => {
+        existing[i] = {
+          qty: row.querySelector('.pallet-qty').value,
+          area: row.querySelector('.pallet-area').value,
+          l: row.querySelector('.pallet-l').value,
+          w: row.querySelector('.pallet-w').value,
+          h: row.querySelector('.pallet-h').value
+        };
+      });
+
+      let html = '';
+      for (let i = 0; i < palletNumSizes; i++) {
+        const prev = existing[i] || {};
+        const areaOpts = PALLET_AREAS.map(a =>
+          `<option value="${a}"${(prev.area || 'Loading Dock') === a ? ' selected' : ''}>${a}</option>`
+        ).join('');
+        html += `<div class="pallet-row" style="display:grid;grid-template-columns:60px 1fr 52px 52px 52px;gap:4px;align-items:center;padding:6px 2px;border-top:1px solid var(--border);">
+          <input type="number" class="form-input pallet-qty" value="${prev.qty || 1}" min="1" inputmode="numeric"
+            style="padding:6px 8px;font-family:'Space Mono',monospace;font-size:14px;font-weight:700;text-align:center;">
+          <select class="form-select pallet-area" style="font-size:11px;padding:6px 4px;">${areaOpts}</select>
+          <input type="number" class="form-input pallet-l" value="${prev.l || 48}" min="1" inputmode="decimal"
+            style="padding:6px 4px;font-size:13px;text-align:center;">
+          <input type="number" class="form-input pallet-w" value="${prev.w || 40}" min="1" inputmode="decimal"
+            style="padding:6px 4px;font-size:13px;text-align:center;">
+          <input type="number" class="form-input pallet-h" value="${prev.h || 6}" min="1" inputmode="decimal"
+            style="padding:6px 4px;font-size:13px;text-align:center;">
+        </div>`;
+      }
+      container.innerHTML = html;
+    }
+
+    function calcPallets() {
+      const rows = document.querySelectorAll('.pallet-row');
+      let totalCubicIn = 0;
+      const groups = [];
+      let valid = true;
+
+      rows.forEach((row, i) => {
+        const qty = parseInt(row.querySelector('.pallet-qty').value) || 0;
+        const area = row.querySelector('.pallet-area').value;
+        const l = parseFloat(row.querySelector('.pallet-l').value) || 0;
+        const w = parseFloat(row.querySelector('.pallet-w').value) || 0;
+        const h = parseFloat(row.querySelector('.pallet-h').value) || 0;
+
+        if (!qty || !l || !w || !h) { valid = false; return; }
+
+        const cubicIn = l * w * h * qty;
+        totalCubicIn += cubicIn;
+        groups.push({ qty, area, l, w, h, cubicIn });
+      });
+
+      if (!valid || groups.length === 0) {
+        alert('Please fill in all dimensions and quantities.');
+        return;
+      }
+
+      const totalCubicFt = totalCubicIn / 1728;
+      const truckFraction = totalCubicFt / 400;
+      const snapped = Math.round(truckFraction * 8) / 8;
+
+      // Description: "20x 48×40×6", 5x 42×42×5""
+      const descParts = groups.map(g => `${g.qty}x ${g.l}×${g.w}×${g.h}"`);
+      const desc = descParts.join(', ');
+      // Primary area = first row's area
+      const primaryArea = groups[0].area;
+
+      palletCalcData = { trucks: snapped, desc, primaryArea, groups };
+
+      document.getElementById('palletCalcVolume').textContent = formatTrucks(snapped);
+      const totalPallets = groups.reduce((s, g) => s + g.qty, 0);
+      document.getElementById('palletCalcDetail').textContent =
+        totalPallets + ' pallet' + (totalPallets !== 1 ? 's' : '') +
+        ' — ' + desc +
+        ' — ' + totalCubicFt.toFixed(1) + ' cu ft';
+      document.getElementById('palletCalcResult').style.display = 'block';
+      document.getElementById('palletAddBtn').disabled = false;
+      document.getElementById('palletAddBtn').style.opacity = '1';
+    }
+
+    function addPalletsToEstimate() {
+      if (!palletCalcData) return;
+      const { trucks, desc, primaryArea } = palletCalcData;
+      const truckQty = Math.round(trucks * 8) / 8;
+
+      currentEstimate.charges.push({
+        type: 'volume',
+        room: 'Pallets',
+        area: primaryArea,
+        description: 'Pallet removal — ' + desc,
+        truckLabel: trucks <= 1 ? trucksToLabel(trucks) : 'Full',
+        truckQty: trucks <= 1 ? 1 : truckQty,
+        truckVolume: truckQty
+      });
+
+      renderCharges();
+      updateTotals();
+      autoSaveDraft();
+      document.getElementById('palletWizardModal').style.display = 'none';
     }
 
     // ===== SPECIALTY WIZARD DROPDOWN =====
