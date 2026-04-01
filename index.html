@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v1.4 | 2026-04-01">
+  <meta name="crewlogic-version" content="v1.4.1 | 2026-04-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -6317,14 +6317,16 @@
       const fillMap = { 'Empty': 0.05, '25% full': 0.25, '50% full': 0.50, '75% full': 0.75, 'Packed full': 1.0 };
       const fillPct = fillMap[fill] || 0.5;
 
-      // Structural debris: ~1 truck per 200 sq ft of floor area (full demo)
-      // We estimate shed structure volume + contents volume
-      const structureCubicFt = (2 * L * wallH + 2 * W * wallH + L * W) * 0.5; // rough surface area × thickness
+      // Structural debris: surface area × material thickness estimate
+      const structureCubicFt = (2 * L * wallH + 2 * W * wallH + L * W) * 0.5;
       const contentsCubicFt = cubicFt * fillPct;
       const totalCubicFt = structureCubicFt + contentsCubicFt;
 
-      // Convert cubic feet to truck fractions (1 truck ≈ 400 cubic ft usable)
-      const truckFraction = totalCubicFt / 400;
+      // Packing inefficiency factor — demolished shed lumber (irregular boards, rafters,
+      // roofing) loads very loosely in the truck. 1.3x brings geometric math in line
+      // with real-world crew experience. Tune this value based on field results.
+      const SHED_PACK_FACTOR = 1.3;
+      const truckFraction = (totalCubicFt * SHED_PACK_FACTOR) / 400;
       const snapped = snapToEighth(truckFraction);
 
       const detail = L + '×' + W + ' ft, wall ' + wallH + 'ft' + (peakH ? '/peak ' + peakH + 'ft' : '') +
