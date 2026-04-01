@@ -2855,6 +2855,7 @@
     let priceListID = null;
     let priceListName = '';
     let autoSaveTimer = null;
+    let isDirty = false; // true when estimate has unsaved changes
 
     // Local estimates cache
     function getLocalEstimates() {
@@ -2996,6 +2997,7 @@
       priceBlocks = [];
       priceListID = null;
       priceListName = '';
+      isDirty = false;
       openEstimateEditor();
     }
 
@@ -3158,10 +3160,16 @@
         submitBtn.querySelector('.btn-text').textContent = 'Submit to Vonigo';
         feedbackEl.textContent = '';
       }
+
+      isDirty = false; // estimate just loaded — no unsaved changes
     }
 
     function promptSaveBeforeLeaving() {
-      document.getElementById('savePromptModal').style.display = 'flex';
+      if (isDirty) {
+        document.getElementById('savePromptModal').style.display = 'flex';
+      } else {
+        backToEstimatesList();
+      }
     }
 
     async function saveAndLeave() {
@@ -4633,6 +4641,7 @@
       currentEstimate.address = document.getElementById('estAddress').value.trim();
       currentEstimate.notes = document.getElementById('estNotes').value.trim();
       currentEstimate.updatedAt = new Date().toISOString();
+      isDirty = true; // mark unsaved changes on any mutation
       saveLocalEstimate(currentEstimate);
     }
 
@@ -4664,6 +4673,7 @@
         });
         const data = await res.json();
         if (data.success) {
+          isDirty = false; // changes are now saved
           feedbackEl.textContent = '✓ Draft saved';
           feedbackEl.className = 'settings-feedback ok';
         } else {
@@ -4910,6 +4920,7 @@
       saveLocalEstimate(clone);
       currentEstimate = clone;
       openEstimateEditor();
+      isDirty = true; // clone is unsaved on the backend
     }
 
     async function deleteEstimate(estimateID) {
