@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v1.7.2 | 2026-04-01">
+  <meta name="crewlogic-version" content="v1.7.3 | 2026-04-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -6415,16 +6415,35 @@
 
     function addShedToEstimate() {
       if (!shedCalcData) return;
-      const truckLabel = trucksToLabel(shedCalcData.trucks);
-      currentEstimate.charges.push({
-        type: 'volume',
-        room: 'Shed',
-        area: 'Shed',
-        description: 'Shed removal — ' + shedCalcData.description,
-        truckLabel: truckLabel,
-        truckQty: 1,
-        truckVolume: shedCalcData.trucks
-      });
+      const total = shedCalcData.trucks;
+      const wholeTrucks = Math.floor(total);
+      const remainder   = Math.round((total - wholeTrucks) * 8) / 8;
+      const desc = 'Shed removal — ' + shedCalcData.description;
+
+      if (total <= 1) {
+        currentEstimate.charges.push({
+          type: 'volume', room: 'Shed', area: 'Shed',
+          description: desc,
+          truckLabel: trucksToLabel(total), truckQty: 1,
+          truckVolume: Math.round(total * 1000) / 1000
+        });
+      } else {
+        if (wholeTrucks > 0) {
+          currentEstimate.charges.push({
+            type: 'volume', room: 'Shed', area: 'Shed',
+            description: desc,
+            truckLabel: 'Full', truckQty: wholeTrucks, truckVolume: wholeTrucks
+          });
+        }
+        if (remainder > 0) {
+          currentEstimate.charges.push({
+            type: 'volume', room: 'Shed', area: 'Shed',
+            description: desc + ' (continued)',
+            truckLabel: trucksToLabel(remainder), truckQty: 1,
+            truckVolume: Math.round(remainder * 1000) / 1000
+          });
+        }
+      }
       renderCharges();
       updateTotals();
       autoSaveDraft();
@@ -6493,16 +6512,35 @@
 
     function addStorageToEstimate() {
       if (!storageCalcData) return;
-      const truckLabel = trucksToLabel(storageCalcData.trucks);
-      currentEstimate.charges.push({
-        type: 'volume',
-        room: 'Storage Unit',
-        area: 'Storage Unit',
-        description: 'Storage unit — ' + storageCalcData.description,
-        truckLabel: truckLabel,
-        truckQty: 1,
-        truckVolume: storageCalcData.trucks
-      });
+      const total = storageCalcData.trucks;
+      const wholeTrucks = Math.floor(total);
+      const remainder   = Math.round((total - wholeTrucks) * 8) / 8;
+      const desc = 'Storage unit — ' + storageCalcData.description;
+
+      if (total <= 1) {
+        currentEstimate.charges.push({
+          type: 'volume', room: 'Storage Unit', area: 'Storage Unit',
+          description: desc,
+          truckLabel: trucksToLabel(total), truckQty: 1,
+          truckVolume: Math.round(total * 1000) / 1000
+        });
+      } else {
+        if (wholeTrucks > 0) {
+          currentEstimate.charges.push({
+            type: 'volume', room: 'Storage Unit', area: 'Storage Unit',
+            description: desc,
+            truckLabel: 'Full', truckQty: wholeTrucks, truckVolume: wholeTrucks
+          });
+        }
+        if (remainder > 0) {
+          currentEstimate.charges.push({
+            type: 'volume', room: 'Storage Unit', area: 'Storage Unit',
+            description: desc + ' (continued)',
+            truckLabel: trucksToLabel(remainder), truckQty: 1,
+            truckVolume: Math.round(remainder * 1000) / 1000
+          });
+        }
+      }
       renderCharges();
       updateTotals();
       autoSaveDraft();
