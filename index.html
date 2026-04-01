@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.0 | 2026-04-01">
+  <meta name="crewlogic-version" content="v2.0.1 | 2026-04-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -5434,12 +5434,41 @@
       img.src = src;
     }
 
-    function saveCoverPhotoBase64(base64) {
-      currentEstimate.coverPhoto = base64;
+    async function saveCoverPhotoBase64(base64) {
+      // Show preview immediately from base64 while upload happens
       document.getElementById('coverPhotoImg').src = base64;
       document.getElementById('coverPhotoPreview').style.display = 'block';
       document.getElementById('coverPhotoBtn').style.display = 'none';
+
+      // Store base64 temporarily so PDF generation works while upload is in progress
+      currentEstimate.coverPhoto = base64;
       autoSaveDraft();
+
+      // Upload to Drive in background — replace base64 with Drive URL once done
+      try {
+        const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'uploadPhoto',
+            email: currentUser.email,
+            franchiseID: currentUser.franchiseID,
+            estimateID: currentEstimate.estimateID,
+            chargeIdx: 'cover',
+            label: 'cover',
+            photo: base64
+          })
+        });
+        const data = await response.json();
+        if (data.success && data.photoUrl) {
+          // Replace base64 with Drive URL — keeps sheet cell tiny
+          currentEstimate.coverPhoto = data.photoUrl;
+          // Keep img src as the base64 preview (already loaded) — no flicker
+          autoSaveDraft();
+        }
+      } catch(e) {
+        console.warn('Cover photo Drive upload failed, keeping base64:', e);
+        // Falls back to base64 — will hit cell limit but at least photo is saved
+      }
     }
 
     function closeCropOverlay() {
@@ -5598,19 +5627,31 @@
       const photoH = Math.min(180, H - photoY - 110);
 
       if (est.coverPhoto && photoH > 60) {
-        const tmpImg = new Image();
-        tmpImg.src = est.coverPhoto;
-        const imgW = tmpImg.naturalWidth || 480;
-        const imgH = tmpImg.naturalHeight || 300;
-        const scale = Math.min(photoW / imgW, photoH / imgH);
-        const drawW = imgW * scale;
-        const drawH = imgH * scale;
-        doc.setFillColor(0, 0, 0);
-        doc.rect(lx, photoY, photoW, photoH, 'F');
-        doc.addImage(est.coverPhoto, 'JPEG', lx + (photoW - drawW) / 2, photoY + (photoH - drawH) / 2, drawW, drawH);
-        doc.setDrawColor(50, 80, 100);
-        doc.setLineWidth(0.5);
-        doc.rect(lx, photoY, photoW, photoH);
+        // If coverPhoto is a Drive URL, fetch and convert to base64 for jsPDF
+        let coverPhotoData = est.coverPhoto;
+        if (!coverPhotoData.startsWith('data:')) {
+          try {
+            coverPhotoData = await loadImageAsBase64(coverPhotoData);
+          } catch(e) {
+            console.warn('Cover photo fetch failed for PDF:', e);
+            coverPhotoData = null;
+          }
+        }
+        if (coverPhotoData) {
+          const tmpImg = new Image();
+          tmpImg.src = coverPhotoData;
+          const imgW = tmpImg.naturalWidth || 480;
+          const imgH = tmpImg.naturalHeight || 300;
+          const scale = Math.min(photoW / imgW, photoH / imgH);
+          const drawW = imgW * scale;
+          const drawH = imgH * scale;
+          doc.setFillColor(0, 0, 0);
+          doc.rect(lx, photoY, photoW, photoH, 'F');
+          doc.addImage(coverPhotoData, 'JPEG', lx + (photoW - drawW) / 2, photoY + (photoH - drawH) / 2, drawW, drawH);
+          doc.setDrawColor(50, 80, 100);
+          doc.setLineWidth(0.5);
+          doc.rect(lx, photoY, photoW, photoH);
+        }
       } else if (!est.coverPhoto) {
         doc.setFillColor(0, 0, 0);
         doc.rect(lx, photoY, photoW, photoH, 'F');
@@ -6364,6 +6405,29 @@
       }
       } // end else (not skipBoilerplate)
     } // end generateEstimatePDF
+
+    // Convert a URL to base64 data URI — used by PDF generation for Drive-hosted photos
+    function loadImageAsBase64(url) {
+      return new Promise((resolve, reject) => {
+        // Use a proxy-friendly approach via canvas
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth || img.width;
+            canvas.height = img.naturalHeight || img.height;
+            canvas.getContext('2d').drawImage(img, 0, 0);
+            resolve(canvas.toDataURL('image/jpeg', 0.85));
+          } catch(e) {
+            reject(e);
+          }
+        };
+        img.onerror = () => reject(new Error('Failed to load image: ' + url));
+        img.src = url;
+        setTimeout(() => reject(new Error('Timeout loading: ' + url)), 15000);
+      });
+    }
 
     function loadImageFromUrl(url) {
       return new Promise((resolve, reject) => {
