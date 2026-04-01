@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v1.9.1 | 2026-04-01">
+  <meta name="crewlogic-version" content="v2.0 | 2026-04-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1089,7 +1089,8 @@
           <div style="margin-bottom:14px;">
             <div class="est-section-title" style="margin-bottom:8px;">Add Items</div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-              <button class="est-add-btn voice-room-btn" id="voiceRoomBtn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe Room</button>
+              <button class="est-add-btn voice-room-btn" id="voiceRoomBtn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe</button>
+              <button class="est-add-btn" id="photoRoomBtn" onclick="togglePhotoPanel()" style="background:var(--accent-blue);color:#fff;font-weight:600;border-color:var(--accent-blue);">📷</button>
               <button class="est-add-btn" id="addChargeBtn" onclick="showAddCharge()">+ Manual</button>
               <!-- Specialty wizards dropdown -->
               <div style="position:relative;display:inline-block;">
@@ -1110,11 +1111,31 @@
           </div>
           <!-- Room voice status -->
           <div id="roomVoiceStatus" style="display:none;margin-bottom:12px;padding:10px 14px;border-radius:var(--radius-sm);font-size:13px;"></div>
+
+          <!-- Photo-first capture panel -->
+          <div id="photoRoomPanel" style="display:none;background:var(--bg-card);border:1px solid var(--accent-blue);border-radius:var(--radius-sm);padding:14px;margin-bottom:12px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+              <div style="font-size:13px;font-weight:600;color:var(--accent-blue);">📷 Photo Room Capture</div>
+              <button onclick="closePhotoPanel()" style="background:none;border:none;color:var(--text-muted);font-size:16px;cursor:pointer;">✕</button>
+            </div>
+            <!-- Photo thumbnails -->
+            <div id="photoRoomThumbs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;min-height:20px;"></div>
+            <!-- Status -->
+            <div id="photoRoomStatus" style="font-size:12px;color:var(--text-muted);margin-bottom:10px;min-height:16px;"></div>
+            <!-- Buttons -->
+            <div style="display:flex;gap:8px;">
+              <button id="photoRoomAddBtn" onclick="addPhotoRoomPhoto()" style="flex:1;padding:10px;background:var(--bg-input);border:1px solid var(--accent-blue);border-radius:var(--radius-sm);color:var(--accent-blue);font-size:13px;font-weight:600;cursor:pointer;">+ Add Photo</button>
+              <button id="photoRoomAnalyzeBtn" onclick="analyzeRoomPhotos()" disabled style="flex:1;padding:10px;background:var(--accent-blue);border:none;border-radius:var(--radius-sm);color:#fff;font-size:13px;font-weight:700;cursor:pointer;opacity:0.4;">Analyze</button>
+            </div>
+            <input type="file" id="photoRoomInput" accept="image/*" capture="environment" style="display:none;" onchange="handlePhotoRoomCapture(this)">
+          </div>
+
           <div id="estChargesList"></div>
 
           <!-- Add charge buttons (repeated below charges for convenience) -->
           <div id="estChargesBottomBtns" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:10px 0 4px 0;">
-            <button class="est-add-btn voice-room-btn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe Room</button>
+            <button class="est-add-btn voice-room-btn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe</button>
+            <button class="est-add-btn" onclick="togglePhotoPanel()" style="background:var(--accent-blue);color:#fff;font-weight:600;border-color:var(--accent-blue);">📷</button>
             <button class="est-add-btn" onclick="showAddCharge()">+ Manual</button>
             <div style="position:relative;display:inline-block;">
               <button class="est-add-btn" onclick="toggleWizardMenu(event)" style="border-color:var(--accent-orange);color:var(--accent-orange);">⚡ Specialty ▾</button>
@@ -6516,6 +6537,239 @@
       updateTotals();
       autoSaveDraft();
       document.getElementById('palletWizardModal').style.display = 'none';
+    }
+
+    // ===== PHOTO-FIRST ROOM CAPTURE =====
+    let photoRoomPending = []; // array of { base64, driveUrl } — driveUrl filled after upload
+
+    function togglePhotoPanel() {
+      const panel = document.getElementById('photoRoomPanel');
+      const isOpen = panel.style.display !== 'none';
+      if (isOpen) {
+        closePhotoPanel();
+      } else {
+        photoRoomPending = [];
+        renderPhotoRoomThumbs();
+        document.getElementById('photoRoomStatus').textContent = 'Take up to 4 photos of the room, then tap Analyze.';
+        document.getElementById('photoRoomAnalyzeBtn').disabled = true;
+        document.getElementById('photoRoomAnalyzeBtn').style.opacity = '0.4';
+        panel.style.display = 'block';
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+
+    function closePhotoPanel() {
+      document.getElementById('photoRoomPanel').style.display = 'none';
+      photoRoomPending = [];
+    }
+
+    function addPhotoRoomPhoto() {
+      if (photoRoomPending.length >= 4) {
+        alert('Maximum 4 photos per room.');
+        return;
+      }
+      document.getElementById('photoRoomInput').click();
+    }
+
+    async function handlePhotoRoomCapture(input) {
+      const file = input.files[0];
+      if (!file) return;
+      input.value = '';
+
+      const statusEl = document.getElementById('photoRoomStatus');
+      statusEl.textContent = 'Processing photo...';
+
+      const base64 = await new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onload = () => res(reader.result);
+        reader.onerror = rej;
+        reader.readAsDataURL(file);
+      });
+
+      // Compress using existing compressChargePhoto
+      const compressed = await compressChargePhoto(base64);
+      photoRoomPending.push({ base64: compressed, driveUrl: null });
+      renderPhotoRoomThumbs();
+
+      const count = photoRoomPending.length;
+      statusEl.textContent = count + ' photo' + (count !== 1 ? 's' : '') + ' captured' +
+        (count < 4 ? ' — tap Add Photo for more, or Analyze when ready.' : ' — tap Analyze.');
+      document.getElementById('photoRoomAnalyzeBtn').disabled = false;
+      document.getElementById('photoRoomAnalyzeBtn').style.opacity = '1';
+
+      // Upload to Drive in background
+      uploadPhotoRoomToDrive(photoRoomPending.length - 1, compressed);
+    }
+
+    function renderPhotoRoomThumbs() {
+      const container = document.getElementById('photoRoomThumbs');
+      if (photoRoomPending.length === 0) {
+        container.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:4px 0;">No photos yet</div>';
+        return;
+      }
+      container.innerHTML = photoRoomPending.map((p, i) =>
+        '<div style="position:relative;width:64px;height:64px;">' +
+          '<img src="' + p.base64 + '" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border);">' +
+          (p.driveUrl ? '<div style="position:absolute;bottom:2px;right:2px;width:10px;height:10px;background:#00EE76;border-radius:50%;border:1px solid #000;"></div>' : '') +
+          '<button onclick="removePhotoRoomPhoto(' + i + ')" style="position:absolute;top:-4px;right:-4px;width:18px;height:18px;background:#ef4444;border:none;border-radius:50%;color:#fff;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;">✕</button>' +
+        '</div>'
+      ).join('');
+    }
+
+    function removePhotoRoomPhoto(idx) {
+      photoRoomPending.splice(idx, 1);
+      renderPhotoRoomThumbs();
+      const count = photoRoomPending.length;
+      const statusEl = document.getElementById('photoRoomStatus');
+      if (count === 0) {
+        statusEl.textContent = 'Take up to 4 photos of the room, then tap Analyze.';
+        document.getElementById('photoRoomAnalyzeBtn').disabled = true;
+        document.getElementById('photoRoomAnalyzeBtn').style.opacity = '0.4';
+      } else {
+        statusEl.textContent = count + ' photo' + (count !== 1 ? 's' : '') + ' captured.';
+      }
+    }
+
+    async function uploadPhotoRoomToDrive(idx, base64) {
+      try {
+        const res = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'uploadPhoto',
+            email: currentUser.email,
+            franchiseID: currentUser.franchiseID,
+            estimateID: currentEstimate.estimateID,
+            label: 'room_' + idx,
+            chargeIdx: idx,
+            photo: base64
+          })
+        });
+        const data = await res.json();
+        if (data.photoUrl && photoRoomPending[idx]) {
+          photoRoomPending[idx].driveUrl = data.photoUrl;
+          renderPhotoRoomThumbs(); // show green dot
+        }
+      } catch(e) {
+        console.warn('Photo room upload failed:', e);
+      }
+    }
+
+    async function analyzeRoomPhotos() {
+      const analyzeBtn = document.getElementById('photoRoomAnalyzeBtn');
+      const statusEl   = document.getElementById('photoRoomStatus');
+
+      if (photoRoomPending.length === 0) return;
+
+      // Use Drive URLs if available, fall back to base64 for any not yet uploaded
+      const driveUrls  = photoRoomPending.filter(p => p.driveUrl).map(p => p.driveUrl);
+      const base64Only = photoRoomPending.filter(p => !p.driveUrl).map(p => p.base64);
+
+      if (driveUrls.length === 0 && base64Only.length > 0) {
+        // None uploaded yet — wait briefly then retry once
+        statusEl.textContent = '⏳ Photos still uploading, please wait a moment...';
+        await new Promise(r => setTimeout(r, 2000));
+        const driveUrls2 = photoRoomPending.filter(p => p.driveUrl).map(p => p.driveUrl);
+        if (driveUrls2.length === 0) {
+          statusEl.textContent = '⚠️ Photos not yet uploaded to Drive. Please try again in a moment.';
+          return;
+        }
+      }
+
+      const photosToAnalyze = photoRoomPending
+        .filter(p => p.driveUrl)
+        .map(p => p.driveUrl);
+
+      if (photosToAnalyze.length === 0) {
+        statusEl.textContent = '⚠️ Waiting for upload to complete. Please try again shortly.';
+        return;
+      }
+
+      analyzeBtn.disabled = true;
+      analyzeBtn.textContent = '⏳ Analyzing...';
+      statusEl.textContent = 'Sending ' + photosToAnalyze.length + ' photo' +
+        (photosToAnalyze.length !== 1 ? 's' : '') + ' to AI...';
+
+      try {
+        const res = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'analyzeVoice',
+            email: currentUser.email,
+            franchiseID: currentUser.franchiseID,
+            transcript: '[PHOTO ANALYSIS — no voice transcript. Analyze the provided photos to identify items and estimate volume.]',
+            areas: availableAreas,
+            photos: photosToAnalyze
+          })
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
+          let addedCount = 0;
+
+          charges.forEach(charge => {
+            if (charge.type === 'volume') {
+              // Create charge row with blank room/area for crew to fill in
+              currentEstimate.charges.push({
+                type: 'volume',
+                room: charge.room || '',
+                area: charge.area || '',
+                description: charge.description || '',
+                notIncluded: charge.notIncluded || '',
+                truckLabel: charge.truckLabel || '',
+                truckQty: charge.truckQty || 1,
+                truckVolume: charge.truckVolume || 0,
+                photos: photosToAnalyze  // attach the Drive URLs to the charge
+              });
+              addedCount++;
+            } else if (charge.type === 'surcharge') {
+              const matched = matchSurchargeItem(charge.name);
+              if (matched) {
+                const alreadyExists = currentEstimate.charges.some(
+                  ec => ec.type === 'surcharge' && ec.priceItemID === matched.priceItemID
+                );
+                if (!alreadyExists) {
+                  currentEstimate.charges.push({
+                    type: 'surcharge',
+                    priceItemID: matched.priceItemID,
+                    name: matched.name,
+                    blockName: matched.blockName,
+                    priceBlockID: matched.priceBlockID,
+                    qty: charge.qty || 1,
+                    unitPrice: matched.value,
+                    area: charge.area || '',
+                    taxID: matched.taxID || 146
+                  });
+                }
+              }
+            }
+          });
+
+          renderCharges();
+          updateTotals();
+          autoSaveDraft();
+          closePhotoPanel();
+
+          // Show brief success in voice status bar
+          const voiceStatus = document.getElementById('roomVoiceStatus');
+          voiceStatus.style.display = 'block';
+          voiceStatus.style.background = 'rgba(0,238,118,0.1)';
+          voiceStatus.innerHTML = '<span style="color:var(--accent-green);font-weight:600;">✓ ' + addedCount + ' row' +
+            (addedCount !== 1 ? 's' : '') + ' added from photos</span> — review room name and area below.';
+          setTimeout(() => { voiceStatus.style.display = 'none'; }, 5000);
+
+        } else {
+          statusEl.textContent = '⚠️ Analysis failed. Please try again.';
+          analyzeBtn.disabled = false;
+          analyzeBtn.textContent = 'Analyze';
+        }
+      } catch(e) {
+        console.error('analyzeRoomPhotos error:', e);
+        statusEl.textContent = '⚠️ Connection error. Please try again.';
+        analyzeBtn.disabled = false;
+        analyzeBtn.textContent = 'Analyze';
+      }
     }
 
     // ===== SPECIALTY WIZARD DROPDOWN =====
