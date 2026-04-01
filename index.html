@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v1.5.2 | 2026-04-01">
+  <meta name="crewlogic-version" content="v1.5.3 | 2026-04-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -6507,17 +6507,19 @@
 
     // ===== MATTRESS WIZARD =====
     // TOP-DOWN VIEW — looking down into the truck bed:
-    //   X axis = truck WIDTH  (96" left to right)
-    //   Y axis = truck LENGTH (144", 0 = BACK DOORS, increases toward CAB)
+    //   X axis = truck WIDTH  (96", left to right)
+    //   Y axis = truck LENGTH (144", top=CAB, bottom=BACK DOORS)
     //
-    // Each mattress stands UPRIGHT on its depth edge against the back wall:
-    //   - mattress WIDTH  spans across X (left-right)
-    //   - mattress DEPTH  (thickness) extends along Y (toward cab)
-    //   - mattress LENGTH goes vertical (can exceed truck height — that's fine)
+    // Each mattress stands UPRIGHT on its depth edge:
+    //   - mattress DEPTH (thickness, e.g. 10") spans across X
+    //   - mattress WIDTH (e.g. 38" twin, 60" queen) extends down Y toward doors
+    //   - mattress LENGTH goes vertical (can exceed truck height)
     //
-    // Packing: fill across X first, then step Y forward by the row's depth.
-    // Gap fill: after each row, leftover X space gets pieces rotated 90°
-    //   (depth spans X, width extends Y — fills shallow side pockets).
+    // Packing: columns left to right across X.
+    // Each column is depth" wide. Fill Y from CAB end downward.
+    // When a column fills its Y, start next column to the right.
+    // Leftover Y space at bottom of a column: try rotated pieces
+    //   (width spans X=depth, depth spans Y=width).
 
     const MATT_DIMS = {
       mTwin:  { w: 38, l: 75, label: 'Twin',    color: '#60a5fa' },
@@ -6566,93 +6568,90 @@
     }
 
     // ── PACKING ALGORITHM ──────────────────────────────────────────────────────
-    // Pack rows from back doors (Y=0) toward cab (Y=lIn).
-    // Each row: fill across truck width (X) with items.
-    //   item.w  = mattress width  → spans X
-    //   item.d  = mattress depth  → extends Y (row height)
-    // Row depth = the tallest item depth in that row.
-    // After filling a row across X, any leftover X gap gets filled
-    // with items rotated 90° (item.w→Y, item.d→X).
+    // Columns run left→right across truck WIDTH (X axis, 96").
+    // Each column is item.depth wide (e.g. 10").
+    // Within a column, items stack top→bottom (Y axis, 144"), cab to doors.
+    // item.w (mattress width, e.g. 38") is the height of each item in the column.
+    // After filling a column top-to-bottom, move X right by item.depth.
+    // Leftover Y space at bottom of column: try rotated items
+    //   rotated: item.depth spans Y (short), item.w spans X (may need new column slot).
 
     function packItems(truck, itemList) {
-      const TW = truck.wIn;  // 96"
-      const TL = truck.lIn;  // 144"
+      const TW = truck.wIn;  // 96" — X axis (left to right)
+      const TL = truck.lIn;  // 144" — Y axis (cab to doors)
 
-      // Sort largest width first so big mattresses anchor each row
+      // Sort: largest mattress width first so long items anchor columns
       const remaining = [...itemList].sort((a, b) => b.w - a.w);
 
-      const placed  = [];
+      const placed   = [];
       const overflow = [];
-      let yPos = 0; // how far from back doors we've filled
+      let xPos = 0; // current X position (left edge of current column)
 
-      while (remaining.length > 0 && yPos < TL) {
-        // ── Build a row ────────────────────────────────────────────────
-        let xPos     = 0;
-        let rowDepth = 0;
-        const rowItems = [];
+      while (remaining.length > 0 && xPos < TW) {
+        // Determine column depth from first item that fits width-wise
+        const firstIdx = remaining.findIndex(item => xPos + item.depth <= TW);
+        if (firstIdx === -1) break;
 
-        // Pass A: fill row across width with normal orientation (w spans X)
+        const colDepth = remaining[firstIdx].depth;
+
+        // Check column fits in truck width
+        if (xPos + colDepth > TW) break;
+
+        // Fill this column top-to-bottom (Y: 0=cab, TL=doors)
+        let yPos = 0;
+        let colItems = [];
+
         let i = 0;
         while (i < remaining.length) {
           const item = remaining[i];
-          if (xPos + item.w <= TW) {
-            rowItems.push({ ...item, x: xPos, y: yPos, spanX: item.w, spanY: item.d, rotated: false });
-            xPos     += item.w;
-            rowDepth  = Math.max(rowDepth, item.d);
+          // Only place items with same depth in this column pass
+          if (item.depth === colDepth && yPos + item.w <= TL) {
+            colItems.push({ ...item, x: xPos, y: yPos, spanX: item.depth, spanY: item.w, rotated: false });
+            yPos += item.w;
             remaining.splice(i, 1);
           } else {
             i++;
           }
         }
 
-        // If nothing placed in this pass, nothing will ever fit — break
-        if (rowItems.length === 0) break;
-
-        // Default row depth if no items placed (shouldn't happen)
-        if (rowDepth === 0) rowDepth = 8;
-
-        // Check row fits in truck length
-        if (yPos + rowDepth > TL) {
-          // Row doesn't fit — push row items to overflow and stop
-          rowItems.forEach(ri => overflow.push(ri.label));
-          break;
-        }
-
-        // Pass B: fill leftover X gap with rotated items (d spans X, w spans Y)
-        // Rotated items must fit within rowDepth in the Y direction
-        const gapX = TW - xPos;
-        if (gapX > 0) {
+        // If nothing placed at all (depth mismatch), try any item that fits width
+        if (colItems.length === 0) {
           let j = 0;
-          let gapXUsed = 0;
           while (j < remaining.length) {
             const item = remaining[j];
-            // Rotated: item.d across X, item.w into Y — item.w must fit within rowDepth
-            if (gapXUsed + item.d <= gapX && item.w <= rowDepth) {
-              rowItems.push({
-                ...item,
-                x: xPos + gapXUsed,
-                y: yPos,
-                spanX: item.d,
-                spanY: item.w,
-                rotated: true
-              });
-              gapXUsed += item.d;
+            if (xPos + item.depth <= TW && yPos + item.w <= TL) {
+              colItems.push({ ...item, x: xPos, y: yPos, spanX: item.depth, spanY: item.w, rotated: false });
+              yPos += item.w;
               remaining.splice(j, 1);
             } else {
               j++;
             }
           }
+          if (colItems.length === 0) break; // nothing fits at all
         }
 
-        // Commit row
-        rowItems.forEach(ri => placed.push(ri));
-        yPos += rowDepth;
+        // Fill remaining Y gap with rotated items
+        // Rotated: item.w spans X (must fit in colDepth), item.depth spans Y
+        if (yPos < TL) {
+          let k = 0;
+          while (k < remaining.length) {
+            const item = remaining[k];
+            if (item.w <= colDepth && yPos + item.depth <= TL) {
+              colItems.push({ ...item, x: xPos, y: yPos, spanX: item.w, spanY: item.depth, rotated: true });
+              yPos += item.depth;
+              remaining.splice(k, 1);
+            } else {
+              k++;
+            }
+          }
+        }
+
+        colItems.forEach(ci => placed.push(ci));
+        xPos += colDepth;
       }
 
-      // Anything still in remaining is overflow
       remaining.forEach(item => overflow.push(item.label));
-
-      return { placed, overflow, yUsed: yPos, truckW: TW, truckL: TL };
+      return { placed, overflow, xUsed: xPos, truckW: TW, truckL: TL };
     }
 
     function calcMattress() {
@@ -6663,10 +6662,10 @@
       Object.keys(MATT_DIMS).forEach(key => {
         const cnt = mattCounts[key] || 0;
         if (!cnt) return;
-        const dim  = MATT_DIMS[key];
-        const d    = getDepth(key);
+        const dim = MATT_DIMS[key];
+        const d   = getDepth(key);
         for (let i = 0; i < cnt; i++) {
-          itemList.push({ w: dim.w, d, l: dim.l, label: dim.label, color: dim.color, isBox: dim.isBox || false });
+          itemList.push({ w: dim.w, d, label: dim.label, color: dim.color, isBox: dim.isBox || false });
         }
       });
 
@@ -6674,12 +6673,11 @@
 
       const result = packItems(truck, itemList);
 
-      // Volume: each item w * d * standing height (use 60" as typical)
+      // Volume based on actual dimensions
       let cubicIn = 0;
       itemList.forEach(item => { cubicIn += item.w * item.d * 60; });
       const snapped = snapToEighth(cubicIn / 1728 / 400);
 
-      // Description
       const parts = [];
       if (mattCounts.mTwin)  parts.push(mattCounts.mTwin  + ' Twin');
       if (mattCounts.mFull)  parts.push(mattCounts.mFull  + ' Full');
@@ -6695,8 +6693,7 @@
 
       const totalPieces = Object.values(mattCounts).reduce((s,v) => s+v, 0);
       const mattPieces  = ['mTwin','mFull','mQueen','mKing'].reduce((s,k) => s+(mattCounts[k]||0), 0);
-
-      mattressCalcData = { trucks: snapped, description: desc, totalPieces, mattPieces };
+      mattressCalcData  = { trucks: snapped, description: desc, totalPieces, mattPieces };
 
       document.getElementById('mattressCalcVolume').textContent = formatTrucks(snapped);
       let detail = desc + ' \u2022 Recycling fee applies';
@@ -6708,17 +6705,18 @@
 
       renderMattressDiagram(result, truck);
 
-      const note = [
+      document.getElementById('mattPackNote').textContent = [
         '\ud83d\udccf ' + truck.label,
-        result.placed.length + ' placed' + (result.overflow.length ? ', ' + result.overflow.length + ' overflow' : ' \u2713'),
-        '* = rotated 90\u00b0 to fill gap'
+        result.placed.length + ' placed' + (result.overflow.length ? ', ' + result.overflow.length + ' overflow' : ' \u2713 all fit'),
+        '* = rotated 90\u00b0'
       ].join('  \u2502  ');
-      document.getElementById('mattPackNote').textContent = note;
     }
 
     // ── DIAGRAM ────────────────────────────────────────────────────────────────
-    // Top-down. Back doors at BOTTOM, cab at TOP (matches the reference image).
-    // X = truck width, Y = truck length (0=back doors, increases upward toward cab).
+    // Top-down view. Cab at TOP, Back Doors at BOTTOM.
+    // X = truck width (left→right). Y = truck length (top=cab, bottom=doors).
+    // item.x, item.spanX → horizontal position & width on canvas
+    // item.y, item.spanY → vertical position & height on canvas (y=0 is cab end)
 
     function renderMattressDiagram(result, truck) {
       const canvas = document.getElementById('mattPackCanvas');
@@ -6726,7 +6724,6 @@
       const ctx = canvas.getContext('2d');
       const CW = canvas.width, CH = canvas.height;
       ctx.clearRect(0, 0, CW, CH);
-
       ctx.fillStyle = '#1e2f40';
       ctx.fillRect(0, 0, CW, CH);
 
@@ -6739,61 +6736,47 @@
         return;
       }
 
-      const PAD   = 10;
-      const LABEL = 30; // bottom label strip height ("BACK DOORS")
-      const drawW = CW - PAD * 2;
-      const drawH = CH - PAD - LABEL;
+      const TPAD  = 18; // top pad (cab label)
+      const BPAD  = 18; // bottom pad (door label)
+      const LPAD  = 6;
+      const RPAD  = 6;
+      const drawW = CW - LPAD - RPAD;
+      const drawH = CH - TPAD - BPAD;
 
-      // Scale: map truck dims to canvas
-      const scaleX = drawW / truck.wIn;  // px per inch (width)
-      const scaleY = drawH / truck.lIn;  // px per inch (length)
+      const scaleX = drawW / truck.wIn;
+      const scaleY = drawH / truck.lIn;
 
-      // originX/Y = top-left of truck drawing area
-      // Y=0 (back doors) is at the BOTTOM of the drawing area
-      const originX = PAD;
-      const originY = PAD;
+      const ox = LPAD;   // left edge of truck
+      const oy = TPAD;   // top edge of truck (cab end)
 
-      // Helper: convert truck coords to canvas coords
-      // truck y=0 → canvas bottom of drawing area; y increases → canvas moves up
-      const tx = (x)  => originX + x * scaleX;
-      const ty = (y)  => originY + drawH - (y + 0) * scaleY; // flip Y
-      const th = (h)  => h * scaleY;
-      const tw = (w)  => w * scaleX;
-
-      // Truck bed fill
+      // Truck bed
       ctx.fillStyle = '#253545';
-      ctx.fillRect(originX, originY, drawW, drawH);
-
-      // Truck outline
+      ctx.fillRect(ox, oy, drawW, drawH);
       ctx.strokeStyle = '#4a6fa0';
       ctx.lineWidth = 2;
-      ctx.strokeRect(originX, originY, drawW, drawH);
+      ctx.strokeRect(ox, oy, drawW, drawH);
 
-      // Back door line (bottom of truck area) — green
+      // Back door marker at bottom — green bar
       ctx.fillStyle = '#00EE76';
-      ctx.fillRect(originX, originY + drawH - 3, drawW, 3);
+      ctx.fillRect(ox, oy + drawH - 3, drawW, 3);
 
-      // Draw placed items
+      // Draw items
       result.placed.forEach(item => {
-        // item.x, item.y = truck coords; item.spanX = width in X, item.spanY = depth in Y
-        const px = tx(item.x);
-        const py = ty(item.y + item.spanY); // top-left in canvas (remember Y flipped)
-        const pw = tw(item.spanX);
-        const ph = th(item.spanY);
+        const px = ox + item.x * scaleX;
+        const py = oy + item.y * scaleY;
+        const pw = item.spanX * scaleX;
+        const ph = item.spanY * scaleY;
 
-        // Fill
         ctx.fillStyle = item.color + '50';
         ctx.fillRect(px, py, pw, ph);
 
-        // Border — dashed if rotated
         ctx.strokeStyle = item.color;
         ctx.lineWidth = 1.5;
         ctx.setLineDash(item.rotated ? [3, 2] : []);
         ctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
         ctx.setLineDash([]);
 
-        // Label
-        if (pw > 12 && ph > 8) {
+        if (pw > 10 && ph > 8) {
           ctx.save();
           ctx.beginPath();
           ctx.rect(px + 1, py + 1, pw - 2, ph - 2);
@@ -6807,25 +6790,26 @@
         }
       });
 
-      // Labels: "CAB" at top, "BACK DOORS" at bottom
+      // CAB label top
       ctx.fillStyle = '#64748b';
       ctx.font = 'bold 9px DM Sans, sans-serif';
       ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      ctx.fillText('CAB', CW / 2, PAD + 2);
+      ctx.textBaseline = 'middle';
+      ctx.fillText('CAB', CW/2, TPAD/2);
 
+      // BACK DOORS label bottom
       ctx.fillStyle = '#00EE76';
       ctx.font = 'bold 9px DM Sans, sans-serif';
       ctx.textAlign = 'center';
-      ctx.textBaseline = 'bottom';
-      ctx.fillText('BACK DOORS', CW / 2, CH - 2);
+      ctx.textBaseline = 'middle';
+      ctx.fillText('BACK DOORS', CW/2, CH - BPAD/2);
 
       // Width label
       ctx.fillStyle = '#64748b';
       ctx.font = '8px Space Mono, monospace';
       ctx.textAlign = 'right';
       ctx.textBaseline = 'top';
-      ctx.fillText(truck.wIn + '" wide', originX + drawW - 2, originY + 2);
+      ctx.fillText(truck.wIn + '"', ox + drawW - 2, oy + 2);
     }
 
     function addMattressToEstimate() {
