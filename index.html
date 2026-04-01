@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v1.8 | 2026-04-01">
+  <meta name="crewlogic-version" content="v1.8.1 | 2026-04-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1085,15 +1085,21 @@
 
           <hr class="form-divider">
 
-          <!-- QUICK ESTIMATOR WIZARDS -->
+          <!-- ADD ITEMS ROW -->
           <div style="margin-bottom:14px;">
             <div class="est-section-title" style="margin-bottom:8px;">Add Items</div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
               <button class="est-add-btn voice-room-btn" id="voiceRoomBtn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe Room</button>
               <button class="est-add-btn" id="addChargeBtn" onclick="showAddCharge()">+ Manual</button>
-              <button class="est-add-btn" onclick="showShedWizard()" style="border-color:var(--accent-orange);color:var(--accent-orange);">🏚️ Shed</button>
-              <button class="est-add-btn" onclick="showStorageWizard()" style="border-color:var(--accent-blue);color:var(--accent-blue);">📦 Storage Unit</button>
-              <button class="est-add-btn" onclick="showMattressWizard()" style="border-color:var(--accent-yellow);color:var(--accent-yellow);">🛏️ Mattress</button>
+              <!-- Specialty wizards dropdown -->
+              <div style="position:relative;display:inline-block;">
+                <button class="est-add-btn" onclick="toggleWizardMenu(event)" id="wizardMenuBtn" style="border-color:var(--accent-orange);color:var(--accent-orange);">⚡ Specialty ▾</button>
+                <div id="wizardMenu" style="display:none;position:absolute;top:calc(100% + 4px);left:0;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);z-index:50;min-width:160px;box-shadow:var(--shadow);">
+                  <button onclick="closeWizardMenu();showShedWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🏚️ Shed</button>
+                  <button onclick="closeWizardMenu();showStorageWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">📦 Storage Unit</button>
+                  <button onclick="closeWizardMenu();showMattressWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;">🛏️ Mattress</button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1106,12 +1112,17 @@
           <div id="estChargesList"></div>
 
           <!-- Add charge buttons (repeated below charges for convenience) -->
-          <div id="estChargesBottomBtns" style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 4px 0;">
+          <div id="estChargesBottomBtns" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:10px 0 4px 0;">
             <button class="est-add-btn voice-room-btn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe Room</button>
             <button class="est-add-btn" onclick="showAddCharge()">+ Manual</button>
-            <button class="est-add-btn" onclick="showShedWizard()" style="border-color:var(--accent-orange);color:var(--accent-orange);">🏚️ Shed</button>
-            <button class="est-add-btn" onclick="showStorageWizard()" style="border-color:var(--accent-blue);color:var(--accent-blue);">📦 Storage Unit</button>
-            <button class="est-add-btn" onclick="showMattressWizard()" style="border-color:var(--accent-yellow);color:var(--accent-yellow);">🛏️ Mattress</button>
+            <div style="position:relative;display:inline-block;">
+              <button class="est-add-btn" onclick="toggleWizardMenu(event)" style="border-color:var(--accent-orange);color:var(--accent-orange);">⚡ Specialty ▾</button>
+              <div id="wizardMenuBottom" style="display:none;position:absolute;bottom:calc(100% + 4px);left:0;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);z-index:50;min-width:160px;box-shadow:var(--shadow);">
+                <button onclick="closeWizardMenu();showShedWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🏚️ Shed</button>
+                <button onclick="closeWizardMenu();showStorageWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">📦 Storage Unit</button>
+                <button onclick="closeWizardMenu();showMattressWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;">🛏️ Mattress</button>
+              </div>
+            </div>
           </div>
 
           <!-- Volume summary footer -->
@@ -6335,6 +6346,30 @@
         collapseClientInfo();
       }
     }
+
+    // ===== SPECIALTY WIZARD DROPDOWN =====
+    function toggleWizardMenu(e) {
+      e.stopPropagation();
+      const top = document.getElementById('wizardMenu');
+      const bot = document.getElementById('wizardMenuBottom');
+      // Figure out which menu is near the clicked button
+      const btn = e.currentTarget;
+      const isBottom = btn.closest('#estChargesBottomBtns') !== null;
+      const menu = isBottom ? bot : top;
+      const other = isBottom ? top : bot;
+      if (other) other.style.display = 'none';
+      menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+    }
+
+    function closeWizardMenu() {
+      const top = document.getElementById('wizardMenu');
+      const bot = document.getElementById('wizardMenuBottom');
+      if (top) top.style.display = 'none';
+      if (bot) bot.style.display = 'none';
+    }
+
+    // Close menu when tapping anywhere else
+    document.addEventListener('click', function() { closeWizardMenu(); });
 
     // ===== SHED WIZARD =====
     let shedCalcData = null;
