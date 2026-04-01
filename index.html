@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v1.3 | 2026-03-28">
+  <meta name="crewlogic-version" content="v1.4 | 2026-04-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1050,17 +1050,16 @@
           </label>
         </div>
 
-        <!-- STEP 1: JOB LOOKUP — required first, auto-loads pricing from ZIP -->
-        <div class="est-step-card" id="estStepZip">
-          <div class="est-step-label">Step 1 — Job Lookup</div>
-          <div style="display:flex;gap:8px;margin-top:8px;">
-            <input type="text" class="form-input" id="estJobIDStep1" placeholder="Vonigo Job #" style="font-family:'Space Mono',monospace;font-size:18px;letter-spacing:2px;" inputmode="numeric" onkeydown="if(event.key==='Enter')lookupEstimateJobStep1()">
-            <button class="zip-lookup-btn" id="estZipBtn" onclick="lookupEstimateJobStep1()" style="flex:1;padding:12px;background:var(--accent-green);color:var(--bg-primary);border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
-              <div class="spinner" style="border-top-color:var(--bg-primary);display:none;"></div>
+        <!-- JOB LOOKUP — compact inline row -->
+        <div id="estStepZip" style="margin-bottom:8px;">
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input type="text" class="form-input" id="estJobIDStep1" placeholder="Vonigo Job #" style="font-family:'Space Mono',monospace;font-size:15px;letter-spacing:1px;padding:9px 12px;max-width:150px;" inputmode="numeric" onkeydown="if(event.key==='Enter')lookupEstimateJobStep1()">
+            <button id="estZipBtn" onclick="lookupEstimateJobStep1()" style="padding:9px 16px;background:var(--accent-green);color:var(--bg-primary);border:none;border-radius:var(--radius-sm);font-weight:700;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0;">
+              <div class="spinner" style="border-top-color:var(--bg-primary);display:none;width:14px;height:14px;"></div>
               <span class="btn-text">Look Up</span>
             </button>
+            <div class="zip-status" id="estZipStatus" style="margin-top:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
           </div>
-          <div class="zip-status" id="estZipStatus" style="margin-top:6px;"></div>
         </div>
 
         <!-- Manual ZIP fallback if job has no ZIP -->
@@ -1074,47 +1073,63 @@
         <!-- STEPS 2-6: Hidden until prices loaded -->
         <div id="estMainContent" style="display:none;">
 
-          <!-- STEP 2: Client Info -->
-          <div style="margin-top:16px;">
-            <div class="est-section-header" style="margin-top:0;margin-bottom:10px;">
-              <div class="est-section-title">Client Info</div>
+          <!-- CLIENT INFO — compact bar, expandable -->
+          <div id="estClientInfoBar" style="margin-top:8px;margin-bottom:4px;display:none;align-items:center;justify-content:space-between;gap:8px;">
+            <div style="flex:1;min-width:0;">
+              <div id="estClientNameDisplay" style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+              <div id="estAddressDisplay" style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;"></div>
             </div>
-            <div class="form-group">
+            <button onclick="toggleClientInfoExpanded()" style="background:none;border:1px solid var(--border);color:var(--text-muted);font-size:11px;cursor:pointer;flex-shrink:0;padding:3px 8px;border-radius:4px;">edit</button>
+          </div>
+          <!-- Expanded client fields -->
+          <div id="estClientInfoExpanded" style="display:block;">
+            <div class="form-group" style="margin-top:8px;">
               <div class="form-label">Client Name</div>
-              <input type="text" class="form-input" id="estClientName" placeholder="Last, First" oninput="autoSaveDraft()">
+              <input type="text" class="form-input" id="estClientName" placeholder="Last, First" oninput="autoSaveDraft();updateClientInfoBar()">
             </div>
             <div class="form-group">
               <div class="form-label">Service Address</div>
-              <input type="text" class="form-input" id="estAddress" placeholder="123 Main St, City MA 02XXX" oninput="autoSaveDraft()">
+              <input type="text" class="form-input" id="estAddress" placeholder="123 Main St, City MA 02XXX" oninput="autoSaveDraft();updateClientInfoBar()">
             </div>
             <div class="form-group">
               <div class="form-label">Vonigo Job #</div>
               <div style="font-family:'Space Mono',monospace;font-size:15px;color:var(--accent-green);" id="estJobIDDisplay">—</div>
             </div>
-            <div class="form-group">
-              <div class="form-label">Notes</div>
-              <textarea class="form-input" id="estNotes" rows="2" placeholder="Access notes, special instructions..." style="resize:none;" oninput="autoSaveDraft()"></textarea>
-            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Notes</div>
+            <textarea class="form-input" id="estNotes" rows="2" placeholder="Access notes, special instructions..." style="resize:none;" oninput="autoSaveDraft()"></textarea>
           </div>
 
           <hr class="form-divider">
 
-          <!-- UNIFIED CHARGES SECTION -->
-          <div class="est-section-header" style="margin-bottom:12px;">
-            <div class="est-section-title">Charges</div>
-            <div style="display:flex;gap:6px;">
+          <!-- QUICK ESTIMATOR WIZARDS -->
+          <div style="margin-bottom:14px;">
+            <div class="est-section-title" style="margin-bottom:8px;">Add Items</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
               <button class="est-add-btn voice-room-btn" id="voiceRoomBtn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe Room</button>
               <button class="est-add-btn" id="addChargeBtn" onclick="showAddCharge()">+ Manual</button>
+              <button class="est-add-btn" onclick="showShedWizard()" style="border-color:var(--accent-orange);color:var(--accent-orange);">🏚️ Shed</button>
+              <button class="est-add-btn" onclick="showStorageWizard()" style="border-color:var(--accent-blue);color:var(--accent-blue);">📦 Storage Unit</button>
+              <button class="est-add-btn" onclick="showMattressWizard()" style="border-color:var(--accent-yellow);color:var(--accent-yellow);">🛏️ Mattress</button>
             </div>
+          </div>
+
+          <!-- UNIFIED CHARGES SECTION -->
+          <div class="est-section-header" style="margin-bottom:12px;margin-top:0;">
+            <div class="est-section-title">Charges</div>
           </div>
           <!-- Room voice status -->
           <div id="roomVoiceStatus" style="display:none;margin-bottom:12px;padding:10px 14px;border-radius:var(--radius-sm);font-size:13px;"></div>
           <div id="estChargesList"></div>
 
           <!-- Add charge buttons (repeated below charges for convenience) -->
-          <div id="estChargesBottomBtns" style="display:flex;gap:6px;margin:10px 0 4px 0;">
+          <div id="estChargesBottomBtns" style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 4px 0;">
             <button class="est-add-btn voice-room-btn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe Room</button>
             <button class="est-add-btn" onclick="showAddCharge()">+ Manual</button>
+            <button class="est-add-btn" onclick="showShedWizard()" style="border-color:var(--accent-orange);color:var(--accent-orange);">🏚️ Shed</button>
+            <button class="est-add-btn" onclick="showStorageWizard()" style="border-color:var(--accent-blue);color:var(--accent-blue);">📦 Storage Unit</button>
+            <button class="est-add-btn" onclick="showMattressWizard()" style="border-color:var(--accent-yellow);color:var(--accent-yellow);">🛏️ Mattress</button>
           </div>
 
           <!-- Volume summary footer -->
@@ -1188,6 +1203,175 @@
             🔒 Keep Existing Charges
             <div class="vol-option-sub">Leave charges at original prices</div>
           </button>
+        </div>
+      </div>
+
+
+      <!-- SHED WIZARD MODAL -->
+      <div id="shedWizardModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:200;align-items:flex-end;justify-content:center;">
+        <div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <div style="font-size:16px;font-weight:700;color:var(--accent-orange);">🏚️ Shed Estimator</div>
+            <button onclick="document.getElementById('shedWizardModal').style.display='none'" style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;">✕</button>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Length (ft)</div>
+            <input type="number" class="form-input" id="shedLength" placeholder="e.g. 10" inputmode="decimal" min="1">
+          </div>
+          <div class="form-group">
+            <div class="form-label">Width (ft)</div>
+            <input type="number" class="form-input" id="shedWidth" placeholder="e.g. 12" inputmode="decimal" min="1">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div class="form-group">
+              <div class="form-label">Wall Height (ft)</div>
+              <input type="number" class="form-input" id="shedWallHeight" placeholder="e.g. 8" inputmode="decimal" min="1">
+            </div>
+            <div class="form-group">
+              <div class="form-label">Peak Height (ft)</div>
+              <input type="number" class="form-input" id="shedPeakHeight" placeholder="e.g. 10" inputmode="decimal" min="1">
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Siding Material</div>
+            <select class="form-select" id="shedSiding">
+              <option value="Wood">Wood</option>
+              <option value="Vinyl">Vinyl</option>
+              <option value="Metal">Metal</option>
+              <option value="T1-11">T1-11</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Interior Fill Level</div>
+            <select class="form-select" id="shedFill">
+              <option value="Empty">Empty</option>
+              <option value="25% full">25% full</option>
+              <option value="50% full">50% full</option>
+              <option value="75% full">75% full</option>
+              <option value="Packed full">Packed full</option>
+            </select>
+          </div>
+          <div id="shedCalcResult" style="display:none;background:var(--bg-card);border:1px solid var(--accent-orange);border-radius:var(--radius-sm);padding:12px;margin-bottom:12px;">
+            <div style="font-size:11px;color:var(--accent-orange);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Estimated Volume</div>
+            <div id="shedCalcVolume" style="font-family:'Space Mono',monospace;font-size:20px;font-weight:700;color:var(--accent-green);"></div>
+            <div id="shedCalcDetail" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
+          </div>
+          <button onclick="calcShed()" style="width:100%;padding:13px;background:var(--bg-input);border:1px solid var(--accent-orange);border-radius:var(--radius-sm);color:var(--accent-orange);font-weight:700;font-size:14px;cursor:pointer;margin-bottom:8px;">Calculate Volume</button>
+          <button id="shedAddBtn" onclick="addShedToEstimate()" disabled style="width:100%;padding:13px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);color:#000;font-weight:700;font-size:14px;cursor:pointer;opacity:0.4;">Add to Estimate</button>
+        </div>
+      </div>
+
+      <!-- STORAGE UNIT WIZARD MODAL -->
+      <div id="storageWizardModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:200;align-items:flex-end;justify-content:center;">
+        <div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <div style="font-size:16px;font-weight:700;color:var(--accent-blue);">📦 Storage Unit Estimator</div>
+            <button onclick="document.getElementById('storageWizardModal').style.display='none'" style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;">✕</button>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Unit Size</div>
+            <select class="form-select" id="storageSize" onchange="onStorageSizeChange()">
+              <option value="custom">Custom dimensions...</option>
+              <option value="5x5">5×5 (25 sq ft)</option>
+              <option value="5x10">5×10 (50 sq ft)</option>
+              <option value="10x10">10×10 (100 sq ft)</option>
+              <option value="10x15">10×15 (150 sq ft)</option>
+              <option value="10x20">10×20 (200 sq ft)</option>
+              <option value="10x30">10×30 (300 sq ft)</option>
+            </select>
+          </div>
+          <div id="storageCustomDims" style="display:block;grid-template-columns:1fr 1fr;gap:12px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <div class="form-group">
+                <div class="form-label">Length (ft)</div>
+                <input type="number" class="form-input" id="storageLength" placeholder="e.g. 10" inputmode="decimal" min="1">
+              </div>
+              <div class="form-group">
+                <div class="form-label">Width (ft)</div>
+                <input type="number" class="form-input" id="storageWidth" placeholder="e.g. 10" inputmode="decimal" min="1">
+              </div>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Ceiling Height (ft)</div>
+            <input type="number" class="form-input" id="storageHeight" placeholder="e.g. 8" inputmode="decimal" min="1" value="8">
+          </div>
+          <div class="form-group">
+            <div class="form-label">Fill Level</div>
+            <select class="form-select" id="storageFill">
+              <option value="25% full">25% full</option>
+              <option value="50% full" selected>50% full</option>
+              <option value="75% full">75% full</option>
+              <option value="Packed full">Packed full</option>
+            </select>
+          </div>
+          <div id="storageCalcResult" style="display:none;background:var(--bg-card);border:1px solid var(--accent-blue);border-radius:var(--radius-sm);padding:12px;margin-bottom:12px;">
+            <div style="font-size:11px;color:var(--accent-blue);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Estimated Volume</div>
+            <div id="storageCalcVolume" style="font-family:'Space Mono',monospace;font-size:20px;font-weight:700;color:var(--accent-green);"></div>
+            <div id="storageCalcDetail" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
+          </div>
+          <button onclick="calcStorage()" style="width:100%;padding:13px;background:var(--bg-input);border:1px solid var(--accent-blue);border-radius:var(--radius-sm);color:var(--accent-blue);font-weight:700;font-size:14px;cursor:pointer;margin-bottom:8px;">Calculate Volume</button>
+          <button id="storageAddBtn" onclick="addStorageToEstimate()" disabled style="width:100%;padding:13px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);color:#000;font-weight:700;font-size:14px;cursor:pointer;opacity:0.4;">Add to Estimate</button>
+        </div>
+      </div>
+
+      <!-- MATTRESS WIZARD MODAL -->
+      <div id="mattressWizardModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:200;align-items:flex-end;justify-content:center;">
+        <div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <div style="font-size:16px;font-weight:700;color:var(--accent-yellow);">🛏️ Mattress Calculator</div>
+            <button onclick="document.getElementById('mattressWizardModal').style.display='none'" style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;">✕</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
+            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;">
+              <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;font-weight:600;">Twin</div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <button onclick="mattressAdj('twin',-1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
+                <span id="mattCount_twin" style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--accent-green);min-width:24px;text-align:center;">0</span>
+                <button onclick="mattressAdj('twin',1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
+              </div>
+            </div>
+            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;">
+              <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;font-weight:600;">Full</div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <button onclick="mattressAdj('full',-1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
+                <span id="mattCount_full" style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--accent-green);min-width:24px;text-align:center;">0</span>
+                <button onclick="mattressAdj('full',1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
+              </div>
+            </div>
+            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;">
+              <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;font-weight:600;">Queen</div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <button onclick="mattressAdj('queen',-1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
+                <span id="mattCount_queen" style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--accent-green);min-width:24px;text-align:center;">0</span>
+                <button onclick="mattressAdj('queen',1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
+              </div>
+            </div>
+            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;">
+              <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;font-weight:600;">King</div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <button onclick="mattressAdj('king',-1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
+                <span id="mattCount_king" style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--accent-green);min-width:24px;text-align:center;">0</span>
+                <button onclick="mattressAdj('king',1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
+              </div>
+            </div>
+            <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;">
+              <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;font-weight:600;">Box Spring</div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <button onclick="mattressAdj('boxspring',-1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
+                <span id="mattCount_boxspring" style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--accent-green);min-width:24px;text-align:center;">0</span>
+                <button onclick="mattressAdj('boxspring',1)" style="width:28px;height:28px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
+              </div>
+            </div>
+          </div>
+          <div id="mattressCalcResult" style="display:none;background:var(--bg-card);border:1px solid var(--accent-yellow);border-radius:var(--radius-sm);padding:12px;margin-bottom:12px;">
+            <div style="font-size:11px;color:var(--accent-yellow);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Summary</div>
+            <div id="mattressCalcVolume" style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--accent-green);margin-bottom:4px;"></div>
+            <div id="mattressCalcDetail" style="font-size:11px;color:var(--text-muted);line-height:1.6;"></div>
+          </div>
+          <button onclick="calcMattress()" style="width:100%;padding:13px;background:var(--bg-input);border:1px solid var(--accent-yellow);border-radius:var(--radius-sm);color:var(--accent-yellow);font-weight:700;font-size:14px;cursor:pointer;margin-bottom:8px;">Calculate</button>
+          <button id="mattressAddBtn" onclick="addMattressToEstimate()" disabled style="width:100%;padding:13px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);color:#000;font-weight:700;font-size:14px;cursor:pointer;opacity:0.4;">Add to Estimate</button>
         </div>
       </div>
 
@@ -3098,6 +3282,13 @@
         document.getElementById('estJobIDDisplay').textContent = currentEstimate.jobID;
       }
 
+      // Collapse client info bar if we already have client data, expand if new estimate
+      if (currentEstimate.clientName || currentEstimate.address) {
+        collapseClientInfo();
+      } else {
+        expandClientInfo();
+      }
+
       // Restore split pricing toggle
       updateSplitToggleUI();
 
@@ -4533,6 +4724,7 @@
           document.getElementById('estClientName').value = data.clientName || '';
           document.getElementById('estAddress').value = data.address || '';
           document.getElementById('estJobIDDisplay').textContent = jobID;
+          collapseClientInfo();
 
           // Auto-load pricing from ZIP
           const zip = data.zip;
@@ -6063,6 +6255,331 @@
       });
     }
 
+
+
+    // ===== CLIENT INFO BAR =====
+    function updateClientInfoBar() {
+      const name = document.getElementById('estClientName').value.trim();
+      const addr = document.getElementById('estAddress').value.trim();
+      document.getElementById('estClientNameDisplay').textContent = name || 'No client name';
+      document.getElementById('estAddressDisplay').textContent = addr || '';
+    }
+
+    function collapseClientInfo() {
+      updateClientInfoBar();
+      document.getElementById('estClientInfoBar').style.display = 'flex';
+      document.getElementById('estClientInfoExpanded').style.display = 'none';
+    }
+
+    function expandClientInfo() {
+      document.getElementById('estClientInfoBar').style.display = 'none';
+      document.getElementById('estClientInfoExpanded').style.display = 'block';
+    }
+
+    function toggleClientInfoExpanded() {
+      const expanded = document.getElementById('estClientInfoExpanded');
+      if (expanded.style.display === 'none') {
+        expandClientInfo();
+      } else {
+        collapseClientInfo();
+      }
+    }
+
+    // ===== SHED WIZARD =====
+    let shedCalcData = null;
+
+    function showShedWizard() {
+      shedCalcData = null;
+      document.getElementById('shedAddBtn').disabled = true;
+      document.getElementById('shedAddBtn').style.opacity = '0.4';
+      document.getElementById('shedCalcResult').style.display = 'none';
+      document.getElementById('shedWizardModal').style.display = 'flex';
+    }
+
+    function calcShed() {
+      const L = parseFloat(document.getElementById('shedLength').value) || 0;
+      const W = parseFloat(document.getElementById('shedWidth').value) || 0;
+      const wallH = parseFloat(document.getElementById('shedWallHeight').value) || 0;
+      const peakH = parseFloat(document.getElementById('shedPeakHeight').value) || 0;
+      const siding = document.getElementById('shedSiding').value;
+      const fill = document.getElementById('shedFill').value;
+
+      if (!L || !W || !wallH) {
+        alert('Please enter length, width, and wall height.');
+        return;
+      }
+
+      // Volume: box portion + triangular roof portion
+      const avgH = peakH > wallH ? wallH + (peakH - wallH) / 2 : wallH;
+      const cubicFt = L * W * avgH;
+
+      // Fill multiplier
+      const fillMap = { 'Empty': 0.05, '25% full': 0.25, '50% full': 0.50, '75% full': 0.75, 'Packed full': 1.0 };
+      const fillPct = fillMap[fill] || 0.5;
+
+      // Structural debris: ~1 truck per 200 sq ft of floor area (full demo)
+      // We estimate shed structure volume + contents volume
+      const structureCubicFt = (2 * L * wallH + 2 * W * wallH + L * W) * 0.5; // rough surface area × thickness
+      const contentsCubicFt = cubicFt * fillPct;
+      const totalCubicFt = structureCubicFt + contentsCubicFt;
+
+      // Convert cubic feet to truck fractions (1 truck ≈ 400 cubic ft usable)
+      const truckFraction = totalCubicFt / 400;
+      const snapped = snapToEighth(truckFraction);
+
+      const detail = L + '×' + W + ' ft, wall ' + wallH + 'ft' + (peakH ? '/peak ' + peakH + 'ft' : '') +
+        ', ' + siding + ' siding, ' + fill;
+
+      shedCalcData = {
+        trucks: snapped,
+        description: detail,
+        siding, fill,
+        dims: L + 'x' + W + ' wall:' + wallH + (peakH ? ' peak:' + peakH : '')
+      };
+
+      document.getElementById('shedCalcVolume').textContent = formatTrucks(snapped);
+      document.getElementById('shedCalcDetail').textContent = detail;
+      document.getElementById('shedCalcResult').style.display = 'block';
+      document.getElementById('shedAddBtn').disabled = false;
+      document.getElementById('shedAddBtn').style.opacity = '1';
+    }
+
+    function addShedToEstimate() {
+      if (!shedCalcData) return;
+      const truckLabel = trucksToLabel(shedCalcData.trucks);
+      currentEstimate.charges.push({
+        type: 'volume',
+        room: 'Shed',
+        area: 'Shed',
+        description: 'Shed removal — ' + shedCalcData.description,
+        truckLabel: truckLabel,
+        truckQty: 1,
+        truckVolume: shedCalcData.trucks
+      });
+      renderCharges();
+      updateTotals();
+      autoSaveDraft();
+      document.getElementById('shedWizardModal').style.display = 'none';
+    }
+
+    // ===== STORAGE UNIT WIZARD =====
+    let storageCalcData = null;
+
+    function showStorageWizard() {
+      storageCalcData = null;
+      document.getElementById('storageAddBtn').disabled = true;
+      document.getElementById('storageAddBtn').style.opacity = '0.4';
+      document.getElementById('storageCalcResult').style.display = 'none';
+      document.getElementById('storageWizardModal').style.display = 'flex';
+    }
+
+    function onStorageSizeChange() {
+      const val = document.getElementById('storageSize').value;
+      const customDiv = document.getElementById('storageCustomDims');
+      if (val === 'custom') {
+        customDiv.style.display = 'block';
+        document.getElementById('storageLength').value = '';
+        document.getElementById('storageWidth').value = '';
+      } else {
+        customDiv.style.display = 'none';
+        const parts = val.split('x');
+        document.getElementById('storageLength').value = parts[0];
+        document.getElementById('storageWidth').value = parts[1];
+      }
+    }
+
+    function calcStorage() {
+      const L = parseFloat(document.getElementById('storageLength').value) || 0;
+      const W = parseFloat(document.getElementById('storageWidth').value) || 0;
+      const H = parseFloat(document.getElementById('storageHeight').value) || 8;
+      const fill = document.getElementById('storageFill').value;
+
+      if (!L || !W) {
+        alert('Please enter length and width.');
+        return;
+      }
+
+      const fillMap = { '25% full': 0.25, '50% full': 0.50, '75% full': 0.75, 'Packed full': 1.0 };
+      const fillPct = fillMap[fill] || 0.5;
+      const cubicFt = L * W * H * fillPct;
+      const truckFraction = cubicFt / 400;
+      const snapped = snapToEighth(truckFraction);
+
+      const sizeLabel = L + '×' + W + ' ft';
+      const detail = sizeLabel + ' × ' + H + 'ft ceiling, ' + fill;
+
+      storageCalcData = {
+        trucks: snapped,
+        description: detail,
+        size: sizeLabel,
+        fill
+      };
+
+      document.getElementById('storageCalcVolume').textContent = formatTrucks(snapped);
+      document.getElementById('storageCalcDetail').textContent = detail;
+      document.getElementById('storageCalcResult').style.display = 'block';
+      document.getElementById('storageAddBtn').disabled = false;
+      document.getElementById('storageAddBtn').style.opacity = '1';
+    }
+
+    function addStorageToEstimate() {
+      if (!storageCalcData) return;
+      const truckLabel = trucksToLabel(storageCalcData.trucks);
+      currentEstimate.charges.push({
+        type: 'volume',
+        room: 'Storage Unit',
+        area: 'Storage Unit',
+        description: 'Storage unit — ' + storageCalcData.description,
+        truckLabel: truckLabel,
+        truckQty: 1,
+        truckVolume: storageCalcData.trucks
+      });
+      renderCharges();
+      updateTotals();
+      autoSaveDraft();
+      document.getElementById('storageWizardModal').style.display = 'none';
+    }
+
+    // ===== MATTRESS WIZARD =====
+    const mattressCounts = { twin: 0, full: 0, queen: 0, king: 0, boxspring: 0 };
+    // Truck volume per item (fraction of a truck)
+    const mattressVol = { twin: 0.0625, full: 0.0625, queen: 0.125, king: 0.125, boxspring: 0.0625 };
+    let mattressCalcData = null;
+
+    function showMattressWizard() {
+      mattressCalcData = null;
+      Object.keys(mattressCounts).forEach(k => { mattressCounts[k] = 0; document.getElementById('mattCount_' + k).textContent = '0'; });
+      document.getElementById('mattressAddBtn').disabled = true;
+      document.getElementById('mattressAddBtn').style.opacity = '0.4';
+      document.getElementById('mattressCalcResult').style.display = 'none';
+      document.getElementById('mattressWizardModal').style.display = 'flex';
+    }
+
+    function mattressAdj(type, delta) {
+      mattressCounts[type] = Math.max(0, (mattressCounts[type] || 0) + delta);
+      document.getElementById('mattCount_' + type).textContent = mattressCounts[type];
+    }
+
+    function calcMattress() {
+      const total = Object.values(mattressCounts).reduce((s, v) => s + v, 0);
+      if (total === 0) { alert('Add at least one mattress or box spring.'); return; }
+
+      let trucks = 0;
+      Object.keys(mattressCounts).forEach(k => { trucks += (mattressCounts[k] || 0) * (mattressVol[k] || 0); });
+      const snapped = snapToEighth(trucks);
+
+      // Build description
+      const parts = [];
+      if (mattressCounts.twin) parts.push(mattressCounts.twin + ' Twin');
+      if (mattressCounts.full) parts.push(mattressCounts.full + ' Full');
+      if (mattressCounts.queen) parts.push(mattressCounts.queen + ' Queen');
+      if (mattressCounts.king) parts.push(mattressCounts.king + ' King');
+      if (mattressCounts.boxspring) parts.push(mattressCounts.boxspring + ' Box Spring');
+      const desc = parts.join(', ');
+
+      mattressCalcData = { trucks: snapped, description: desc, total };
+
+      document.getElementById('mattressCalcVolume').textContent = formatTrucks(snapped);
+      document.getElementById('mattressCalcDetail').textContent = desc + ' • Mattress recycling fee applies';
+      document.getElementById('mattressCalcResult').style.display = 'block';
+      document.getElementById('mattressAddBtn').disabled = false;
+      document.getElementById('mattressAddBtn').style.opacity = '1';
+    }
+
+    function addMattressToEstimate() {
+      if (!mattressCalcData) return;
+      // Row 1: volume charge
+      const truckLabel = trucksToLabel(mattressCalcData.trucks);
+      currentEstimate.charges.push({
+        type: 'volume',
+        room: 'Mattress',
+        area: 'Bedroom',
+        description: 'Mattress removal — ' + mattressCalcData.description,
+        truckLabel: truckLabel,
+        truckQty: 1,
+        truckVolume: mattressCalcData.trucks
+      });
+      // Row 2: mattress recycling surcharge — use existing price book item if available
+      const recycleItem = findPriceItem('mattress');
+      if (recycleItem) {
+        currentEstimate.charges.push({
+          type: 'surcharge',
+          priceItemID: recycleItem.priceItemID,
+          name: recycleItem.name,
+          blockName: recycleItem.blockName,
+          priceBlockID: recycleItem.priceBlockID,
+          qty: mattressCalcData.total,
+          unitPrice: recycleItem.value,
+          area: 'Bedroom',
+          description: 'Mattress recycling — ' + mattressCalcData.description,
+          taxID: recycleItem.taxID || 146
+        });
+      } else {
+        // No price book match — add a placeholder surcharge at $0 for the crew to price manually
+        currentEstimate.charges.push({
+          type: 'surcharge',
+          priceItemID: null,
+          name: 'Mattress Recycling Fee',
+          blockName: '',
+          priceBlockID: null,
+          qty: mattressCalcData.total,
+          unitPrice: 0,
+          area: 'Bedroom',
+          description: 'Mattress recycling — ' + mattressCalcData.description,
+          taxID: 146
+        });
+      }
+      renderCharges();
+      updateTotals();
+      autoSaveDraft();
+      document.getElementById('mattressWizardModal').style.display = 'none';
+    }
+
+    // Find a price book item by keyword
+    function findPriceItem(keyword) {
+      if (!priceBlocks || !priceBlocks.length) return null;
+      const kw = keyword.toLowerCase();
+      for (const block of priceBlocks) {
+        for (const item of (block.items || [])) {
+          if ((item.name || '').toLowerCase().includes(kw)) {
+            return { ...item, blockName: block.name, priceBlockID: block.priceBlockID };
+          }
+        }
+      }
+      return null;
+    }
+
+    // Convert decimal trucks to nearest 1/8 fraction label
+    function trucksToLabel(trucks) {
+      const fractionMap = {
+        0: 'Included', 0.0625: 'Minimum', 0.125: '1/8', 0.25: '1/4',
+        0.375: '3/8', 0.5: '1/2', 0.625: '5/8', 0.75: '3/4', 0.875: '7/8', 1: 'Full'
+      };
+      // For fractions <= 1 truck, snap to label; for > 1 truck, return as decimal
+      if (trucks <= 1) {
+        const snapped = snapToEighth(trucks);
+        return fractionMap[snapped] || 'Full';
+      }
+      return String(Math.round(trucks * 1000) / 1000);
+    }
+
+    function formatTrucks(trucks) {
+      if (trucks < 0.01) return '< 1/8 truck';
+      if (trucks <= 1) {
+        const eighths = Math.round(trucks * 8);
+        const whole = Math.floor(eighths / 8);
+        const rem = eighths % 8;
+        const fracMap = {1:'⅛',2:'¼',3:'⅜',4:'½',5:'⅝',6:'¾',7:'⅞'};
+        if (whole && rem) return whole + fracMap[rem] + ' trucks';
+        if (whole) return whole + ' truck' + (whole > 1 ? 's' : '');
+        return (fracMap[rem] || rem + '/8') + ' truck';
+      }
+      return trucks.toFixed(3) + ' trucks';
+    }
+
+    function snapToEighth(val) {
+      return Math.round(val * 8) / 8;
+    }
 
     function fmtMoney(val) {
       const n = parseFloat(val) || 0;
