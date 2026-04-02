@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.2.3 | 2026-04-02">
+  <meta name="crewlogic-version" content="v2.2.4 | 2026-04-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -3530,7 +3530,14 @@
                'vonigoQuoteID','_pendingVolumeLines','clonedFrom','createdAt','updatedAt',
                'label','totalTrucks','totalPrice','splitPricing','coverPhoto','payload','costAnalysis']
               .forEach(k => delete p[k]);
+              // Also strip any col_N bleed-through from extra sheet columns
+              Object.keys(p).forEach(k => { if (/^col_\d+$/.test(k)) delete p[k]; });
+              console.log('[CoverPhoto] currentEstimate.coverPhoto before merge:', currentEstimate.coverPhoto ? currentEstimate.coverPhoto.substring(0,80) : 'EMPTY');
+              const savedCoverPhoto = currentEstimate.coverPhoto;
               currentEstimate = {...currentEstimate, ...p};
+              // Ensure coverPhoto from sheet row is never overwritten by payload merge
+              if (savedCoverPhoto) currentEstimate.coverPhoto = savedCoverPhoto;
+              console.log('[CoverPhoto] after merge:', currentEstimate.coverPhoto ? currentEstimate.coverPhoto.substring(0,80) : 'EMPTY');
             } catch(e) {
               console.warn('Payload parse failed, trying localStorage fallback');
               // Payload may be truncated — merge from localStorage if available
@@ -3549,6 +3556,7 @@
             currentEstimate._pendingVolumeLines = null;
           }
           restorePriceBlocks();
+          console.log('[CoverPhoto] before open:', currentEstimate.coverPhoto ? currentEstimate.coverPhoto.substring(0,80) : 'EMPTY');
           // Restore collapse state before opening editor — only on fresh load
           chargeCollapsed.clear();
           try {
