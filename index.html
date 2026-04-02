@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.1 | 2026-04-02">
+  <meta name="crewlogic-version" content="v2.1.1 | 2026-04-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -5661,9 +5661,10 @@
       document.getElementById('coverPhotoPreview').style.display = 'block';
       document.getElementById('coverPhotoBtn').style.display = 'none';
 
-      // Store base64 temporarily so PDF generation works while upload is in progress
+      // Store base64 and save to backend immediately as fallback
+      // (large but ensures photo is not lost if Drive upload fails)
       currentEstimate.coverPhoto = base64;
-      autoSaveDraft();
+      saveEstimateDraft();
 
       // Upload to Drive in background — replace base64 with Drive URL once done
       try {
@@ -5683,8 +5684,8 @@
         if (data.success && data.photoUrl) {
           // Replace base64 with Drive URL — keeps sheet cell tiny
           currentEstimate.coverPhoto = data.photoUrl;
-          // Keep img src as the base64 preview (already loaded) — no flicker
-          autoSaveDraft();
+          // Push to backend so Drive URL persists across sessions
+          saveEstimateDraft();
         }
       } catch(e) {
         console.warn('Cover photo Drive upload failed, keeping base64:', e);
