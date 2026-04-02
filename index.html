@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.2.2 | 2026-04-02">
+  <meta name="crewlogic-version" content="v2.2.3 | 2026-04-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -5766,12 +5766,16 @@
       document.getElementById('coverPhotoPreview').style.display = 'block';
       document.getElementById('coverPhotoBtn').style.display = 'none';
 
-      // Store base64 and save to backend immediately as fallback
-      // (large but ensures photo is not lost if Drive upload fails)
+      // Store base64 in memory only — do NOT save to sheet yet (too large, hits 50K limit)
       currentEstimate.coverPhoto = base64;
-      saveEstimateDraft();
+      autoSaveDraft(); // saves to localStorage only
 
-      // Upload to Drive in background — replace base64 with Drive URL once done
+      // Show uploading indicator
+      const feedbackEl = document.getElementById('estFeedback');
+      feedbackEl.textContent = '📷 Uploading cover photo...';
+      feedbackEl.className = 'settings-feedback loading';
+
+      // Upload to Drive — only save to sheet once we have a compact Drive URL
       try {
         const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
           method: 'POST',
@@ -5787,14 +5791,18 @@
         });
         const data = await response.json();
         if (data.success && data.photoUrl) {
-          // Replace base64 with Drive URL — keeps sheet cell tiny
           currentEstimate.coverPhoto = data.photoUrl;
-          // Push to backend so Drive URL persists across sessions
-          saveEstimateDraft();
+          feedbackEl.textContent = '';
+          saveEstimateDraft(); // now save with compact Drive URL
+        } else {
+          // Drive upload failed — warn user photo may not persist after refresh
+          feedbackEl.textContent = '⚠️ Cover photo upload failed — photo may be lost on refresh';
+          feedbackEl.className = 'settings-feedback error';
         }
       } catch(e) {
-        console.warn('Cover photo Drive upload failed, keeping base64:', e);
-        // Falls back to base64 — will hit cell limit but at least photo is saved
+        console.warn('Cover photo Drive upload failed:', e);
+        feedbackEl.textContent = '⚠️ Cover photo upload failed — photo may be lost on refresh';
+        feedbackEl.className = 'settings-feedback error';
       }
     }
 
