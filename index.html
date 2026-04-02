@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.2.4 | 2026-04-02">
+  <meta name="crewlogic-version" content="v2.2.5 | 2026-04-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -3621,7 +3621,14 @@
 
       // Restore cover photo
       if (currentEstimate.coverPhoto) {
-        document.getElementById('coverPhotoImg').src = currentEstimate.coverPhoto;
+        // Convert Drive uc?export=view URLs to lh3 format to bypass CORS restrictions
+        const coverSrc = (() => {
+          const url = currentEstimate.coverPhoto;
+          if (!url || url.startsWith('data:')) return url;
+          const m = url.match(/[?&]id=([^&]+)/);
+          return m ? 'https://lh3.googleusercontent.com/d/' + m[1] : url;
+        })();
+        document.getElementById('coverPhotoImg').src = coverSrc;
         document.getElementById('coverPhotoPreview').style.display = 'block';
         document.getElementById('coverPhotoBtn').style.display = 'none';
       } else {
