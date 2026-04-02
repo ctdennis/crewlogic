@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.1.1 | 2026-04-02">
+  <meta name="crewlogic-version" content="v2.1.2 | 2026-04-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -3696,6 +3696,32 @@
       initEstimatesList();
     }
 
+    // ===== CHARGE COLLAPSE STATE =====
+    const chargeCollapsed = new Set(); // tracks which globalIdx values are collapsed
+
+    function toggleChargeCollapse(idx) {
+      if (chargeCollapsed.has(idx)) {
+        chargeCollapsed.delete(idx);
+      } else {
+        chargeCollapsed.add(idx);
+      }
+      renderCharges();
+    }
+
+    function toggleAllCharges() {
+      const charges = currentEstimate.charges || [];
+      const volumeIdxs = charges
+        .map((c, i) => c.type === 'volume' ? i : -1)
+        .filter(i => i >= 0);
+      const allCollapsed = volumeIdxs.every(i => chargeCollapsed.has(i));
+      if (allCollapsed) {
+        volumeIdxs.forEach(i => chargeCollapsed.delete(i));
+      } else {
+        volumeIdxs.forEach(i => chargeCollapsed.add(i));
+      }
+      renderCharges();
+    }
+
     // ===== UNIFIED CHARGES =====
     const volLabelMap = {'Included':0,'Minimum':0.0625,'1/8':0.125,'1/4':0.25,'3/8':0.375,'1/2':0.5,'5/8':0.625,'3/4':0.75,'7/8':0.875,'Full':1};
     let currentChargeType = null;
@@ -4603,18 +4629,45 @@
 
       let html = '';
 
-      // Volume section header if any
+      // Volume section header with collapse-all toggle
       if (volumeCharges.length > 0) {
-        html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin:8px 0 6px 0;">Volume</div>';
+        const allCollapsed = volumeCharges.every((c, i) => chargeCollapsed.has(charges.indexOf(c)));
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0 6px 0;">';
+        html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);">Volume</div>';
+        if (volumeCharges.length > 1) {
+          html += '<button onclick="toggleAllCharges()" style="background:none;border:none;font-size:11px;color:var(--text-muted);cursor:pointer;padding:2px 6px;">' + (allCollapsed ? '▸ Expand all' : '▾ Collapse all') + '</button>';
+        }
+        html += '</div>';
+
         volumeCharges.forEach((charge, i) => {
           const globalIdx = charges.indexOf(charge);
+          const isCollapsed = chargeCollapsed.has(globalIdx);
           const volOptions = ['Included','Minimum','1/8','1/4','3/8','1/2','5/8','3/4','7/8','Full'].map(v =>
             '<option value="' + v + '"' + (charge.truckLabel === v ? ' selected' : '') + '>' + v + '</option>'
           ).join('');
           const areaOptions = (availableAreas || []).map(a =>
             '<option value="' + a + '"' + (charge.area === a ? ' selected' : '') + '>' + a + '</option>'
           ).join('');
-          html += '<div class="room-row">';
+
+          // Volume summary label for collapsed view
+          const volSummary = (charge.truckLabel || '—') + (charge.truckQty && charge.truckQty !== 1 ? ' ×' + charge.truckQty : '');
+          const roomLabel = charge.room || '(no room)';
+          const areaLabel = charge.area || '';
+
+          html += '<div class="room-row" style="padding:0;overflow:hidden;">';
+
+          // Always-visible header row
+          html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;background:var(--bg-card);" onclick="toggleChargeCollapse(' + globalIdx + ')">';
+          html += '<div style="flex:1;min-width:0;">';
+          html += '<div style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + roomLabel.replace(/</g,'&lt;') + '</div>';
+          if (areaLabel) html += '<div style="font-size:11px;color:var(--text-muted);">' + areaLabel.replace(/</g,'&lt;') + '</div>';
+          html += '</div>';
+          html += '<div style="font-family:monospace;font-size:12px;font-weight:700;color:var(--accent-green);white-space:nowrap;">' + volSummary + '</div>';
+          html += '<div style="font-size:11px;color:var(--text-muted);margin-left:4px;">' + (isCollapsed ? '▸' : '▾') + '</div>';
+          html += '</div>';
+
+          // Collapsible detail body
+          html += '<div style="display:' + (isCollapsed ? 'none' : 'block') + ';padding:10px 12px;border-top:1px solid var(--border);">';
 
           // Row 1: Room + Area + Delete
           html += '<div class="room-row-top">';
@@ -4629,7 +4682,7 @@
           html += '<input class="form-input" type="number" min="0.125" step="0.125" value="' + (charge.truckQty || 1) + '" style="width:64px;flex-shrink:0;text-align:center;padding:12px 6px;" data-idx="' + globalIdx + '" data-field="truckQty" oninput="updateChargeFromInput(this)">';
           html += '</div>';
 
-          // Row 2b: % Recycled / % Donated (cost analysis inputs)
+          // Row 2b: % Recycled / % Donated
           html += '<div style="display:flex;gap:6px;margin-top:4px;align-items:center;">';
           html += '<span style="font-size:10px;color:var(--text-muted);white-space:nowrap;">♻️ Recycle %</span>';
           html += '<input class="form-input" type="number" min="0" max="100" step="1" value="' + (charge.pctRecycled||0) + '" style="width:56px;flex-shrink:0;text-align:center;padding:8px 4px;font-size:12px;" data-idx="' + globalIdx + '" data-field="pctRecycled" oninput="updateChargeFromInput(this)" placeholder="0">';
@@ -4638,7 +4691,7 @@
           html += '<span style="font-size:10px;color:var(--text-muted);margin-left:4px;" id="pctCheck_' + globalIdx + '"></span>';
           html += '</div>';
 
-          // Row 3: Description (textarea + re-record + re-analyze)
+          // Row 3: Description
           html += '<div style="margin-top:6px;position:relative;">';
           html += '<textarea class="form-input" style="width:100%;min-height:56px;resize:vertical;font-size:12px;line-height:1.5;padding:8px 10px;box-sizing:border-box;" placeholder="Description" data-idx="' + globalIdx + '" data-field="description" oninput="updateChargeFromInput(this)">' + (charge.description||'').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</textarea>';
           html += '<div style="display:flex;gap:5px;margin-top:4px;">';
@@ -4653,18 +4706,14 @@
           // Row 4: Excluded
           html += '<input class="form-input" style="width:100%;margin-top:6px;" placeholder="Not included" value="' + (charge.notIncluded||'').replace(/"/g,'&quot;') + '" data-idx="' + globalIdx + '" data-field="notIncluded" oninput="updateChargeFromInput(this)">';
 
-          // Row 5: Photo Gallery (up to 4) + Analyze
-          // Migrate legacy single photoUrl to photos array
-          if (!charge.photos) {
-            charge.photos = charge.photoUrl ? [charge.photoUrl] : [];
-          }
+          // Row 5: Photos
+          if (!charge.photos) charge.photos = charge.photoUrl ? [charge.photoUrl] : [];
           const photos = charge.photos;
           html += '<div style="margin-top:8px;">';
-          // Thumbnail strip
           if (photos.length > 0) {
             html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">';
             photos.forEach((url, pi) => {
-              const thumbSrc = url.includes('drive.google.com') 
+              const thumbSrc = url.includes('drive.google.com')
                 ? url.replace('uc?export=view&id=', 'thumbnail?id=').replace('drive.google.com/uc', 'drive.google.com/thumbnail')
                 : url;
               html += '<div style="position:relative;flex-shrink:0;">';
@@ -4674,20 +4723,21 @@
             });
             html += '</div>';
           }
-          // Action buttons row
           html += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">';
           if (photos.length < 4) {
-            html += '<button onclick="captureChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:var(--text-secondary);cursor:pointer;">📷 ' + (photos.length === 0 ? 'Add Photo' : 'Add Photo') + '</button>';
+            html += '<button onclick="captureChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:var(--text-secondary);cursor:pointer;">📷 Add Photo</button>';
           }
           if (photos.length > 0) {
-            html += '<button onclick="analyzeChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:#000;font-weight:600;cursor:pointer;">🤖 Analyze ' + (photos.length > 1 ? '(' + photos.length + ' photos)' : '') + '</button>';
+            html += '<button onclick="analyzeChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:#000;font-weight:600;cursor:pointer;">🤖 Analyze' + (photos.length > 1 ? ' (' + photos.length + ')' : '') + '</button>';
           }
           html += '</div>';
           if (charge.photoAnalysis) {
             html += '<div style="width:100%;margin-top:6px;font-size:11px;padding:6px 10px;border-radius:var(--radius-sm);background:rgba(0,238,118,0.08);color:var(--text-primary);">🤖 ' + charge.photoAnalysis + '</div>';
           }
           html += '</div>';
-          html += '</div>';
+
+          html += '</div>'; // end detail body
+          html += '</div>'; // end room-row
         });
       }
 
