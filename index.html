@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.3.1 | 2026-04-02">
+  <meta name="crewlogic-version" content="v2.3.3 | 2026-04-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -7266,12 +7266,15 @@
       const fields = ['DisposalSite','RecyclingSite','DonationSite','Days','Crew','HrsDay','Margin','Cans','CanCost'];
       fields.forEach(f => {
         const el = document.getElementById('ca' + f);
-        if (el && ca[f.toLowerCase()] !== undefined) el.value = ca[f.toLowerCase()];
+        if (el && ca[f.toLowerCase()] !== undefined && ca[f.toLowerCase()] !== null && ca[f.toLowerCase()] !== '') {
+          el.value = ca[f.toLowerCase()];
+        }
       });
       // Restore distance results
       if (ca.distances) {
         renderDistanceResult(ca.distances);
       }
+      updateCostAnalysis();
     }
 
     function saveCostAnalysisDraft() {
@@ -7319,10 +7322,8 @@
       const cans    = ca.cans || 0;
       const canCost = ca.canCost || 0;
 
-      if (!days || !crew || !hrsDay) {
-        document.getElementById('caCostBreakdown').style.display = 'none';
-        return;
-      }
+      // Show breakdown even with partial inputs — labor will be $0 if crew info missing
+      // (removed early return so margin analysis shows even without labor details)
 
       // Derive truck routing from volume charge rows
       const charges = (currentEstimate && currentEstimate.charges) || [];
@@ -7340,6 +7341,7 @@
 
       // Distances (from saved calc or zeros)
       const dist = ca.distances || {};
+      const hasDistances = !!(dist.homeMiles || dist.disposalMiles);
       const homeMi    = parseFloat(dist.homeMiles) || 0;
       const homeMin   = parseFloat(dist.homeMinutes) || 0;
       const dispMi    = parseFloat(dist.disposalMiles) || 0;
@@ -7422,8 +7424,16 @@
       ];
       if (cans > 0) lines.push(['Cans (' + cans + ' × $' + canCost + ')', fmt(canTotal)]);
 
+      // Partial load note
+      if (trucksDisposal > 0 && trucksDisposal < 1) {
+        lines.push(['⚠️ Partial load (' + trucksDisposal.toFixed(3) + ' trucks) — will combine at facility', '']);
+      }
+      // No distances warning
+      if (!hasDistances) {
+        lines.push(['⚠️ Distances not calculated — fuel cost is $0', '']);
+      }
       document.getElementById('caCostLines').innerHTML = lines.map(([l,v]) =>
-        '<div style="display:flex;justify-content:space-between;"><span>' + l + '</span><span style="font-weight:600;">' + v + '</span></div>'
+        '<div style="display:flex;justify-content:space-between;"><span style="color:' + (l.startsWith('⚠️') ? '#fbbf24' : 'inherit') + '">' + l + '</span><span style="font-weight:600;">' + v + '</span></div>'
       ).join('');
       document.getElementById('caTotalCosts').textContent = fmt(totalCosts);
       document.getElementById('caRecyclingRevenue').textContent = '−' + fmt(recycRevenue);
@@ -7508,7 +7518,11 @@
       const fmt = (mi, min) => mi.toFixed(1) + ' mi / ' + Math.round(min) + ' min';
       let html = '';
       if (dist.homeMiles) html += '<div>🏠 Home → Job: ' + fmt(dist.homeMiles, dist.homeMinutes) + '</div>';
-      if (dist.disposalMiles) html += '<div>🗑 Job → Disposal: ' + fmt(dist.disposalMiles, dist.disposalMinutes) + '</div>';
+      if (dist.disposalMiles) {
+        html += '<div>🗑 Job → Disposal: ' + fmt(dist.disposalMiles, dist.disposalMinutes) + '</div>';
+      } else {
+        html += '<div style="color:var(--accent-orange);">🗑 Job → Disposal: distance not returned — check disposal site address in n8n</div>';
+      }
       if (dist.recyclingMiles) html += '<div>♻️ Job → Recycling: ' + fmt(dist.recyclingMiles, dist.recyclingMinutes) + '</div>';
       if (dist.donationMiles) html += '<div>🤝 Job → Donation: ' + fmt(dist.donationMiles, dist.donationMinutes) + '</div>';
       el.innerHTML = html;
