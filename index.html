@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.1.6 | 2026-04-02">
+  <meta name="crewlogic-version" content="v2.1.8 | 2026-04-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -3662,6 +3662,12 @@
         feedbackEl.textContent = '';
       }
 
+      // Restore collapse state
+      chargeCollapsed.clear();
+      if (currentEstimate.collapseState && Array.isArray(currentEstimate.collapseState)) {
+        currentEstimate.collapseState.forEach(idx => chargeCollapsed.add(idx));
+      }
+
       isDirty = false; // estimate just loaded — no unsaved changes
 
       // If cost analysis panel is open, repopulate it
@@ -3706,6 +3712,10 @@
         chargeCollapsed.delete(idx);
       } else {
         chargeCollapsed.add(idx);
+      }
+      if (currentEstimate) {
+        currentEstimate.collapseState = Array.from(chargeCollapsed);
+        saveLocalEstimate(currentEstimate);
       }
       renderCharges();
     }
@@ -4703,9 +4713,9 @@
 
           // Row 2b: % Recycled / % Donated
           html += '<div style="display:flex;gap:6px;margin-top:4px;align-items:center;">';
-          html += '<span style="font-size:10px;color:var(--text-muted);white-space:nowrap;">♻️ Recycle %</span>';
+          html += '<span style="font-size:10px;color:var(--text-muted);white-space:nowrap;"><span style="font-size:16px;">♻️</span> Recycle %</span>';
           html += '<input class="form-input" type="number" min="0" max="100" step="1" value="' + (charge.pctRecycled||0) + '" style="width:56px;flex-shrink:0;text-align:center;padding:8px 4px;font-size:12px;" data-idx="' + globalIdx + '" data-field="pctRecycled" oninput="updateChargeFromInput(this)" placeholder="0">';
-          html += '<span style="font-size:10px;color:var(--text-muted);white-space:nowrap;">🤝 Donate %</span>';
+          html += '<span style="font-size:10px;color:var(--text-muted);white-space:nowrap;"><span style="font-size:16px;">🤝</span> Donate %</span>';
           html += '<input class="form-input" type="number" min="0" max="100" step="1" value="' + (charge.pctDonated||0) + '" style="width:56px;flex-shrink:0;text-align:center;padding:8px 4px;font-size:12px;" data-idx="' + globalIdx + '" data-field="pctDonated" oninput="updateChargeFromInput(this)" placeholder="0">';
           html += '<span style="font-size:10px;color:var(--text-muted);margin-left:4px;" id="pctCheck_' + globalIdx + '"></span>';
           html += '</div>';
@@ -5250,6 +5260,8 @@
       currentEstimate.address = document.getElementById('estAddress').value.trim();
       currentEstimate.notes = document.getElementById('estNotes').value.trim();
       currentEstimate.updatedAt = new Date().toISOString();
+      // Persist collapse state with the estimate
+      currentEstimate.collapseState = Array.from(chargeCollapsed);
       isDirty = true; // mark unsaved changes on any mutation
       saveLocalEstimate(currentEstimate);
     }
@@ -5275,6 +5287,7 @@
               delete p.priceBook;
               delete p.row_number;
               delete p.costAnalysis;
+              delete p.collapseState;
               return p;
             })(),
             priceBook: currentEstimate.priceBlocks || [],
