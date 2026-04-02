@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.1.2 | 2026-04-02">
+  <meta name="crewlogic-version" content="v2.1.3 | 2026-04-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1175,11 +1175,11 @@
             <div class="est-section-title" style="margin-bottom:8px;">Add Items</div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
               <button class="est-add-btn voice-room-btn" id="voiceRoomBtn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe</button>
-              <button class="est-add-btn" id="photoRoomBtn" onclick="togglePhotoPanel()" style="background:var(--accent-blue);color:#fff;font-weight:600;border-color:var(--accent-blue);">📷</button>
-              <button class="est-add-btn" id="addChargeBtn" onclick="showAddCharge()">+ Manual</button>
+              <button class="est-add-btn" id="photoRoomBtn" onclick="togglePhotoPanel()" style="background:var(--accent-green);color:#000;font-weight:600;">📷 Photo</button>
+              <button class="est-add-btn" id="addChargeBtn" onclick="showAddCharge()" style="background:var(--accent-green);color:#000;font-weight:600;">+ Manual</button>
               <!-- Specialty wizards dropdown -->
               <div style="position:relative;display:inline-block;">
-                <button class="est-add-btn" onclick="toggleWizardMenu(event)" id="wizardMenuBtn" style="border-color:var(--accent-orange);color:var(--accent-orange);">⚡ Specialty ▾</button>
+                <button class="est-add-btn" onclick="toggleWizardMenu(event)" id="wizardMenuBtn" style="background:var(--accent-green);color:#000;font-weight:600;">⚡ Specialty ▾</button>
                 <div id="wizardMenu" style="display:none;position:absolute;top:calc(100% + 4px);left:0;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);z-index:50;min-width:160px;box-shadow:var(--shadow);">
                   <button onclick="closeWizardMenu();showShedWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🏚️ Shed</button>
                   <button onclick="closeWizardMenu();showStorageWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">📦 Storage Unit</button>
@@ -1220,8 +1220,8 @@
           <!-- Add charge buttons (repeated below charges for convenience) -->
           <div id="estChargesBottomBtns" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:10px 0 4px 0;">
             <button class="est-add-btn voice-room-btn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe</button>
-            <button class="est-add-btn" onclick="togglePhotoPanel()" style="background:var(--accent-blue);color:#fff;font-weight:600;border-color:var(--accent-blue);">📷</button>
-            <button class="est-add-btn" onclick="showAddCharge()">+ Manual</button>
+            <button class="est-add-btn" onclick="togglePhotoPanel()" style="background:var(--accent-green);color:#000;font-weight:600;">📷 Photo</button>
+            <button class="est-add-btn" onclick="showAddCharge()" style="background:var(--accent-green);color:#000;font-weight:600;">+ Manual</button>
             <div style="position:relative;display:inline-block;">
               <button class="est-add-btn" onclick="toggleWizardMenu(event)" style="border-color:var(--accent-orange);color:var(--accent-orange);">⚡ Specialty ▾</button>
               <div id="wizardMenuBottom" style="display:none;position:absolute;bottom:calc(100% + 4px);left:0;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);z-index:50;min-width:160px;box-shadow:var(--shadow);">
@@ -3722,6 +3722,20 @@
       renderCharges();
     }
 
+    function toggleAllSurcharges() {
+      const charges = currentEstimate.charges || [];
+      const otherIdxs = charges
+        .map((c, i) => c.type !== 'volume' ? i : -1)
+        .filter(i => i >= 0);
+      const allCollapsed = otherIdxs.every(i => chargeCollapsed.has(i));
+      if (allCollapsed) {
+        otherIdxs.forEach(i => chargeCollapsed.delete(i));
+      } else {
+        otherIdxs.forEach(i => chargeCollapsed.add(i));
+      }
+      renderCharges();
+    }
+
     // ===== UNIFIED CHARGES =====
     const volLabelMap = {'Included':0,'Minimum':0.0625,'1/8':0.125,'1/4':0.25,'3/8':0.375,'1/2':0.5,'5/8':0.625,'3/4':0.75,'7/8':0.875,'Full':1};
     let currentChargeType = null;
@@ -4743,39 +4757,53 @@
 
       // Other charges
       if (otherCharges.length > 0) {
-        html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin:12px 0 6px 0;">Surcharges & Other</div>';
+        const allSurchargesCollapsed = otherCharges.every(c => chargeCollapsed.has(charges.indexOf(c)));
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;margin:12px 0 6px 0;">';
+        html += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);">Surcharges & Other</div>';
+        if (otherCharges.length > 1) {
+          html += '<button onclick="toggleAllSurcharges()" style="background:none;border:none;font-size:11px;color:var(--text-muted);cursor:pointer;padding:2px 6px;">' + (allSurchargesCollapsed ? '▸ Expand all' : '▾ Collapse all') + '</button>';
+        }
+        html += '</div>';
         otherCharges.forEach(charge => {
           const globalIdx = charges.indexOf(charge);
+          const isCollapsed = chargeCollapsed.has(globalIdx);
           const lineTotal = (parseFloat(charge.qty) || 0) * (parseFloat(charge.unitPrice) || 0);
           const isNeg = lineTotal < 0;
           const isDiscount = charge.type === 'discount';
           const areaOptions = '<option value="">— No area —</option>' +
             (availableAreas || []).map(a => '<option value="' + a + '"' + (charge.area === a ? ' selected' : '') + '>' + a + '</option>').join('');
           const isWholeNum = charge.type === 'singleitem' || charge.type === 'surcharge';
-          html += '<div class="charge-row">';
-          html += '<div class="charge-row-top">';
-          html += '<div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--text-primary)">' + (charge.name || '') + '</div>';
-          if (charge.description) {
-            html += '<div style="font-size:11px;color:var(--text-secondary);margin-top:1px;">' + charge.description + '</div>';
-          }
-          html += '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">' + (charge.type || '') + '</div></div>';
+          const totalColor = isDiscount ? 'var(--accent-green)' : isNeg ? '#ef4444' : 'var(--accent-green)';
+          const totalFmt = (isNeg ? '-' : '') + '$' + Math.abs(lineTotal).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+          html += '<div class="charge-row" style="padding:0;overflow:hidden;">';
+
+          // Always-visible header
+          html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;background:var(--bg-card);" onclick="toggleChargeCollapse(' + globalIdx + ')">';
+          html += '<div style="flex:1;min-width:0;">';
+          html += '<div style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (charge.name || '') + '</div>';
+          html += '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">' + (charge.type || '') + ' · qty ' + (charge.qty || 0) + '</div>';
+          html += '</div>';
+          html += '<div style="font-family:monospace;font-size:12px;font-weight:700;color:' + totalColor + ';white-space:nowrap;">' + totalFmt + '</div>';
+          html += '<div style="font-size:11px;color:var(--text-muted);margin-left:4px;">' + (isCollapsed ? '▸' : '▾') + '</div>';
+          html += '</div>';
+
+          // Collapsible detail
+          html += '<div style="display:' + (isCollapsed ? 'none' : 'block') + ';padding:10px 12px;border-top:1px solid var(--border);">';
+          html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
+          html += '<div style="font-size:12px;color:var(--text-muted);">Qty</div>';
+          html += '<input class="form-input charge-qty-input" type="number" value="' + charge.qty + '" min="0" step="' + (isWholeNum ? '1' : '0.25') + '" data-idx="' + globalIdx + '" data-field="qty" oninput="updateChargeFromInput(this)">';
+          html += '<div style="font-size:12px;color:var(--text-muted);margin:0 2px;">@</div>';
+          html += '<input class="form-input charge-price-input" type="number" value="' + charge.unitPrice + '" min="0" step="0.01" data-idx="' + globalIdx + '" data-field="unitPrice" oninput="updateChargeFromInput(this)">';
+          html += '<div class="charge-line-total" style="color:' + totalColor + '">' + totalFmt + '</div>';
           html += '<button class="room-delete-btn" onclick="deleteCharge(' + globalIdx + ')">&#215;</button>';
           html += '</div>';
-          html += '<div class="charge-row-bottom">';
-          html += '<div style="font-size:12px;color:var(--text-muted);margin-right:4px;">Qty</div>';
-          html += '<input class="form-input charge-qty-input" type="number" value="' + charge.qty + '" min="0" step="' + (isWholeNum ? '1' : '0.25') + '" data-idx="' + globalIdx + '" data-field="qty" oninput="updateChargeFromInput(this)">';
-          html += '<div style="font-size:12px;color:var(--text-muted);margin:0 4px;">@</div>';
-          html += '<input class="form-input charge-price-input" type="number" value="' + charge.unitPrice + '" min="0" step="0.01" data-idx="' + globalIdx + '" data-field="unitPrice" oninput="updateChargeFromInput(this)">';
-          const totalColor = isDiscount ? 'var(--accent-green)' : isNeg ? '#ef4444' : 'var(--accent-green)';
-          html += '<div class="charge-line-total" style="color:' + totalColor + '">' + (isNeg ? '-' : '') + '$' + Math.abs(lineTotal).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</div>';
-          html += '</div>';
           if (charge.type !== 'discount') {
-            html += '<div style="margin-top:6px;"><select class="form-select" style="font-size:12px;padding:6px 10px;height:auto;" data-idx="' + globalIdx + '" onchange="updateChargeRoom(this)">' + areaOptions + '</select></div>';
+            html += '<div style="margin-bottom:6px;"><select class="form-select" style="font-size:12px;padding:6px 10px;height:auto;" data-idx="' + globalIdx + '" onchange="updateChargeRoom(this)">' + areaOptions + '</select></div>';
           }
-          html += '<div style="margin-top:6px;">';
           html += '<input type="text" class="form-input" style="font-size:12px;padding:8px 10px;" placeholder="Description (optional)" value="' + (charge.description || '').replace(/"/g, '&quot;') + '" data-idx="' + globalIdx + '" data-field="description" oninput="updateChargeFromInput(this)">';
-          html += '</div>';
-          html += '</div>';
+          html += '</div>'; // end detail
+          html += '</div>'; // end charge-row
         });
       }
 
