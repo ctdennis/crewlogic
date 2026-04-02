@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.0.2 | 2026-04-01">
+  <meta name="crewlogic-version" content="v2.1 | 2026-04-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -999,6 +999,91 @@
           <div class="settings-feedback" id="franchiseFeedback"></div>
         </div>
 
+
+        <!-- Cost Analysis Settings -->
+        <div class="settings-card fade-in fade-in-delay-3">
+          <div class="settings-card-title">Cost Analysis</div>
+          <div class="settings-input-group">
+            <label class="settings-input-label">Truck Home Location (address)</label>
+            <input type="text" class="form-input" id="settingsTruckHome" placeholder="2 County Rd, East Freetown, MA 02717" autocomplete="off">
+          </div>
+          <div class="form-row">
+            <div class="settings-input-group">
+              <label class="settings-input-label">Miles per Gallon</label>
+              <input type="number" class="form-input" id="settingsMPG" placeholder="10" inputmode="decimal" min="1">
+            </div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Fuel Cost ($/gal)</label>
+              <input type="number" class="form-input" id="settingsFuelCost" placeholder="3.50" inputmode="decimal" min="0" step="0.01">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="settings-input-group">
+              <label class="settings-input-label">Crew Rate ($/hr)</label>
+              <input type="number" class="form-input" id="settingsCrewRate" placeholder="25" inputmode="decimal" min="0">
+            </div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Disposal Cost ($/ton)</label>
+              <input type="number" class="form-input" id="settingsDisposalCost" placeholder="200" inputmode="decimal" min="0">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="settings-input-group">
+              <label class="settings-input-label">Recycling Revenue ($/truck)</label>
+              <input type="number" class="form-input" id="settingsRecyclingRevenue" placeholder="130" inputmode="decimal" min="0">
+            </div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Royalty %</label>
+              <input type="number" class="form-input" id="settingsRoyaltyPct" placeholder="14" inputmode="decimal" min="0" max="100" step="0.1">
+            </div>
+          </div>
+          <div class="form-section-label" style="margin-top:8px;">Wait Times (minutes per load)</div>
+          <div class="form-row">
+            <div class="settings-input-group">
+              <label class="settings-input-label">Disposal Wait</label>
+              <input type="number" class="form-input" id="settingsDisposalWait" placeholder="15" inputmode="numeric" min="0">
+            </div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Recycling Wait</label>
+              <input type="number" class="form-input" id="settingsRecyclingWait" placeholder="20" inputmode="numeric" min="0">
+            </div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Donation Wait</label>
+              <input type="number" class="form-input" id="settingsDonationWait" placeholder="15" inputmode="numeric" min="0">
+            </div>
+          </div>
+          <div class="form-section-label" style="margin-top:8px;">Recycling Disposal Costs (what you pay)</div>
+          <div class="form-row">
+            <div class="settings-input-group">
+              <label class="settings-input-label">Mattress ($)</label>
+              <input type="number" class="form-input" id="settingsCostMattress" placeholder="10" inputmode="decimal" min="0">
+            </div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">TV/Monitor ($)</label>
+              <input type="number" class="form-input" id="settingsCostTV" placeholder="10" inputmode="decimal" min="0">
+            </div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Freon Appl. ($)</label>
+              <input type="number" class="form-input" id="settingsCostFreon" placeholder="25" inputmode="decimal" min="0">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="settings-input-group">
+              <label class="settings-input-label">Tire ($)</label>
+              <input type="number" class="form-input" id="settingsCostTire" placeholder="5" inputmode="decimal" min="0">
+            </div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Paint Can ($)</label>
+              <input type="number" class="form-input" id="settingsCostPaint" placeholder="5" inputmode="decimal" min="0">
+            </div>
+          </div>
+          <button class="settings-save-btn" id="costSettingsSaveBtn" onclick="saveCostSettings()">
+            <div class="spinner"></div>
+            <span class="btn-text">Save cost settings</span>
+          </button>
+          <div class="settings-feedback" id="costSettingsFeedback"></div>
+        </div>
+
         <!-- Account -->
         <div class="settings-card fade-in fade-in-delay-4">
           <div class="settings-card-title">Account</div>
@@ -1183,6 +1268,104 @@
             <div style="text-align:right">
               <div class="est-total-label">Quote Total</div>
               <div class="est-total-amount" id="estGrandTotal">$0.00</div>
+            </div>
+          </div>
+
+
+          <!-- COST ANALYSIS PANEL -->
+          <div style="margin-top:16px;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;">
+            <button onclick="toggleCostAnalysis()" style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--bg-card);border:none;cursor:pointer;color:var(--text-primary);">
+              <span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);">📊 Cost Analysis</span>
+              <span id="costAnalysisChevron" style="font-size:11px;color:var(--text-muted);">▸ Expand</span>
+            </button>
+            <div id="costAnalysisBody" style="display:none;padding:14px;background:var(--bg-secondary);">
+
+              <!-- Job Details -->
+              <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:10px;">Job Details</div>
+              <div class="form-group">
+                <div class="form-label">Disposal Site</div>
+                <input type="text" class="form-input" id="caDisposalSite" placeholder="35 Thrasher St, Raynham, MA" oninput="saveCostAnalysisDraft()">
+              </div>
+              <div class="form-group">
+                <div class="form-label">Recycling Site <span id="caRecyclingSiteRequired" style="color:var(--accent-red);display:none;">*</span></div>
+                <input type="text" class="form-input" id="caRecyclingSite" placeholder="449 American Legion Hwy, Westport, MA" oninput="saveCostAnalysisDraft()">
+              </div>
+              <div class="form-group">
+                <div class="form-label">Donation Site <span id="caDonationSiteRequired" style="color:var(--accent-red);display:none;">*</span></div>
+                <input type="text" class="form-input" id="caDonationSite" placeholder="636 County St, Taunton, MA" oninput="saveCostAnalysisDraft()">
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+                <div class="form-group">
+                  <div class="form-label">Days</div>
+                  <input type="number" class="form-input" id="caDays" placeholder="1" min="1" inputmode="numeric" oninput="saveCostAnalysisDraft();updateCostAnalysis()">
+                </div>
+                <div class="form-group">
+                  <div class="form-label">Crew</div>
+                  <input type="number" class="form-input" id="caCrew" placeholder="2" min="1" inputmode="numeric" oninput="saveCostAnalysisDraft();updateCostAnalysis()">
+                </div>
+                <div class="form-group">
+                  <div class="form-label">Hrs/Day</div>
+                  <input type="number" class="form-input" id="caHrsDay" placeholder="6" min="1" inputmode="decimal" oninput="saveCostAnalysisDraft();updateCostAnalysis()">
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <div class="form-group">
+                  <div class="form-label">Desired Margin %</div>
+                  <input type="number" class="form-input" id="caMargin" placeholder="60" min="0" max="99" inputmode="decimal" oninput="saveCostAnalysisDraft();updateCostAnalysis()">
+                </div>
+                <div class="form-group">
+                  <div class="form-label">Cans (30/40 yd)</div>
+                  <input type="number" class="form-input" id="caCans" placeholder="0" min="0" inputmode="numeric" oninput="saveCostAnalysisDraft();updateCostAnalysis()">
+                </div>
+              </div>
+              <div class="form-group">
+                <div class="form-label">Cost per Can ($)</div>
+                <input type="number" class="form-input" id="caCanCost" placeholder="0" min="0" inputmode="decimal" oninput="saveCostAnalysisDraft();updateCostAnalysis()">
+              </div>
+
+              <!-- Distance Calculator -->
+              <button onclick="calculateDistances()" id="caDistBtn" style="width:100%;padding:10px;background:var(--bg-input);border:1px solid var(--accent-blue);border-radius:var(--radius-sm);color:var(--accent-blue);font-weight:700;font-size:13px;cursor:pointer;margin-bottom:12px;">
+                🗺️ Calculate Distances
+              </button>
+              <div id="caDistResult" style="display:none;background:var(--bg-card);border-radius:var(--radius-sm);padding:10px;margin-bottom:12px;font-size:12px;color:var(--text-secondary);line-height:1.8;"></div>
+
+              <!-- Cost Breakdown -->
+              <div id="caCostBreakdown" style="display:none;">
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:8px;">Cost Breakdown</div>
+                <div id="caCostLines" style="font-size:12px;color:var(--text-secondary);line-height:2;"></div>
+                <div style="border-top:1px solid var(--border);margin:8px 0;"></div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600;color:var(--text-primary);">
+                  <span>Total Costs</span><span id="caTotalCosts">—</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--accent-green);">
+                  <span>Recycling Revenue</span><span id="caRecyclingRevenue">—</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:var(--text-primary);margin-top:4px;">
+                  <span>Net Cost</span><span id="caNetCost">—</span>
+                </div>
+
+                <!-- Margin Analysis -->
+                <div id="caMarginBox" style="margin-top:12px;padding:12px;border-radius:var(--radius-sm);border:2px solid var(--border);">
+                  <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;" id="caMarginLabel">Margin Analysis</div>
+                  <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
+                    <span style="color:var(--text-secondary);">Recommended Price</span>
+                    <span id="caRecommendedPrice" style="font-weight:700;font-family:'Space Mono',monospace;"></span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
+                    <span style="color:var(--text-secondary);">Current Estimate</span>
+                    <span id="caCurrentPrice" style="font-weight:700;font-family:'Space Mono',monospace;"></span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
+                    <span style="color:var(--text-secondary);">Difference</span>
+                    <span id="caPriceDiff" style="font-weight:700;font-family:'Space Mono',monospace;"></span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:700;margin-top:6px;padding-top:6px;border-top:1px solid var(--border);">
+                    <span>Actual Margin</span>
+                    <span id="caActualMargin" style="font-family:'Space Mono',monospace;font-size:18px;"></span>
+                  </div>
+                </div>
+              </div>
+
             </div>
           </div>
 
@@ -3153,6 +3336,7 @@
       if (currentUser.officeState) document.getElementById('settingsOfficeState').value = currentUser.officeState;
       if (currentUser.officeZip) document.getElementById('settingsOfficeZip').value = currentUser.officeZip;
       if (currentUser.website) document.getElementById('settingsWebsite').value = currentUser.website;
+      populateCostSettingsFields();
     }
 
     // ===== ESTIMATES MODULE =====
@@ -3341,7 +3525,7 @@
               // Strip ALL row-identity and submission fields — row-level columns are source of truth
               ['estimateID','row_number','ownerEmail','franchiseID','status','vonigoQuoteID',
                'vonigoQuoteID','_pendingVolumeLines','clonedFrom','createdAt','updatedAt',
-               'label','totalTrucks','totalPrice','splitPricing','coverPhoto','payload']
+               'label','totalTrucks','totalPrice','splitPricing','coverPhoto','payload','costAnalysis']
               .forEach(k => delete p[k]);
               currentEstimate = {...currentEstimate, ...p};
             } catch(e) {
@@ -3477,6 +3661,13 @@
       }
 
       isDirty = false; // estimate just loaded — no unsaved changes
+
+      // If cost analysis panel is open, repopulate it
+      if (document.getElementById('costAnalysisBody') &&
+          document.getElementById('costAnalysisBody').style.display !== 'none') {
+        populateCostAnalysisFields();
+        updateCostAnalysis();
+      }
     }
 
     function promptSaveBeforeLeaving() {
@@ -4438,6 +4629,15 @@
           html += '<input class="form-input" type="number" min="0.125" step="0.125" value="' + (charge.truckQty || 1) + '" style="width:64px;flex-shrink:0;text-align:center;padding:12px 6px;" data-idx="' + globalIdx + '" data-field="truckQty" oninput="updateChargeFromInput(this)">';
           html += '</div>';
 
+          // Row 2b: % Recycled / % Donated (cost analysis inputs)
+          html += '<div style="display:flex;gap:6px;margin-top:4px;align-items:center;">';
+          html += '<span style="font-size:10px;color:var(--text-muted);white-space:nowrap;">♻️ Recycle %</span>';
+          html += '<input class="form-input" type="number" min="0" max="100" step="1" value="' + (charge.pctRecycled||0) + '" style="width:56px;flex-shrink:0;text-align:center;padding:8px 4px;font-size:12px;" data-idx="' + globalIdx + '" data-field="pctRecycled" oninput="updateChargeFromInput(this)" placeholder="0">';
+          html += '<span style="font-size:10px;color:var(--text-muted);white-space:nowrap;">🤝 Donate %</span>';
+          html += '<input class="form-input" type="number" min="0" max="100" step="1" value="' + (charge.pctDonated||0) + '" style="width:56px;flex-shrink:0;text-align:center;padding:8px 4px;font-size:12px;" data-idx="' + globalIdx + '" data-field="pctDonated" oninput="updateChargeFromInput(this)" placeholder="0">';
+          html += '<span style="font-size:10px;color:var(--text-muted);margin-left:4px;" id="pctCheck_' + globalIdx + '"></span>';
+          html += '</div>';
+
           // Row 3: Description (textarea + re-record + re-analyze)
           html += '<div style="margin-top:6px;position:relative;">';
           html += '<textarea class="form-input" style="width:100%;min-height:56px;resize:vertical;font-size:12px;line-height:1.5;padding:8px 10px;box-sizing:border-box;" placeholder="Description" data-idx="' + globalIdx + '" data-field="description" oninput="updateChargeFromInput(this)">' + (charge.description||'').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</textarea>';
@@ -4821,6 +5021,12 @@
       const totalPrice = subtotal + discountTotal;
       currentEstimate.totalPrice = Math.round(totalPrice * 100) / 100;
       document.getElementById('estGrandTotal').textContent = (totalPrice < 0 ? '-' : '') + '$' + Math.abs(totalPrice).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+      // Refresh cost analysis margin if panel is open
+      if (document.getElementById('costAnalysisBody') &&
+          document.getElementById('costAnalysisBody').style.display !== 'none') {
+        updateCostAnalysis();
+      }
     }
 
     // ===== SAVE =====
@@ -4985,10 +5191,12 @@
               delete p.payload;      // prevent nested payload string
               delete p.priceBook;
               delete p.row_number;
+              delete p.costAnalysis;
               return p;
             })(),
             priceBook: currentEstimate.priceBlocks || [],
-            coverPhoto: currentEstimate.coverPhoto || ''
+            coverPhoto: currentEstimate.coverPhoto || '',
+            costAnalysis: currentEstimate.costAnalysis || {}
           })
         });
         const data = await res.json();
@@ -5232,6 +5440,19 @@
       clone.clientName = ''; clone.address = '';
       clone.createdAt = new Date().toISOString();
       clone.updatedAt = new Date().toISOString();
+      // Keep cost analysis job inputs but clear calculated distances/results
+      // since the job site address is cleared above
+      if (clone.costAnalysis) {
+        clone.costAnalysis.distances = null;
+        clone.costAnalysis.calculatedAt = null;
+        clone.costAnalysis.totalCosts = null;
+        clone.costAnalysis.netCost = null;
+        clone.costAnalysis.recommendedPrice = null;
+        clone.costAnalysis.actualMargin = null;
+        clone.costAnalysis.disposalSite = '';
+        clone.costAnalysis.recyclingSite = '';
+        clone.costAnalysis.donationSite = '';
+      }
       // Strip submitted state from payload too
       if (clone.payload && typeof clone.payload === 'object') {
         clone.payload.vonigoQuoteID = null;
@@ -6837,6 +7058,323 @@
         analyzeBtn.textContent = 'Analyze';
       }
     }
+
+    // ===== COST SETTINGS =====
+    const COST_SETTINGS_FIELDS = [
+      'truckHome','MPG','fuelCost','crewRate','disposalCost',
+      'disposalWait','recyclingWait','donationWait',
+      'recyclingRevenue','royaltyPct',
+      'costMattress','costTV','costFreon','costTire','costPaint'
+    ];
+
+    async function saveCostSettings() {
+      const btn = document.getElementById('costSettingsSaveBtn');
+      const feedbackEl = document.getElementById('costSettingsFeedback');
+      btn.classList.add('loading');
+      feedbackEl.textContent = '';
+      const vals = {};
+      COST_SETTINGS_FIELDS.forEach(f => {
+        const el = document.getElementById('settings' + f.charAt(0).toUpperCase() + f.slice(1));
+        vals[f] = el ? el.value.trim() : '';
+      });
+      try {
+        const res = await apiFetch(N8N_BASE + '/crewlogic-settings', {
+          method: 'POST',
+          body: JSON.stringify({ email: currentUser.email, franchiseID: currentUser.franchiseID, costSettings: vals })
+        });
+        const data = await res.json();
+        if (data.success) {
+          currentUser.costSettings = vals;
+          storage.set(SESSION_KEY, JSON.stringify(currentUser));
+          feedbackEl.textContent = '✓ Cost settings saved';
+          feedbackEl.className = 'settings-feedback ok';
+        } else {
+          feedbackEl.textContent = data.error || 'Failed to save.';
+          feedbackEl.className = 'settings-feedback error';
+        }
+      } catch(e) {
+        feedbackEl.textContent = 'Connection error.';
+        feedbackEl.className = 'settings-feedback error';
+      }
+      btn.classList.remove('loading');
+    }
+
+    function populateCostSettingsFields() {
+      if (!currentUser || !currentUser.costSettings) return;
+      const cs = currentUser.costSettings;
+      COST_SETTINGS_FIELDS.forEach(f => {
+        const el = document.getElementById('settings' + f.charAt(0).toUpperCase() + f.slice(1));
+        if (el && cs[f] !== undefined) el.value = cs[f];
+      });
+    }
+
+    // ===== COST ANALYSIS PANEL =====
+    function toggleCostAnalysis() {
+      const body = document.getElementById('costAnalysisBody');
+      const chevron = document.getElementById('costAnalysisChevron');
+      const isOpen = body.style.display !== 'none';
+      body.style.display = isOpen ? 'none' : 'block';
+      chevron.textContent = isOpen ? '▸ Expand' : '▾ Collapse';
+      if (!isOpen) {
+        populateCostAnalysisFields();
+        updateCostAnalysis();
+      }
+    }
+
+    function populateCostAnalysisFields() {
+      const ca = (currentEstimate && currentEstimate.costAnalysis) || {};
+      const fields = ['DisposalSite','RecyclingSite','DonationSite','Days','Crew','HrsDay','Margin','Cans','CanCost'];
+      fields.forEach(f => {
+        const el = document.getElementById('ca' + f);
+        if (el && ca[f.toLowerCase()] !== undefined) el.value = ca[f.toLowerCase()];
+      });
+      // Restore distance results
+      if (ca.distances) {
+        renderDistanceResult(ca.distances);
+      }
+    }
+
+    function saveCostAnalysisDraft() {
+      if (!currentEstimate) return;
+      if (!currentEstimate.costAnalysis) currentEstimate.costAnalysis = {};
+      const ca = currentEstimate.costAnalysis;
+      ca.disposalSite  = document.getElementById('caDisposalSite').value.trim();
+      ca.recyclingSite = document.getElementById('caRecyclingSite').value.trim();
+      ca.donationSite  = document.getElementById('caDonationSite').value.trim();
+      ca.days     = parseFloat(document.getElementById('caDays').value) || 0;
+      ca.crew     = parseFloat(document.getElementById('caCrew').value) || 0;
+      ca.hrsDay   = parseFloat(document.getElementById('caHrsDay').value) || 0;
+      ca.margin   = parseFloat(document.getElementById('caMargin').value) || 0;
+      ca.cans     = parseFloat(document.getElementById('caCans').value) || 0;
+      ca.canCost  = parseFloat(document.getElementById('caCanCost').value) || 0;
+      isDirty = true;
+    }
+
+    function updateCostAnalysis() {
+      saveCostAnalysisDraft();
+      const ca = (currentEstimate && currentEstimate.costAnalysis) || {};
+      const cs = (currentUser && currentUser.costSettings) || {};
+
+      // Get settings values with fallbacks
+      const mpg          = parseFloat(cs.mpg || cs.MPG) || 10;
+      const fuelCost     = parseFloat(cs.fuelCost) || 3.50;
+      const crewRate     = parseFloat(cs.crewRate) || 25;
+      const disposalCost = parseFloat(cs.disposalCost) || 200;
+      const recycRevRate = parseFloat(cs.recyclingRevenue) || 0;
+      const royaltyPct   = parseFloat(cs.royaltyPct) || 14;
+      const dispWait     = parseFloat(cs.disposalWait) || 15;
+      const recycWait    = parseFloat(cs.recyclingWait) || 20;
+      const donWait      = parseFloat(cs.donationWait) || 15;
+      const costMatt     = parseFloat(cs.costMattress) || 10;
+      const costTV       = parseFloat(cs.costTV) || 10;
+      const costFreon    = parseFloat(cs.costFreon) || 25;
+      const costTire     = parseFloat(cs.costTire) || 5;
+      const costPaint    = parseFloat(cs.costPaint) || 5;
+
+      // Job inputs
+      const days    = ca.days || 0;
+      const crew    = ca.crew || 0;
+      const hrsDay  = ca.hrsDay || 0;
+      const margin  = (ca.margin || 0) / 100;
+      const cans    = ca.cans || 0;
+      const canCost = ca.canCost || 0;
+
+      if (!days || !crew || !hrsDay) {
+        document.getElementById('caCostBreakdown').style.display = 'none';
+        return;
+      }
+
+      // Derive truck routing from volume charge rows
+      const charges = (currentEstimate && currentEstimate.charges) || [];
+      let trucksRecycled = 0, trucksDonated = 0, totalTrucks = 0;
+      charges.filter(c => c.type === 'volume').forEach(c => {
+        const vol = (parseFloat(c.truckVolume) || 0) * (parseFloat(c.truckQty) || 1);
+        totalTrucks += vol;
+        trucksRecycled += vol * ((parseFloat(c.pctRecycled) || 0) / 100);
+        trucksDonated  += vol * ((parseFloat(c.pctDonated)  || 0) / 100);
+      });
+      const trucksDisposal = Math.max(0, totalTrucks - trucksRecycled - trucksDonated);
+      const loadsDisposal  = Math.ceil(trucksDisposal);
+      const loadsRecycling = Math.ceil(trucksRecycled);
+      const loadsDonation  = Math.ceil(trucksDonated);
+
+      // Distances (from saved calc or zeros)
+      const dist = ca.distances || {};
+      const homeMi    = parseFloat(dist.homeMiles) || 0;
+      const homeMin   = parseFloat(dist.homeMinutes) || 0;
+      const dispMi    = parseFloat(dist.disposalMiles) || 0;
+      const dispMin   = parseFloat(dist.disposalMinutes) || 0;
+      const recycMi   = parseFloat(dist.recyclingMiles) || 0;
+      const recycMin  = parseFloat(dist.recyclingMinutes) || 0;
+      const donMi     = parseFloat(dist.donationMiles) || 0;
+      const donMin    = parseFloat(dist.donationMinutes) || 0;
+
+      // Total miles: home→job (1x each way) + all dump runs
+      const totalMiles =
+        (homeMi * 2) +                          // home to job and back at end
+        (dispMi * 2 * loadsDisposal) +           // job↔disposal per load
+        (recycMi * 2 * loadsRecycling) +         // job↔recycling per load
+        (donMi * 2 * loadsDonation);             // job↔donation per load
+
+      // Total trucking time (minutes)
+      const totalTruckMin =
+        (homeMin * 2) +
+        ((dispMin * 2 + dispWait) * loadsDisposal) +
+        ((recycMin * 2 + recycWait) * loadsRecycling) +
+        ((donMin * 2 + donWait) * loadsDonation);
+      const totalTruckHrs = totalTruckMin / 60;
+
+      // COSTS
+      const laborHrs   = days * crew * hrsDay;
+      const totalHrs   = laborHrs + totalTruckHrs;
+      const laborCost  = totalHrs * crewRate;
+      const dispCost   = trucksDisposal * disposalCost;
+      const fuelGals   = totalMiles / mpg;
+      const fuelTotal  = fuelGals * fuelCost;
+      const canTotal   = cans * canCost;
+
+      // Surcharge disposal costs — pick up from existing surcharge rows
+      let surchargeDisposalCost = 0;
+      const surchargeMap = {
+        'Mattress/Box Spring(s)': costMatt,
+        'TV/Monitor(s)':          costTV,
+        'Freon Appliance(s)':     costFreon,
+        'Tire(s)':                costTire,
+        'Paint Can(s)':           costPaint
+      };
+      charges.filter(c => c.type === 'surcharge').forEach(c => {
+        const rate = surchargeMap[c.name];
+        if (rate) surchargeDisposalCost += (parseFloat(c.qty) || 0) * rate;
+      });
+
+      const totalCosts = laborCost + dispCost + fuelTotal + canTotal + surchargeDisposalCost;
+
+      // REVENUE OFFSETS
+      const recycRevenue = trucksRecycled * recycRevRate;
+      const netCost = totalCosts - recycRevenue;
+
+      // MARGIN ANALYSIS
+      const royaltyFrac = royaltyPct / 100;
+      const recommendedPrice = netCost / (1 - margin - royaltyFrac);
+      const currentPrice = parseFloat(currentEstimate.totalPrice) || 0;
+      const royaltyCost = currentPrice * royaltyFrac;
+      const actualMargin = currentPrice > 0
+        ? (currentPrice - netCost - royaltyCost) / currentPrice
+        : 0;
+
+      // Save calculated values
+      if (currentEstimate.costAnalysis) {
+        currentEstimate.costAnalysis.calculatedAt = new Date().toISOString();
+        currentEstimate.costAnalysis.totalCosts = totalCosts;
+        currentEstimate.costAnalysis.recyclingRevenue = recycRevenue;
+        currentEstimate.costAnalysis.netCost = netCost;
+        currentEstimate.costAnalysis.recommendedPrice = recommendedPrice;
+        currentEstimate.costAnalysis.actualMargin = actualMargin;
+      }
+
+      // Render cost lines
+      const fmt = (n) => '$' + Math.round(n).toLocaleString();
+      const lines = [
+        ['Labor (' + totalHrs.toFixed(1) + ' hrs × $' + crewRate + ')', fmt(laborCost)],
+        ['Disposal (' + trucksDisposal.toFixed(2) + ' tons × $' + disposalCost + ')', fmt(dispCost)],
+        ['Fuel (' + totalMiles.toFixed(0) + ' mi ÷ ' + mpg + ' mpg × $' + fuelCost + ')', fmt(fuelTotal)],
+        ['Recycling/Disposal Fees', fmt(surchargeDisposalCost)],
+      ];
+      if (cans > 0) lines.push(['Cans (' + cans + ' × $' + canCost + ')', fmt(canTotal)]);
+
+      document.getElementById('caCostLines').innerHTML = lines.map(([l,v]) =>
+        '<div style="display:flex;justify-content:space-between;"><span>' + l + '</span><span style="font-weight:600;">' + v + '</span></div>'
+      ).join('');
+      document.getElementById('caTotalCosts').textContent = fmt(totalCosts);
+      document.getElementById('caRecyclingRevenue').textContent = '−' + fmt(recycRevenue);
+      document.getElementById('caNetCost').textContent = fmt(netCost);
+      document.getElementById('caCostBreakdown').style.display = 'block';
+
+      // Margin callout
+      const marginPct = Math.round(actualMargin * 100);
+      const targetPct = Math.round(margin * 100);
+      const diff = currentPrice - recommendedPrice;
+      const isGreen = actualMargin >= margin - 0.02;
+      const isAmber = !isGreen && actualMargin >= margin - 0.10;
+      const color = isGreen ? '#00EE76' : isAmber ? '#fbbf24' : '#f87171';
+      const border = isGreen ? '#00EE76' : isAmber ? '#fbbf24' : '#f87171';
+
+      const box = document.getElementById('caMarginBox');
+      box.style.borderColor = border;
+      box.style.background = isGreen ? 'rgba(0,238,118,0.06)' : isAmber ? 'rgba(251,191,36,0.06)' : 'rgba(248,113,113,0.06)';
+      document.getElementById('caMarginLabel').style.color = color;
+      document.getElementById('caMarginLabel').textContent = isGreen ? '✓ Margin Analysis' : isAmber ? '⚠ Margin Analysis' : '✗ Margin Analysis';
+      document.getElementById('caRecommendedPrice').textContent = fmt(recommendedPrice);
+      document.getElementById('caCurrentPrice').textContent = fmt(currentPrice);
+      document.getElementById('caPriceDiff').style.color = diff >= 0 ? '#00EE76' : '#f87171';
+      document.getElementById('caPriceDiff').textContent = (diff >= 0 ? '+' : '') + fmt(diff);
+      document.getElementById('caActualMargin').style.color = color;
+      document.getElementById('caActualMargin').textContent = marginPct + '% (target ' + targetPct + '%)';
+
+      // Validation: warn if recycling/donation site missing when needed
+      document.getElementById('caRecyclingSiteRequired').style.display = trucksRecycled > 0 ? 'inline' : 'none';
+      document.getElementById('caDonationSiteRequired').style.display = trucksDonated > 0 ? 'inline' : 'none';
+    }
+
+    async function calculateDistances() {
+      const jobSite      = currentEstimate.address || '';
+      const disposalSite = document.getElementById('caDisposalSite').value.trim();
+      const recyclingSite = document.getElementById('caRecyclingSite').value.trim();
+      const donationSite  = document.getElementById('caDonationSite').value.trim();
+      const truckHome    = (currentUser.costSettings && currentUser.costSettings.truckHome) || '';
+
+      if (!jobSite) { alert('Job site address is required. Enter the client address first.'); return; }
+      if (!disposalSite) { alert('Please enter a disposal site address.'); return; }
+
+      const btn = document.getElementById('caDistBtn');
+      btn.textContent = '⏳ Calculating...';
+      btn.disabled = true;
+
+      try {
+        const res = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'calcDistances',
+            email: currentUser.email,
+            franchiseID: currentUser.franchiseID,
+            truckHome,
+            jobSite,
+            disposalSite,
+            recyclingSite: recyclingSite || null,
+            donationSite: donationSite || null
+          })
+        });
+        const data = await res.json();
+        if (data.success && data.distances) {
+          if (!currentEstimate.costAnalysis) currentEstimate.costAnalysis = {};
+          currentEstimate.costAnalysis.distances = data.distances;
+          renderDistanceResult(data.distances);
+          updateCostAnalysis();
+          isDirty = true;
+        } else {
+          alert('Distance calculation failed: ' + (data.error || 'Unknown error'));
+        }
+      } catch(e) {
+        alert('Connection error calculating distances.');
+        console.error(e);
+      }
+      btn.textContent = '🗺️ Calculate Distances';
+      btn.disabled = false;
+    }
+
+    function renderDistanceResult(dist) {
+      if (!dist) return;
+      const el = document.getElementById('caDistResult');
+      const fmt = (mi, min) => mi.toFixed(1) + ' mi / ' + Math.round(min) + ' min';
+      let html = '';
+      if (dist.homeMiles) html += '<div>🏠 Home → Job: ' + fmt(dist.homeMiles, dist.homeMinutes) + '</div>';
+      if (dist.disposalMiles) html += '<div>🗑 Job → Disposal: ' + fmt(dist.disposalMiles, dist.disposalMinutes) + '</div>';
+      if (dist.recyclingMiles) html += '<div>♻️ Job → Recycling: ' + fmt(dist.recyclingMiles, dist.recyclingMinutes) + '</div>';
+      if (dist.donationMiles) html += '<div>🤝 Job → Donation: ' + fmt(dist.donationMiles, dist.donationMinutes) + '</div>';
+      el.innerHTML = html;
+      el.style.display = 'block';
+    }
+
 
     // ===== SPECIALTY WIZARD DROPDOWN =====
     function toggleWizardMenu(e) {
