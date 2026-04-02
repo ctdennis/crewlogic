@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.2.5 | 2026-04-02">
+  <meta name="crewlogic-version" content="v2.2.7 | 2026-04-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -3441,7 +3441,13 @@
         const eid = String(est.estimateID);
         html += '<div class="estimate-card" data-estimate-id="' + eid + '">';
         if (est.coverPhoto) {
-          html += '<img src="' + est.coverPhoto + '" style="width:100%;height:70px;object-fit:cover;border-radius:var(--radius-sm) var(--radius-sm) 0 0;margin-bottom:10px;display:block;">';
+          const coverThumb = (() => {
+            const url = est.coverPhoto;
+            if (!url || url.startsWith('data:')) return url;
+            const m = url.match(/[?&]id=([^&]+)/);
+            return m ? 'https://lh3.googleusercontent.com/d/' + m[1] : url;
+          })();
+          html += '<img src="' + coverThumb + '" style="width:100%;height:70px;object-fit:cover;border-radius:var(--radius-sm) var(--radius-sm) 0 0;margin-bottom:10px;display:block;">';
         }
         html += '<div class="estimate-card-top">';
         html += '<div class="estimate-card-label">' + (est.label || 'Untitled Estimate') + '</div>';
@@ -3532,12 +3538,10 @@
               .forEach(k => delete p[k]);
               // Also strip any col_N bleed-through from extra sheet columns
               Object.keys(p).forEach(k => { if (/^col_\d+$/.test(k)) delete p[k]; });
-              console.log('[CoverPhoto] currentEstimate.coverPhoto before merge:', currentEstimate.coverPhoto ? currentEstimate.coverPhoto.substring(0,80) : 'EMPTY');
               const savedCoverPhoto = currentEstimate.coverPhoto;
               currentEstimate = {...currentEstimate, ...p};
               // Ensure coverPhoto from sheet row is never overwritten by payload merge
               if (savedCoverPhoto) currentEstimate.coverPhoto = savedCoverPhoto;
-              console.log('[CoverPhoto] after merge:', currentEstimate.coverPhoto ? currentEstimate.coverPhoto.substring(0,80) : 'EMPTY');
             } catch(e) {
               console.warn('Payload parse failed, trying localStorage fallback');
               // Payload may be truncated — merge from localStorage if available
@@ -3556,7 +3560,6 @@
             currentEstimate._pendingVolumeLines = null;
           }
           restorePriceBlocks();
-          console.log('[CoverPhoto] before open:', currentEstimate.coverPhoto ? currentEstimate.coverPhoto.substring(0,80) : 'EMPTY');
           // Restore collapse state before opening editor — only on fresh load
           chargeCollapsed.clear();
           try {
