@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.3.3 | 2026-04-02">
+  <meta name="crewlogic-version" content="v2.3.7 | 2026-04-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -5466,7 +5466,6 @@
         if (!item) return null;
         return {
           priceItemID: String(item.priceItemID),
-          taxID: '146',
           Fields: [
             { fieldID: 9290, fieldValue: item.name },
             { fieldID: 9289, fieldValue: '' },
@@ -5480,7 +5479,6 @@
         .filter(c => c.type !== 'volume')
         .map(c => ({
           priceItemID: String(c.priceItemID),
-          taxID: String(c.taxID || 146),
           Fields: [
             { fieldID: 9290, fieldValue: c.name },
             { fieldID: 9289, fieldValue: c.description || '' },
@@ -5500,7 +5498,10 @@
             const urls = (c.photos || (c.photoUrl ? [c.photoUrl] : []))
               .filter(u => u && !u.startsWith('data:')); // Drive URLs only
             urls.forEach(url => {
-              const m = url.match(/[?&]id=([^&]+)/);
+              // Handle both Drive URL formats:
+              // uc?export=view&id=FILEID  (standard Drive URL)
+              // lh3.googleusercontent.com/d/FILEID  (converted display URL)
+              const m = url.match(/[?&]id=([^&]+)/) || url.match(/\/d\/([a-zA-Z0-9_-]+)/);
               if (m) photos.push({ fileId: m[1], room: c.room || '', area: c.area || '' });
             });
           });
@@ -5517,6 +5518,7 @@
             charges,
             franchiseID: currentUser.franchiseID,
             email: currentUser.email,
+            zip: currentEstimate.zip || '',
             photos
           })
         });
@@ -7256,8 +7258,12 @@
       body.style.display = isOpen ? 'none' : 'block';
       chevron.textContent = isOpen ? '▸ Expand' : '▾ Collapse';
       if (!isOpen) {
-        populateCostAnalysisFields();
-        updateCostAnalysis();
+        try {
+          populateCostAnalysisFields();
+          updateCostAnalysis();
+        } catch(e) {
+          console.error('Cost analysis error:', e);
+        }
       }
     }
 
@@ -7274,7 +7280,7 @@
       if (ca.distances) {
         renderDistanceResult(ca.distances);
       }
-      updateCostAnalysis();
+      // Note: caller is responsible for calling updateCostAnalysis() after this
     }
 
     function saveCostAnalysisDraft() {
