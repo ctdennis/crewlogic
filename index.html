@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.5.0 | 2026-04-03">
+  <meta name="crewlogic-version" content="v2.5.1 | 2026-04-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1177,7 +1177,7 @@
             <div class="est-section-title" style="margin-bottom:8px;">Add Items</div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
               <button class="est-add-btn voice-room-btn" id="voiceRoomBtn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe</button>
-              <button class="est-add-btn" id="photoRoomBtn" onclick="togglePhotoPanel()" style="background:var(--accent-green);color:#000;font-weight:600;">📷 Photo</button>
+              <button class="est-add-btn" id="photoRoomBtn" onclick="startPhotoCapture()" style="background:var(--accent-green);color:#000;font-weight:600;">📷 Photo</button>
               <button class="est-add-btn" id="addChargeBtn" onclick="showAddCharge()" style="background:var(--accent-green);color:#000;font-weight:600;">✏️ Manual</button>
               <!-- Specialty wizards dropdown -->
               <div style="position:relative;display:inline-block;">
@@ -1199,14 +1199,16 @@
           <!-- Room voice status -->
           <div id="roomVoiceStatus" style="display:none;margin-bottom:12px;padding:10px 14px;border-radius:var(--radius-sm);font-size:13px;"></div>
 
-          <!-- Photo-first capture panel -->
+          <div id="estChargesList"></div>
+
+          <!-- Photo-first capture panel — appears near bottom buttons where new rows land -->
           <div id="photoRoomPanel" style="display:none;background:var(--bg-card);border:1px solid var(--accent-blue);border-radius:var(--radius-sm);padding:14px;margin-bottom:12px;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
               <div style="font-size:13px;font-weight:600;color:var(--accent-blue);">📷 Photo Room Capture</div>
               <button onclick="closePhotoPanel()" style="background:none;border:none;color:var(--text-muted);font-size:16px;cursor:pointer;">✕</button>
             </div>
-            <!-- Photo thumbnails -->
-            <div id="photoRoomThumbs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;min-height:20px;"></div>
+            <!-- Photo thumbnails — fixed height prevents landscape photos distorting layout -->
+            <div id="photoRoomThumbs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;min-height:72px;align-items:flex-start;"></div>
             <!-- Status -->
             <div id="photoRoomStatus" style="font-size:12px;color:var(--text-muted);margin-bottom:10px;min-height:16px;"></div>
             <!-- Buttons -->
@@ -1218,12 +1220,10 @@
             <input type="file" id="photoRoomInput" accept="image/*" capture="environment" style="display:none;" onchange="handlePhotoRoomCapture(this)">
           </div>
 
-          <div id="estChargesList"></div>
-
           <!-- Add charge buttons (repeated below charges for convenience) -->
           <div id="estChargesBottomBtns" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:10px 0 4px 0;">
             <button class="est-add-btn voice-room-btn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe</button>
-            <button class="est-add-btn" onclick="togglePhotoPanel()" style="background:var(--accent-green);color:#000;font-weight:600;">📷 Photo</button>
+            <button class="est-add-btn" onclick="startPhotoCapture()" style="background:var(--accent-green);color:#000;font-weight:600;">📷 Photo</button>
             <button class="est-add-btn" onclick="showAddCharge()" style="background:var(--accent-green);color:#000;font-weight:600;">✏️ Manual</button>
             <div style="position:relative;display:inline-block;">
               <button class="est-add-btn" onclick="toggleWizardMenu(event)" style="background:var(--accent-green);color:#000;font-weight:600;">⚡ Specialty ▾</button>
@@ -3568,12 +3568,17 @@
             currentEstimate._pendingVolumeLines = null;
           }
           restorePriceBlocks();
-          // Restore collapse state before opening editor — only on fresh load
+          // Restore collapse state — prefer estimate object (cross-device) over localStorage
           chargeCollapsed.clear();
           try {
-            const key = 'cl_collapse_' + currentEstimate.estimateID;
-            const saved = (() => { try { return localStorage.getItem(key); } catch(e) { return null; } })()
-                       || storage.get(key);
+            let saved = null;
+            if (currentEstimate.collapseState && Array.isArray(currentEstimate.collapseState)) {
+              saved = JSON.stringify(currentEstimate.collapseState);
+            } else {
+              const key = 'cl_collapse_' + currentEstimate.estimateID;
+              saved = (() => { try { return localStorage.getItem(key); } catch(e) { return null; } })()
+                   || storage.get(key);
+            }
             if (saved) JSON.parse(saved).forEach(idx => chargeCollapsed.add(idx));
           } catch(e) { }
           openEstimateEditor();
@@ -3738,10 +3743,14 @@
 
     function saveCollapseState() {
       if (!currentEstimate) return;
+      // Save to localStorage for immediate local use
       const key = 'cl_collapse_' + currentEstimate.estimateID;
       const val = JSON.stringify(Array.from(chargeCollapsed));
       try { localStorage.setItem(key, val); } catch(e) {}
       storage.set(key, val);
+      // Also save to estimate object so it syncs across devices via sheet
+      currentEstimate.collapseState = Array.from(chargeCollapsed);
+      autoSaveDraft();
     }
 
     function toggleChargeCollapse(idx) {
@@ -5465,6 +5474,7 @@
               delete p.priceBook;
               delete p.row_number;
               delete p.costAnalysis;
+              // collapseState stays in payload for cross-device sync
               return p;
             })(),
             priceBook: currentEstimate.priceBlocks || [],
@@ -7119,6 +7129,24 @@
     // ===== PHOTO-FIRST ROOM CAPTURE =====
     let photoRoomPending = []; // array of { base64, driveUrl } — driveUrl filled after upload
 
+    function startPhotoCapture() {
+      // Open camera immediately — show panel first so input is in DOM
+      const panel = document.getElementById('photoRoomPanel');
+      if (panel.style.display === 'none') {
+        photoRoomPending = [];
+        renderPhotoRoomThumbs();
+        document.getElementById('photoRoomStatus').textContent = 'Take up to 4 photos of the room, then tap Analyze.';
+        const ab = document.getElementById('photoRoomAnalyzeBtn');
+        ab.disabled = true;
+        ab.style.opacity = '0.4';
+        ab.textContent = 'Analyze';
+        panel.style.display = 'block';
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      // Trigger camera immediately
+      document.getElementById('photoRoomInput').click();
+    }
+
     function togglePhotoPanel() {
       const panel = document.getElementById('photoRoomPanel');
       const isOpen = panel.style.display !== 'none';
@@ -7216,8 +7244,8 @@
         return;
       }
       container.innerHTML = photoRoomPending.map((p, i) =>
-        '<div style="position:relative;width:64px;height:64px;">' +
-          '<img src="' + p.base64 + '" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border);">' +
+        '<div style="position:relative;width:64px;height:64px;flex-shrink:0;">' +
+          '<img src="' + p.base64 + '" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border);display:block;">' +
           (p.driveUrl
             ? '<div title="Uploaded" style="position:absolute;bottom:2px;right:2px;width:10px;height:10px;background:#00EE76;border-radius:50%;border:1px solid #000;"></div>'
             : '<div title="Uploading..." style="position:absolute;bottom:2px;right:2px;width:10px;height:10px;background:#fbbf24;border-radius:50%;border:1px solid #000;"></div>') +
