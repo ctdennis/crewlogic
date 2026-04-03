@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.4.8 | 2026-04-03">
+  <meta name="crewlogic-version" content="v2.4.9 | 2026-04-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -5207,22 +5207,22 @@
       const marginEl = document.getElementById('estActualMarginDisplay');
       if (marginEl) {
         const ca = (currentEstimate && currentEstimate.costAnalysis) || {};
-        const cs = (currentUser && currentUser.costSettings) || {};
         const netCost = parseFloat(ca.netCost) || 0;
-        const royaltyPct = parseFloat(cs.royaltyPct) || 14;
-        if (netCost > 0 && totalPrice > 0) {
-          const royaltyCost = totalPrice * (royaltyPct / 100);
-          const netMargin = (totalPrice - netCost - royaltyCost) / totalPrice;
-          const grossMargin = (totalPrice - netCost) / totalPrice;
-          const netPct = Math.round(netMargin * 100);
-          const grossPct = Math.round(grossMargin * 100);
-          const targetMargin = parseFloat(ca.margin) || 0;
-          const isGreen = netMargin >= (targetMargin / 100) - 0.02;
-          const isAmber = !isGreen && netMargin >= (targetMargin / 100) - 0.10;
-          const color = isGreen ? '#00EE76' : isAmber ? '#fbbf24' : '#f87171';
-          marginEl.style.color = color;
+        if (totalPrice > 0) {
           marginEl.style.display = 'block';
-          marginEl.textContent = netPct + '% net / ' + grossPct + '% gross';
+          if (netCost > 0) {
+            const grossMargin = (totalPrice - netCost) / totalPrice;
+            const grossPct = Math.round(grossMargin * 100);
+            const targetMargin = parseFloat(ca.margin) || 0;
+            const isGreen = !targetMargin || grossMargin >= (targetMargin / 100) - 0.02;
+            const isAmber = !isGreen && grossMargin >= (targetMargin / 100) - 0.10;
+            const color = isGreen ? '#00EE76' : isAmber ? '#fbbf24' : '#f87171';
+            marginEl.style.color = color;
+            marginEl.textContent = grossPct + '% Margin';
+          } else {
+            marginEl.style.color = '#fbbf24';
+            marginEl.textContent = '⚠ Enter costs for margin';
+          }
         } else {
           marginEl.style.display = 'none';
         }
