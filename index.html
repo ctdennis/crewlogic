@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.4.3 | 2026-04-03">
+  <meta name="crewlogic-version" content="v2.4.4 | 2026-04-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -4299,6 +4299,24 @@
       input.click();
     }
 
+    // Low-res compress for inline AI analysis — fast to send, sufficient for identification
+    async function compressForAnalysis(base64) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const maxW = 800, maxH = 600;
+          let w = img.width, h = img.height;
+          if (w > maxW) { h = h * maxW / w; w = maxW; }
+          if (h > maxH) { w = w * maxH / h; h = maxH; }
+          canvas.width = Math.round(w); canvas.height = Math.round(h);
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.7));
+        };
+        img.src = base64;
+      });
+    }
+
     async function compressChargePhoto(base64) {
       return new Promise((resolve) => {
         const img = new Image();
@@ -7051,9 +7069,10 @@
         reader.readAsDataURL(file);
       });
 
-      // Compress using existing compressChargePhoto
-      const compressed = await compressChargePhoto(base64);
-      photoRoomPending.push({ base64: compressed, driveUrl: null });
+      // High-res for Drive storage, low-res for inline analysis
+      const compressed = await compressChargePhoto(base64);   // 1920x1440 for Drive
+      const analysisImg = await compressForAnalysis(base64);  // 800x600 for inline AI
+      photoRoomPending.push({ base64: analysisImg, hiRes: compressed, driveUrl: null });
       renderPhotoRoomThumbs();
 
       const count = photoRoomPending.length;
@@ -7062,7 +7081,7 @@
       document.getElementById('photoRoomAnalyzeBtn').disabled = false;
       document.getElementById('photoRoomAnalyzeBtn').style.opacity = '1';
 
-      // Upload to Drive in background
+      // Upload high-res to Drive in background
       uploadPhotoRoomToDrive(photoRoomPending.length - 1, compressed);
     }
 
@@ -7075,10 +7094,16 @@
       container.innerHTML = photoRoomPending.map((p, i) =>
         '<div style="position:relative;width:64px;height:64px;">' +
           '<img src="' + p.base64 + '" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border);">' +
-          (p.driveUrl ? '<div style="position:absolute;bottom:2px;right:2px;width:10px;height:10px;background:#00EE76;border-radius:50%;border:1px solid #000;"></div>' : '') +
+          (p.driveUrl
+            ? '<div title="Uploaded" style="position:absolute;bottom:2px;right:2px;width:10px;height:10px;background:#00EE76;border-radius:50%;border:1px solid #000;"></div>'
+            : '<div title="Uploading..." style="position:absolute;bottom:2px;right:2px;width:10px;height:10px;background:#fbbf24;border-radius:50%;border:1px solid #000;"></div>') +
           '<button onclick="removePhotoRoomPhoto(' + i + ')" style="position:absolute;top:-4px;right:-4px;width:18px;height:18px;background:#ef4444;border:none;border-radius:50%;color:#fff;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;">✕</button>' +
         '</div>'
-      ).join('');
+      ).join('') +
+      '<div style="font-size:10px;color:var(--text-muted);margin-top:4px;width:100%;">' +
+        (photoRoomPending.every(p => p.driveUrl) ? '✓ All uploaded' :
+         '🟡 Uploading... safe to analyze or save') +
+      '</div>';
     }
 
     function removePhotoRoomPhoto(idx) {
@@ -7155,17 +7180,25 @@
         (usingBase64 ? ' (uploading in background)' : '');
 
       try {
-        const res = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
-          method: 'POST',
-          body: JSON.stringify({
-            action: 'analyzeVoice',
-            email: currentUser.email,
-            franchiseID: currentUser.franchiseID,
-            transcript: '[PHOTO ANALYSIS — no voice transcript. Analyze the provided photos to identify items and estimate volume.]',
-            areas: availableAreas,
-            photos: photosToAnalyze
-          })
-        });
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 45000); // 45 second timeout
+        let res;
+        try {
+          res = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
+            method: 'POST',
+            signal: controller.signal,
+            body: JSON.stringify({
+              action: 'analyzeVoice',
+              email: currentUser.email,
+              franchiseID: currentUser.franchiseID,
+              transcript: '[PHOTO ANALYSIS — no voice transcript. Analyze the provided photos to identify items and estimate volume.]',
+              areas: availableAreas,
+              photos: photosToAnalyze
+            })
+          });
+        } finally {
+          clearTimeout(timeout);
+        }
 
         const data = await res.json();
 
@@ -7231,7 +7264,11 @@
         }
       } catch(e) {
         console.error('analyzeRoomPhotos error:', e);
-        statusEl.textContent = '⚠️ Connection error. Please try again.';
+        if (e.name === 'AbortError') {
+          statusEl.textContent = '⚠️ Timed out after 45s. Check connection and try again.';
+        } else {
+          statusEl.textContent = '⚠️ Connection error. Please try again.';
+        }
         analyzeBtn.disabled = false;
         analyzeBtn.textContent = 'Analyze';
       }
