@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.5.7 | 2026-04-03">
+  <meta name="crewlogic-version" content="v2.5.8 | 2026-04-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -7708,11 +7708,16 @@
 
     function populateCostAnalysisFields() {
       const ca = (currentEstimate && currentEstimate.costAnalysis) || {};
-      const fields = ['DisposalSite','RecyclingSite','DonationSite','Days','Crew','HrsDay','Margin','Cans','CanCost'];
-      fields.forEach(f => {
+      // Map field names to camelCase keys in costAnalysis object
+      const fieldMap = {
+        'DisposalSite': 'disposalSite', 'RecyclingSite': 'recyclingSite',
+        'DonationSite': 'donationSite', 'Days': 'days', 'Crew': 'crew',
+        'HrsDay': 'hrsDay', 'Margin': 'margin', 'Cans': 'cans', 'CanCost': 'canCost'
+      };
+      Object.entries(fieldMap).forEach(([f, key]) => {
         const el = document.getElementById('ca' + f);
-        if (el && ca[f.toLowerCase()] !== undefined && ca[f.toLowerCase()] !== null && ca[f.toLowerCase()] !== '') {
-          el.value = ca[f.toLowerCase()];
+        if (el && ca[key] !== undefined && ca[key] !== null && ca[key] !== '') {
+          el.value = ca[key];
         }
       });
       // Restore distance results
