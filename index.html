@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.4.0 | 2026-04-03">
+  <meta name="crewlogic-version" content="v2.4.1 | 2026-04-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -7428,6 +7428,7 @@
 
       // Render cost lines
       const fmt = (n) => '$' + Math.round(n).toLocaleString();
+      const fmtT = (n) => n.toFixed(2) + ' trucks';
       const lines = [
         ['Labor (' + totalHrs.toFixed(1) + ' hrs × $' + crewRate + ')', fmt(laborCost)],
         ['Disposal (' + trucksDisposal.toFixed(2) + ' tons × $' + disposalCost + ')', fmt(dispCost)],
@@ -7435,6 +7436,14 @@
         ['Recycling/Disposal Fees', fmt(surchargeDisposalCost)],
       ];
       if (cans > 0) lines.push(['Cans (' + cans + ' × $' + canCost + ')', fmt(canTotal)]);
+
+      // Routing summary — show non-zero splits
+      if (trucksRecycled > 0 || trucksDonated > 0) {
+        lines.push(['— Routing Summary —', '']);
+        lines.push(['↳ Disposal: ' + fmtT(trucksDisposal), '']);
+        if (trucksRecycled > 0) lines.push(['↳ Recycling: ' + fmtT(trucksRecycled) + ' (+' + fmt(recycRevRate) + '/truck revenue)', '+' + fmt(recycRevRate * trucksRecycled)]);
+        if (trucksDonated > 0)  lines.push(['↳ Donation: ' + fmtT(trucksDonated) + ' (saves disposal cost)', '−' + fmt(trucksDonated * disposalCost)]);
+      }
 
       // Partial load note
       if (trucksDisposal > 0 && trucksDisposal < 1) {
@@ -7444,9 +7453,18 @@
       if (!hasDistances) {
         lines.push(['⚠️ Distances not calculated — fuel cost is $0', '']);
       }
-      document.getElementById('caCostLines').innerHTML = lines.map(([l,v]) =>
-        '<div style="display:flex;justify-content:space-between;"><span style="color:' + (l.startsWith('⚠️') ? '#fbbf24' : 'inherit') + '">' + l + '</span><span style="font-weight:600;">' + v + '</span></div>'
-      ).join('');
+      document.getElementById('caCostLines').innerHTML = lines.map(([l,v]) => {
+        const isWarn = l.startsWith('⚠️');
+        const isSep  = l.startsWith('—');
+        const isPos  = v.startsWith('+');
+        const lColor = isWarn ? '#fbbf24' : isSep ? 'var(--text-muted)' : 'inherit';
+        const vColor = isPos  ? '#00EE76' : v.startsWith('−') ? 'var(--accent-green)' : 'inherit';
+        const lStyle = isSep  ? 'font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-top:4px;' : '';
+        return '<div style="display:flex;justify-content:space-between;' + lStyle + '">' +
+          '<span style="color:' + lColor + '">' + l + '</span>' +
+          (v ? '<span style="font-weight:600;color:' + vColor + '">' + v + '</span>' : '') +
+          '</div>';
+      }).join('');
       document.getElementById('caTotalCosts').textContent = fmt(totalCosts);
       document.getElementById('caRecyclingRevenue').textContent = '−' + fmt(recycRevenue);
       document.getElementById('caNetCost').textContent = fmt(netCost);
