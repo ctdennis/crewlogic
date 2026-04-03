@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.4.1 | 2026-04-03">
+  <meta name="crewlogic-version" content="v2.4.2 | 2026-04-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1212,8 +1212,9 @@
             <!-- Buttons -->
             <div style="display:flex;gap:8px;">
               <button id="photoRoomAddBtn" onclick="addPhotoRoomPhoto()" style="flex:1;padding:10px;background:var(--bg-input);border:1px solid var(--accent-blue);border-radius:var(--radius-sm);color:var(--accent-blue);font-size:13px;font-weight:600;cursor:pointer;">+ Add Photo</button>
-              <button id="photoRoomAnalyzeBtn" onclick="analyzeRoomPhotos()" disabled style="flex:1;padding:10px;background:var(--accent-blue);border:none;border-radius:var(--radius-sm);color:#fff;font-size:13px;font-weight:700;cursor:pointer;opacity:0.4;">Analyze</button>
+              <button id="photoRoomAnalyzeBtn" onclick="analyzeRoomPhotos()" disabled style="flex:2;padding:10px;background:var(--accent-blue);border:none;border-radius:var(--radius-sm);color:#fff;font-size:13px;font-weight:700;cursor:pointer;opacity:0.4;">Analyze</button>
             </div>
+            <button onclick="closePhotoPanel()" style="width:100%;margin-top:8px;padding:8px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;">✕ Close without analyzing</button>
             <input type="file" id="photoRoomInput" accept="image/*" capture="environment" style="display:none;" onchange="handlePhotoRoomCapture(this)">
           </div>
 
@@ -4068,15 +4069,17 @@
       // Migrate legacy single photo
       if (!charge.photos) charge.photos = charge.photoUrl ? [charge.photoUrl] : [];
       
-      // Only send Drive URLs — filter out any inline base64 placeholders
-      const drivePhotos = charge.photos.filter(p => p && !p.startsWith('data:'));
-      if (drivePhotos.length === 0) {
-        alert('Photos are still uploading to Drive. Please wait a moment and try again.');
+      // Use Drive URLs where available, fall back to base64 for still-uploading photos
+      const allPhotos = (charge.photos || []).filter(p => p && p.length > 10);
+      if (allPhotos.length === 0) {
+        alert('No photos found on this charge.');
         return;
       }
+      const usingBase64 = allPhotos.some(p => p.startsWith('data:'));
 
-      const photoCount = drivePhotos.length;
-      currentEstimate.charges[chargeIdx].photoAnalysis = '⏳ Analyzing ' + (photoCount > 1 ? photoCount + ' photos' : 'photo') + ' with AI...';
+      const photoCount = allPhotos.length;
+      currentEstimate.charges[chargeIdx].photoAnalysis = '⏳ Analyzing ' + (photoCount > 1 ? photoCount + ' photos' : 'photo') +
+        (usingBase64 ? ' (uploading in background)' : '') + '...';
       renderCharges();
 
       try {
@@ -4084,15 +4087,14 @@
             action: 'analyzePhoto',
             email: currentUser.email,
             franchiseID: currentUser.franchiseID,
-            photos: drivePhotos,
-            photoUrl: drivePhotos[0],
+            photos: allPhotos,
+            photoUrl: allPhotos.find(p => !p.startsWith('data:')) || null,
             photo: null,
             description: charge.description || '',
             room: charge.room || '',
             area: charge.area || '',
             currentVolume: charge.truckLabel || ''
         };
-        console.log('analyzePhoto payload size:', JSON.stringify(payload).length, 'action:', payload.action, 'photos:', payload.photos);
         const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
           method: 'POST',
           body: JSON.stringify(payload)
@@ -7095,34 +7097,16 @@
 
       if (photoRoomPending.length === 0) return;
 
-      // Use Drive URLs if available, fall back to base64 for any not yet uploaded
-      const driveUrls  = photoRoomPending.filter(p => p.driveUrl).map(p => p.driveUrl);
-      const base64Only = photoRoomPending.filter(p => !p.driveUrl).map(p => p.base64);
-
-      if (driveUrls.length === 0 && base64Only.length > 0) {
-        // None uploaded yet — wait briefly then retry once
-        statusEl.textContent = '⏳ Photos still uploading, please wait a moment...';
-        await new Promise(r => setTimeout(r, 2000));
-        const driveUrls2 = photoRoomPending.filter(p => p.driveUrl).map(p => p.driveUrl);
-        if (driveUrls2.length === 0) {
-          statusEl.textContent = '⚠️ Photos not yet uploaded to Drive. Please try again in a moment.';
-          return;
-        }
-      }
-
-      const photosToAnalyze = photoRoomPending
-        .filter(p => p.driveUrl)
-        .map(p => p.driveUrl);
-
-      if (photosToAnalyze.length === 0) {
-        statusEl.textContent = '⚠️ Waiting for upload to complete. Please try again shortly.';
-        return;
-      }
+      // Use Drive URLs where available, inline base64 for anything still uploading
+      // This allows analysis to proceed immediately regardless of connection quality
+      const photosToAnalyze = photoRoomPending.map(p => p.driveUrl || p.base64);
 
       analyzeBtn.disabled = true;
       analyzeBtn.textContent = '⏳ Analyzing...';
+      const usingBase64 = photoRoomPending.some(p => !p.driveUrl);
       statusEl.textContent = 'Sending ' + photosToAnalyze.length + ' photo' +
-        (photosToAnalyze.length !== 1 ? 's' : '') + ' to AI...';
+        (photosToAnalyze.length !== 1 ? 's' : '') + ' to AI...' +
+        (usingBase64 ? ' (uploading in background)' : '');
 
       try {
         const res = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
@@ -7155,7 +7139,7 @@
                 truckLabel: charge.truckLabel || '',
                 truckQty: charge.truckQty || 1,
                 truckVolume: charge.truckVolume || 0,
-                photos: photosToAnalyze  // attach the Drive URLs to the charge
+                photos: photoRoomPending.map(p => p.driveUrl || p.base64)  // drive URL if ready, base64 as fallback
               });
               addedCount++;
             } else if (charge.type === 'surcharge') {
