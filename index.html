@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.5.1 | 2026-04-03">
+  <meta name="crewlogic-version" content="v2.5.5 | 2026-04-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1079,6 +1079,30 @@
               <input type="number" class="form-input" id="settingsCostPaint" placeholder="5" inputmode="decimal" min="0">
             </div>
           </div>
+
+          <div class="form-section-label" style="margin-top:12px;">Facilities</div>
+
+          <!-- Disposal Sites -->
+          <div style="margin-bottom:10px;">
+            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">🗑 Disposal Sites</div>
+            <div id="settingsDisposalSitesList"></div>
+            <button onclick="addFacility('disposal')" style="width:100%;padding:7px;background:none;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;margin-top:4px;">+ Add Disposal Site</button>
+          </div>
+
+          <!-- Recycling Sites -->
+          <div style="margin-bottom:10px;">
+            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">♻️ Recycling Sites</div>
+            <div id="settingsRecyclingSitesList"></div>
+            <button onclick="addFacility('recycling')" style="width:100%;padding:7px;background:none;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;margin-top:4px;">+ Add Recycling Site</button>
+          </div>
+
+          <!-- Donation Sites -->
+          <div style="margin-bottom:10px;">
+            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">🤝 Donation Sites</div>
+            <div id="settingsDonationSitesList"></div>
+            <button onclick="addFacility('donation')" style="width:100%;padding:7px;background:none;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;margin-top:4px;">+ Add Donation Site</button>
+          </div>
+
           <button class="settings-save-btn" id="costSettingsSaveBtn" onclick="saveCostSettings()">
             <div class="spinner"></div>
             <span class="btn-text">Save cost settings</span>
@@ -1181,7 +1205,7 @@
               <button class="est-add-btn" id="addChargeBtn" onclick="showAddCharge()" style="background:var(--accent-green);color:#000;font-weight:600;">✏️ Manual</button>
               <!-- Specialty wizards dropdown -->
               <div style="position:relative;display:inline-block;">
-                <button class="est-add-btn" onclick="toggleWizardMenu(event)" id="wizardMenuBtn" style="background:var(--accent-green);color:#000;font-weight:600;">⚡ Specialty ▾</button>
+                <button class="est-add-btn" onclick="toggleWizardMenu(event)" id="wizardMenuBtn" style="background:var(--accent-green);color:#000;font-weight:600;">⚡ More ▾</button>
                 <div id="wizardMenu" style="display:none;position:absolute;top:calc(100% + 4px);left:0;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);z-index:50;min-width:160px;box-shadow:var(--shadow);">
                   <button onclick="closeWizardMenu();showShedWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🏚️ Shed</button>
                   <button onclick="closeWizardMenu();showStorageWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">📦 Storage Unit</button>
@@ -1226,7 +1250,7 @@
             <button class="est-add-btn" onclick="startPhotoCapture()" style="background:var(--accent-green);color:#000;font-weight:600;">📷 Photo</button>
             <button class="est-add-btn" onclick="showAddCharge()" style="background:var(--accent-green);color:#000;font-weight:600;">✏️ Manual</button>
             <div style="position:relative;display:inline-block;">
-              <button class="est-add-btn" onclick="toggleWizardMenu(event)" style="background:var(--accent-green);color:#000;font-weight:600;">⚡ Specialty ▾</button>
+              <button class="est-add-btn" onclick="toggleWizardMenu(event)" style="background:var(--accent-green);color:#000;font-weight:600;">⚡ More ▾</button>
               <div id="wizardMenuBottom" style="display:none;position:absolute;bottom:calc(100% + 4px);left:0;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);z-index:50;min-width:160px;box-shadow:var(--shadow);">
                 <button onclick="closeWizardMenu();showShedWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🏚️ Shed</button>
                 <button onclick="closeWizardMenu();showStorageWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">📦 Storage Unit</button>
@@ -1288,15 +1312,18 @@
               <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:10px;">Job Details</div>
               <div class="form-group">
                 <div class="form-label">Disposal Site</div>
-                <input type="text" class="form-input" id="caDisposalSite" placeholder="35 Thrasher St, Raynham, MA" oninput="saveCostAnalysisDraft()">
+                <select class="form-select" id="caDisposalSiteSelect" onchange="onFacilitySelect('disposal')"></select>
+                <input type="text" class="form-input" id="caDisposalSite" placeholder="Enter address" oninput="saveCostAnalysisDraft()" style="display:none;margin-top:4px;">
               </div>
               <div class="form-group">
                 <div class="form-label">Recycling Site <span id="caRecyclingSiteRequired" style="color:var(--accent-red);display:none;">*</span></div>
-                <input type="text" class="form-input" id="caRecyclingSite" placeholder="449 American Legion Hwy, Westport, MA" oninput="saveCostAnalysisDraft()">
+                <select class="form-select" id="caRecyclingSiteSelect" onchange="onFacilitySelect('recycling')"></select>
+                <input type="text" class="form-input" id="caRecyclingSite" placeholder="Enter address" oninput="saveCostAnalysisDraft()" style="display:none;margin-top:4px;">
               </div>
               <div class="form-group">
                 <div class="form-label">Donation Site <span id="caDonationSiteRequired" style="color:var(--accent-red);display:none;">*</span></div>
-                <input type="text" class="form-input" id="caDonationSite" placeholder="636 County St, Taunton, MA" oninput="saveCostAnalysisDraft()">
+                <select class="form-select" id="caDonationSiteSelect" onchange="onFacilitySelect('donation')"></select>
+                <input type="text" class="form-input" id="caDonationSite" placeholder="Enter address" oninput="saveCostAnalysisDraft()" style="display:none;margin-top:4px;">
               </div>
               <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
                 <div class="form-group">
@@ -3500,7 +3527,9 @@
         rooms: [],
         charges: [],
         discount: 0,
-        notes: ''
+        notes: '',
+        splitPricing: true,
+        costAnalysis: { days: 1, crew: 1, hrsDay: 2, margin: 60, cans: 0, canCost: 0 }
       };
       priceBlocks = [];
       priceListID = null;
@@ -5220,14 +5249,13 @@
         if (totalPrice > 0) {
           marginEl.style.display = 'block';
 
-          // Check if we have enough settings to calculate
-          const crewRate     = parseFloat(cs.crewRate) || 0;
-          const disposalCost = parseFloat(cs.disposalCost) || 0;
-          const hasSettings  = crewRate > 0 || disposalCost > 0;
+          // Need job inputs — use settings with fallbacks (same as cost analysis panel)
           const hasJobInputs = (ca.days > 0) && (ca.crew > 0) && (ca.hrsDay > 0);
 
-          if (hasSettings && hasJobInputs) {
-            // Recalculate costs fresh from current charge data + settings
+          if (hasJobInputs) {
+            // Recalculate costs fresh using settings with fallbacks
+            const crewRate = parseFloat(cs.crewRate) || 25;
+            const disposalCost = parseFloat(cs.disposalCost) || 200;
             const mpg      = parseFloat(cs.mpg || cs.MPG) || 10;
             const fuelCost = parseFloat(cs.fuelCost) || 3.50;
             const recycRevRate  = parseFloat(cs.recyclingRevenue) || 0;
@@ -7450,6 +7478,151 @@
       }
     }
 
+    // ===== FACILITIES MANAGEMENT =====
+    // facilities stored in costSettings.disposalSites, recyclingSites, donationSites
+    // each entry: { name: "Raynham Transfer", address: "35 Thrasher St..." }
+
+    function getFacilities(type) {
+      const cs = (currentUser && currentUser.costSettings) || {};
+      const key = type + 'Sites';
+      try {
+        const raw = cs[key];
+        if (Array.isArray(raw)) return raw;
+        if (typeof raw === 'string') return JSON.parse(raw);
+      } catch(e) {}
+      return [];
+    }
+
+    function setFacilities(type, arr) {
+      if (!currentUser.costSettings) currentUser.costSettings = {};
+      currentUser.costSettings[type + 'Sites'] = arr;
+    }
+
+    // ── Settings screen: render facility rows ──
+    function renderFacilityList(type) {
+      const listEl = document.getElementById('settings' + type.charAt(0).toUpperCase() + type.slice(1) + 'SitesList');
+      if (!listEl) return;
+      const facilities = getFacilities(type);
+      if (facilities.length === 0) {
+        listEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:4px 0;">No sites added yet.</div>';
+        return;
+      }
+      listEl.innerHTML = facilities.map((f, i) => {
+        const isDefault = !!f.isDefault;
+        const starStyle = isDefault
+          ? 'flex-shrink:0;padding:7px 9px;background:none;border:1px solid var(--accent-green);border-radius:var(--radius-sm);color:var(--accent-green);font-size:13px;cursor:pointer;'
+          : 'flex-shrink:0;padding:7px 9px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:13px;cursor:pointer;';
+        const star = isDefault ? '★' : '☆';
+        return '<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:6px;">' +
+          '<button title="Set as default" onclick="setDefaultFacility(\'' + type + '\',' + i + ')" style="' + starStyle + '">' + star + '</button>' +
+          '<div style="flex:1;display:flex;gap:6px;">' +
+            '<input class="form-input" style="flex:1;font-size:12px;padding:7px 10px;" placeholder="Name" value="' + (f.name||'').replace(/"/g,'&quot;') + '" ' +
+              'oninput="updateFacility(\'' + type + '\',' + i + ',\'name\',this.value)">' +
+            '<input class="form-input" style="flex:2;font-size:12px;padding:7px 10px;" placeholder="Address" value="' + (f.address||'').replace(/"/g,'&quot;') + '" ' +
+              'oninput="updateFacility(\'' + type + '\',' + i + ',\'address\',this.value)">' +
+          '</div>' +
+          '<button onclick="removeFacility(\'' + type + '\',' + i + ')" style="flex-shrink:0;padding:7px 9px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;">✕</button>' +
+        '</div>';
+      }).join('');
+    }
+
+    function renderAllFacilityLists() {
+      renderFacilityList('disposal');
+      renderFacilityList('recycling');
+      renderFacilityList('donation');
+    }
+
+    function addFacility(type) {
+      const facilities = getFacilities(type);
+      facilities.push({ name: '', address: '' });
+      setFacilities(type, facilities);
+      renderFacilityList(type);
+      // Focus the new name input
+      const listEl = document.getElementById('settings' + type.charAt(0).toUpperCase() + type.slice(1) + 'SitesList');
+      if (listEl) {
+        const inputs = listEl.querySelectorAll('input');
+        if (inputs.length > 0) inputs[inputs.length - 2].focus();
+      }
+    }
+
+    function updateFacility(type, idx, field, value) {
+      const facilities = getFacilities(type);
+      if (facilities[idx]) facilities[idx][field] = value;
+      setFacilities(type, facilities);
+      // Don't re-render — let user keep typing
+    }
+
+    function removeFacility(type, idx) {
+      const facilities = getFacilities(type);
+      facilities.splice(idx, 1);
+      setFacilities(type, facilities);
+      renderFacilityList(type);
+      populateFacilityDropdowns();
+    }
+
+    function setDefaultFacility(type, idx) {
+      const facilities = getFacilities(type);
+      facilities.forEach((f, i) => f.isDefault = (i === idx ? !f.isDefault : false));
+      setFacilities(type, facilities);
+      renderFacilityList(type);
+    }
+
+    // ── Cost analysis panel: populate dropdowns from saved facilities ──
+    function populateFacilityDropdowns() {
+      ['disposal', 'recycling', 'donation'].forEach(type => {
+        const sel = document.getElementById('ca' + type.charAt(0).toUpperCase() + type.slice(1) + 'SiteSelect');
+        if (!sel) return;
+        const facilities = getFacilities(type);
+        const ca = (currentEstimate && currentEstimate.costAnalysis) || {};
+        const currentAddr = ca[type + 'Site'] || '';
+
+        // Use default facility address if no current address saved
+        const defaultFacility = facilities.find(f => f.isDefault);
+        const effectiveAddr = currentAddr || (defaultFacility ? defaultFacility.address : '');
+
+        let options = '<option value="">— Select ' + type + ' site —</option>';
+        facilities.forEach((f, i) => {
+          if (!f.name && !f.address) return;
+          const label = (f.isDefault ? '★ ' : '') + (f.name || f.address);
+          const selected = f.address === effectiveAddr ? ' selected' : '';
+          options += '<option value="' + f.address.replace(/"/g,'&quot;') + '"' + selected + '>' + label + '</option>';
+        });
+        options += '<option value="__other__"' + (effectiveAddr && !facilities.some(f => f.address === effectiveAddr) ? ' selected' : '') + '>Other (enter address)</option>';
+        sel.innerHTML = options;
+
+        // Sync effective address to hidden text input
+        const currentAddr2 = effectiveAddr;
+
+        // Show/hide text input based on current selection
+        const textEl = document.getElementById('ca' + type.charAt(0).toUpperCase() + type.slice(1) + 'Site');
+        const isOther = sel.value === '__other__' || (currentAddr2 && !facilities.some(f => f.address === currentAddr2) && facilities.length > 0);
+        if (textEl) {
+          textEl.style.display = isOther ? 'block' : 'none';
+          if (isOther && currentAddr2) textEl.value = currentAddr2;
+          if (!isOther && sel.value) {
+            textEl.value = sel.value;
+          }
+        }
+      });
+    }
+
+    function onFacilitySelect(type) {
+      const sel = document.getElementById('ca' + type.charAt(0).toUpperCase() + type.slice(1) + 'SiteSelect');
+      const textEl = document.getElementById('ca' + type.charAt(0).toUpperCase() + type.slice(1) + 'Site');
+      if (!sel || !textEl) return;
+
+      if (sel.value === '__other__') {
+        textEl.style.display = 'block';
+        textEl.value = '';
+        textEl.focus();
+      } else {
+        textEl.style.display = 'none';
+        textEl.value = sel.value; // store address in hidden field
+      }
+      saveCostAnalysisDraft();
+    }
+
+
     // ===== COST SETTINGS =====
     const COST_SETTINGS_FIELDS = [
       'truckHome','MPG','fuelCost','crewRate','disposalCost',
@@ -7468,6 +7641,10 @@
         const el = document.getElementById('settings' + f.charAt(0).toUpperCase() + f.slice(1));
         vals[f] = el ? el.value.trim() : '';
       });
+      // Include facility lists
+      vals.disposalSites  = getFacilities('disposal');
+      vals.recyclingSites = getFacilities('recycling');
+      vals.donationSites  = getFacilities('donation');
       try {
         const res = await apiFetch(N8N_BASE + '/crewlogic-settings', {
           method: 'POST',
@@ -7497,6 +7674,7 @@
         const el = document.getElementById('settings' + f.charAt(0).toUpperCase() + f.slice(1));
         if (el && cs[f] !== undefined) el.value = cs[f];
       });
+      renderAllFacilityLists();
     }
 
     // ===== COST ANALYSIS PANEL =====
@@ -7508,6 +7686,7 @@
       chevron.textContent = isOpen ? '▸ Expand' : '▾ Collapse';
       if (!isOpen) {
         try {
+          populateFacilityDropdowns();
           populateCostAnalysisFields();
           updateCostAnalysis();
         } catch(e) {
