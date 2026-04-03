@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.4.4 | 2026-04-03">
+  <meta name="crewlogic-version" content="v2.4.5 | 2026-04-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -4063,59 +4063,96 @@
       return null;
     }
 
-    // ===== CHARGE PHOTO ANALYSIS =====
+    // ===== CHARGE ANALYZE — uses photos + description via analyzeVoice =====
     async function analyzeChargePhoto(chargeIdx) {
       const charge = currentEstimate.charges[chargeIdx];
-      // Migrate legacy single photo
       if (!charge.photos) charge.photos = charge.photoUrl ? [charge.photoUrl] : [];
-      
-      // Use Drive URLs where available, fall back to base64 for still-uploading photos
+
       const allPhotos = (charge.photos || []).filter(p => p && p.length > 10);
-      if (allPhotos.length === 0) {
-        alert('No photos found on this charge.');
+      const hasPhotos = allPhotos.length > 0;
+      const hasDescription = !!(charge.description || '').trim();
+
+      if (!hasPhotos && !hasDescription) {
+        alert('Add photos or a description first.');
         return;
       }
-      const usingBase64 = allPhotos.some(p => p.startsWith('data:'));
 
-      const photoCount = allPhotos.length;
-      currentEstimate.charges[chargeIdx].photoAnalysis = '⏳ Analyzing ' + (photoCount > 1 ? photoCount + ' photos' : 'photo') +
-        (usingBase64 ? ' (uploading in background)' : '') + '...';
-      renderCharges();
+      // Show analyzing status on the button
+      const analyzeBtn = document.querySelector('[data-analyze="' + chargeIdx + '"]');
+      if (analyzeBtn) { analyzeBtn.textContent = '⏳...'; analyzeBtn.disabled = true; }
 
       try {
-        const payload = {
-            action: 'analyzePhoto',
-            email: currentUser.email,
-            franchiseID: currentUser.franchiseID,
-            photos: allPhotos,
-            photoUrl: allPhotos.find(p => !p.startsWith('data:')) || null,
-            photo: null,
-            description: charge.description || '',
-            room: charge.room || '',
-            area: charge.area || '',
-            currentVolume: charge.truckLabel || ''
-        };
+        // Build transcript from existing description (appended to photo analysis context)
+        const transcript = hasDescription
+          ? (charge.room ? charge.room + ': ' : '') + charge.description
+          : '[PHOTO ANALYSIS — no voice transcript. Analyze the provided photos to identify items and estimate volume.]';
+
         const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
           method: 'POST',
-          body: JSON.stringify(payload)
+          body: JSON.stringify({
+            action: 'analyzeVoice',
+            email: currentUser.email,
+            franchiseID: currentUser.franchiseID,
+            transcript,
+            areas: availableAreas,
+            photos: hasPhotos ? allPhotos : undefined
+          })
         });
+
         const data = await response.json();
         if (data.success) {
-          currentEstimate.charges[chargeIdx].photoAnalysis = data.analysis;
-          renderCharges();
-          autoSaveDraft();
-        } else {
-          currentEstimate.charges[chargeIdx].photoAnalysis = null;
-          renderCharges();
+          const results = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
+          const vol = results.find(c => c.type === 'volume');
+          if (vol) {
+            // Update all fields — only overwrite if AI returned a non-empty value
+            if (vol.description) charge.description = vol.description;
+            if (vol.room && !charge.room) charge.room = vol.room;
+            if (vol.area && !charge.area) charge.area = vol.area;
+            if (vol.notIncluded) charge.notIncluded = vol.notIncluded;
+            if (vol.truckLabel) {
+              charge.truckLabel  = vol.truckLabel;
+              charge.truckQty    = parseFloat(vol.truckQty) || 1;
+              const lv = {'Included':0,'Minimum':0.0625,'1/8':0.125,'1/4':0.25,'3/8':0.375,'1/2':0.5,'5/8':0.625,'3/4':0.75,'7/8':0.875,'Full':1};
+              const labelVol = lv[charge.truckLabel] !== undefined ? lv[charge.truckLabel] : (parseFloat(charge.truckLabel) || 0);
+              charge.truckVolume = Math.round(labelVol * charge.truckQty * 1000) / 1000;
+            }
+          }
+          // Add any surcharges identified
+          results.filter(c => c.type === 'surcharge').forEach(s => {
+            const matched = matchSurchargeItem(s.name);
+            if (matched && !currentEstimate.charges.some(ec => ec.type === 'surcharge' && ec.priceItemID === matched.priceItemID)) {
+              currentEstimate.charges.push({
+                type: 'surcharge',
+                priceItemID: matched.priceItemID,
+                name: matched.name,
+                blockName: matched.blockName,
+                priceBlockID: matched.priceBlockID,
+                qty: s.qty || 1,
+                unitPrice: matched.value,
+                area: charge.area || '',
+                taxID: matched.taxID || 146
+              });
+            }
+          });
+          // Clear old separate photo analysis box
+          charge.photoAnalysis = null;
         }
       } catch(e) {
-        console.error('Photo analysis error:', e);
-        currentEstimate.charges[chargeIdx].photoAnalysis = null;
-        renderCharges();
+        console.error('Analyze error:', e);
       }
+
+      renderCharges();
+      updateTotals();
+      autoSaveDraft();
     }
 
-    // ===== CHARGE DESCRIPTION VOICE & RE-ANALYZE =====
+    function clearChargeDescription(idx) {
+      currentEstimate.charges[idx].description = '';
+      renderCharges();
+      autoSaveDraft();
+    }
+
+    // ===== CHARGE DESCRIPTION VOICE =====
     let activeChargeVoice = null; // { recognition, chargeIdx, append, btnIds }
 
     function reRecordChargeDescription(chargeIdx) {
@@ -4776,15 +4813,14 @@
           html += '<span style="font-size:10px;color:var(--text-muted);margin-left:4px;" id="pctCheck_' + globalIdx + '"></span>';
           html += '</div>';
 
-          // Row 3: Description
+          // Row 3: Description with clear button
           html += '<div style="margin-top:6px;position:relative;">';
-          html += '<textarea class="form-input" style="width:100%;min-height:56px;resize:vertical;font-size:12px;line-height:1.5;padding:8px 10px;box-sizing:border-box;" placeholder="Description" data-idx="' + globalIdx + '" data-field="description" oninput="updateChargeFromInput(this)">' + (charge.description||'').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</textarea>';
-          html += '<div style="display:flex;gap:5px;margin-top:4px;">';
-          html += '<button data-voice-rerecord="' + globalIdx + '" onclick="reRecordChargeDescription(' + globalIdx + ')" style="background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:11px;color:var(--text-secondary);cursor:pointer;">🎤 Re-record</button>';
-          html += '<button data-voice-append="' + globalIdx + '" onclick="appendRecordChargeDescription(' + globalIdx + ')" style="background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:11px;color:var(--text-secondary);cursor:pointer;">🎤 Add to description</button>';
+          html += '<textarea class="form-input" style="width:100%;min-height:56px;resize:vertical;font-size:12px;line-height:1.5;padding:8px 32px 8px 10px;box-sizing:border-box;" placeholder="Description" data-idx="' + globalIdx + '" data-field="description" oninput="updateChargeFromInput(this)">' + (charge.description||'').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</textarea>';
           if (charge.description) {
-            html += '<button data-reanalyze="' + globalIdx + '" onclick="reanalyzeChargeDescription(' + globalIdx + ')" style="background:rgba(0,238,118,0.15);border:1px solid var(--accent-green);border-radius:var(--radius-sm);padding:4px 8px;font-size:11px;color:var(--accent-green);cursor:pointer;">↻ Re-analyze volume</button>';
+            html += '<button onclick="clearChargeDescription(' + globalIdx + ')" title="Clear description" style="position:absolute;top:6px;right:6px;background:none;border:none;color:var(--text-muted);font-size:14px;cursor:pointer;line-height:1;padding:2px;">✕</button>';
           }
+          html += '<div style="display:flex;gap:5px;margin-top:4px;">';
+          html += '<button data-voice-append="' + globalIdx + '" onclick="appendRecordChargeDescription(' + globalIdx + ')" style="background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:11px;color:var(--text-secondary);cursor:pointer;">🎤 Add</button>';
           html += '</div>';
           html += '</div>';
 
@@ -4812,13 +4848,8 @@
           if (photos.length < 4) {
             html += '<button onclick="captureChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:var(--text-secondary);cursor:pointer;">📷 Add Photo</button>';
           }
-          if (photos.length > 0) {
-            html += '<button onclick="analyzeChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:#000;font-weight:600;cursor:pointer;">🤖 Analyze' + (photos.length > 1 ? ' (' + photos.length + ')' : '') + '</button>';
-          }
+          html += '<button data-analyze="' + globalIdx + '" onclick="analyzeChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:#000;font-weight:600;cursor:pointer;">🤖 Analyze' + (photos.length > 1 ? ' (' + photos.length + ')' : '') + '</button>';
           html += '</div>';
-          if (charge.photoAnalysis) {
-            html += '<div style="width:100%;margin-top:6px;font-size:11px;padding:6px 10px;border-radius:var(--radius-sm);background:rgba(0,238,118,0.08);color:var(--text-primary);">🤖 ' + charge.photoAnalysis + '</div>';
-          }
           html += '</div>';
 
           html += '</div>'; // end detail body
