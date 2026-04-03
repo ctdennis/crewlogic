@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.4.7 | 2026-04-03">
+  <meta name="crewlogic-version" content="v2.4.8 | 2026-04-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1271,6 +1271,7 @@
             <div style="text-align:right">
               <div class="est-total-label">Quote Total</div>
               <div class="est-total-amount" id="estGrandTotal">$0.00</div>
+              <div id="estActualMarginDisplay" style="display:none;margin-top:3px;font-size:11px;font-family:monospace;font-weight:600;"></div>
             </div>
           </div>
 
@@ -5201,6 +5202,31 @@
       const totalPrice = subtotal + discountTotal;
       currentEstimate.totalPrice = Math.round(totalPrice * 100) / 100;
       document.getElementById('estGrandTotal').textContent = (totalPrice < 0 ? '-' : '') + '$' + Math.abs(totalPrice).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+      // Show actual margin below total if cost analysis has enough data
+      const marginEl = document.getElementById('estActualMarginDisplay');
+      if (marginEl) {
+        const ca = (currentEstimate && currentEstimate.costAnalysis) || {};
+        const cs = (currentUser && currentUser.costSettings) || {};
+        const netCost = parseFloat(ca.netCost) || 0;
+        const royaltyPct = parseFloat(cs.royaltyPct) || 14;
+        if (netCost > 0 && totalPrice > 0) {
+          const royaltyCost = totalPrice * (royaltyPct / 100);
+          const netMargin = (totalPrice - netCost - royaltyCost) / totalPrice;
+          const grossMargin = (totalPrice - netCost) / totalPrice;
+          const netPct = Math.round(netMargin * 100);
+          const grossPct = Math.round(grossMargin * 100);
+          const targetMargin = parseFloat(ca.margin) || 0;
+          const isGreen = netMargin >= (targetMargin / 100) - 0.02;
+          const isAmber = !isGreen && netMargin >= (targetMargin / 100) - 0.10;
+          const color = isGreen ? '#00EE76' : isAmber ? '#fbbf24' : '#f87171';
+          marginEl.style.color = color;
+          marginEl.style.display = 'block';
+          marginEl.textContent = netPct + '% net / ' + grossPct + '% gross';
+        } else {
+          marginEl.style.display = 'none';
+        }
+      }
 
       // Refresh cost analysis margin if panel is open
       if (document.getElementById('costAnalysisBody') &&
