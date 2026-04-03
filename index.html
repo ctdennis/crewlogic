@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.4.9 | 2026-04-03">
+  <meta name="crewlogic-version" content="v2.5.0 | 2026-04-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -5203,21 +5203,88 @@
       currentEstimate.totalPrice = Math.round(totalPrice * 100) / 100;
       document.getElementById('estGrandTotal').textContent = (totalPrice < 0 ? '-' : '') + '$' + Math.abs(totalPrice).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
 
-      // Show actual margin below total if cost analysis has enough data
+      // Show actual margin below total — recalculate live from current data
       const marginEl = document.getElementById('estActualMarginDisplay');
       if (marginEl) {
         const ca = (currentEstimate && currentEstimate.costAnalysis) || {};
-        const netCost = parseFloat(ca.netCost) || 0;
+        const cs = (currentUser && currentUser.costSettings) || {};
         if (totalPrice > 0) {
           marginEl.style.display = 'block';
-          if (netCost > 0) {
-            const grossMargin = (totalPrice - netCost) / totalPrice;
-            const grossPct = Math.round(grossMargin * 100);
+
+          // Check if we have enough settings to calculate
+          const crewRate     = parseFloat(cs.crewRate) || 0;
+          const disposalCost = parseFloat(cs.disposalCost) || 0;
+          const hasSettings  = crewRate > 0 || disposalCost > 0;
+          const hasJobInputs = (ca.days > 0) && (ca.crew > 0) && (ca.hrsDay > 0);
+
+          if (hasSettings && hasJobInputs) {
+            // Recalculate costs fresh from current charge data + settings
+            const mpg      = parseFloat(cs.mpg || cs.MPG) || 10;
+            const fuelCost = parseFloat(cs.fuelCost) || 3.50;
+            const recycRevRate  = parseFloat(cs.recyclingRevenue) || 0;
+
+            // Routing from current charges
+            const volCharges = (currentEstimate.charges || []).filter(c => c.type === 'volume');
+            let trucksRecycled = 0, trucksDonated = 0, totalTrucksCA = 0;
+            volCharges.forEach(c => {
+              const vol = (parseFloat(c.truckVolume) || 0) * (parseFloat(c.truckQty) || 1);
+              totalTrucksCA  += vol;
+              trucksRecycled += vol * ((parseFloat(c.pctRecycled) || 0) / 100);
+              trucksDonated  += vol * ((parseFloat(c.pctDonated)  || 0) / 100);
+            });
+            const trucksDisposal = Math.max(0, totalTrucksCA - trucksRecycled - trucksDonated);
+            const loadsDisposal  = Math.ceil(trucksDisposal);
+            const loadsRecycling = Math.ceil(trucksRecycled);
+
+            // Distances
+            const dist   = ca.distances || {};
+            const homeMi = parseFloat(dist.homeMiles) || 0;
+            const dispMi = parseFloat(dist.disposalMiles) || 0;
+            const recycMi = parseFloat(dist.recyclingMiles) || 0;
+            const donMi  = parseFloat(dist.donationMiles) || 0;
+            const dispMin = parseFloat(dist.disposalMinutes) || 0;
+            const recycMin = parseFloat(dist.recyclingMinutes) || 0;
+            const donMin = parseFloat(dist.donationMinutes) || 0;
+            const dispWait  = parseFloat(cs.disposalWait) || 15;
+            const recycWait = parseFloat(cs.recyclingWait) || 20;
+            const donWait   = parseFloat(cs.donationWait)  || 15;
+
+            const totalMiles = (homeMi * 2) +
+              (dispMi * 2 * loadsDisposal) +
+              (recycMi * 2 * loadsRecycling) +
+              (donMi  * 2 * Math.ceil(trucksDonated));
+            const totalTruckMin = (homeMi ? (parseFloat(dist.homeMinutes)||0) * 2 : 0) +
+              ((dispMin * 2 + dispWait) * loadsDisposal) +
+              ((recycMin * 2 + recycWait) * loadsRecycling) +
+              ((donMin * 2 + donWait) * Math.ceil(trucksDonated));
+
+            const laborCost  = (ca.days * ca.crew * ca.hrsDay + totalTruckMin / 60) * crewRate;
+            const dispCost   = trucksDisposal * disposalCost;
+            const fuelTotal  = (totalMiles / mpg) * fuelCost;
+            const recycRev   = trucksRecycled * recycRevRate;
+            const cans       = (ca.cans || 0) * (ca.canCost || 0);
+
+            // Surcharge disposal costs
+            const surchargeMap = {
+              'Mattress/Box Spring(s)': parseFloat(cs.costMattress)||10,
+              'TV/Monitor(s)':          parseFloat(cs.costTV)||10,
+              'Freon Appliance(s)':     parseFloat(cs.costFreon)||25,
+              'Tire(s)':                parseFloat(cs.costTire)||5,
+              'Paint Can(s)':           parseFloat(cs.costPaint)||5
+            };
+            let surchargeDisp = 0;
+            (currentEstimate.charges||[]).filter(c=>c.type==='surcharge').forEach(c=>{
+              const rate = surchargeMap[c.name];
+              if (rate) surchargeDisp += (parseFloat(c.qty)||0) * rate;
+            });
+
+            const netCostLive = laborCost + dispCost + fuelTotal + surchargeDisp + cans - recycRev;
+            const grossMargin = (totalPrice - netCostLive) / totalPrice;
+            const grossPct    = Math.round(grossMargin * 100);
             const targetMargin = parseFloat(ca.margin) || 0;
             const isGreen = !targetMargin || grossMargin >= (targetMargin / 100) - 0.02;
             const isAmber = !isGreen && grossMargin >= (targetMargin / 100) - 0.10;
-            const color = isGreen ? '#00EE76' : isAmber ? '#fbbf24' : '#f87171';
-            marginEl.style.color = color;
+            marginEl.style.color = isGreen ? '#00EE76' : isAmber ? '#fbbf24' : '#f87171';
             marginEl.textContent = grossPct + '% Margin';
           } else {
             marginEl.style.color = '#fbbf24';
