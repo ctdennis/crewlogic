@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.4.5 | 2026-04-03">
+  <meta name="crewlogic-version" content="v2.4.6 | 2026-04-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -7236,21 +7236,43 @@
         if (data.success) {
           const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
           let addedCount = 0;
+          const currentPhotos = photoRoomPending.map(p => p.driveUrl || p.base64);
 
           charges.forEach(charge => {
             if (charge.type === 'volume') {
-              // Create charge row with blank room/area for crew to fill in
-              currentEstimate.charges.push({
-                type: 'volume',
-                room: charge.room || '',
-                area: charge.area || '',
-                description: charge.description || '',
-                notIncluded: charge.notIncluded || '',
-                truckLabel: charge.truckLabel || '',
-                truckQty: charge.truckQty || 1,
-                truckVolume: charge.truckVolume || 0,
-                photos: photoRoomPending.map(p => p.driveUrl || p.base64)  // drive URL if ready, base64 as fallback
-              });
+              // Check if closePhotoPanel already created a blank row with these photos
+              // If so, update it in place rather than adding a duplicate
+              const existingIdx = currentEstimate.charges.findIndex(ec =>
+                ec.type === 'volume' &&
+                !ec.truckLabel &&
+                ec.photos && ec.photos.length > 0 &&
+                ec.photos[0] === currentPhotos[0]
+              );
+
+              if (existingIdx !== -1) {
+                // Update the existing blank row
+                const ec = currentEstimate.charges[existingIdx];
+                ec.room        = charge.room || ec.room || '';
+                ec.area        = charge.area || ec.area || '';
+                ec.description = charge.description || '';
+                ec.notIncluded = charge.notIncluded || '';
+                ec.truckLabel  = charge.truckLabel || '';
+                ec.truckQty    = charge.truckQty || 1;
+                ec.truckVolume = charge.truckVolume || 0;
+              } else {
+                // No existing row — push new one
+                currentEstimate.charges.push({
+                  type: 'volume',
+                  room: charge.room || '',
+                  area: charge.area || '',
+                  description: charge.description || '',
+                  notIncluded: charge.notIncluded || '',
+                  truckLabel: charge.truckLabel || '',
+                  truckQty: charge.truckQty || 1,
+                  truckVolume: charge.truckVolume || 0,
+                  photos: currentPhotos
+                });
+              }
               addedCount++;
             } else if (charge.type === 'surcharge') {
               const matched = matchSurchargeItem(charge.name);
