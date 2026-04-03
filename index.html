@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.3.8 | 2026-04-03">
+  <meta name="crewlogic-version" content="v2.3.9 | 2026-04-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1363,11 +1363,11 @@
                   </div>
                   <div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px;">
                     <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-bottom:4px;">
-                      <span>Margin (after royalty)</span>
+                      <span>Target Margin (net of royalty)</span>
                       <span id="caActualMargin" style="font-family:monospace;font-size:16px;"></span>
                     </div>
                     <div style="display:flex;justify-content:space-between;font-size:12px;">
-                      <span style="color:var(--text-secondary);">Gross Margin (before royalty)</span>
+                      <span style="color:var(--text-secondary);">Gross Margin (incl. royalty)</span>
                       <span id="caGrossMargin" style="font-family:monospace;font-size:14px;font-weight:600;"></span>
                     </div>
                   </div>
@@ -7453,13 +7453,15 @@
       document.getElementById('caCostBreakdown').style.display = 'block';
 
       // Margin callout
-      const marginPct = Math.round(actualMargin * 100);
       const targetPct = Math.round(margin * 100);
       const diff = currentPrice - recommendedPrice;
-      const isGreen = actualMargin >= margin - 0.02;
-      const isAmber = !isGreen && actualMargin >= margin - 0.10;
+      // Color based on how current price compares to recommended price
+      const pctOver = recommendedPrice > 0 ? (currentPrice - recommendedPrice) / recommendedPrice : 0;
+      const isGreen = pctOver >= -0.02;
+      const isAmber = !isGreen && pctOver >= -0.10;
       const color = isGreen ? '#00EE76' : isAmber ? '#fbbf24' : '#f87171';
       const border = isGreen ? '#00EE76' : isAmber ? '#fbbf24' : '#f87171';
+      const marginPct = targetPct; // kept for label compatibility
 
       const box = document.getElementById('caMarginBox');
       box.style.borderColor = border;
@@ -7470,12 +7472,12 @@
       document.getElementById('caCurrentPrice').textContent = fmt(currentPrice);
       document.getElementById('caPriceDiff').style.color = diff >= 0 ? '#00EE76' : '#f87171';
       document.getElementById('caPriceDiff').textContent = (diff >= 0 ? '+' : '') + fmt(diff);
-      // Gross margin = before royalty deduction
-      const grossMargin = currentPrice > 0 ? (currentPrice - netCost) / currentPrice : 0;
-      const grossMarginPct = Math.round(grossMargin * 100);
+      // Both margins based on recommended price (target)
+      // Gross margin = margin after royalty + royalty = margin + royalty
+      const grossMarginPct = Math.round((margin + royaltyFrac) * 100);
 
       document.getElementById('caActualMargin').style.color = color;
-      document.getElementById('caActualMargin').textContent = marginPct + '% (target ' + targetPct + '%)';
+      document.getElementById('caActualMargin').textContent = targetPct + '%';
       document.getElementById('caGrossMargin').style.color = color;
       document.getElementById('caGrossMargin').textContent = grossMarginPct + '%';
 
