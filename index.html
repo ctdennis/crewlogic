@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.5.5 | 2026-04-03">
+  <meta name="crewlogic-version" content="v2.5.6 | 2026-04-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -6508,6 +6508,17 @@
         y += 20;
       };
 
+      // Section header for surcharges
+      if (surchargeCharges.length > 0) {
+        y += 4;
+        doc.setFillColor(30, 45, 55);
+        doc.rect(margin, y, W - 2 * margin, 20, 'F');
+        doc.setTextColor(...green);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.text('RECYCLING, LABOR & OTHER CHARGES', col.area, y + 13);
+        y += 20;
+      }
       surchargeCharges.forEach((c, i) => renderPDFChargeRow(c, i));
 
       // Sub Total (volume + surcharges, before discounts)
@@ -7925,6 +7936,23 @@
       // Validation: warn if recycling/donation site missing when needed
       document.getElementById('caRecyclingSiteRequired').style.display = trucksRecycled > 0 ? 'inline' : 'none';
       document.getElementById('caDonationSiteRequired').style.display = trucksDonated > 0 ? 'inline' : 'none';
+
+      // Update the margin display below the total (reads ca.netCost which we just calculated)
+      // Call directly rather than via updateTotals to avoid infinite loop
+      const marginEl2 = document.getElementById('estActualMarginDisplay');
+      if (marginEl2 && currentEstimate && currentEstimate.totalPrice > 0) {
+        const totalPrice2 = parseFloat(currentEstimate.totalPrice) || 0;
+        if (netCost > 0 && totalPrice2 > 0) {
+          const grossMargin2 = (totalPrice2 - netCost) / totalPrice2;
+          const grossPct2 = Math.round(grossMargin2 * 100);
+          const targetMargin2 = margin * 100;
+          const isGreen2 = !targetMargin2 || grossMargin2 >= (margin - 0.02);
+          const isAmber2 = !isGreen2 && grossMargin2 >= (margin - 0.10);
+          marginEl2.style.color = isGreen2 ? '#00EE76' : isAmber2 ? '#fbbf24' : '#f87171';
+          marginEl2.style.display = 'block';
+          marginEl2.textContent = grossPct2 + '% Margin';
+        }
+      }
     }
 
     async function calculateDistances() {
