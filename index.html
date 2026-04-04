@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.8.7 | 2026-04-04">
+  <meta name="crewlogic-version" content="v2.8.8 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -7138,21 +7138,24 @@
         // Page: Terms
         const defaultTerms = `TERMS & CONDITIONS
 
-1. SCOPE OF WORK: Price covers removal of items as described in this estimate. Additional items may incur additional charges.
+PRICING
+- If items take up less space than anticipated, price will be reduced accordingly
+- Frequently not all items were visible or accessible during the estimate. There may be additional recycling charges based on what is uncovered during the removal, typically tires, oil paint cans, TVs & mattresses and boxsprings.
 
-2. PRICING: All prices are estimates. Final price is confirmed on-site before work begins. If actual volume differs significantly, pricing will be adjusted accordingly.
+ITEMS WE CANNOT REMOVE
+- Junkluggers cannot remove or transport flammable or explosive materials such as gas, propane, ammunition, firearms, compressed air cylinders, etc.
+- Junkluggers cannot remove biohazards such as some chemicals, some pesticides, animal waste, etc
 
-3. PAYMENT: Payment is due upon completion of service. We accept cash, check, and major credit cards.
+GENERAL
+- Some items may need to be dismantled to safely exit building
+- W9 and Certificate of Insurance available upon request
+- Payment is due upon completion of service
+- Please provide 24 hours notice to cancel or reschedule
 
-4. RECYCLING & DONATION: We make every effort to donate and recycle items. We cannot guarantee specific items will be donated or recycled as this depends on condition and partner acceptance.
-
-5. HAZARDOUS MATERIALS: We do not remove hazardous materials including but not limited to: paint (unless sealed), chemicals, asbestos, or biohazards.
-
-6. PROPERTY: Customer is responsible for ensuring items to be removed are accessible. We are not responsible for pre-existing damage. We will take reasonable care to protect your property during removal.
-
-7. CANCELLATION: Please provide 24 hours notice to cancel or reschedule. Late cancellations may incur a fee.
-
-8. SATISFACTION: If you are not satisfied with our service, please contact us within 24 hours and we will work to resolve any issues.`;
+RECYCLING & DONATION
+- We make every effort to donate and recycle items
+- We cannot guarantee specific items will be donated or recycled as this depends on condition and partner acceptance
+- Ultimately, the donation centers we partner with have the final say in what items they accept`;
 
         const termsText = customTerms || defaultTerms;
         doc.addPage([W, H], 'landscape');
@@ -7177,26 +7180,54 @@
         doc.setFontSize(9);
         doc.text(dateStr, W - margin, 50, { align: 'right' });
 
-        let ty = 100;
+        // Two-column layout for terms
+        const termColW = (W - 2 * margin - 20) / 2;
+        const col1X = margin, col2X = margin + termColW + 20;
+        let ty1 = 100, ty2 = 100;
+        let useCol2 = false;
+
         const termLines = termsText.split(/\r?\n/);
         termLines.forEach(line => {
-          const isSectionHeader = /^\d+\./.test(line.trim()) || line.toUpperCase() === line.trim() && line.trim().length > 3;
-          if (isSectionHeader) {
+          const trimmed = line.trim();
+          const isHeader = trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !/^[-]/.test(trimmed);
+          const isBullet = /^[-]/.test(trimmed);
+
+          if (!useCol2 && ty1 > H - margin - 40) useCol2 = true;
+          const cx = useCol2 ? col2X : col1X;
+
+          if (trimmed === '') {
+            if (useCol2) ty2 += 6; else ty1 += 6;
+            return;
+          }
+
+          if (isHeader) {
+            if (useCol2) ty2 += 4; else ty1 += 4;
+            let ty = useCol2 ? ty2 : ty1;
             doc.setTextColor(...green);
             doc.setFont('helvetica', 'bold');
             doc.setFontSize(9);
+            doc.text(trimmed, cx, ty);
+            if (useCol2) ty2 += 14; else ty1 += 14;
+          } else if (isBullet) {
+            let ty = useCol2 ? ty2 : ty1;
+            const bText = trimmed.replace(/^[-]\s*/, '');
+            const wrapped = doc.splitTextToSize(bText, termColW - 16);
+            doc.setTextColor(...green);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.text('-', cx + 2, ty);
+            doc.setTextColor(...white);
+            doc.text(wrapped, cx + 14, ty);
+            if (useCol2) ty2 += wrapped.length * 13 + 2; else ty1 += wrapped.length * 13 + 2;
           } else {
+            let ty = useCol2 ? ty2 : ty1;
+            const wrapped = doc.splitTextToSize(trimmed, termColW);
             doc.setTextColor(...white);
             doc.setFont('helvetica', 'normal');
             doc.setFontSize(9);
+            doc.text(wrapped, cx, ty);
+            if (useCol2) ty2 += wrapped.length * 13 + 2; else ty1 += wrapped.length * 13 + 2;
           }
-          if (line.trim() === '') { ty += 6; return; }
-          const wrapped = doc.splitTextToSize(line, (W - 2 * margin) / 2 - 10);
-          // Two columns
-          const col1Lines = wrapped;
-          doc.text(col1Lines, margin, ty);
-          ty += col1Lines.length * 12;
-          if (ty > H - margin) ty = H - margin; // clamp
         });
 
         // Output merged doc
