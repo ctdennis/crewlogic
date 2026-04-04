@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.6.7 | 2026-04-04">
+  <meta name="crewlogic-version" content="v2.6.8 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -7953,14 +7953,9 @@
       lines.push(['Recycling/Disposal Fees', fmt(surchargeDisposalCost)]);
       if (cans > 0) lines.push(['Cans (' + cans + ' × $' + canCost + ')', fmt(canTotal)]);
 
-      // Routing summary — show non-zero splits
-      if (trucksRecycled > 0 || trucksDonated > 0) {
-        lines.push(['— Routing Summary —', '']);
-        lines.push(['↳ Disposal: ' + fmtT(trucksDisposal), '']);
-        if (trucksRecycled > 0) lines.push(['↳ Recycling: ' + fmtT(trucksRecycled) + ' (+' + fmt(recycRevRate) + '/truck revenue)', '+' + fmt(recycRevRate * trucksRecycled)]);
-        if (trucksDonated > 0)  lines.push(['↳ Donation: ' + fmtT(trucksDonated) + ' (saves disposal cost)', '−' + fmt(trucksDonated * disposalCost)]);
-        const partialRemainder = trucksDisposal - Math.floor(trucksDisposal);
-        if (partialRemainder > 0.01) lines.push(['↳ Partial remainder (' + partialRemainder.toFixed(3) + ' trucks) → storage, no disposal cost', '']);
+      // Recycling revenue inline (credit against costs)
+      if (trucksRecycled > 0 && recycRevRate > 0) {
+        lines.push(['Recycling Revenue (' + trucksRecycled.toFixed(2) + ' trucks × $' + recycRevRate + ')', '−' + fmt(recycRevenue)]);
       }
 
       // Partial load note
