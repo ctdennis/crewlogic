@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.8.1 | 2026-04-04">
+  <meta name="crewlogic-version" content="v2.8.2 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1389,9 +1389,15 @@
                       <span>Net Margin @ Rec. Price</span>
                       <span id="caActualMargin" style="font-family:monospace;font-size:16px;"></span>
                     </div>
-                    <div style="display:flex;justify-content:space-between;font-size:12px;">
-                      <span style="color:var(--text-secondary);">Gross Margin @ Rec. Price</span>
-                      <span id="caGrossMargin" style="font-family:monospace;font-size:14px;font-weight:600;"></span>
+                    <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-bottom:6px;">
+                      <span>Gross Margin @ Rec. Price</span>
+                      <span id="caGrossMargin" style="font-family:monospace;font-size:16px;"></span>
+                    </div>
+                    <div style="border-top:1px solid var(--border);padding-top:6px;">
+                      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px;">
+                        <span style="color:var(--text-secondary);">Realized Gross Margin @ Current Price</span>
+                        <span id="caRealizedMargin" style="font-family:monospace;font-size:13px;font-weight:700;"></span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -7925,31 +7931,26 @@
       if (totalTruckHrs > 0) {
         const truckMinBreakdown = [];
         if (homeMin > 0) truckMinBreakdown.push({ label: 'Home→Job (one-way)', min: homeMin, detail: Math.round(homeMin) + ' min' });
+        const buildFacilityBreakdown = (label, legMin, waitMin, rtLoads) => {
+          const subLines = [];
+          if (rtLoads > 0) {
+            const rtMin = (legMin * 2 + waitMin) * rtLoads;
+            subLines.push('Round Trip↔: ' + Math.round(legMin) + ' × 2 + ' + waitMin + ' wait × ' + rtLoads + ' truck' + (rtLoads > 1 ? 's' : '') + ' = ' + Math.round(rtMin) + ' min');
+          }
+          const finalMin = legMin + waitMin;
+          subLines.push('Final One-Way→: ' + Math.round(legMin) + ' + ' + waitMin + ' wait = ' + Math.round(finalMin) + ' min');
+          const total = ((legMin * 2 + waitMin) * rtLoads) + (legMin + waitMin);
+          return { label, min: total, subLines };
+        };
+
         if (dispMin > 0 && loadsDisposal > 0) {
-          const rtLoads = Math.max(0, loadsDisposal - 1);
-          const finalLoad = 1;
-          let detail = '';
-          if (rtLoads > 0) detail += rtLoads + ' round trip' + (rtLoads > 1 ? 's' : '') + ': (' + Math.round(dispMin) + ' × 2 + ' + dispWait + ' wait) × ' + rtLoads;
-          if (rtLoads > 0 && finalLoad) detail += ' + ';
-          detail += 'final one-way: ' + Math.round(dispMin) + ' + ' + dispWait + ' wait';
-          const m = ((dispMin * 2 + dispWait) * rtLoads) + ((dispMin + dispWait) * finalLoad);
-          truckMinBreakdown.push({ label: 'Job→Disposal', min: m, detail });
+          truckMinBreakdown.push(buildFacilityBreakdown('Job→Disposal', dispMin, dispWait, Math.max(0, loadsDisposal - 1)));
         }
         if (recycMin > 0 && loadsRecycling > 0) {
-          const rtLoads = Math.max(0, loadsRecycling - 1);
-          let detail = '';
-          if (rtLoads > 0) detail += rtLoads + ' round trip' + (rtLoads > 1 ? 's' : '') + ': (' + Math.round(recycMin) + ' × 2 + ' + recycWait + ' wait) × ' + rtLoads + ' + ';
-          detail += 'final one-way: ' + Math.round(recycMin) + ' + ' + recycWait + ' wait';
-          const m = ((recycMin * 2 + recycWait) * rtLoads) + ((recycMin + recycWait) * 1);
-          truckMinBreakdown.push({ label: 'Job→Recycling', min: m, detail });
+          truckMinBreakdown.push(buildFacilityBreakdown('Job→Recycling', recycMin, recycWait, Math.max(0, loadsRecycling - 1)));
         }
         if (donMin > 0 && loadsDonation > 0) {
-          const rtLoads = Math.max(0, loadsDonation - 1);
-          let detail = '';
-          if (rtLoads > 0) detail += rtLoads + ' round trip' + (rtLoads > 1 ? 's' : '') + ': (' + Math.round(donMin) + ' × 2 + ' + donWait + ' wait) × ' + rtLoads + ' + ';
-          detail += 'final one-way: ' + Math.round(donMin) + ' + ' + donWait + ' wait';
-          const m = ((donMin * 2 + donWait) * rtLoads) + ((donMin + donWait) * 1);
-          truckMinBreakdown.push({ label: 'Job→Donation', min: m, detail });
+          truckMinBreakdown.push(buildFacilityBreakdown('Job→Donation', donMin, donWait, Math.max(0, loadsDonation - 1)));
         }
         if (loadsDisposal === 0 && trucksDisposal > 0) {
           truckMinBreakdown.push({ label: 'Disposal: 0 min (partial load → storage to combine)', min: 0, detail: '' });
@@ -7958,7 +7959,13 @@
         const totalTruckMin2 = truckMinBreakdown.reduce((s, t) => s + t.min, 0);
         lines.push(['  ↳ Drive + wait (' + Math.round(totalTruckMin2) + ' min = ' + totalTruckHrs.toFixed(2) + ' hrs × $' + crewRate + ')', fmt(totalTruckHrs * crewRate)]);
         truckMinBreakdown.forEach(t => {
-          lines.push(['    · ' + t.label + ': ' + t.detail + ' = ' + Math.round(t.min) + ' min', '']);
+          if (t.subLines) {
+            // Facility header line
+            lines.push(['    · ' + t.label + ' (' + Math.round(t.min) + ' min total)', '']);
+            t.subLines.forEach(s => lines.push(['      – ' + s, '']));
+          } else {
+            lines.push(['    · ' + t.label + ': ' + t.detail + ' = ' + Math.round(t.min) + ' min', '']);
+          }
         });
       }
       lines.push(['Disposal (' + trucksDisposal.toFixed(2) + ' tons × $' + disposalCost + ')', fmt(dispCost)]);
@@ -7997,25 +8004,27 @@
           const isSep    = l.startsWith('—');
           const isIndent = l.startsWith('  ↳');
           const isDeep   = l.startsWith('    ·');
+          const isDeeper = l.startsWith('      –');
           const isPos    = typeof v === 'string' && v.startsWith('+');
 
           // Detect section headers
           if (l.startsWith('Labor (')) section = 'labor';
           else if (l.startsWith('Fuel (')) section = 'fuel';
-          else if (!isIndent && !isDeep) section = null;
+          else if (!isIndent && !isDeep && !isDeeper) section = null;
 
           // Hide detail rows when section is collapsed
-          const isLaborDetail = (isIndent || isDeep) && section === 'labor';
-          const isFuelDetail  = (isIndent || isDeep) && section === 'fuel';
+          const isLaborDetail = (isIndent || isDeep || isDeeper) && section === 'labor';
+          const isFuelDetail  = (isIndent || isDeep || isDeeper) && section === 'fuel';
           if (isLaborDetail && !caLaborExpanded) return;
           if (isFuelDetail  && !caFuelExpanded)  return;
 
-          const lColor = isWarn ? '#fbbf24' : isSep ? '#6b7280' : isDeep ? '#9ca3af' : isIndent ? '#d1d5db' : 'inherit';
-          const vColor = isPos  ? '#00EE76' : (typeof v === 'string' && v.startsWith('−')) ? '#00EE76' : isDeep ? '#9ca3af' : isIndent ? '#d1d5db' : 'inherit';
-          const lStyle = isSep    ? 'font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-top:4px;' :
-                         isDeep   ? 'font-size:10px;padding-left:24px;' :
-                         isIndent ? 'font-size:11px;padding-left:12px;' : '';
-          const vStyle = (isIndent || isDeep) ? 'font-size:10px;' : 'font-weight:600;';
+          const lColor = isWarn ? '#fbbf24' : isSep ? '#6b7280' : isDeeper ? '#6b7280' : isDeep ? '#9ca3af' : isIndent ? '#d1d5db' : 'inherit';
+          const vColor = isPos  ? '#00EE76' : (typeof v === 'string' && v.startsWith('−')) ? '#00EE76' : isDeeper ? '#6b7280' : isDeep ? '#9ca3af' : isIndent ? '#d1d5db' : 'inherit';
+          const lStyle = isSep     ? 'font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-top:4px;' :
+                         isDeeper  ? 'font-size:10px;padding-left:36px;' :
+                         isDeep    ? 'font-size:11px;padding-left:24px;font-weight:600;' :
+                         isIndent  ? 'font-size:11px;padding-left:12px;' : '';
+          const vStyle = (isIndent || isDeep || isDeeper) ? 'font-size:10px;' : 'font-weight:600;';
 
           // Add toggle chevron to labor and fuel header lines
           let label = l.trim();
@@ -8067,6 +8076,20 @@
       document.getElementById('caActualMargin').textContent = targetPct + '%';
       document.getElementById('caGrossMargin').style.color = color;
       document.getElementById('caGrossMargin').textContent = grossMarginPct + '%';
+
+      // Realized margin at current estimate price
+      const realizedEl = document.getElementById('caRealizedMargin');
+      if (realizedEl && currentPrice > 0 && netCost > 0) {
+        const realizedGross = (currentPrice - netCost) / currentPrice;
+        const realizedPct = Math.round(realizedGross * 100);
+        const isGreenR = realizedGross >= (margin - 0.02);
+        const isAmberR = !isGreenR && realizedGross >= (margin - 0.10);
+        realizedEl.style.color = isGreenR ? '#00EE76' : isAmberR ? '#fbbf24' : '#f87171';
+        realizedEl.textContent = realizedPct + '%';
+      } else if (realizedEl) {
+        realizedEl.textContent = '—';
+        realizedEl.style.color = 'var(--text-muted)';
+      }
 
       // Validation: warn if recycling/donation site missing when needed
       const recyclingSiteVal = document.getElementById('caRecyclingSite').value.trim();
