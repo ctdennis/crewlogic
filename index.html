@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.5.9 | 2026-04-03">
+  <meta name="crewlogic-version" content="v2.6.1 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -5270,7 +5270,7 @@
               trucksDonated  += vol * ((parseFloat(c.pctDonated)  || 0) / 100);
             });
             const trucksDisposal = Math.max(0, totalTrucksCA - trucksRecycled - trucksDonated);
-            const loadsDisposal  = Math.ceil(trucksDisposal);
+            const loadsDisposal  = Math.floor(trucksDisposal); // only whole trucks go to disposal
             const loadsRecycling = Math.ceil(trucksRecycled);
 
             // Distances
@@ -5286,17 +5286,25 @@
             const recycWait = parseFloat(cs.recyclingWait) || 20;
             const donWait   = parseFloat(cs.donationWait)  || 15;
 
-            const totalMiles = (homeMi * 2) +
-              (dispMi * 2 * loadsDisposal) +
-              (recycMi * 2 * loadsRecycling) +
-              (donMi  * 2 * Math.ceil(trucksDonated));
-            const totalTruckMin = (homeMi ? (parseFloat(dist.homeMinutes)||0) * 2 : 0) +
-              ((dispMin * 2 + dispWait) * loadsDisposal) +
-              ((recycMin * 2 + recycWait) * loadsRecycling) +
-              ((donMin * 2 + donWait) * Math.ceil(trucksDonated));
+            const loadsDonation = Math.ceil(trucksDonated);
+            const homeMin2 = parseFloat(dist.homeMinutes) || 0;
+            const lastFacMi2  = loadsDisposal > 0 ? dispMi  : loadsRecycling > 0 ? recycMi  : donMi;
+            const lastFacMin2 = loadsDisposal > 0 ? dispMin : loadsRecycling > 0 ? recycMin : donMin;
+            const totalMiles =
+              homeMi +
+              (dispMi * 2 * Math.max(0, loadsDisposal - 1)) + (dispMi  * (loadsDisposal  > 0 ? 1 : 0)) +
+              (recycMi * 2 * Math.max(0, loadsRecycling - 1)) + (recycMi * (loadsRecycling > 0 ? 1 : 0)) +
+              (donMi * 2 * Math.max(0, loadsDonation - 1)) + (donMi   * (loadsDonation  > 0 ? 1 : 0)) +
+              lastFacMi2;
+            const totalTruckMin =
+              homeMin2 +
+              ((dispMin * 2 + dispWait) * Math.max(0, loadsDisposal - 1))   + ((dispMin  + dispWait)  * (loadsDisposal  > 0 ? 1 : 0)) +
+              ((recycMin * 2 + recycWait) * Math.max(0, loadsRecycling - 1)) + ((recycMin + recycWait) * (loadsRecycling > 0 ? 1 : 0)) +
+              ((donMin * 2 + donWait) * Math.max(0, loadsDonation - 1))     + ((donMin   + donWait)   * (loadsDonation  > 0 ? 1 : 0)) +
+              lastFacMin2;
 
             const laborCost  = (ca.days * ca.crew * ca.hrsDay + totalTruckMin / 60) * crewRate;
-            const dispCost   = trucksDisposal * disposalCost;
+            const dispCost   = Math.floor(trucksDisposal) * disposalCost; // partial goes to storage, no disposal cost
             const fuelTotal  = (totalMiles / mpg) * fuelCost;
             const recycRev   = trucksRecycled * recycRevRate;
             const cans       = (ca.cans || 0) * (ca.canCost || 0);
@@ -7785,7 +7793,7 @@
         trucksDonated  += vol * ((parseFloat(c.pctDonated)  || 0) / 100);
       });
       const trucksDisposal = Math.max(0, totalTrucks - trucksRecycled - trucksDonated);
-      const loadsDisposal  = Math.ceil(trucksDisposal);
+      const loadsDisposal  = Math.floor(trucksDisposal); // only whole trucks go to disposal, partial goes to storage
       const loadsRecycling = Math.ceil(trucksRecycled);
       const loadsDonation  = Math.ceil(trucksDonated);
 
@@ -7801,26 +7809,40 @@
       const donMi     = parseFloat(dist.donationMiles) || 0;
       const donMin    = parseFloat(dist.donationMinutes) || 0;
 
-      // Total miles: home→job (1x each way) + all dump runs
-      const totalMiles =
-        (homeMi * 2) +                          // home to job and back at end
-        (dispMi * 2 * loadsDisposal) +           // job↔disposal per load
-        (recycMi * 2 * loadsRecycling) +         // job↔recycling per load
-        (donMi * 2 * loadsDonation);             // job↔donation per load
+      // Routing model:
+      // - Home → Job (one-way start)
+      // - For each facility: (loads-1) round trips + 1 final one-way (crew ends at last facility then goes home)
+      // - Last facility → Home (approximated as same distance as Job→LastFacility)
+      // Determine which facility is last (disposal unless no disposal, then recycling, then donation)
+      const lastFacilityMi  = loadsDisposal > 0 ? dispMi : loadsRecycling > 0 ? recycMi : donMi;
+      const lastFacilityMin = loadsDisposal > 0 ? dispMin : loadsRecycling > 0 ? recycMin : donMin;
 
-      // Total trucking time (minutes)
+      const totalMiles =
+        homeMi +                                              // home → job (one-way)
+        (dispMi * 2 * Math.max(0, loadsDisposal - 1)) +      // disposal round trips (all but last)
+        (dispMi * (loadsDisposal > 0 ? 1 : 0)) +             // final disposal one-way
+        (recycMi * 2 * Math.max(0, loadsRecycling - 1)) +    // recycling round trips
+        (recycMi * (loadsRecycling > 0 ? 1 : 0)) +           // final recycling one-way
+        (donMi * 2 * Math.max(0, loadsDonation - 1)) +       // donation round trips
+        (donMi * (loadsDonation > 0 ? 1 : 0)) +              // final donation one-way
+        lastFacilityMi;                                       // last facility → home
+
       const totalTruckMin =
-        (homeMin * 2) +
-        ((dispMin * 2 + dispWait) * loadsDisposal) +
-        ((recycMin * 2 + recycWait) * loadsRecycling) +
-        ((donMin * 2 + donWait) * loadsDonation);
+        homeMin +                                                         // home → job
+        ((dispMin * 2 + dispWait) * Math.max(0, loadsDisposal - 1)) +    // disposal round trips
+        ((dispMin + dispWait) * (loadsDisposal > 0 ? 1 : 0)) +           // final disposal one-way + wait
+        ((recycMin * 2 + recycWait) * Math.max(0, loadsRecycling - 1)) + // recycling round trips
+        ((recycMin + recycWait) * (loadsRecycling > 0 ? 1 : 0)) +        // final recycling one-way + wait
+        ((donMin * 2 + donWait) * Math.max(0, loadsDonation - 1)) +      // donation round trips
+        ((donMin + donWait) * (loadsDonation > 0 ? 1 : 0)) +             // final donation one-way + wait
+        lastFacilityMin;                                                   // last facility → home
       const totalTruckHrs = totalTruckMin / 60;
 
       // COSTS
       const laborHrs   = days * crew * hrsDay;
       const totalHrs   = laborHrs + totalTruckHrs;
       const laborCost  = totalHrs * crewRate;
-      const dispCost   = trucksDisposal * disposalCost;
+      const dispCost   = Math.floor(trucksDisposal) * disposalCost; // partial goes to storage, no disposal cost
       const fuelGals   = totalMiles / mpg;
       const fuelTotal  = fuelGals * fuelCost;
       const canTotal   = cans * canCost;
@@ -7884,22 +7906,34 @@
       // Drive/wait time breakdown — fully granular
       if (totalTruckHrs > 0) {
         const truckMinBreakdown = [];
-        if (homeMin > 0) truckMinBreakdown.push({ label: 'Home→Job', min: homeMin * 2, detail: Math.round(homeMin) + ' min × 2' });
+        if (homeMin > 0) truckMinBreakdown.push({ label: 'Home→Job (one-way)', min: homeMin, detail: Math.round(homeMin) + ' min' });
         if (dispMin > 0 && loadsDisposal > 0) {
-          const m = (dispMin * 2 + dispWait) * loadsDisposal;
-          truckMinBreakdown.push({ label: 'Job→Disposal', min: m,
-            detail: '(' + Math.round(dispMin) + ' min × 2 + ' + dispWait + ' min wait) × ' + loadsDisposal + ' load' + (loadsDisposal !== 1 ? 's' : '') });
+          const rtLoads = Math.max(0, loadsDisposal - 1);
+          const finalLoad = 1;
+          let detail = '';
+          if (rtLoads > 0) detail += rtLoads + ' round trip' + (rtLoads > 1 ? 's' : '') + ': (' + Math.round(dispMin) + ' × 2 + ' + dispWait + ' wait) × ' + rtLoads;
+          if (rtLoads > 0 && finalLoad) detail += ' + ';
+          detail += 'final one-way: ' + Math.round(dispMin) + ' + ' + dispWait + ' wait';
+          const m = ((dispMin * 2 + dispWait) * rtLoads) + ((dispMin + dispWait) * finalLoad);
+          truckMinBreakdown.push({ label: 'Job→Disposal', min: m, detail });
         }
         if (recycMin > 0 && loadsRecycling > 0) {
-          const m = (recycMin * 2 + recycWait) * loadsRecycling;
-          truckMinBreakdown.push({ label: 'Job→Recycling', min: m,
-            detail: '(' + Math.round(recycMin) + ' min × 2 + ' + recycWait + ' min wait) × ' + loadsRecycling + ' load' + (loadsRecycling !== 1 ? 's' : '') });
+          const rtLoads = Math.max(0, loadsRecycling - 1);
+          let detail = '';
+          if (rtLoads > 0) detail += rtLoads + ' round trip' + (rtLoads > 1 ? 's' : '') + ': (' + Math.round(recycMin) + ' × 2 + ' + recycWait + ' wait) × ' + rtLoads + ' + ';
+          detail += 'final one-way: ' + Math.round(recycMin) + ' + ' + recycWait + ' wait';
+          const m = ((recycMin * 2 + recycWait) * rtLoads) + ((recycMin + recycWait) * 1);
+          truckMinBreakdown.push({ label: 'Job→Recycling', min: m, detail });
         }
         if (donMin > 0 && loadsDonation > 0) {
-          const m = (donMin * 2 + donWait) * loadsDonation;
-          truckMinBreakdown.push({ label: 'Job→Donation', min: m,
-            detail: '(' + Math.round(donMin) + ' min × 2 + ' + donWait + ' min wait) × ' + loadsDonation + ' load' + (loadsDonation !== 1 ? 's' : '') });
+          const rtLoads = Math.max(0, loadsDonation - 1);
+          let detail = '';
+          if (rtLoads > 0) detail += rtLoads + ' round trip' + (rtLoads > 1 ? 's' : '') + ': (' + Math.round(donMin) + ' × 2 + ' + donWait + ' wait) × ' + rtLoads + ' + ';
+          detail += 'final one-way: ' + Math.round(donMin) + ' + ' + donWait + ' wait';
+          const m = ((donMin * 2 + donWait) * rtLoads) + ((donMin + donWait) * 1);
+          truckMinBreakdown.push({ label: 'Job→Donation', min: m, detail });
         }
+        if (lastFacilityMin > 0) truckMinBreakdown.push({ label: 'Last stop→Home (one-way)', min: lastFacilityMin, detail: Math.round(lastFacilityMin) + ' min' });
         const totalTruckMin2 = truckMinBreakdown.reduce((s, t) => s + t.min, 0);
         lines.push(['  ↳ Drive + wait (' + Math.round(totalTruckMin2) + ' min = ' + totalTruckHrs.toFixed(2) + ' hrs × $' + crewRate + ')', fmt(totalTruckHrs * crewRate)]);
         truckMinBreakdown.forEach(t => {
@@ -7917,6 +7951,8 @@
         lines.push(['↳ Disposal: ' + fmtT(trucksDisposal), '']);
         if (trucksRecycled > 0) lines.push(['↳ Recycling: ' + fmtT(trucksRecycled) + ' (+' + fmt(recycRevRate) + '/truck revenue)', '+' + fmt(recycRevRate * trucksRecycled)]);
         if (trucksDonated > 0)  lines.push(['↳ Donation: ' + fmtT(trucksDonated) + ' (saves disposal cost)', '−' + fmt(trucksDonated * disposalCost)]);
+        const partialRemainder = trucksDisposal - Math.floor(trucksDisposal);
+        if (partialRemainder > 0.01) lines.push(['↳ Partial remainder (' + partialRemainder.toFixed(3) + ' trucks) → storage, no disposal cost', '']);
       }
 
       // Partial load note
@@ -7933,10 +7969,10 @@
         const isIndent  = l.startsWith('  ↳');
         const isDeep    = l.startsWith('    ·');
         const isPos     = v.startsWith('+');
-        const lColor = isWarn ? '#fbbf24' : isSep ? 'var(--text-muted)' : (isIndent || isDeep) ? 'var(--text-muted)' : 'inherit';
-        const vColor = isPos ? '#00EE76' : v.startsWith('−') ? 'var(--accent-green)' : (isIndent || isDeep) ? 'var(--text-secondary)' : 'inherit';
+        const lColor = isWarn ? '#fbbf24' : isSep ? '#6b7280' : isDeep ? '#9ca3af' : isIndent ? '#d1d5db' : 'inherit';
+        const vColor = isPos ? '#00EE76' : v.startsWith('−') ? 'var(--accent-green)' : isDeep ? '#9ca3af' : isIndent ? '#d1d5db' : 'inherit';
         const lStyle = isSep    ? 'font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-top:4px;' :
-                       isDeep   ? 'font-size:10px;padding-left:24px;color:var(--text-muted);' :
+                       isDeep   ? 'font-size:10px;padding-left:24px;' :
                        isIndent ? 'font-size:11px;padding-left:12px;' : '';
         const vStyle = (isIndent || isDeep) ? 'font-size:10px;' : 'font-weight:600;';
         return '<div style="display:flex;justify-content:space-between;' + lStyle + '">' +
