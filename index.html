@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.6.6 | 2026-04-04">
+  <meta name="crewlogic-version" content="v2.6.7 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -4193,6 +4193,8 @@
 
     // ===== CHARGE DESCRIPTION VOICE =====
     let activeChargeVoice = null; // { recognition, chargeIdx, append, btnIds }
+    let caLaborExpanded = true;
+    let caFuelExpanded  = true;
 
     function reRecordChargeDescription(chargeIdx) {
       if (activeChargeVoice && activeChargeVoice.chargeIdx === chargeIdx) {
@@ -7970,10 +7972,10 @@
         lines.push(['⚠️ Distances not calculated — fuel cost is $0', '']);
       }
       // Build collapsible cost lines — labor and fuel are toggleable
-      let caLaborExpanded = true;
-      let caFuelExpanded  = true;
-
-      function renderCostLines() {
+      // Store lines reference so renderCostLines can be called from toggle buttons
+      window._caCostLines = lines;
+      window.renderCostLines = function() {
+        const lines = window._caCostLines || [];
         const el = document.getElementById('caCostLines');
         if (!el) return;
         let html = '';
