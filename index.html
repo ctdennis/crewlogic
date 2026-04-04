@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.8.4 | 2026-04-04">
+  <meta name="crewlogic-version" content="v2.8.6 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -6197,6 +6197,7 @@
       const preOpenedTab = (mode === 'tab') ? window.open('', '_blank') : null;
       if (preOpenedTab) preOpenedTab.document.write('<html><body style="background:#000;color:#fff;font-family:sans-serif;padding:20px;">⏳ Generating PDF...</body></html>');
 
+      try {
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: [960, 540] });
       const W = 960, H = 540;
@@ -6217,6 +6218,10 @@
       const ownerName = currentUser.name || '';
       const phone = currentUser.phone || '';
       const website = currentUser.website || '';
+      const franchisePhone   = currentUser.phone || '';
+      const franchiseWebsite = currentUser.website || '';
+      const cs0 = (currentUser && currentUser.costSettings) || {};
+      const franchiseAddress = [cs0.officeAddress, cs0.officeCity, cs0.officeState].filter(Boolean).join(', ');
 
       // ===== PAGE 1: COVER PAGE — single panel, full width =====
       doc.setFillColor(0, 0, 0);
@@ -7025,12 +7030,12 @@
         }
       } else {
         // Render proposal pages (About Us + Terms) in jsPDF — same theme as estimate
-        const cs = (currentUser && currentUser.costSettings) || {};
-        const tagline    = cs.proposalTagline    || '';
-        const aboutText  = cs.proposalAbout      || '';
-        const serviceArea= cs.proposalServiceArea|| '';
-        const bulletsRaw = cs.proposalBullets    || '';
-        const customTerms= cs.proposalTerms      || '';
+        const csP = (currentUser && currentUser.costSettings) || {};
+        const tagline    = csP.proposalTagline    || '';
+        const aboutText  = csP.proposalAbout      || '';
+        const serviceArea= csP.proposalServiceArea|| '';
+        const bulletsRaw = csP.proposalBullets    || '';
+        const customTerms= csP.proposalTerms      || '';
         const hasProposalContent = tagline || aboutText || bulletsRaw;
 
         if (hasProposalContent) {
@@ -7201,6 +7206,11 @@
           }
         }
       } // end else (not skipBoilerplate)
+      } catch(pdfErr) {
+        console.error('PDF generation error:', pdfErr);
+        if (preOpenedTab) preOpenedTab.document.body.innerHTML = '<pre style="color:red;padding:20px;">PDF Error: ' + pdfErr.message + '</pre>';
+        alert('PDF generation failed: ' + pdfErr.message);
+      }
     } // end generateEstimatePDF
 
     // Convert a URL to base64 data URI — used by PDF generation for Drive-hosted photos
