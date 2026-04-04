@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.9.9 | 2026-04-04">
+  <meta name="crewlogic-version" content="v3.0.0 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -7200,7 +7200,7 @@ RECYCLING & DONATION
         const termLines = termsText.split(/\r?\n/);
         termLines.forEach(line => {
           const trimmed = line.trim();
-          const isHeader = trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !/^[-]/.test(trimmed);
+          const isHeader = trimmed === trimmed.toUpperCase() && trimmed.length > 3 && trimmed.length < 40 && !/^[-]/.test(trimmed);
           const isBullet = /^[-]/.test(trimmed);
 
           if (!useCol2 && ty1 > H - margin - 40) useCol2 = true;
@@ -7231,12 +7231,15 @@ RECYCLING & DONATION
             doc.text(wrapped, cx + 14, ty);
             if (useCol2) ty2 += wrapped.length * 13 + 2; else ty1 += wrapped.length * 13 + 2;
           } else {
+            // Plain text lines get a bullet too
             let ty = useCol2 ? ty2 : ty1;
-            const wrapped = doc.splitTextToSize(trimmed, termColW);
-            doc.setTextColor(...white);
+            const wrapped = doc.splitTextToSize(trimmed, termColW - 16);
+            doc.setTextColor(...green);
             doc.setFont('helvetica', 'normal');
             doc.setFontSize(9);
-            doc.text(wrapped, cx, ty);
+            doc.text('-', cx + 2, ty);
+            doc.setTextColor(...white);
+            doc.text(wrapped, cx + 14, ty);
             if (useCol2) ty2 += wrapped.length * 13 + 2; else ty1 += wrapped.length * 13 + 2;
           }
         });
