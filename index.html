@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.7.2 | 2026-04-04">
+  <meta name="crewlogic-version" content="v2.7.3 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1316,12 +1316,12 @@
                 <input type="text" class="form-input" id="caDisposalSite" placeholder="Enter address" oninput="saveCostAnalysisDraft()" style="display:none;margin-top:4px;">
               </div>
               <div class="form-group">
-                <div class="form-label">Recycling Site <span id="caRecyclingSiteRequired" style="color:var(--accent-red);display:none;">*</span></div>
+                <div class="form-label">Recycling Site <span id="caRecyclingSiteRequired" style="color:var(--accent-red);display:none;font-size:10px;cursor:help;" title="Recycling volume detected — enter a site for accurate distances">* missing site</span></div>
                 <select class="form-select" id="caRecyclingSiteSelect" onchange="onFacilitySelect('recycling')"></select>
                 <input type="text" class="form-input" id="caRecyclingSite" placeholder="Enter address" oninput="saveCostAnalysisDraft()" style="display:none;margin-top:4px;">
               </div>
               <div class="form-group">
-                <div class="form-label">Donation Site <span id="caDonationSiteRequired" style="color:var(--accent-red);display:none;">*</span></div>
+                <div class="form-label">Donation Site <span id="caDonationSiteRequired" style="color:var(--accent-red);display:none;font-size:10px;cursor:help;" title="Donation volume detected — enter a site for accurate distances">* missing site</span></div>
                 <select class="form-select" id="caDonationSiteSelect" onchange="onFacilitySelect('donation')"></select>
                 <input type="text" class="form-input" id="caDonationSite" placeholder="Enter address" oninput="saveCostAnalysisDraft()" style="display:none;margin-top:4px;">
               </div>
@@ -8049,8 +8049,14 @@
       document.getElementById('caGrossMargin').textContent = grossMarginPct + '%';
 
       // Validation: warn if recycling/donation site missing when needed
-      document.getElementById('caRecyclingSiteRequired').style.display = trucksRecycled > 0 ? 'inline' : 'none';
-      document.getElementById('caDonationSiteRequired').style.display = trucksDonated > 0 ? 'inline' : 'none';
+      const recyclingSiteVal = document.getElementById('caRecyclingSite').value.trim();
+      const donationSiteVal  = document.getElementById('caDonationSite').value.trim();
+      const showRecycWarn = trucksRecycled > 0 && !recyclingSiteVal;
+      const showDonWarn   = trucksDonated  > 0 && !donationSiteVal;
+      const recycReqEl = document.getElementById('caRecyclingSiteRequired');
+      const donReqEl   = document.getElementById('caDonationSiteRequired');
+      if (recycReqEl) { recycReqEl.style.display = showRecycWarn ? 'inline' : 'none'; recycReqEl.title = 'Recycling volume detected — enter a recycling site for accurate distance calculation'; }
+      if (donReqEl)   { donReqEl.style.display   = showDonWarn   ? 'inline' : 'none'; donReqEl.title   = 'Donation volume detected — enter a donation site for accurate distance calculation'; }
 
       // Update the margin display below the total (reads ca.netCost which we just calculated)
       // Call directly rather than via updateTotals to avoid infinite loop
@@ -8078,7 +8084,7 @@
       const truckHome    = (currentUser.costSettings && currentUser.costSettings.truckHome) || '';
 
       if (!jobSite) { alert('Job site address is required. Enter the client address first.'); return; }
-      if (!disposalSite) { alert('Please enter a disposal site address.'); return; }
+      if (!truckHome) { alert('Truck home location is required. Set it in Settings → Cost Analysis.'); return; }
 
       const btn = document.getElementById('caDistBtn');
       btn.textContent = '⏳ Calculating...';
