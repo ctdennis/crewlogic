@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.7.5 | 2026-04-04">
+  <meta name="crewlogic-version" content="v2.7.6 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -6453,8 +6453,11 @@
       doc.text(totalTrucks.toFixed(3), col.trucks, y + 13, { align: 'right' });
       doc.text((totalTrucks * 16).toFixed(1), col.cy, y + 13, { align: 'right' });
       if (!hasRealSplit) {
-        // Single tier — show price/truck and total right on this row
-        if (pricePerTruck > 0) doc.text(fmtMoney(pricePerTruck), col.price, y + 13, { align: 'right' });
+        // Single tier — use the actual rate for this fraction, not full truck price
+        const singleRate = (pdfVolumeLines && pdfVolumeLines.length === 1)
+          ? pdfVolumeLines[0].rate
+          : pricePerTruck;
+        if (singleRate > 0) doc.text(fmtMoney(singleRate), col.price, y + 13, { align: 'right' });
         if (pdfVolumePrice > 0) doc.text(fmtMoney(pdfVolumePrice), col.total, y + 13, { align: 'right' });
       } else {
         // Real split — just show total here, detail rows follow
