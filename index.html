@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.8.2 | 2026-04-04">
+  <meta name="crewlogic-version" content="v2.8.3 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -545,6 +545,28 @@
       background: var(--bg-card); border: 1px solid var(--border);
       border-radius: var(--radius); padding: 16px; margin-bottom: 14px;
     }
+    .settings-tab {
+      flex: 1;
+      padding: 8px 4px;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: color 0.15s, border-color 0.15s;
+      white-space: nowrap;
+    }
+    .settings-tab.active {
+      color: var(--accent-green);
+      border-bottom: 2px solid var(--accent-green);
+    }
+    .settings-tab:hover:not(.active) {
+      color: var(--text-primary);
+    }
+
     .settings-card-title {
       font-size: 11px; font-weight: 700; text-transform: uppercase;
       letter-spacing: 1.5px; color: var(--text-muted); margin-bottom: 14px;
@@ -935,187 +957,247 @@
           </div>
         </div>
 
-        <!-- Vonigo credentials -->
-        <div class="settings-card fade-in fade-in-delay-2">
-          <div class="settings-card-title">Vonigo Integration</div>
-
-          <div id="vonigoStatusBadge" class="config-status missing">
-            <span class="config-status-dot"></span>
-            <span id="vonigoStatusText">Not configured</span>
-          </div>
-
-          <div class="settings-input-group">
-            <label class="settings-input-label">Vonigo username</label>
-            <input type="text" class="form-input" id="settingsVonigoUser"
-              placeholder="First.Last" autocomplete="off" autocapitalize="off">
-            <div class="form-hint">Your Vonigo login username (e.g. Charles.Dennis)</div>
-          </div>
-
-          <div class="settings-input-group">
-            <label class="settings-input-label">Vonigo password</label>
-            <input type="password" class="form-input" id="settingsVonigoPass"
-              placeholder="••••••••" autocomplete="current-password">
-            <div class="form-hint">Sent securely over HTTPS, never stored in the app</div>
-          </div>
-
-          <button class="settings-save-btn" id="settingsSaveBtn" onclick="saveVonigoCredentials()">
-            <div class="spinner"></div>
-            <span class="btn-text">Save credentials</span>
-          </button>
-          <div class="settings-feedback" id="settingsFeedback"></div>
+        <!-- Settings Tabs -->
+        <div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0;">
+          <button class="settings-tab active" id="stab-franchise" onclick="showSettingsTab('franchise')">🏢 Franchise</button>
+          <button class="settings-tab" id="stab-cost" onclick="showSettingsTab('cost')">💰 Cost</button>
+          <button class="settings-tab" id="stab-proposal" onclick="showSettingsTab('proposal')">📄 Proposal</button>
+          <button class="settings-tab" id="stab-account" onclick="showSettingsTab('account')">⚙️ Account</button>
         </div>
 
-        <!-- Franchise Info -->
-        <div class="settings-card fade-in fade-in-delay-3">
-          <div class="settings-card-title">Franchise Info</div>
-          <div class="settings-input-group">
-            <label class="settings-input-label">Office Phone</label>
-            <input type="tel" class="form-input" id="settingsPhone" placeholder="(774) 281-2800" autocomplete="off">
-          </div>
-          <div class="settings-input-group">
-            <label class="settings-input-label">Office Address</label>
-            <input type="text" class="form-input" id="settingsOfficeAddress" placeholder="PO Box 871" autocomplete="off">
-          </div>
-          <div class="form-row">
-            <div class="settings-input-group">
-              <label class="settings-input-label">City</label>
-              <input type="text" class="form-input" id="settingsOfficeCity" placeholder="Lakeville" autocomplete="off">
-            </div>
-            <div class="settings-input-group">
-              <label class="settings-input-label">State</label>
-              <input type="text" class="form-input" id="settingsOfficeState" placeholder="MA" maxlength="2" style="width:60px" autocomplete="off">
-            </div>
-            <div class="settings-input-group">
-              <label class="settings-input-label">Zip</label>
-              <input type="text" class="form-input" id="settingsOfficeZip" placeholder="02347" maxlength="5" inputmode="numeric" autocomplete="off">
-            </div>
-          </div>
-          <div class="settings-input-group">
-            <label class="settings-input-label">Website URL</label>
-            <input type="url" class="form-input" id="settingsWebsite" placeholder="https://www.junkluggers.com/..." autocomplete="off">
-          </div>
-          <button class="settings-save-btn" id="franchiseSaveBtn" onclick="saveFranchiseInfo()">
-            <div class="spinner"></div>
-            <span class="btn-text">Save franchise info</span>
-          </button>
-          <div class="settings-feedback" id="franchiseFeedback"></div>
-        </div>
+        <!-- TAB: Franchise -->
+        <div id="stab-content-franchise">
 
+          <!-- Vonigo credentials -->
+          <div class="settings-card fade-in fade-in-delay-2">
+            <div class="settings-card-title">Vonigo Integration</div>
 
-        <!-- Cost Analysis Settings -->
-        <div class="settings-card fade-in fade-in-delay-3">
-          <div class="settings-card-title">Cost Analysis</div>
-          <div class="settings-input-group">
-            <label class="settings-input-label">Truck Home Location (address)</label>
-            <input type="text" class="form-input" id="settingsTruckHome" placeholder="2 County Rd, East Freetown, MA 02717" autocomplete="off">
-          </div>
-          <div class="form-row">
-            <div class="settings-input-group">
-              <label class="settings-input-label">Miles per Gallon</label>
-              <input type="number" class="form-input" id="settingsMPG" placeholder="10" inputmode="decimal" min="1">
+            <div id="vonigoStatusBadge" class="config-status missing">
+              <span class="config-status-dot"></span>
+              <span id="vonigoStatusText">Not configured</span>
             </div>
+
             <div class="settings-input-group">
-              <label class="settings-input-label">Fuel Cost ($/gal)</label>
-              <input type="number" class="form-input" id="settingsFuelCost" placeholder="3.50" inputmode="decimal" min="0" step="0.01">
+              <label class="settings-input-label">Vonigo username</label>
+              <input type="text" class="form-input" id="settingsVonigoUser"
+                placeholder="First.Last" autocomplete="off" autocapitalize="off">
+              <div class="form-hint">Your Vonigo login username (e.g. Charles.Dennis)</div>
             </div>
-          </div>
-          <div class="form-row">
+
             <div class="settings-input-group">
-              <label class="settings-input-label">Crew Rate ($/hr)</label>
-              <input type="number" class="form-input" id="settingsCrewRate" placeholder="25" inputmode="decimal" min="0">
+              <label class="settings-input-label">Vonigo password</label>
+              <input type="password" class="form-input" id="settingsVonigoPass"
+                placeholder="••••••••" autocomplete="current-password">
+              <div class="form-hint">Sent securely over HTTPS, never stored in the app</div>
             </div>
-            <div class="settings-input-group">
-              <label class="settings-input-label">Disposal Cost ($/ton)</label>
-              <input type="number" class="form-input" id="settingsDisposalCost" placeholder="200" inputmode="decimal" min="0">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="settings-input-group">
-              <label class="settings-input-label">Recycling Revenue ($/truck)</label>
-              <input type="number" class="form-input" id="settingsRecyclingRevenue" placeholder="130" inputmode="decimal" min="0">
-            </div>
-            <div class="settings-input-group">
-              <label class="settings-input-label">Royalty %</label>
-              <input type="number" class="form-input" id="settingsRoyaltyPct" placeholder="14" inputmode="decimal" min="0" max="100" step="0.1">
-            </div>
-          </div>
-          <div class="form-section-label" style="margin-top:8px;">Wait Times (minutes per load)</div>
-          <div class="form-row">
-            <div class="settings-input-group">
-              <label class="settings-input-label">Disposal Wait</label>
-              <input type="number" class="form-input" id="settingsDisposalWait" placeholder="15" inputmode="numeric" min="0">
-            </div>
-            <div class="settings-input-group">
-              <label class="settings-input-label">Recycling Wait</label>
-              <input type="number" class="form-input" id="settingsRecyclingWait" placeholder="20" inputmode="numeric" min="0">
-            </div>
-            <div class="settings-input-group">
-              <label class="settings-input-label">Donation Wait</label>
-              <input type="number" class="form-input" id="settingsDonationWait" placeholder="15" inputmode="numeric" min="0">
-            </div>
-          </div>
-          <div class="form-section-label" style="margin-top:8px;">Recycling Disposal Costs (what you pay)</div>
-          <div class="form-row">
-            <div class="settings-input-group">
-              <label class="settings-input-label">Mattress ($)</label>
-              <input type="number" class="form-input" id="settingsCostMattress" placeholder="10" inputmode="decimal" min="0">
-            </div>
-            <div class="settings-input-group">
-              <label class="settings-input-label">TV/Monitor ($)</label>
-              <input type="number" class="form-input" id="settingsCostTV" placeholder="10" inputmode="decimal" min="0">
-            </div>
-            <div class="settings-input-group">
-              <label class="settings-input-label">Freon Appl. ($)</label>
-              <input type="number" class="form-input" id="settingsCostFreon" placeholder="25" inputmode="decimal" min="0">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="settings-input-group">
-              <label class="settings-input-label">Tire ($)</label>
-              <input type="number" class="form-input" id="settingsCostTire" placeholder="5" inputmode="decimal" min="0">
-            </div>
-            <div class="settings-input-group">
-              <label class="settings-input-label">Paint Can ($)</label>
-              <input type="number" class="form-input" id="settingsCostPaint" placeholder="5" inputmode="decimal" min="0">
-            </div>
+
+            <button class="settings-save-btn" id="settingsSaveBtn" onclick="saveVonigoCredentials()">
+              <div class="spinner"></div>
+              <span class="btn-text">Save credentials</span>
+            </button>
+            <div class="settings-feedback" id="settingsFeedback"></div>
           </div>
 
-          <div class="form-section-label" style="margin-top:12px;">Facilities</div>
-
-          <!-- Disposal Sites -->
-          <div style="margin-bottom:10px;">
-            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">🗑 Disposal Sites</div>
-            <div id="settingsDisposalSitesList"></div>
-            <button onclick="addFacility('disposal')" style="width:100%;padding:7px;background:none;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;margin-top:4px;">+ Add Disposal Site</button>
+          <!-- Franchise Info -->
+          <div class="settings-card fade-in fade-in-delay-3">
+            <div class="settings-card-title">Franchise Info</div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Office Phone</label>
+              <input type="tel" class="form-input" id="settingsPhone" placeholder="(774) 281-2800" autocomplete="off">
+            </div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Office Address</label>
+              <input type="text" class="form-input" id="settingsOfficeAddress" placeholder="PO Box 871" autocomplete="off">
+            </div>
+            <div class="form-row">
+              <div class="settings-input-group">
+                <label class="settings-input-label">City</label>
+                <input type="text" class="form-input" id="settingsOfficeCity" placeholder="Lakeville" autocomplete="off">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">State</label>
+                <input type="text" class="form-input" id="settingsOfficeState" placeholder="MA" maxlength="2" style="width:60px" autocomplete="off">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Zip</label>
+                <input type="text" class="form-input" id="settingsOfficeZip" placeholder="02347" maxlength="5" inputmode="numeric" autocomplete="off">
+              </div>
+            </div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Website URL</label>
+              <input type="url" class="form-input" id="settingsWebsite" placeholder="https://www.junkluggers.com/..." autocomplete="off">
+            </div>
+            <button class="settings-save-btn" id="franchiseSaveBtn" onclick="saveFranchiseInfo()">
+              <div class="spinner"></div>
+              <span class="btn-text">Save franchise info</span>
+            </button>
+            <div class="settings-feedback" id="franchiseFeedback"></div>
           </div>
 
-          <!-- Recycling Sites -->
-          <div style="margin-bottom:10px;">
-            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">♻️ Recycling Sites</div>
-            <div id="settingsRecyclingSitesList"></div>
-            <button onclick="addFacility('recycling')" style="width:100%;padding:7px;background:none;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;margin-top:4px;">+ Add Recycling Site</button>
+        </div><!-- end franchise tab -->
+
+        <!-- TAB: Cost Analysis -->
+        <div id="stab-content-cost" style="display:none;">
+
+          <div class="settings-card">
+            <div class="settings-card-title">Cost Analysis</div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Truck Home Location (address)</label>
+              <input type="text" class="form-input" id="settingsTruckHome" placeholder="2 County Rd, East Freetown, MA 02717" autocomplete="off">
+            </div>
+            <div class="form-row">
+              <div class="settings-input-group">
+                <label class="settings-input-label">Miles per Gallon</label>
+                <input type="number" class="form-input" id="settingsMPG" placeholder="10" inputmode="decimal" min="1">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Fuel Cost ($/gal)</label>
+                <input type="number" class="form-input" id="settingsFuelCost" placeholder="3.50" inputmode="decimal" min="0" step="0.01">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="settings-input-group">
+                <label class="settings-input-label">Crew Rate ($/hr)</label>
+                <input type="number" class="form-input" id="settingsCrewRate" placeholder="25" inputmode="decimal" min="0">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Disposal Cost ($/ton)</label>
+                <input type="number" class="form-input" id="settingsDisposalCost" placeholder="200" inputmode="decimal" min="0">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="settings-input-group">
+                <label class="settings-input-label">Recycling Revenue ($/truck)</label>
+                <input type="number" class="form-input" id="settingsRecyclingRevenue" placeholder="130" inputmode="decimal" min="0">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Royalty %</label>
+                <input type="number" class="form-input" id="settingsRoyaltyPct" placeholder="14" inputmode="decimal" min="0" max="100" step="0.1">
+              </div>
+            </div>
+            <div class="form-section-label" style="margin-top:8px;">Wait Times (minutes per load)</div>
+            <div class="form-row">
+              <div class="settings-input-group">
+                <label class="settings-input-label">Disposal Wait</label>
+                <input type="number" class="form-input" id="settingsDisposalWait" placeholder="15" inputmode="numeric" min="0">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Recycling Wait</label>
+                <input type="number" class="form-input" id="settingsRecyclingWait" placeholder="20" inputmode="numeric" min="0">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Donation Wait</label>
+                <input type="number" class="form-input" id="settingsDonationWait" placeholder="15" inputmode="numeric" min="0">
+              </div>
+            </div>
+            <div class="form-section-label" style="margin-top:8px;">Recycling Disposal Costs (what you pay)</div>
+            <div class="form-row">
+              <div class="settings-input-group">
+                <label class="settings-input-label">Mattress ($)</label>
+                <input type="number" class="form-input" id="settingsCostMattress" placeholder="10" inputmode="decimal" min="0">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">TV/Monitor ($)</label>
+                <input type="number" class="form-input" id="settingsCostTV" placeholder="10" inputmode="decimal" min="0">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Freon Appl. ($)</label>
+                <input type="number" class="form-input" id="settingsCostFreon" placeholder="25" inputmode="decimal" min="0">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="settings-input-group">
+                <label class="settings-input-label">Tire ($)</label>
+                <input type="number" class="form-input" id="settingsCostTire" placeholder="5" inputmode="decimal" min="0">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Paint Can ($)</label>
+                <input type="number" class="form-input" id="settingsCostPaint" placeholder="5" inputmode="decimal" min="0">
+              </div>
+            </div>
+
+            <div class="form-section-label" style="margin-top:12px;">Facilities</div>
+
+            <!-- Disposal Sites -->
+            <div style="margin-bottom:10px;">
+              <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">🗑 Disposal Sites</div>
+              <div id="settingsDisposalSitesList"></div>
+              <button onclick="addFacility('disposal')" style="width:100%;padding:7px;background:none;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;margin-top:4px;">+ Add Disposal Site</button>
+            </div>
+
+            <!-- Recycling Sites -->
+            <div style="margin-bottom:10px;">
+              <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">♻️ Recycling Sites</div>
+              <div id="settingsRecyclingSitesList"></div>
+              <button onclick="addFacility('recycling')" style="width:100%;padding:7px;background:none;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;margin-top:4px;">+ Add Recycling Site</button>
+            </div>
+
+            <!-- Donation Sites -->
+            <div style="margin-bottom:10px;">
+              <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">🤝 Donation Sites</div>
+              <div id="settingsDonationSitesList"></div>
+              <button onclick="addFacility('donation')" style="width:100%;padding:7px;background:none;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;margin-top:4px;">+ Add Donation Site</button>
+            </div>
+
+            <button class="settings-save-btn" id="costSettingsSaveBtn" onclick="saveCostSettings()">
+              <div class="spinner"></div>
+              <span class="btn-text">Save cost settings</span>
+            </button>
+            <div class="settings-feedback" id="costSettingsFeedback"></div>
           </div>
 
-          <!-- Donation Sites -->
-          <div style="margin-bottom:10px;">
-            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">🤝 Donation Sites</div>
-            <div id="settingsDonationSitesList"></div>
-            <button onclick="addFacility('donation')" style="width:100%;padding:7px;background:none;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;margin-top:4px;">+ Add Donation Site</button>
+        </div><!-- end cost tab -->
+
+        <!-- TAB: Proposal -->
+        <div id="stab-content-proposal" style="display:none;">
+
+          <div class="settings-card">
+            <div class="settings-card-title">Proposal Pages</div>
+            <div class="form-hint" style="margin-bottom:12px;">These pages are appended to every generated PDF proposal, styled to match your estimate.</div>
+
+            <div class="form-section-label">About Your Franchise</div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Tagline / Headline</label>
+              <input type="text" class="form-input" id="settingsProposalTagline" placeholder="Your Trusted Junk Removal Experts" autocomplete="off">
+            </div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">About Us (2–4 sentences)</label>
+              <textarea class="form-input" id="settingsProposalAbout" rows="4" placeholder="We are The Junkluggers of Southeastern MA & RI. We serve homeowners and businesses across Plymouth County, Bristol County, and Rhode Island..." style="resize:vertical;font-size:13px;line-height:1.5;"></textarea>
+            </div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Service Area</label>
+              <input type="text" class="form-input" id="settingsProposalServiceArea" placeholder="Plymouth County, Bristol County, and Rhode Island" autocomplete="off">
+            </div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Why Choose Us (bullet points, one per line)</label>
+              <textarea class="form-input" id="settingsProposalBullets" rows="5" placeholder="We donate and recycle up to 70% of what we haul&#10;Eco-friendly junk removal since 2010&#10;Uniformed, background-checked crews&#10;Upfront pricing, no hidden fees&#10;Same-day and next-day service available" style="resize:vertical;font-size:13px;line-height:1.5;"></textarea>
+            </div>
+
+            <div class="form-section-label" style="margin-top:12px;">Terms &amp; Conditions</div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Custom Terms (leave blank for standard Junkluggers terms)</label>
+              <textarea class="form-input" id="settingsProposalTerms" rows="5" placeholder="Optional: enter any custom terms or notes to include..." style="resize:vertical;font-size:13px;line-height:1.5;"></textarea>
+            </div>
+
+            <button class="settings-save-btn" id="proposalSettingsSaveBtn" onclick="saveProposalSettings()">
+              <div class="spinner"></div>
+              <span class="btn-text">Save proposal settings</span>
+            </button>
+            <div class="settings-feedback" id="proposalSettingsFeedback"></div>
           </div>
 
-          <button class="settings-save-btn" id="costSettingsSaveBtn" onclick="saveCostSettings()">
-            <div class="spinner"></div>
-            <span class="btn-text">Save cost settings</span>
-          </button>
-          <div class="settings-feedback" id="costSettingsFeedback"></div>
-        </div>
+        </div><!-- end proposal tab -->
 
-        <!-- Account -->
-        <div class="settings-card fade-in fade-in-delay-4">
-          <div class="settings-card-title">Account</div>
-          <button class="logout-btn" onclick="handleLogout()">Sign out</button>
-        </div>
+        <!-- TAB: Account -->
+        <div id="stab-content-account" style="display:none;">
+          <div class="settings-card fade-in fade-in-delay-4">
+            <div class="settings-card-title">Account</div>
+            <button class="logout-btn" onclick="handleLogout()">Sign out</button>
+          </div>
+        </div><!-- end account tab -->
+
       </div>
+
 
       <!-- ESTIMATES LIST -->
       <div class="estimates-section" id="estimatesScreen">
@@ -2577,6 +2659,10 @@
 
       document.getElementById('settingsFeedback').textContent = '';
       populateFranchiseFields();
+      populateCostSettingsFields();
+      populateProposalSettingsFields();
+      // Always start on franchise tab
+      showSettingsTab('franchise');
     }
 
     async function saveVonigoCredentials() {
@@ -6931,30 +7017,165 @@
           window.open(url, '_blank');
         }
       } else {
-      try {
-        const [estimateBytes, boilerplateBytes] = await Promise.all([
-          doc.output('arraybuffer'),
-          fetch('/assets/boilerplate.pdf').then(r => r.arrayBuffer())
-        ]);
+        // Render proposal pages (About Us + Terms) in jsPDF — same theme as estimate
+        const cs = (currentUser && currentUser.costSettings) || {};
+        const tagline    = cs.proposalTagline    || '';
+        const aboutText  = cs.proposalAbout      || '';
+        const serviceArea= cs.proposalServiceArea|| '';
+        const bulletsRaw = cs.proposalBullets    || '';
+        const customTerms= cs.proposalTerms      || '';
+        const hasProposalContent = tagline || aboutText || bulletsRaw;
 
-        const { PDFDocument } = PDFLib;
-        const mergedPdf = await PDFDocument.create();
+        if (hasProposalContent) {
+          // Page: About Us
+          doc.addPage([W, H], 'landscape');
+          // Header
+          doc.setFillColor(...dark);
+          doc.rect(0, 0, W, H, 'F');
+          doc.setFillColor(15, 25, 35);
+          doc.rect(0, 0, W, 80, 'F');
+          doc.setFillColor(...green);
+          doc.rect(0, 80, W, 3, 'F');
+          doc.setTextColor(...green);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(22);
+          doc.text('JUNKLUGGERS', margin, 42);
+          doc.setTextColor(...white);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9);
+          doc.text(franchiseName, margin, 58);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(14);
+          doc.text('ABOUT US', W - margin, 35, { align: 'right' });
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9);
+          if (serviceArea) doc.text('Serving ' + serviceArea, W - margin, 50, { align: 'right' });
+          doc.text(dateStr, W - margin, 63, { align: 'right' });
 
-        const estimatePdf = await PDFDocument.load(estimateBytes);
-        const boilerplatePdf = await PDFDocument.load(boilerplateBytes);
+          let ay = 108;
+          // Tagline
+          if (tagline) {
+            doc.setTextColor(...green);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(16);
+            doc.text(tagline, margin, ay);
+            ay += 26;
+          }
+          // About text
+          if (aboutText) {
+            doc.setTextColor(...white);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(10);
+            const aboutLines = doc.splitTextToSize(aboutText, W / 2 - margin - 20);
+            doc.text(aboutLines, margin, ay);
+            ay += aboutLines.length * 14 + 16;
+          }
+          // Bullets
+          const bullets = bulletsRaw.split(/\r?\n/).map(b => b.trim()).filter(Boolean);
+          if (bullets.length > 0) {
+            doc.setTextColor(...green);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(10);
+            doc.text('WHY CHOOSE US', margin, ay);
+            ay += 14;
+            doc.setTextColor(...white);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(10);
+            bullets.forEach(b => {
+              doc.setTextColor(...green);
+              doc.text('✓', margin, ay);
+              doc.setTextColor(...white);
+              doc.text(b, margin + 14, ay);
+              ay += 14;
+            });
+          }
 
-        const estPages = await mergedPdf.copyPages(estimatePdf, estimatePdf.getPageIndices());
-        estPages.forEach(p => mergedPdf.addPage(p));
+          // Right column — contact info box
+          const rx = W / 2 + 10, rw = W / 2 - margin - 10;
+          doc.setFillColor(15, 25, 35);
+          doc.rect(rx, 90, rw, H - 90 - margin, 'F');
+          doc.setFillColor(...green);
+          doc.rect(rx, 90, 3, H - 90 - margin, 'F');
+          let ry = 110;
+          doc.setTextColor(...green);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(10);
+          doc.text('CONTACT US', rx + 14, ry); ry += 18;
+          doc.setTextColor(...white);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(10);
+          if (franchisePhone) { doc.text('📞 ' + franchisePhone, rx + 14, ry); ry += 14; }
+          if (franchiseWebsite) { doc.text('🌐 ' + franchiseWebsite, rx + 14, ry); ry += 14; }
+          if (franchiseAddress) { doc.text('📍 ' + franchiseAddress, rx + 14, ry); ry += 14; }
+        }
 
-        const bpPages = await mergedPdf.copyPages(boilerplatePdf, boilerplatePdf.getPageIndices());
-        bpPages.forEach(p => mergedPdf.addPage(p));
+        // Page: Terms
+        const defaultTerms = `TERMS & CONDITIONS
 
-        const mergedBytes = await mergedPdf.save();
-        const mergedBlob = new Blob([mergedBytes], { type: 'application/pdf' });
-        const mergedUrl = URL.createObjectURL(mergedBlob);
+1. SCOPE OF WORK: Price covers removal of items as described in this estimate. Additional items may incur additional charges.
 
+2. PRICING: All prices are estimates. Final price is confirmed on-site before work begins. If actual volume differs significantly, pricing will be adjusted accordingly.
+
+3. PAYMENT: Payment is due upon completion of service. We accept cash, check, and major credit cards.
+
+4. RECYCLING & DONATION: We make every effort to donate and recycle items. We cannot guarantee specific items will be donated or recycled as this depends on condition and partner acceptance.
+
+5. HAZARDOUS MATERIALS: We do not remove hazardous materials including but not limited to: paint (unless sealed), chemicals, asbestos, or biohazards.
+
+6. PROPERTY: Customer is responsible for ensuring items to be removed are accessible. We are not responsible for pre-existing damage. We will take reasonable care to protect your property during removal.
+
+7. CANCELLATION: Please provide 24 hours notice to cancel or reschedule. Late cancellations may incur a fee.
+
+8. SATISFACTION: If you are not satisfied with our service, please contact us within 24 hours and we will work to resolve any issues.`;
+
+        const termsText = customTerms || defaultTerms;
+        doc.addPage([W, H], 'landscape');
+        doc.setFillColor(...dark);
+        doc.rect(0, 0, W, H, 'F');
+        doc.setFillColor(15, 25, 35);
+        doc.rect(0, 0, W, 80, 'F');
+        doc.setFillColor(...green);
+        doc.rect(0, 80, W, 3, 'F');
+        doc.setTextColor(...green);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(22);
+        doc.text('JUNKLUGGERS', margin, 42);
+        doc.setTextColor(...white);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.text(franchiseName, margin, 58);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.text('TERMS & CONDITIONS', W - margin, 35, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.text(dateStr, W - margin, 50, { align: 'right' });
+
+        let ty = 100;
+        const termLines = termsText.split(/\r?\n/);
+        termLines.forEach(line => {
+          const isSectionHeader = /^\d+\./.test(line.trim()) || line.toUpperCase() === line.trim() && line.trim().length > 3;
+          if (isSectionHeader) {
+            doc.setTextColor(...green);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9);
+          } else {
+            doc.setTextColor(...white);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+          }
+          if (line.trim() === '') { ty += 6; return; }
+          const wrapped = doc.splitTextToSize(line, (W - 2 * margin) / 2 - 10);
+          // Two columns
+          const col1Lines = wrapped;
+          doc.text(col1Lines, margin, ty);
+          ty += col1Lines.length * 12;
+          if (ty > H - margin) ty = H - margin; // clamp
+        });
+
+        // Output merged doc
         if (mode === 'base64') {
-          const bytes = new Uint8Array(mergedBytes);
+          const bytes = new Uint8Array(doc.output('arraybuffer'));
           let binary = '';
           const chunkSize = 8192;
           for (let i = 0; i < bytes.length; i += chunkSize) {
@@ -6962,25 +7183,12 @@
           }
           return btoa(binary);
         } else if (mode === 'download') {
-          const a = document.createElement('a');
-          a.href = mergedUrl;
-          a.download = filename;
-          a.click();
-        } else {
-          window.open(mergedUrl, '_blank');
-        }
-      } catch(e) {
-        console.warn('Boilerplate merge failed, falling back:', e);
-        if (mode === 'base64') {
-          return doc.output('datauristring').split(',')[1];
-        } else if (mode === 'download') {
           doc.save(filename);
         } else {
           const blob = doc.output('blob');
           const url = URL.createObjectURL(blob);
           window.open(url, '_blank');
         }
-      }
       } // end else (not skipBoilerplate)
     } // end generateEstimatePDF
 
@@ -7662,6 +7870,60 @@
       if (donReqEl)   donReqEl.style.display   = (donReqEl.style.display   !== 'none' && !donVal)   ? 'inline' : 'none';
     }
 
+
+    // ===== SETTINGS TABS =====
+    function showSettingsTab(tab) {
+      ['franchise','cost','proposal','account'].forEach(t => {
+        document.getElementById('stab-content-' + t).style.display = t === tab ? 'block' : 'none';
+        const btn = document.getElementById('stab-' + t);
+        if (btn) btn.classList.toggle('active', t === tab);
+      });
+      // Render facility lists when switching to cost tab
+      if (tab === 'cost') renderAllFacilityLists();
+    }
+
+    // ===== PROPOSAL SETTINGS =====
+    const PROPOSAL_FIELDS = ['Tagline','About','ServiceArea','Bullets','Terms'];
+
+    function populateProposalSettingsFields() {
+      if (!currentUser || !currentUser.costSettings) return;
+      const cs = currentUser.costSettings;
+      PROPOSAL_FIELDS.forEach(f => {
+        const el = document.getElementById('settingsProposal' + f);
+        if (el && cs['proposal' + f] !== undefined) el.value = cs['proposal' + f];
+      });
+    }
+
+    async function saveProposalSettings() {
+      const btn = document.getElementById('proposalSettingsSaveBtn');
+      const feedbackEl = document.getElementById('proposalSettingsFeedback');
+      btn.classList.add('loading');
+      feedbackEl.textContent = '';
+      if (!currentUser.costSettings) currentUser.costSettings = {};
+      PROPOSAL_FIELDS.forEach(f => {
+        const el = document.getElementById('settingsProposal' + f);
+        if (el) currentUser.costSettings['proposal' + f] = el.value.trim();
+      });
+      try {
+        const res = await apiFetch(N8N_BASE + '/crewlogic-settings', {
+          method: 'POST',
+          body: JSON.stringify({ email: currentUser.email, franchiseID: currentUser.franchiseID, costSettings: currentUser.costSettings })
+        });
+        const data = await res.json();
+        if (data.success) {
+          storage.set(SESSION_KEY, JSON.stringify(currentUser));
+          feedbackEl.textContent = '✓ Proposal settings saved';
+          feedbackEl.className = 'settings-feedback ok';
+        } else {
+          feedbackEl.textContent = data.error || 'Failed to save.';
+          feedbackEl.className = 'settings-feedback error';
+        }
+      } catch(e) {
+        feedbackEl.textContent = 'Connection error.';
+        feedbackEl.className = 'settings-feedback error';
+      }
+      btn.classList.remove('loading');
+    }
 
     // ===== COST SETTINGS =====
     const COST_SETTINGS_FIELDS = [
