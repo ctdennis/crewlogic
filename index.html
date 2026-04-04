@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.6.5 | 2026-04-04">
+  <meta name="crewlogic-version" content="v2.6.6 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -7969,23 +7969,58 @@
       if (!hasDistances) {
         lines.push(['⚠️ Distances not calculated — fuel cost is $0', '']);
       }
-      document.getElementById('caCostLines').innerHTML = lines.map(([l,v]) => {
-        const isWarn    = l.startsWith('⚠️');
-        const isSep     = l.startsWith('—');
-        const isIndent  = l.startsWith('  ↳');
-        const isDeep    = l.startsWith('    ·');
-        const isPos     = v.startsWith('+');
-        const lColor = isWarn ? '#fbbf24' : isSep ? '#6b7280' : isDeep ? '#9ca3af' : isIndent ? '#d1d5db' : 'inherit';
-        const vColor = isPos ? '#00EE76' : v.startsWith('−') ? 'var(--accent-green)' : isDeep ? '#9ca3af' : isIndent ? '#d1d5db' : 'inherit';
-        const lStyle = isSep    ? 'font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-top:4px;' :
-                       isDeep   ? 'font-size:10px;padding-left:24px;' :
-                       isIndent ? 'font-size:11px;padding-left:12px;' : '';
-        const vStyle = (isIndent || isDeep) ? 'font-size:10px;' : 'font-weight:600;';
-        return '<div style="display:flex;justify-content:space-between;' + lStyle + '">' +
-          '<span style="color:' + lColor + '">' + l.trim() + '</span>' +
-          (v ? '<span style="' + vStyle + 'color:' + vColor + '">' + v + '</span>' : '') +
-          '</div>';
-      }).join('');
+      // Build collapsible cost lines — labor and fuel are toggleable
+      let caLaborExpanded = true;
+      let caFuelExpanded  = true;
+
+      function renderCostLines() {
+        const el = document.getElementById('caCostLines');
+        if (!el) return;
+        let html = '';
+        let section = null; // 'labor' | 'fuel' | null
+
+        lines.forEach(([l, v]) => {
+          const isWarn   = l.startsWith('⚠️');
+          const isSep    = l.startsWith('—');
+          const isIndent = l.startsWith('  ↳');
+          const isDeep   = l.startsWith('    ·');
+          const isPos    = typeof v === 'string' && v.startsWith('+');
+
+          // Detect section headers
+          if (l.startsWith('Labor (')) section = 'labor';
+          else if (l.startsWith('Disposal (') || l.startsWith('Fuel (') || l.startsWith('Recycling') || l.startsWith('Cans') || l.startsWith('—')) section = null;
+          if (l.startsWith('Fuel (')) section = 'fuel';
+
+          // Hide detail rows when section is collapsed
+          const isLaborDetail = (isIndent || isDeep) && section === 'labor';
+          const isFuelDetail  = (isIndent || isDeep) && section === 'fuel';
+          if (isLaborDetail && !caLaborExpanded) return;
+          if (isFuelDetail  && !caFuelExpanded)  return;
+
+          const lColor = isWarn ? '#fbbf24' : isSep ? '#6b7280' : isDeep ? '#9ca3af' : isIndent ? '#d1d5db' : 'inherit';
+          const vColor = isPos  ? '#00EE76' : (typeof v === 'string' && v.startsWith('−')) ? '#00EE76' : isDeep ? '#9ca3af' : isIndent ? '#d1d5db' : 'inherit';
+          const lStyle = isSep    ? 'font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-top:4px;' :
+                         isDeep   ? 'font-size:10px;padding-left:24px;' :
+                         isIndent ? 'font-size:11px;padding-left:12px;' : '';
+          const vStyle = (isIndent || isDeep) ? 'font-size:10px;' : 'font-weight:600;';
+
+          // Add toggle chevron to labor and fuel header lines
+          let label = l.trim();
+          let extraBtn = '';
+          if (l.startsWith('Labor (')) {
+            extraBtn = '<button onclick="caLaborExpanded=!caLaborExpanded;renderCostLines();" style="background:none;border:none;color:#9ca3af;font-size:10px;cursor:pointer;padding:0 4px;">' + (caLaborExpanded ? '▾' : '▸') + '</button>';
+          } else if (l.startsWith('Fuel (')) {
+            extraBtn = '<button onclick="caFuelExpanded=!caFuelExpanded;renderCostLines();" style="background:none;border:none;color:#9ca3af;font-size:10px;cursor:pointer;padding:0 4px;">' + (caFuelExpanded ? '▾' : '▸') + '</button>';
+          }
+
+          html += '<div style="display:flex;justify-content:space-between;align-items:baseline;' + lStyle + '">' +
+            '<span style="color:' + lColor + ';display:flex;align-items:center;gap:2px;">' + label + extraBtn + '</span>' +
+            (v ? '<span style="' + vStyle + 'color:' + vColor + '">' + v + '</span>' : '') +
+            '</div>';
+        });
+        el.innerHTML = html;
+      }
+      renderCostLines();
       document.getElementById('caTotalCosts').textContent = fmt(totalCosts);
       document.getElementById('caRecyclingRevenue').textContent = '−' + fmt(recycRevenue);
       document.getElementById('caNetCost').textContent = fmt(netCost);
