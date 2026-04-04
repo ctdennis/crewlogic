@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.7.3 | 2026-04-04">
+  <meta name="crewlogic-version" content="v2.7.5 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -6440,19 +6440,30 @@
         y += 20;
       });
 
-      // Sub total row(s)
-      if (pdfSplit && pdfVolumeLines && pdfVolumeLines.length > 0) {
-        // Volume sub-total row showing total trucks
-        doc.setFillColor(...dark);
-        doc.rect(margin, y - 2, W - 2 * margin, 22, 'F');
-        doc.setTextColor(...white);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(9);
-        doc.text('Total Volume (trucks)', col.area, y + 13);
-        doc.text(totalTrucks.toFixed(3), col.trucks, y + 13, { align: 'right' });
-        y += 28;
+      // Determine if we have a real split (2 price tiers) or just a single tier
+      const hasRealSplit = pdfSplit && pdfVolumeLines && pdfVolumeLines.length > 1;
 
-        // Show split lines
+      // Total Volume row — always shown
+      doc.setFillColor(...dark);
+      doc.rect(margin, y - 2, W - 2 * margin, 22, 'F');
+      doc.setTextColor(...white);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.text('Total Volume (trucks)', col.area, y + 13);
+      doc.text(totalTrucks.toFixed(3), col.trucks, y + 13, { align: 'right' });
+      doc.text((totalTrucks * 16).toFixed(1), col.cy, y + 13, { align: 'right' });
+      if (!hasRealSplit) {
+        // Single tier — show price/truck and total right on this row
+        if (pricePerTruck > 0) doc.text(fmtMoney(pricePerTruck), col.price, y + 13, { align: 'right' });
+        if (pdfVolumePrice > 0) doc.text(fmtMoney(pdfVolumePrice), col.total, y + 13, { align: 'right' });
+      } else {
+        // Real split — just show total here, detail rows follow
+        if (pdfVolumePrice > 0) doc.text(fmtMoney(pdfVolumePrice), col.total, y + 13, { align: 'right' });
+      }
+      y += 28;
+
+      // If real split, show the two price tier rows beneath Total Volume
+      if (hasRealSplit) {
         pdfVolumeLines.forEach((line, i) => {
           if (i % 2 === 0) { doc.setFillColor(...offwhite); doc.rect(margin, y - 2, W - 2 * margin, 18, 'F'); }
           doc.setTextColor(...dark);
@@ -6464,30 +6475,8 @@
           doc.text(fmtMoney(line.total), col.total, y + 10, { align: 'right' });
           y += 20;
         });
-        // Split sub total
-        doc.setFillColor(...dark);
-        doc.rect(margin, y - 2, W - 2 * margin, 22, 'F');
-        doc.setTextColor(...white);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(9);
-        doc.text('Volume Sub Total', col.area, y + 13);
-        doc.text(totalTrucks.toFixed(3), col.trucks, y + 13, { align: 'right' });
-        doc.text((totalTrucks * 16).toFixed(1), col.cy, y + 13, { align: 'right' });
-        doc.text(fmtMoney(pdfVolumePrice), col.total, y + 13, { align: 'right' });
-      } else {
-        // Simple sub total
-        doc.setFillColor(...dark);
-        doc.rect(margin, y - 2, W - 2 * margin, 22, 'F');
-        doc.setTextColor(...white);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(9);
-        doc.text('Sub Total', col.area, y + 13);
-        doc.text(totalTrucks.toFixed(3), col.trucks, y + 13, { align: 'right' });
-        doc.text((totalTrucks * 16).toFixed(1), col.cy, y + 13, { align: 'right' });
-        if (pricePerTruck > 0) doc.text(fmtMoney(pricePerTruck), col.price, y + 13, { align: 'right' });
-        if (pdfVolumePrice > 0) doc.text(fmtMoney(pdfVolumePrice), col.total, y + 13, { align: 'right' });
+        y += 8; // small gap before surcharges
       }
-      y += 28;
 
       // Non-volume, non-discount charges
       const surchargeCharges = (est.charges || []).filter(c => c.type !== 'volume' && c.type !== 'discount');
