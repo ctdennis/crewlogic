@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.0.0 | 2026-04-04">
+  <meta name="crewlogic-version" content="v3.0.1 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -6384,8 +6384,23 @@
         doc.text(phone, rx + 10, ownerName ? 148 : 120);
       }
 
+      // Office address — between phone and website
+      const cs1 = (currentUser && currentUser.costSettings) || {};
+      const officeAddr = [cs1.officeAddress, cs1.officeCity, cs1.officeState].filter(Boolean).join(', ');
+      const addrY = ownerName && phone ? 164 : ownerName || phone ? 148 : 136;
+      if (officeAddr) {
+        doc.setTextColor(150, 180, 160);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.text('ADDRESS', rx + 10, addrY);
+        doc.setTextColor(...white);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.text(doc.splitTextToSize(officeAddr, rxW), rx + 10, addrY + 12);
+      }
+
       if (website) {
-        const webY = ownerName && phone ? 164 : ownerName || phone ? 148 : 136;
+        const webY = (ownerName && phone && officeAddr) ? 196 : (ownerName && phone) || (phone && officeAddr) || (ownerName && officeAddr) ? 180 : ownerName || phone || officeAddr ? 164 : 136;
         doc.setTextColor(150, 180, 160);
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(8);
@@ -6398,7 +6413,7 @@
       }
 
       // Logo image in right column
-      const logoAreaY = website ? 200 : ownerName && phone ? 185 : 170;
+      const logoAreaY = website ? 220 : officeAddr ? 200 : ownerName && phone ? 185 : 170;
       const logoAreaH = H - 40 - logoAreaY;
       const logoW = rxW;
       const logoH = Math.round(logoW / 1.71); // maintain 2971:1738 ratio
