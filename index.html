@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.5.8 | 2026-04-03">
+  <meta name="crewlogic-version" content="v2.5.9 | 2026-04-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -7881,15 +7881,30 @@
         ['Labor (' + totalHrs.toFixed(1) + ' hrs × $' + crewRate + ')', fmt(laborCost)],
         ['  ↳ On-site (' + days + 'd × ' + crew + ' crew × ' + hrsDay + 'h)', fmt(laborHrs * crewRate)],
       ];
-      // Drive/wait time breakdown
+      // Drive/wait time breakdown — fully granular
       if (totalTruckHrs > 0) {
-        const truckParts = [];
-        if (homeMin > 0) truckParts.push('home ' + fmtMin(homeMin*2));
-        if (dispMin > 0 && loadsDisposal > 0) truckParts.push('disposal ' + fmtMin((dispMin*2+dispWait)*loadsDisposal));
-        if (recycMin > 0 && loadsRecycling > 0) truckParts.push('recycling ' + fmtMin((recycMin*2+recycWait)*loadsRecycling));
-        if (donMin > 0 && loadsDonation > 0) truckParts.push('donation ' + fmtMin((donMin*2+donWait)*loadsDonation));
-        const truckLabel = truckParts.length > 0 ? ' (' + truckParts.join(' + ') + ')' : '';
-        lines.push(['  ↳ Drive + wait' + truckLabel, fmt(totalTruckHrs * crewRate)]);
+        const truckMinBreakdown = [];
+        if (homeMin > 0) truckMinBreakdown.push({ label: 'Home→Job', min: homeMin * 2, detail: Math.round(homeMin) + ' min × 2' });
+        if (dispMin > 0 && loadsDisposal > 0) {
+          const m = (dispMin * 2 + dispWait) * loadsDisposal;
+          truckMinBreakdown.push({ label: 'Job→Disposal', min: m,
+            detail: '(' + Math.round(dispMin) + ' min × 2 + ' + dispWait + ' min wait) × ' + loadsDisposal + ' load' + (loadsDisposal !== 1 ? 's' : '') });
+        }
+        if (recycMin > 0 && loadsRecycling > 0) {
+          const m = (recycMin * 2 + recycWait) * loadsRecycling;
+          truckMinBreakdown.push({ label: 'Job→Recycling', min: m,
+            detail: '(' + Math.round(recycMin) + ' min × 2 + ' + recycWait + ' min wait) × ' + loadsRecycling + ' load' + (loadsRecycling !== 1 ? 's' : '') });
+        }
+        if (donMin > 0 && loadsDonation > 0) {
+          const m = (donMin * 2 + donWait) * loadsDonation;
+          truckMinBreakdown.push({ label: 'Job→Donation', min: m,
+            detail: '(' + Math.round(donMin) + ' min × 2 + ' + donWait + ' min wait) × ' + loadsDonation + ' load' + (loadsDonation !== 1 ? 's' : '') });
+        }
+        const totalTruckMin2 = truckMinBreakdown.reduce((s, t) => s + t.min, 0);
+        lines.push(['  ↳ Drive + wait (' + Math.round(totalTruckMin2) + ' min = ' + totalTruckHrs.toFixed(2) + ' hrs × $' + crewRate + ')', fmt(totalTruckHrs * crewRate)]);
+        truckMinBreakdown.forEach(t => {
+          lines.push(['    · ' + t.label + ': ' + t.detail + ' = ' + Math.round(t.min) + ' min', '']);
+        });
       }
       lines.push(['Disposal (' + trucksDisposal.toFixed(2) + ' tons × $' + disposalCost + ')', fmt(dispCost)]);
       lines.push(['Fuel (' + totalMiles.toFixed(0) + ' mi' + fuelBreakdown + ' ÷ ' + mpg + ' mpg × $' + fuelCost + ')', fmt(fuelTotal)]);
@@ -7913,17 +7928,19 @@
         lines.push(['⚠️ Distances not calculated — fuel cost is $0', '']);
       }
       document.getElementById('caCostLines').innerHTML = lines.map(([l,v]) => {
-        const isWarn   = l.startsWith('⚠️');
-        const isSep    = l.startsWith('—');
-        const isIndent = l.startsWith('  ↳');
-        const isPos    = v.startsWith('+');
-        const lColor = isWarn ? '#fbbf24' : isSep ? 'var(--text-muted)' : isIndent ? 'var(--text-muted)' : 'inherit';
-        const vColor = isPos  ? '#00EE76' : v.startsWith('−') ? 'var(--accent-green)' : isIndent ? 'var(--text-secondary)' : 'inherit';
+        const isWarn    = l.startsWith('⚠️');
+        const isSep     = l.startsWith('—');
+        const isIndent  = l.startsWith('  ↳');
+        const isDeep    = l.startsWith('    ·');
+        const isPos     = v.startsWith('+');
+        const lColor = isWarn ? '#fbbf24' : isSep ? 'var(--text-muted)' : (isIndent || isDeep) ? 'var(--text-muted)' : 'inherit';
+        const vColor = isPos ? '#00EE76' : v.startsWith('−') ? 'var(--accent-green)' : (isIndent || isDeep) ? 'var(--text-secondary)' : 'inherit';
         const lStyle = isSep    ? 'font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-top:4px;' :
+                       isDeep   ? 'font-size:10px;padding-left:24px;color:var(--text-muted);' :
                        isIndent ? 'font-size:11px;padding-left:12px;' : '';
-        const vStyle = isIndent ? 'font-size:11px;' : 'font-weight:600;';
+        const vStyle = (isIndent || isDeep) ? 'font-size:10px;' : 'font-weight:600;';
         return '<div style="display:flex;justify-content:space-between;' + lStyle + '">' +
-          '<span style="color:' + lColor + '">' + (isIndent ? l.trim() : l) + '</span>' +
+          '<span style="color:' + lColor + '">' + l.trim() + '</span>' +
           (v ? '<span style="' + vStyle + 'color:' + vColor + '">' + v + '</span>' : '') +
           '</div>';
       }).join('');
