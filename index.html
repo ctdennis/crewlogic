@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.7.7 | 2026-04-04">
+  <meta name="crewlogic-version" content="v2.7.8 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -6721,19 +6721,19 @@
           return c.type === 'volume' && c.photos && c.photos.length > 0;
         });
       if (photoCharges.length > 0) {
-        // Group by area preserving order
+        // Group by room preserving order
         const roomGroups = [];
-        const areaSeen = {};
+        const roomSeen = {};
         photoCharges.forEach(c => {
           if (!c.photos) c.photos = c.photoUrl ? [c.photoUrl] : [];
-          const key = c.area || 'General';
-          if (!areaSeen[key]) {
-            areaSeen[key] = true;
+          const key = (c.room || c.area || 'General') + (c.area ? ' · ' + c.area : '');
+          if (!roomSeen[key]) {
+            roomSeen[key] = true;
             roomGroups.push({ area: key, photos: [] });
           }
-          // Push all photos from this charge
+          const grp = roomGroups.find(g => g.area === key);
           (c.photos || (c.photoUrl ? [c.photoUrl] : [])).forEach(url => {
-            roomGroups[roomGroups.length - 1].photos.push({ url, room: c.room || '' });
+            grp.photos.push({ url, room: c.room || '' });
           });
         });
 
