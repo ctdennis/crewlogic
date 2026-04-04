@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.7.1 | 2026-04-04">
+  <meta name="crewlogic-version" content="v2.7.2 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -7890,13 +7890,12 @@
       const fmtT = (n) => n.toFixed(2) + ' trucks';
       const fmtMin = (m) => m >= 60 ? (m/60).toFixed(1) + ' hrs' : Math.round(m) + ' min';
 
-      // Build fuel distance breakdown
-      const fuelParts = [];
-      if (homeMi > 0) fuelParts.push('home ' + (homeMi*2).toFixed(1) + ' mi');
-      if (dispMi > 0 && loadsDisposal > 0) fuelParts.push('disposal ' + (dispMi*2*loadsDisposal).toFixed(1) + ' mi');
-      if (recycMi > 0 && loadsRecycling > 0) fuelParts.push('recycling ' + (recycMi*2*loadsRecycling).toFixed(1) + ' mi');
-      if (donMi > 0 && loadsDonation > 0) fuelParts.push('donation ' + (donMi*2*loadsDonation).toFixed(1) + ' mi');
-      const fuelBreakdown = fuelParts.length > 1 ? ' (' + fuelParts.join(' + ') + ')' : '';
+      // Build fuel sub-lines (like labor breakdown)
+      const fuelSubLines = [];
+      if (homeMi > 0) fuelSubLines.push({ label: 'Home↔Job', mi: homeMi*2, each: homeMi });
+      if (dispMi > 0 && loadsDisposal > 0) fuelSubLines.push({ label: 'Job↔Disposal', mi: dispMi*2*loadsDisposal, each: dispMi });
+      if (recycMi > 0 && loadsRecycling > 0) fuelSubLines.push({ label: 'Job↔Recycling', mi: recycMi*2*loadsRecycling, each: recycMi });
+      if (donMi > 0 && loadsDonation > 0) fuelSubLines.push({ label: 'Job↔Donation', mi: donMi*2*loadsDonation, each: donMi });
 
       const lines = [
         ['Labor (' + totalHrs.toFixed(1) + ' hrs × $' + crewRate + ')', fmt(laborCost)],
@@ -7943,7 +7942,10 @@
         });
       }
       lines.push(['Disposal (' + trucksDisposal.toFixed(2) + ' tons × $' + disposalCost + ')', fmt(dispCost)]);
-      lines.push(['Fuel (' + totalMiles.toFixed(0) + ' mi' + fuelBreakdown + ' ÷ ' + mpg + ' mpg × $' + fuelCost + ')', fmt(fuelTotal)]);
+      lines.push(['Fuel (' + totalMiles.toFixed(0) + ' mi ÷ ' + mpg + ' mpg × $' + fuelCost + ')', fmt(fuelTotal)]);
+      fuelSubLines.forEach(f => {
+        lines.push(['  ↳ ' + f.label + ': ' + f.mi.toFixed(1) + ' mi (' + f.each.toFixed(1) + ' mi each way)', '']);
+      });
       lines.push(['Recycling/Disposal Fees', fmt(surchargeDisposalCost)]);
       if (cans > 0) lines.push(['Cans (' + cans + ' × $' + canCost + ')', fmt(canTotal)]);
 
@@ -7979,8 +7981,8 @@
 
           // Detect section headers
           if (l.startsWith('Labor (')) section = 'labor';
-          else if (l.startsWith('Disposal (') || l.startsWith('Fuel (') || l.startsWith('Recycling') || l.startsWith('Cans') || l.startsWith('—')) section = null;
-          if (l.startsWith('Fuel (')) section = 'fuel';
+          else if (l.startsWith('Fuel (')) section = 'fuel';
+          else if (!isIndent && !isDeep) section = null;
 
           // Hide detail rows when section is collapsed
           const isLaborDetail = (isIndent || isDeep) && section === 'labor';
