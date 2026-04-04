@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.9.7 | 2026-04-04">
+  <meta name="crewlogic-version" content="v2.9.9 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1168,11 +1168,6 @@
               <label class="settings-input-label">Service Area</label>
               <input type="text" class="form-input" id="settingsProposalServiceArea" placeholder="Plymouth County, Bristol County, and Rhode Island" autocomplete="off">
             </div>
-            <div class="settings-input-group">
-              <label class="settings-input-label">Why Choose Us (bullet points, one per line)</label>
-              <textarea class="form-input" id="settingsProposalBullets" rows="5" placeholder="We donate and recycle up to 70% of what we haul&#10;Eco-friendly junk removal since 2010&#10;Uniformed, background-checked crews&#10;Upfront pricing, no hidden fees&#10;Same-day and next-day service available" style="resize:vertical;font-size:13px;line-height:1.5;"></textarea>
-            </div>
-
             <div class="form-section-label" style="margin-top:12px;">Terms &amp; Conditions</div>
             <div class="settings-input-group">
               <label class="settings-input-label">Custom Terms (leave blank for standard Junkluggers terms)</label>
@@ -7035,9 +7030,8 @@
         const tagline    = csP.proposalTagline    || '';
         const aboutText  = csP.proposalAbout      || '';
         const serviceArea= csP.proposalServiceArea|| '';
-        const bulletsRaw = csP.proposalBullets    || '';
         const customTerms= csP.proposalTerms      || '';
-        const hasProposalContent = tagline || aboutText || bulletsRaw;
+        const hasProposalContent = tagline || aboutText;
 
         if (hasProposalContent) {
           // Page: About Us
@@ -7107,19 +7101,17 @@
           const textW = W / 2 - margin - iconSz - 20;
 
           guarantees.forEach(g => {
-            // Green accent bar instead of icon
-            doc.setFillColor(...green);
-            doc.rect(margin, ay, 4, iconSz, 'F');
             doc.setTextColor(...green);
             doc.setFont('helvetica', 'bold');
             doc.setFontSize(9);
-            doc.text(g.title, textX, ay + 9);
+            doc.text(g.title, margin, ay);
+            ay += 12;
             doc.setTextColor(210, 225, 215);
             doc.setFont('helvetica', 'normal');
             doc.setFontSize(8);
             const bodyLines = doc.splitTextToSize(g.body, textW);
-            doc.text(bodyLines, textX, ay + 20);
-            ay += Math.max(iconSz + 4, bodyLines.length * 10 + 22);
+            doc.text(bodyLines, margin, ay);
+            ay += bodyLines.length * 10 + 8;
           });
 
           // Right column — contact info box
@@ -7968,7 +7960,7 @@ RECYCLING & DONATION
     }
 
     // ===== PROPOSAL SETTINGS =====
-    const PROPOSAL_FIELDS = ['Tagline','About','ServiceArea','Bullets','Terms'];
+    const PROPOSAL_FIELDS = ['Tagline','About','ServiceArea','Terms'];
 
     function populateProposalSettingsFields() {
       if (!currentUser || !currentUser.costSettings) return;
