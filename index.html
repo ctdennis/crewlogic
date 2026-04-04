@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.7.8 | 2026-04-04">
+  <meta name="crewlogic-version" content="v2.8.0 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -2504,6 +2504,13 @@
     }
 
     function openModule(module) {
+      // If in estimate editor with unsaved changes, prompt first
+      const editorScreen = document.getElementById('estimateEditorScreen');
+      if (editorScreen && editorScreen.classList.contains('active') && isDirty) {
+        pendingNavModule = module;
+        document.getElementById('savePromptModal').style.display = 'flex';
+        return;
+      }
       hideAll();
       document.getElementById('backBtn').classList.add('visible');
 
@@ -3378,7 +3385,8 @@
     let priceListID = null;
     let priceListName = '';
     let autoSaveTimer = null;
-    let isDirty = false; // true when estimate has unsaved changes
+    let isDirty = false;
+    let pendingNavModule = null; // set when navigating away from dirty estimate // true when estimate has unsaved changes
 
     // Local estimates cache
     function getLocalEstimates() {
@@ -3746,12 +3754,25 @@
     async function saveAndLeave() {
       document.getElementById('savePromptModal').style.display = 'none';
       await saveEstimateDraft();
-      backToEstimatesList();
+      if (pendingNavModule) {
+        const mod = pendingNavModule;
+        pendingNavModule = null;
+        openModule(mod);
+      } else {
+        backToEstimatesList();
+      }
     }
 
     function leaveWithoutSaving() {
       document.getElementById('savePromptModal').style.display = 'none';
-      backToEstimatesList();
+      isDirty = false;
+      if (pendingNavModule) {
+        const mod = pendingNavModule;
+        pendingNavModule = null;
+        openModule(mod);
+      } else {
+        backToEstimatesList();
+      }
     }
 
     function backToEstimatesList() {
@@ -7661,6 +7682,8 @@
           storage.set(SESSION_KEY, JSON.stringify(currentUser));
           feedbackEl.textContent = '✓ Cost settings saved';
           feedbackEl.className = 'settings-feedback ok';
+          // Refresh estimate dropdowns so new facilities appear immediately
+          populateFacilityDropdowns();
         } else {
           feedbackEl.textContent = data.error || 'Failed to save.';
           feedbackEl.className = 'settings-feedback error';
