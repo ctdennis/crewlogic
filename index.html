@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.8.3 | 2026-04-04">
+  <meta name="crewlogic-version" content="v2.8.4 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -6193,6 +6193,9 @@
 
     async function generateEstimatePDF(mode, opts = {}) {
       document.getElementById('pdfOptionsModal').style.display = 'none';
+      // Open tab immediately while still in user gesture context — browsers block window.open after await
+      const preOpenedTab = (mode === 'tab') ? window.open('', '_blank') : null;
+      if (preOpenedTab) preOpenedTab.document.write('<html><body style="background:#000;color:#fff;font-family:sans-serif;padding:20px;">⏳ Generating PDF...</body></html>');
 
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: [960, 540] });
@@ -7014,7 +7017,11 @@
         } else {
           const blob = doc.output('blob');
           const url = URL.createObjectURL(blob);
-          window.open(url, '_blank');
+          if (preOpenedTab) {
+            preOpenedTab.location.href = url;
+          } else {
+            window.open(url, '_blank');
+          }
         }
       } else {
         // Render proposal pages (About Us + Terms) in jsPDF — same theme as estimate
@@ -7187,7 +7194,11 @@
         } else {
           const blob = doc.output('blob');
           const url = URL.createObjectURL(blob);
-          window.open(url, '_blank');
+          if (preOpenedTab) {
+            preOpenedTab.location.href = url;
+          } else {
+            window.open(url, '_blank');
+          }
         }
       } // end else (not skipBoilerplate)
     } // end generateEstimatePDF
