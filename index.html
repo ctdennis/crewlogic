@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v2.6.1 | 2026-04-04">
+  <meta name="crewlogic-version" content="v2.6.2 | 2026-04-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -5288,8 +5288,9 @@
 
             const loadsDonation = Math.ceil(trucksDonated);
             const homeMin2 = parseFloat(dist.homeMinutes) || 0;
-            const lastFacMi2  = loadsDisposal > 0 ? dispMi  : loadsRecycling > 0 ? recycMi  : donMi;
-            const lastFacMin2 = loadsDisposal > 0 ? dispMin : loadsRecycling > 0 ? recycMin : donMin;
+            // Last stop→home approximated as same as home→job (facility→home not in matrix)
+            const lastFacMi2  = homeMi;
+            const lastFacMin2 = homeMin2;
             const totalMiles =
               homeMi +
               (dispMi * 2 * Math.max(0, loadsDisposal - 1)) + (dispMi  * (loadsDisposal  > 0 ? 1 : 0)) +
@@ -7814,8 +7815,10 @@
       // - For each facility: (loads-1) round trips + 1 final one-way (crew ends at last facility then goes home)
       // - Last facility → Home (approximated as same distance as Job→LastFacility)
       // Determine which facility is last (disposal unless no disposal, then recycling, then donation)
-      const lastFacilityMi  = loadsDisposal > 0 ? dispMi : loadsRecycling > 0 ? recycMi : donMi;
-      const lastFacilityMin = loadsDisposal > 0 ? dispMin : loadsRecycling > 0 ? recycMin : donMin;
+      // Last stop→home: use home↔job distance as approximation (facility→home not in matrix)
+      // Better than using facility→job which could be much shorter/longer than facility→home
+      const lastFacilityMi  = homeMi;
+      const lastFacilityMin = homeMin;
 
       const totalMiles =
         homeMi +                                              // home → job (one-way)
@@ -7933,7 +7936,7 @@
           const m = ((donMin * 2 + donWait) * rtLoads) + ((donMin + donWait) * 1);
           truckMinBreakdown.push({ label: 'Job→Donation', min: m, detail });
         }
-        if (lastFacilityMin > 0) truckMinBreakdown.push({ label: 'Last stop→Home (one-way)', min: lastFacilityMin, detail: Math.round(lastFacilityMin) + ' min' });
+        if (lastFacilityMin > 0) truckMinBreakdown.push({ label: 'Last stop→Home (est. ≈ job↔home)', min: lastFacilityMin, detail: '~' + Math.round(lastFacilityMin) + ' min' });
         const totalTruckMin2 = truckMinBreakdown.reduce((s, t) => s + t.min, 0);
         lines.push(['  ↳ Drive + wait (' + Math.round(totalTruckMin2) + ' min = ' + totalTruckHrs.toFixed(2) + ' hrs × $' + crewRate + ')', fmt(totalTruckHrs * crewRate)]);
         truckMinBreakdown.forEach(t => {
