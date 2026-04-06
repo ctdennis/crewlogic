@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.0.4 | 2026-04-05">
+  <meta name="crewlogic-version" content="v3.0.5 | 2026-04-05">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -851,7 +851,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.0.4 | 2026-04-05 -->
+<!-- CrewLogic v3.0.5 | 2026-04-05 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2709,7 +2709,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.0.4 | 2026-04-05 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.0.5 | 2026-04-05 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6364,46 +6364,47 @@
       doc.setLineWidth(0.5);
       doc.line(rx + 10, 90, W - margin, 90);
 
-      // Owner name
+      // Right column — dynamic y position for all contact fields
+      const cs1 = (currentUser && currentUser.costSettings) || {};
+      const officeAddr = [cs1.officeAddress, cs1.officeCity, cs1.officeState].filter(Boolean).join(', ');
+      let ry2 = 108;
+
+      // CONTACT + name
       if (ownerName) {
         doc.setTextColor(150, 180, 160);
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(8);
-        doc.text('CONTACT', rx + 10, 108);
+        doc.text('CONTACT', rx + 10, ry2); ry2 += 14;
         doc.setTextColor(...white);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
-        doc.text(ownerName, rx + 10, 120);
+        doc.text(ownerName, rx + 10, ry2); ry2 += 18;
       }
 
+      // ADDRESS — between name and phone
+      if (officeAddr) {
+        const addrLines = doc.splitTextToSize(officeAddr, rxW);
+        doc.setTextColor(...white);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.text(addrLines, rx + 10, ry2);
+        ry2 += addrLines.length * 12 + 6;
+      }
+
+      // PHONE
       if (phone) {
         doc.setTextColor(150, 180, 160);
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(8);
-        doc.text('PHONE', rx + 10, ownerName ? 136 : 108);
+        doc.text('PHONE', rx + 10, ry2); ry2 += 14;
         doc.setTextColor(...white);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
-        doc.text(phone, rx + 10, ownerName ? 148 : 120);
-      }
-
-      // Office address — between phone and website
-      const cs1 = (currentUser && currentUser.costSettings) || {};
-      const officeAddr = [cs1.officeAddress, cs1.officeCity, cs1.officeState].filter(Boolean).join(', ');
-      const addrY = ownerName && phone ? 164 : ownerName || phone ? 148 : 136;
-      if (officeAddr) {
-        doc.setTextColor(150, 180, 160);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8);
-        doc.text('ADDRESS', rx + 10, addrY);
-        doc.setTextColor(...white);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9);
-        doc.text(doc.splitTextToSize(officeAddr, rxW), rx + 10, addrY + 12);
+        doc.text(phone, rx + 10, ry2); ry2 += 18;
       }
 
       if (website) {
-        const webY = (ownerName && phone && officeAddr) ? 196 : (ownerName && phone) || (phone && officeAddr) || (ownerName && officeAddr) ? 180 : ownerName || phone || officeAddr ? 164 : 136;
+        const webY = ry2;
         doc.setTextColor(150, 180, 160);
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(8);
@@ -6415,8 +6416,8 @@
         doc.text(doc.splitTextToSize(webShort, rxW), rx + 10, webY + 12);
       }
 
-      // Logo image in right column
-      const logoAreaY = website ? 220 : officeAddr ? 200 : ownerName && phone ? 185 : 170;
+      // Logo image in right column — positioned below all contact fields
+      const logoAreaY = ry2 + (website ? 28 : 10);
       const logoAreaH = H - 40 - logoAreaY;
       const logoW = rxW;
       const logoH = Math.round(logoW / 1.71); // maintain 2971:1738 ratio
