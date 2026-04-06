@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.0.8 | 2026-04-06">
+  <meta name="crewlogic-version" content="v3.0.9 | 2026-04-06">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -851,7 +851,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.0.8 | 2026-04-06 -->
+<!-- CrewLogic v3.0.9 | 2026-04-06 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -973,30 +973,38 @@
           <div class="settings-card fade-in fade-in-delay-2">
             <div class="settings-card-title">Vonigo Integration</div>
 
-            <div id="vonigoStatusBadge" class="config-status missing">
-              <span class="config-status-dot"></span>
-              <span id="vonigoStatusText">Not configured</span>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+              <div id="vonigoStatusBadge" class="config-status missing">
+                <span class="config-status-dot"></span>
+                <span id="vonigoStatusText">Not configured</span>
+              </div>
+              <a id="vonigoChangeLink" href="#" onclick="toggleVonigoForm(event)"
+                style="display:none;font-size:13px;color:var(--accent);text-decoration:underline;">
+                Change
+              </a>
             </div>
 
-            <div class="settings-input-group">
-              <label class="settings-input-label">Vonigo username</label>
-              <input type="text" class="form-input" id="settingsVonigoUser"
-                placeholder="First.Last" autocomplete="off" autocapitalize="off">
-              <div class="form-hint">Your Vonigo login username (e.g. Charles.Dennis)</div>
-            </div>
+            <div id="vonigoForm" style="display:none;">
+              <div class="settings-input-group">
+                <label class="settings-input-label">Vonigo username</label>
+                <input type="text" class="form-input" id="settingsVonigoUser"
+                  placeholder="First.Last" autocomplete="off" autocapitalize="off">
+                <div class="form-hint">Your Vonigo login username (e.g. Charles.Dennis)</div>
+              </div>
 
-            <div class="settings-input-group">
-              <label class="settings-input-label">Vonigo password</label>
-              <input type="password" class="form-input" id="settingsVonigoPass"
-                placeholder="••••••••" autocomplete="current-password">
-              <div class="form-hint">Sent securely over HTTPS, never stored in the app</div>
-            </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Vonigo password</label>
+                <input type="password" class="form-input" id="settingsVonigoPass"
+                  placeholder="••••••••" autocomplete="current-password">
+                <div class="form-hint">Sent securely over HTTPS, never stored in the app</div>
+              </div>
 
-            <button class="settings-save-btn" id="settingsSaveBtn" onclick="saveVonigoCredentials()">
-              <div class="spinner"></div>
-              <span class="btn-text">Save credentials</span>
-            </button>
-            <div class="settings-feedback" id="settingsFeedback"></div>
+              <button class="settings-save-btn" id="settingsSaveBtn" onclick="saveVonigoCredentials()">
+                <div class="spinner"></div>
+                <span class="btn-text">Save credentials</span>
+              </button>
+              <div class="settings-feedback" id="settingsFeedback"></div>
+            </div>
           </div>
 
           <!-- Franchise Info -->
@@ -2645,12 +2653,18 @@
       // Vonigo status
       const badge = document.getElementById('vonigoStatusBadge');
       const txt = document.getElementById('vonigoStatusText');
+      const changeLink = document.getElementById('vonigoChangeLink');
+      const vonigoForm = document.getElementById('vonigoForm');
       if (currentUser.vonigoConfigured) {
         badge.className = 'config-status ok';
         txt.textContent = 'Configured';
+        changeLink.style.display = 'inline';
+        vonigoForm.style.display = 'none';
       } else {
         badge.className = 'config-status missing';
         txt.textContent = 'Not configured';
+        changeLink.style.display = 'none';
+        vonigoForm.style.display = 'block';
       }
 
       document.getElementById('settingsFeedback').textContent = '';
@@ -2659,6 +2673,20 @@
       populateProposalSettingsFields();
       // Always start on franchise tab
       showSettingsTab('franchise');
+    }
+
+    function toggleVonigoForm(e) {
+      e.preventDefault();
+      const form = document.getElementById('vonigoForm');
+      const link = document.getElementById('vonigoChangeLink');
+      const isOpen = form.style.display !== 'none';
+      form.style.display = isOpen ? 'none' : 'block';
+      link.textContent = isOpen ? 'Change' : 'Cancel';
+      if (!isOpen) {
+        document.getElementById('settingsVonigoUser').value = currentUser.vonigoUsername || '';
+        document.getElementById('settingsVonigoPass').value = '';
+        document.getElementById('settingsVonigoPass').focus();
+      }
     }
 
     async function saveVonigoCredentials() {
@@ -2689,6 +2717,9 @@
           feedbackEl.textContent = '✓ Credentials saved — franchise ' + (data.franchiseName || data.franchiseID || '');
           feedbackEl.className = 'settings-feedback ok';
           document.getElementById('settingsVonigoPass').value = '';
+          document.getElementById('vonigoForm').style.display = 'none';
+          document.getElementById('vonigoChangeLink').style.display = 'inline';
+          document.getElementById('vonigoChangeLink').textContent = 'Change';
           updatePriceLookupCardState();
           populateSettings(); // refresh badge
         } else {
@@ -2709,7 +2740,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.0.8 | 2026-04-06 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.0.9 | 2026-04-06 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -3465,6 +3496,9 @@
       if (currentUser.officeState) document.getElementById('settingsOfficeState').value = currentUser.officeState;
       if (currentUser.officeZip) document.getElementById('settingsOfficeZip').value = currentUser.officeZip;
       if (currentUser.website) document.getElementById('settingsWebsite').value = currentUser.website;
+      // Vonigo username pre-filled from session (form is hidden when configured)
+      if (currentUser.vonigoUsername) document.getElementById('settingsVonigoUser').value = currentUser.vonigoUsername;
+
       populateCostSettingsFields();
     }
 
