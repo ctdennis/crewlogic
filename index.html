@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.0.9 | 2026-04-06">
+  <meta name="crewlogic-version" content="v3.1.1 | 2026-04-06">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -851,7 +851,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.0.9 | 2026-04-06 -->
+<!-- CrewLogic v3.1.1 | 2026-04-06 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -906,7 +906,7 @@
             <div class="module-desc">Create & manage customer estimates</div>
           </div>
 
-          <div class="module-card fade-in fade-in-delay-2" onclick="openModule('router')">
+          <div class="module-card fade-in fade-in-delay-2" id="routerCard" onclick="openModule('router')" style="display:none;">
             <div class="module-icon">🚛</div>
             <div class="module-name">Route Optimizer</div>
             <div class="module-desc">Find optimal transfer stations</div>
@@ -973,15 +973,15 @@
           <div class="settings-card fade-in fade-in-delay-2">
             <div class="settings-card-title">Vonigo Integration</div>
 
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-              <div id="vonigoStatusBadge" class="config-status missing">
+            <div style="margin-bottom:12px;">
+              <div id="vonigoStatusBadge" class="config-status missing" style="display:inline-flex;align-items:center;gap:6px;">
                 <span class="config-status-dot"></span>
                 <span id="vonigoStatusText">Not configured</span>
+                <span id="vonigoChangeLink" onclick="toggleVonigoForm(event)"
+                  style="display:none;color:white;cursor:pointer;font-size:13px;border-left:1px solid rgba(255,255,255,0.4);padding-left:8px;margin-left:2px;">
+                  Change
+                </span>
               </div>
-              <a id="vonigoChangeLink" href="#" onclick="toggleVonigoForm(event)"
-                style="display:none;font-size:13px;color:var(--accent);text-decoration:underline;">
-                Change
-              </a>
             </div>
 
             <div id="vonigoForm" style="display:none;">
@@ -2534,6 +2534,10 @@
       // Show setup badge on Price Lookup if Vonigo not configured
       updatePriceLookupCardState();
 
+      // Route Optimizer only available for franchise 90
+      const routerCard = document.getElementById('routerCard');
+      if (routerCard) routerCard.style.display = String(currentUser.franchiseID) === '90' ? '' : 'none';
+
       goHome();
     }
 
@@ -2623,7 +2627,13 @@
       document.getElementById('headerTitle').textContent = m.title;
       currentScreen = module;
 
-      if (module === 'router') initRouteOptimizer();
+      if (module === 'router') {
+        if (String(currentUser.franchiseID) !== '90') {
+          showHome();
+          return;
+        }
+        initRouteOptimizer();
+      }
       if (module === 'estimates') initEstimatesList();
       if (module === 'settings') populateSettings();
       if (module === 'priceLookup') {
@@ -2658,7 +2668,7 @@
       if (currentUser.vonigoConfigured) {
         badge.className = 'config-status ok';
         txt.textContent = 'Configured';
-        changeLink.style.display = 'inline';
+        changeLink.style.display = 'inline-block';
         vonigoForm.style.display = 'none';
       } else {
         badge.className = 'config-status missing';
@@ -2676,7 +2686,7 @@
     }
 
     function toggleVonigoForm(e) {
-      e.preventDefault();
+      if (e) e.preventDefault();
       const form = document.getElementById('vonigoForm');
       const link = document.getElementById('vonigoChangeLink');
       const isOpen = form.style.display !== 'none';
@@ -2718,7 +2728,7 @@
           feedbackEl.className = 'settings-feedback ok';
           document.getElementById('settingsVonigoPass').value = '';
           document.getElementById('vonigoForm').style.display = 'none';
-          document.getElementById('vonigoChangeLink').style.display = 'inline';
+          document.getElementById('vonigoChangeLink').style.display = 'inline-block';
           document.getElementById('vonigoChangeLink').textContent = 'Change';
           updatePriceLookupCardState();
           populateSettings(); // refresh badge
@@ -2740,7 +2750,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.0.9 | 2026-04-06 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.1.1 | 2026-04-06 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
