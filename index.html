@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.1.4 | 2026-04-06">
+  <meta name="crewlogic-version" content="v3.1.5 | 2026-04-06">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -311,13 +311,13 @@
 
     .form-input {
       width: 100%;
-      padding: 12px 14px;
+      padding: 8px 10px;
       background: var(--bg-input);
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
       color: var(--text-primary);
       font-family: 'DM Sans', sans-serif;
-      font-size: 16px;
+      font-size: 14px;
       outline: none;
       transition: border-color 0.2s;
     }
@@ -369,9 +369,9 @@
 
     /* Buttons */
     .calc-btn {
-      width: 100%; padding: 16px; background: var(--accent-green); color: var(--bg-primary);
+      width: 100%; padding: 10px; background: var(--accent-green); color: var(--bg-primary);
       border: none; border-radius: var(--radius); font-family: 'DM Sans', sans-serif;
-      font-size: 16px; font-weight: 700; cursor: pointer; transition: all 0.2s;
+      font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s;
       margin-top: 8px; display: flex; align-items: center; justify-content: center; gap: 8px;
     }
     .calc-btn:active { transform: scale(0.98); }
@@ -389,10 +389,10 @@
     @keyframes spin { to { transform: rotate(360deg); } }
 
     .new-estimate-btn {
-      width: 100%; padding: 14px; background: var(--bg-card);
+      width: 100%; padding: 9px; background: var(--bg-card);
       color: var(--accent-green); border: 1px solid var(--accent-green);
       border-radius: var(--radius); font-family: 'DM Sans', sans-serif;
-      font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 16px; transition: all 0.2s;
+      font-size: 13px; font-weight: 600; cursor: pointer; margin-top: 12px; transition: all 0.2s;
     }
     .new-estimate-btn:active { transform: scale(0.98); background: var(--bg-input); }
 
@@ -789,9 +789,9 @@
     .est-total-amount { font-family: 'Space Mono', monospace; font-size: 22px; font-weight: 700; color: var(--accent-green); }
 
     .est-submit-btn {
-      width: 100%; padding: 16px; background: var(--accent-blue); color: #fff;
+      width: 100%; padding: 10px; background: var(--accent-blue); color: #fff;
       border: none; border-radius: var(--radius); font-family: 'DM Sans', sans-serif;
-      font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 8px;
+      font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 8px;
       display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s;
     }
     .est-submit-btn:active { transform: scale(0.98); }
@@ -851,7 +851,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.1.4 | 2026-04-06 -->
+<!-- CrewLogic v3.1.5 | 2026-04-06 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1276,8 +1276,14 @@
             </div>
           </div>
           <div class="form-group">
-            <div class="form-label">Notes</div>
-            <textarea class="form-input" id="estNotes" rows="2" placeholder="Access notes, special instructions..." style="resize:none;" oninput="autoSaveDraft()"></textarea>
+            <div class="form-label" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;" onclick="toggleNotes()">
+              <span>Notes</span>
+              <span id="notesToggleIcon" style="font-size:11px;color:var(--text-muted);">▼ expand</span>
+            </div>
+            <div id="notesContainer" style="display:none;">
+              <textarea class="form-input" id="estNotes" rows="2" placeholder="Access notes, special instructions..." style="resize:none;margin-top:4px;" oninput="autoSaveDraft()"></textarea>
+            </div>
+            <div id="notesPreview" style="font-size:12px;color:var(--text-muted);font-style:italic;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
           </div>
 
           <hr class="form-divider">
@@ -2685,6 +2691,27 @@
       showSettingsTab('franchise');
     }
 
+    function toggleNotes() {
+      const container = document.getElementById('notesContainer');
+      const icon = document.getElementById('notesToggleIcon');
+      const preview = document.getElementById('notesPreview');
+      const isOpen = container.style.display !== 'none';
+      container.style.display = isOpen ? 'none' : 'block';
+      icon.textContent = isOpen ? '▼ expand' : '▲ collapse';
+      preview.style.display = isOpen ? 'block' : 'none';
+    }
+
+    function updateNotesPreview() {
+      const val = document.getElementById('estNotes').value;
+      const preview = document.getElementById('notesPreview');
+      const container = document.getElementById('notesContainer');
+      if (preview) preview.textContent = val || '';
+      // Auto-expand if notes has content when loading
+      if (val && container && container.style.display === 'none') {
+        toggleNotes();
+      }
+    }
+
     function toggleVonigoForm(e) {
       if (e) e.preventDefault();
       const form = document.getElementById('vonigoForm');
@@ -2750,7 +2777,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.1.4 | 2026-04-06 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.1.5 | 2026-04-06 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -3799,6 +3826,7 @@
       document.getElementById('estClientName').value = currentEstimate.clientName || '';
       document.getElementById('estAddress').value = currentEstimate.address || '';
       document.getElementById('estNotes').value = currentEstimate.notes || '';
+      updateNotesPreview();
 
       // Populate Step 1 job ID field
       if (currentEstimate.jobID) {
