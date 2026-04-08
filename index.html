@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.2.6 | 2026-04-08">
+  <meta name="crewlogic-version" content="v3.2.7 | 2026-04-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -852,7 +852,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.2.6 | 2026-04-08 -->
+<!-- CrewLogic v3.2.7 | 2026-04-08 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2797,6 +2797,11 @@
     }
 
     function acceptInviteWithGoogle() {
+      // Store the name they entered before redirect
+      const nameInput = document.getElementById('inviteName');
+      if (nameInput && nameInput.value.trim()) {
+        storage.set('pending_invite_name', nameInput.value.trim());
+      }
       // Pass invite token through OAuth state so it survives the redirect
       const token = storage.get('pending_invite_token');
       triggerGoogleSignIn(token);
@@ -2809,13 +2814,17 @@
       const role = storage.get('pending_invite_role') || 'estimator';
       if (!token || !inviteId) return false;
 
+      // Use name they entered on invite screen, fallback to Google name
+      const inviteName = storage.get('pending_invite_name') || userName;
+      storage.remove('pending_invite_name');
+
       // Create profile for new team member
       await supabaseFetch('/rest/v1/profiles', {
         method: 'POST',
         body: JSON.stringify({
           franchise_id: franchiseId,
           email: userEmail,
-          name: userName,
+          name: inviteName,
           role: role,
           accepted_invite_id: inviteId
         }),
@@ -2989,7 +2998,7 @@
         initRouteOptimizer();
       }
       if (module === 'estimates') initEstimatesList();
-      if (module === 'settings') populateSettings();
+      if (module === 'settings') { populateSettings(); if (currentUser && currentUser.role === 'owner') loadTeamMembers(); }
       if (module === 'priceLookup') {
         if (!currentUser.vonigoConfigured) {
           document.getElementById('priceLookupError').textContent = 'Vonigo credentials not configured. Go to Settings to set them up.';
@@ -3125,7 +3134,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.2.6 | 2026-04-08 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.2.7 | 2026-04-08 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
