@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.2.4 | 2026-04-08">
+  <meta name="crewlogic-version" content="v3.2.5 | 2026-04-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -852,7 +852,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.2.4 | 2026-04-08 -->
+<!-- CrewLogic v3.2.5 | 2026-04-08 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2530,6 +2530,17 @@
           const session = JSON.parse(decodeURIComponent(raw));
           if (session && session.email) {
             currentUser = session;
+            // Recover invite token from session (passed via OAuth state parameter)
+            if (session.inviteToken) {
+              storage.set('pending_invite_token', session.inviteToken);
+              // Look up invite ID from token
+              const inviteData = await supabaseFetch('/rest/v1/invites?select=id,franchise_id,role&token=eq.' + session.inviteToken);
+              if (inviteData && inviteData[0]) {
+                storage.set('pending_invite_id', inviteData[0].id);
+                storage.set('pending_invite_franchise_id', inviteData[0].franchise_id);
+                storage.set('pending_invite_role', inviteData[0].role || 'estimator');
+              }
+            }
             // Process pending invite if present
             const wasInvite = await processPendingInvite(session.email, session.name);
             if (wasInvite) {
@@ -2583,23 +2594,33 @@
       document.getElementById('appShell').classList.remove('active');
     }
 
-    function triggerGoogleSignIn() {
+    function triggerGoogleSignIn(inviteToken) {
       const btn = document.getElementById('googleSignInBtn');
       const statusEl = document.getElementById('loginStatus');
-      btn.style.opacity = '0.6';
-      btn.style.pointerEvents = 'none';
-      statusEl.textContent = 'Redirecting to Google...';
-      statusEl.style.color = '#94a3b8';
+      if (btn) { btn.style.opacity = '0.6'; btn.style.pointerEvents = 'none'; }
+      if (statusEl) { statusEl.textContent = 'Redirecting to Google...'; statusEl.style.color = '#94a3b8'; }
 
-      const params = new URLSearchParams({
+      const oauthParams = {
         client_id: GOOGLE_CLIENT_ID,
         redirect_uri: OAUTH_REDIRECT,
         response_type: 'code',
         scope: 'openid email profile',
-        hd: 'junkluggers.com',
         access_type: 'online',
         prompt: 'select_account'
-      });
+      };
+
+      // Only restrict to junkluggers.com if not an invite flow
+      const pendingToken = inviteToken || storage.get('pending_invite_token');
+      if (!pendingToken) {
+        oauthParams.hd = 'junkluggers.com';
+      }
+
+      // Pass invite token through OAuth state parameter so it survives redirect
+      if (pendingToken) {
+        oauthParams.state = 'invite:' + pendingToken;
+      }
+
+      const params = new URLSearchParams(oauthParams);
 
       // Full page redirect — avoids COOP popup restrictions
       window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
@@ -2769,8 +2790,9 @@
     }
 
     function acceptInviteWithGoogle() {
-      // Same Google OAuth flow — after login, check for pending invite
-      triggerGoogleSignIn();
+      // Pass invite token through OAuth state so it survives the redirect
+      const token = storage.get('pending_invite_token');
+      triggerGoogleSignIn(token);
     }
 
     async function processPendingInvite(userEmail, userName) {
@@ -3096,7 +3118,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.2.4 | 2026-04-08 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.2.5 | 2026-04-08 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
