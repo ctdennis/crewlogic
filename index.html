@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.1.7 | 2026-04-06">
+  <meta name="crewlogic-version" content="v3.2.0 | 2026-04-06">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -11,6 +11,7 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBmMTkyMyIvPjx0ZXh0IHg9IjE2IiB5PSIyMiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxNCIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iIzRhZGU4MCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+Q0w8L3RleHQ+PC9zdmc+">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
   <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
   <script>
     // Initialize on DOM ready — no GIS library needed
@@ -851,7 +852,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.1.7 | 2026-04-06 -->
+<!-- CrewLogic v3.2.0 | 2026-04-06 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -879,6 +880,38 @@
 
       <div id="loginSpinner" style="display:none;width:20px;height:20px;border:2px solid #2d4050;border-top-color:#4ade80;border-radius:50%;animation:spin 0.7s linear infinite;"></div>
       <div id="loginStatus" style="font-size:13px;color:#64748b;text-align:center;min-height:20px;"></div>
+    </div>
+  </div>
+
+  <!-- ===== INVITE SIGNUP SCREEN ===== -->
+  <div id="inviteScreen" style="display:none;min-height:100vh;background:var(--bg-primary);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;">
+    <div style="width:100%;max-width:400px;">
+      <div style="font-size:28px;font-weight:800;color:var(--accent-green);margin-bottom:4px;">CrewLogic</div>
+      <div style="font-size:14px;color:var(--text-muted);margin-bottom:32px;">You've been invited to join a team</div>
+
+      <div id="inviteDetails" style="background:var(--bg-card);border-radius:var(--radius);padding:16px;margin-bottom:20px;border:1px solid var(--border);">
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">Invited to</div>
+        <div id="inviteFranchiseName" style="font-size:16px;font-weight:700;color:var(--text-primary);">Loading...</div>
+      </div>
+
+      <div style="margin-bottom:12px;">
+        <div class="form-label">Your name</div>
+        <input type="text" class="form-input" id="inviteName" placeholder="First Last" autocomplete="name">
+      </div>
+      <div style="margin-bottom:20px;">
+        <div class="form-label">Sign in with</div>
+        <button onclick="acceptInviteWithGoogle()" style="width:100%;padding:10px 20px;background:#fff;color:#1f2937;border:none;border-radius:var(--radius-sm);font-family:'DM Sans',sans-serif;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;">
+          <svg width="16" height="16" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+            <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
+            <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/>
+            <path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/>
+            <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
+          </svg>
+          Continue with Google
+        </button>
+      </div>
+
+      <div id="inviteStatus" style="font-size:13px;color:var(--text-muted);text-align:center;"></div>
     </div>
   </div>
 
@@ -1194,10 +1227,39 @@
 
         <!-- TAB: Account -->
         <div id="stab-content-account" style="display:none;">
+
+          <!-- Team Members — owners only -->
+          <div class="settings-card fade-in fade-in-delay-2" id="teamMembersCard" style="display:none;">
+            <div class="settings-card-title" style="display:flex;align-items:center;justify-content:space-between;">
+              <span>Team Members</span>
+              <button onclick="generateInviteLink()" style="padding:5px 12px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;">+ Invite</button>
+            </div>
+
+            <!-- Invite link panel — hidden until generated -->
+            <div id="inviteLinkPanel" style="display:none;margin-bottom:12px;padding:10px;background:var(--bg-input);border-radius:var(--radius-sm);border:1px solid var(--border);">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Share this link — expires in 7 days</div>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <input id="inviteLinkInput" type="text" readonly style="flex:1;font-size:11px;padding:6px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-secondary);font-family:monospace;">
+                <button onclick="copyInviteLink()" id="copyInviteBtn" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;color:var(--text-primary);cursor:pointer;white-space:nowrap;">Copy</button>
+                <button onclick="shareInviteLink()" id="shareInviteBtn" style="display:none;padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;color:var(--text-primary);cursor:pointer;">Share</button>
+              </div>
+              <div id="inviteLinkFeedback" style="font-size:11px;margin-top:4px;"></div>
+            </div>
+
+            <!-- Team member list -->
+            <div id="teamMembersList" style="font-size:13px;color:var(--text-muted);">Loading...</div>
+            <div class="settings-feedback" id="teamFeedback"></div>
+          </div>
+
+          <!-- Account -->
           <div class="settings-card fade-in fade-in-delay-4">
             <div class="settings-card-title">Account</div>
+            <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
+              Signed in as <strong style="color:var(--text-primary);" id="accountEmail"></strong>
+            </div>
             <button class="logout-btn" onclick="handleLogout()">Sign out</button>
           </div>
+
         </div><!-- end account tab -->
 
       </div>
@@ -2455,7 +2517,11 @@
     // ===== GOOGLE SIGN-IN — OAuth2 popup flow (no GIS/cookies needed) =====
     const OAUTH_REDIRECT = 'https://junkluggers.app.n8n.cloud/webhook/crewlogic-oauth-callback';
 
-    function initAuth() {
+    async function initAuth() {
+      // Check for invite token first
+      const hasInvite = await checkInviteToken();
+      if (hasInvite) return;
+
       // Check if returning from OAuth callback with session in hash
       const hash = window.location.hash;
       if (hash && hash.startsWith('#session=')) {
@@ -2464,9 +2530,17 @@
           const session = JSON.parse(decodeURIComponent(raw));
           if (session && session.email) {
             currentUser = session;
+            // Process pending invite if present
+            const wasInvite = await processPendingInvite(session.email, session.name);
+            if (wasInvite) {
+              // Reload session from Supabase — franchise info now available
+              // For now just continue with what we have
+            }
             storage.set(SESSION_KEY, JSON.stringify(currentUser));
             // Clean the hash from the URL
             history.replaceState(null, '', window.location.pathname + window.location.search);
+            // Hide invite screen if shown
+            document.getElementById('inviteScreen').style.display = 'none';
             showApp();
             return;
           }
@@ -2520,6 +2594,223 @@
       window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
     }
 
+    // ===== TEAM / INVITE SYSTEM =====
+
+    const SUPABASE_URL = 'https://ozfkpxyachigfpcmvekz.supabase.co';
+    const SUPABASE_ANON_KEY = 'REPLACE_WITH_ANON_KEY'; // Settings → API Keys → anon public
+
+    async function supabaseFetch(path, opts = {}) {
+      const res = await fetch(SUPABASE_URL + path, {
+        ...opts,
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation',
+          ...(opts.headers || {})
+        }
+      });
+      return res.json();
+    }
+
+    async function generateInviteLink() {
+      const feedback = document.getElementById('inviteLinkFeedback');
+      const panel = document.getElementById('inviteLinkPanel');
+      feedback.textContent = 'Generating...';
+      panel.style.display = 'block';
+
+      // Get franchise uuid from Supabase
+      const franchises = await supabaseFetch(
+        '/rest/v1/franchises?select=id&external_id=eq.' + currentUser.franchiseID + '&tenant_id=eq.946a4535-aa61-45b6-a6fb-9190ff546d41'
+      );
+      if (!franchises || !franchises[0]) {
+        feedback.textContent = 'Error: franchise not found';
+        feedback.style.color = 'var(--accent-red)';
+        return;
+      }
+      const franchiseUUID = franchises[0].id;
+
+      // Find inviter profile
+      const profiles = await supabaseFetch('/rest/v1/profiles?select=id&email=eq.' + encodeURIComponent(currentUser.email));
+      const inviterID = profiles && profiles[0] ? profiles[0].id : null;
+
+      // Create invite token
+      const invite = await supabaseFetch('/rest/v1/invites', {
+        method: 'POST',
+        body: JSON.stringify({
+          franchise_id: franchiseUUID,
+          email: '',
+          role: 'estimator',
+          invited_by: inviterID
+        })
+      });
+
+      if (!invite || !invite[0] || !invite[0].token) {
+        feedback.textContent = 'Error generating invite';
+        feedback.style.color = 'var(--accent-red)';
+        return;
+      }
+
+      const link = window.location.origin + window.location.pathname + '?invite=' + invite[0].token;
+      document.getElementById('inviteLinkInput').value = link;
+      feedback.textContent = 'Valid for 7 days';
+      feedback.style.color = 'var(--text-muted)';
+
+      // Show share button if Web Share API available
+      if (navigator.share) {
+        document.getElementById('shareInviteBtn').style.display = 'block';
+      }
+    }
+
+    function copyInviteLink() {
+      const input = document.getElementById('inviteLinkInput');
+      navigator.clipboard.writeText(input.value).then(() => {
+        const btn = document.getElementById('copyInviteBtn');
+        btn.textContent = '✓ Copied';
+        btn.style.color = 'var(--accent-green)';
+        setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = ''; }, 2000);
+      });
+    }
+
+    function shareInviteLink() {
+      const link = document.getElementById('inviteLinkInput').value;
+      navigator.share({
+        title: 'Join my CrewLogic team',
+        text: "You've been invited to join CrewLogic. Tap to set up your account:",
+        url: link
+      });
+    }
+
+    async function loadTeamMembers() {
+      const listEl = document.getElementById('teamMembersList');
+      if (!listEl) return;
+
+      const franchises = await supabaseFetch(
+        '/rest/v1/franchises?select=id&external_id=eq.' + currentUser.franchiseID + '&tenant_id=eq.946a4535-aa61-45b6-a6fb-9190ff546d41'
+      );
+      if (!franchises || !franchises[0]) { listEl.textContent = 'Could not load team.'; return; }
+      const franchiseUUID = franchises[0].id;
+
+      const members = await supabaseFetch(
+        '/rest/v1/profiles?select=name,email,role,created_at&franchise_id=eq.' + franchiseUUID + '&order=created_at.asc'
+      );
+
+      if (!members || members.length === 0) {
+        listEl.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">No team members yet. Tap + Invite to add someone.</div>';
+        return;
+      }
+
+      listEl.innerHTML = members.map(m => {
+        const isYou = m.email === currentUser.email;
+        return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">' +
+          '<div>' +
+            '<div style="font-size:13px;font-weight:600;color:var(--text-primary);">' + (m.name || m.email) + (isYou ? ' <span style="font-size:10px;color:var(--text-muted);">(you)</span>' : '') + '</div>' +
+            '<div style="font-size:11px;color:var(--text-muted);">' + m.email + '</div>' +
+          '</div>' +
+          '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--bg-input);color:' + (m.role === 'owner' ? 'var(--accent-green)' : 'var(--text-muted)') + ';">' + m.role + '</span>' +
+        '</div>';
+      }).join('');
+    }
+
+    // Check for invite token on app load
+    async function checkInviteToken() {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('invite');
+      if (!token) return false;
+
+      // Show invite screen
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('inviteScreen').style.display = 'flex';
+
+      // Look up invite
+      const invites = await supabaseFetch(
+        '/rest/v1/invites?select=id,franchise_id,role,expires_at,accepted_at,franchises(franchise_name)&token=eq.' + token
+      );
+
+      const invite = invites && invites[0];
+      if (!invite) {
+        document.getElementById('inviteStatus').textContent = 'This invite link is invalid or has expired.';
+        document.getElementById('inviteStatus').style.color = 'var(--accent-red)';
+        return true;
+      }
+      if (invite.accepted_at) {
+        document.getElementById('inviteStatus').textContent = 'This invite has already been used.';
+        document.getElementById('inviteStatus').style.color = 'var(--accent-red)';
+        return true;
+      }
+      if (new Date(invite.expires_at) < new Date()) {
+        document.getElementById('inviteStatus').textContent = 'This invite has expired. Ask your owner to send a new one.';
+        document.getElementById('inviteStatus').style.color = 'var(--accent-red)';
+        return true;
+      }
+
+      // Show franchise name
+      const fname = invite.franchises ? invite.franchises.franchise_name : 'your team';
+      document.getElementById('inviteFranchiseName').textContent = fname;
+
+      // Store token for use after Google sign-in
+      storage.set('pending_invite_token', token);
+      storage.set('pending_invite_id', invite.id);
+      storage.set('pending_invite_franchise_id', invite.franchise_id);
+      storage.set('pending_invite_role', invite.role);
+
+      return true;
+    }
+
+    function acceptInviteWithGoogle() {
+      // Same Google OAuth flow — after login, check for pending invite
+      triggerGoogleSignIn();
+    }
+
+    async function processPendingInvite(userEmail, userName) {
+      const token = storage.get('pending_invite_token');
+      const inviteId = storage.get('pending_invite_id');
+      const franchiseId = storage.get('pending_invite_franchise_id');
+      const role = storage.get('pending_invite_role') || 'estimator';
+      if (!token || !inviteId) return false;
+
+      // Create profile for new team member
+      await supabaseFetch('/rest/v1/profiles', {
+        method: 'POST',
+        body: JSON.stringify({
+          franchise_id: franchiseId,
+          email: userEmail,
+          name: userName,
+          role: role,
+          accepted_invite_id: inviteId
+        }),
+        headers: { 'Prefer': 'resolution=merge-duplicates,return=representation' }
+      });
+
+      // Mark invite as accepted
+      await supabaseFetch('/rest/v1/invites?id=eq.' + inviteId, {
+        method: 'PATCH',
+        body: JSON.stringify({ accepted_at: new Date().toISOString() })
+      });
+
+      // Clean up
+      storage.remove('pending_invite_token');
+      storage.remove('pending_invite_id');
+      storage.remove('pending_invite_franchise_id');
+      storage.remove('pending_invite_role');
+
+      return true;
+    }
+
+    function applyRoleRestrictions() {
+      const role = currentUser.role || 'estimator';
+      if (role === 'owner') {
+        // Show team card
+        const teamCard = document.getElementById('teamMembersCard');
+        if (teamCard) teamCard.style.display = 'block';
+        loadTeamMembers();
+      } else {
+        // Hide settings tabs that estimators shouldn't see
+        const costTab = document.querySelector('[data-stab="cost"]');
+        if (costTab) costTab.style.display = 'none';
+      }
+    }
+
     function handleLogout() {
       if (confirm('Sign out of CrewLogic?')) {
         storage.remove(SESSION_KEY);
@@ -2539,6 +2830,13 @@
 
       // Show setup badge on Price Lookup if Vonigo not configured
       updatePriceLookupCardState();
+
+      // Apply role restrictions
+      applyRoleRestrictions();
+
+      // Update account email display
+      const accountEmail = document.getElementById('accountEmail');
+      if (accountEmail) accountEmail.textContent = currentUser.email || '';
 
       // Route Optimizer only available for franchise 90
       const routerCard = document.getElementById('routerCard');
@@ -2777,7 +3075,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.1.7 | 2026-04-06 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.2.0 | 2026-04-06 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -4547,12 +4845,7 @@
       input.onchange = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        const base64 = await new Promise((res, rej) => {
-          const reader = new FileReader();
-          reader.onload = () => res(reader.result);
-          reader.onerror = rej;
-          reader.readAsDataURL(file);
-        });
+        const base64 = await ensureJpegBase64(file);
         // Compress
         const compressed = await compressChargePhoto(base64);
         currentEstimate.charges[chargeIdx].photo = compressed;
@@ -4568,6 +4861,32 @@
         uploadChargePhotoToDrive(chargeIdx, compressed, tempIdx);
       };
       input.click();
+    }
+
+    // Convert HEIC/HEIF to JPEG blob if needed
+    async function ensureJpegBase64(file) {
+      const isHeic = file.type === 'image/heic' || file.type === 'image/heif' ||
+                     file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif');
+      if (isHeic && typeof heic2any !== 'undefined') {
+        try {
+          const jpegBlob = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 });
+          return new Promise((res, rej) => {
+            const reader = new FileReader();
+            reader.onload = () => res(reader.result);
+            reader.onerror = rej;
+            reader.readAsDataURL(jpegBlob);
+          });
+        } catch(e) {
+          console.warn('HEIC conversion failed, trying native:', e);
+        }
+      }
+      // Non-HEIC or fallback — read as-is
+      return new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onload = () => res(reader.result);
+        reader.onerror = rej;
+        reader.readAsDataURL(file);
+      });
     }
 
     // Low-res compress for inline AI analysis — fast to send, sufficient for identification
@@ -6035,15 +6354,11 @@
 
 
     // ===== COVER PHOTO =====
-    function handleCoverPhoto(input) {
+    async function handleCoverPhoto(input) {
       if (!input.files || !input.files[0]) return;
       const file = input.files[0];
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        // Open crop tool with the raw image
-        openCoverPhotoCrop(e.target.result);
-      };
-      reader.readAsDataURL(file);
+      const base64 = await ensureJpegBase64(file);
+      openCoverPhotoCrop(base64);
     }
 
     // ===== COVER PHOTO CROP TOOL =====
@@ -7679,12 +7994,7 @@ RECYCLING & DONATION
       const statusEl = document.getElementById('photoRoomStatus');
       statusEl.textContent = 'Processing photo...';
 
-      const base64 = await new Promise((res, rej) => {
-        const reader = new FileReader();
-        reader.onload = () => res(reader.result);
-        reader.onerror = rej;
-        reader.readAsDataURL(file);
-      });
+      const base64 = await ensureJpegBase64(file);
 
       // High-res for Drive storage, low-res for inline analysis
       const compressed = await compressChargePhoto(base64);   // 1920x1440 for Drive
