@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.2.2 | 2026-04-08">
+  <meta name="crewlogic-version" content="v3.2.4 | 2026-04-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -852,7 +852,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.2.2 | 2026-04-08 -->
+<!-- CrewLogic v3.2.4 | 2026-04-08 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2533,8 +2533,19 @@
             // Process pending invite if present
             const wasInvite = await processPendingInvite(session.email, session.name);
             if (wasInvite) {
-              // Reload session from Supabase — franchise info now available
-              // For now just continue with what we have
+              // Load franchise info from Supabase for the new team member
+              const profileData = await supabaseFetch(
+                '/rest/v1/profiles?select=role,franchise_id,franchises(external_id,franchise_name,cost_settings)&email=eq.' + encodeURIComponent(session.email)
+              );
+              if (profileData && profileData[0]) {
+                const p = profileData[0];
+                currentUser.role = p.role || 'estimator';
+                if (p.franchises) {
+                  currentUser.franchiseID = p.franchises.external_id;
+                  currentUser.franchiseName = p.franchises.franchise_name;
+                  currentUser.costSettings = p.franchises.cost_settings || {};
+                }
+              }
             }
             storage.set(SESSION_KEY, JSON.stringify(currentUser));
             // Clean the hash from the URL
@@ -2805,9 +2816,19 @@
         if (teamCard) teamCard.style.display = 'block';
         loadTeamMembers();
       } else {
-        // Hide settings tabs that estimators shouldn't see
-        const costTab = document.querySelector('[data-stab="cost"]');
+        // Estimator — hide owner-only features
+
+        // Hide Cost and Account settings tabs
+        const costTab = document.getElementById('stab-cost');
         if (costTab) costTab.style.display = 'none';
+
+        // Hide Submit to Vonigo button — estimators can build but not submit
+        const submitBtn = document.getElementById('estSubmitBtn');
+        if (submitBtn) submitBtn.style.display = 'none';
+
+        // Hide cost analysis panel
+        const costPanel = document.getElementById('costAnalysisPanel');
+        if (costPanel) costPanel.style.display = 'none';
       }
     }
 
@@ -3075,7 +3096,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.2.2 | 2026-04-08 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.2.4 | 2026-04-08 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
