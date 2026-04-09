@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.2.9 | 2026-04-08">
+  <meta name="crewlogic-version" content="v3.3.0 | 2026-04-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -852,7 +852,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.2.9 | 2026-04-08 -->
+<!-- CrewLogic v3.3.0 | 2026-04-08 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2886,11 +2886,16 @@
       } else {
         // Estimator — hide all owner-only features
 
-        // Hide Cost and Proposal settings tabs — PDF uses owner's settings
+        // Hide Franchise, Cost and Proposal settings tabs
+        const franchiseTab = document.getElementById('stab-franchise');
+        if (franchiseTab) franchiseTab.style.display = 'none';
         const costTab = document.getElementById('stab-cost');
         if (costTab) costTab.style.display = 'none';
         const proposalTab = document.getElementById('stab-proposal');
         if (proposalTab) proposalTab.style.display = 'none';
+
+        // Switch to account tab since franchise is hidden
+        showSettingsTab('account');
 
         // Hide Vonigo Integration and Franchise Info cards
         const vonigoCard = document.getElementById('vonigoCard');
@@ -3048,7 +3053,8 @@
       if (module === 'estimates') initEstimatesList();
       if (module === 'settings') { populateSettings(); if (currentUser && currentUser.role === 'owner') loadTeamMembers(); }
       if (module === 'priceLookup') {
-        if (!currentUser.vonigoConfigured) {
+        const isEstimatorRole = (currentUser.role || 'estimator') !== 'owner';
+        if (!currentUser.vonigoConfigured && !isEstimatorRole) {
           document.getElementById('priceLookupError').textContent = 'Vonigo credentials not configured. Go to Settings to set them up.';
           document.getElementById('priceLookupError').style.display = 'block';
           document.getElementById('priceLookupBtn').disabled = true;
@@ -3182,7 +3188,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.2.9 | 2026-04-08 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.3.0 | 2026-04-08 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
