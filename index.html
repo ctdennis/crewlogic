@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.2.7 | 2026-04-08">
+  <meta name="crewlogic-version" content="v3.2.9 | 2026-04-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -852,7 +852,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.2.7 | 2026-04-08 -->
+<!-- CrewLogic v3.2.9 | 2026-04-08 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1003,7 +1003,7 @@
         <div id="stab-content-franchise">
 
           <!-- Vonigo credentials -->
-          <div class="settings-card fade-in fade-in-delay-2">
+          <div class="settings-card fade-in fade-in-delay-2" id="vonigoCard">
             <div class="settings-card-title">Vonigo Integration</div>
 
             <div style="margin-bottom:0;">
@@ -1041,7 +1041,7 @@
           </div>
 
           <!-- Franchise Info -->
-          <div class="settings-card fade-in fade-in-delay-3">
+          <div class="settings-card fade-in fade-in-delay-3" id="franchiseInfoCard">
             <div class="settings-card-title">Franchise Info</div>
             <div class="settings-input-group">
               <label class="settings-input-label">Office Phone</label>
@@ -2741,14 +2741,44 @@
 
       listEl.innerHTML = members.map(m => {
         const isYou = m.email === currentUser.email;
+        const safeEmail = m.email.replace(/"/g, '&quot;');
+        const removeBtn = !isYou
+          ? '<button onclick="removeTeamMember(this)" data-email="' + safeEmail + '" style="padding:3px 8px;background:none;border:1px solid var(--accent-red);border-radius:var(--radius-sm);color:var(--accent-red);font-size:11px;cursor:pointer;margin-left:8px;">Remove</button>'
+          : '';
         return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">' +
-          '<div>' +
+          '<div style="flex:1;min-width:0;">' +
             '<div style="font-size:13px;font-weight:600;color:var(--text-primary);">' + (m.name || m.email) + (isYou ? ' <span style="font-size:10px;color:var(--text-muted);">(you)</span>' : '') + '</div>' +
-            '<div style="font-size:11px;color:var(--text-muted);">' + m.email + '</div>' +
+            '<div style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + m.email + '</div>' +
           '</div>' +
-          '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--bg-input);color:' + (m.role === 'owner' ? 'var(--accent-green)' : 'var(--text-muted)') + ';">' + m.role + '</span>' +
+          '<div style="display:flex;align-items:center;flex-shrink:0;">' +
+            '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--bg-input);color:' + (m.role === 'owner' ? 'var(--accent-green)' : 'var(--text-muted)') + ';">' + m.role + '</span>' +
+            removeBtn +
+          '</div>' +
         '</div>';
       }).join('');
+    }
+
+    async function removeTeamMember(btn) {
+      const email = btn.dataset.email;
+      if (!confirm('Remove ' + email + ' from your team?')) return;
+      const feedback = document.getElementById('teamFeedback');
+      feedback.textContent = 'Removing...';
+      feedback.className = 'settings-feedback';
+
+      const result = await supabaseFetch(
+        '/rest/v1/profiles?email=eq.' + encodeURIComponent(email),
+        { method: 'DELETE' }
+      );
+
+      if (result !== null) {
+        feedback.textContent = '✓ ' + email + ' removed';
+        feedback.className = 'settings-feedback ok';
+        setTimeout(() => { feedback.textContent = ''; }, 3000);
+        loadTeamMembers();
+      } else {
+        feedback.textContent = 'Failed to remove — try again';
+        feedback.className = 'settings-feedback error';
+      }
     }
 
     // Check for invite token on app load
@@ -2854,19 +2884,35 @@
         if (teamCard) teamCard.style.display = 'block';
         loadTeamMembers();
       } else {
-        // Estimator — hide owner-only features
+        // Estimator — hide all owner-only features
 
-        // Hide Cost and Account settings tabs
+        // Hide Cost and Proposal settings tabs — PDF uses owner's settings
         const costTab = document.getElementById('stab-cost');
         if (costTab) costTab.style.display = 'none';
+        const proposalTab = document.getElementById('stab-proposal');
+        if (proposalTab) proposalTab.style.display = 'none';
 
-        // Hide Submit to Vonigo button — estimators can build but not submit
+        // Hide Vonigo Integration and Franchise Info cards
+        const vonigoCard = document.getElementById('vonigoCard');
+        if (vonigoCard) vonigoCard.style.display = 'none';
+        const franchiseInfoCard = document.getElementById('franchiseInfoCard');
+        if (franchiseInfoCard) franchiseInfoCard.style.display = 'none';
+
+        // Hide Submit to Vonigo button
         const submitBtn = document.getElementById('estSubmitBtn');
         if (submitBtn) submitBtn.style.display = 'none';
 
         // Hide cost analysis panel
         const costPanel = document.getElementById('costAnalysisPanel');
         if (costPanel) costPanel.style.display = 'none';
+
+        // Remove "Setup needed" badge from Price Lookup — estimators use owner's Vonigo
+        const priceLookupCard = document.getElementById('priceLookupCard');
+        if (priceLookupCard) {
+          priceLookupCard.classList.remove('needs-setup');
+          const badge = priceLookupCard.querySelector('.setup-badge');
+          if (badge) badge.remove();
+        }
       }
     }
 
@@ -2906,7 +2952,9 @@
 
     function updatePriceLookupCardState() {
       const card = document.getElementById('priceLookupCard');
-      if (!currentUser.vonigoConfigured) {
+      // Estimators use owner's Vonigo creds — never show setup badge for them
+      const isEstimator = (currentUser.role || 'estimator') !== 'owner';
+      if (!currentUser.vonigoConfigured && !isEstimator) {
         card.classList.add('needs-setup');
         const existing = card.querySelector('.setup-badge');
         if (!existing) {
@@ -3134,7 +3182,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.2.7 | 2026-04-08 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.2.9 | 2026-04-08 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
