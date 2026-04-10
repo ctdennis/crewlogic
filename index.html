@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.4.7 | 2026-04-09">
+  <meta name="crewlogic-version" content="v3.4.9 | 2026-04-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -856,7 +856,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.4.7 | 2026-04-09 -->
+<!-- CrewLogic v3.4.9 | 2026-04-09 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1365,8 +1365,8 @@
           <div style="margin-bottom:14px;">
             <div class="est-section-title" style="margin-bottom:8px;">Add Items</div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-              <button class="est-add-btn voice-room-btn" id="voiceRoomBtn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe</button>
               <button class="est-add-btn" id="photoRoomBtn" onclick="startPhotoCapture()" style="background:var(--accent-green);color:#000;font-weight:600;">📷 Photo</button>
+              <button class="est-add-btn voice-room-btn" id="voiceRoomBtn" onclick="startRoomVoice()" style="background:var(--accent-green);color:#000;font-weight:600;">🎤 Describe</button>
               <button class="est-add-btn" id="addChargeBtn" onclick="showAddCharge()" style="background:var(--accent-green);color:#000;font-weight:600;">✏️ Manual</button>
               <!-- Specialty wizards dropdown -->
               <div style="position:relative;display:inline-block;">
@@ -1406,7 +1406,7 @@
               <button id="photoRoomAnalyzeBtn" onclick="analyzeRoomPhotos()" disabled style="flex:2;padding:10px;background:var(--accent-blue);border:none;border-radius:var(--radius-sm);color:#fff;font-size:13px;font-weight:700;cursor:pointer;opacity:0.4;">Analyze</button>
             </div>
             <button onclick="closePhotoPanel()" style="width:100%;margin-top:8px;padding:8px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;">💾 Save photos &amp; analyze later</button>
-            <input type="file" id="photoRoomInput" accept="image/*" capture="environment" style="display:none;" onchange="handlePhotoRoomCapture(this)">
+            <input type="file" id="photoRoomInput" accept="image/*" capture="environment" multiple style="display:none;" onchange="handlePhotoRoomCapture(this)">
           </div>
 
           <!-- Add charge buttons (repeated below charges for convenience) -->
@@ -3210,7 +3210,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.4.7 | 2026-04-09 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.4.9 | 2026-04-09 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -8273,29 +8273,37 @@ RECYCLING & DONATION
     }
 
     async function handlePhotoRoomCapture(input) {
-      const file = input.files[0];
-      if (!file) return;
+      const files = Array.from(input.files || []);
+      if (!files.length) return;
       input.value = '';
 
       const statusEl = document.getElementById('photoRoomStatus');
-      statusEl.textContent = 'Processing photo...';
+      const maxPhotos = 8;
+      const available = maxPhotos - photoRoomPending.length;
+      const toProcess = files.slice(0, available);
 
-      const base64 = await ensureJpegBase64(file);
+      if (toProcess.length === 0) {
+        statusEl.textContent = 'Maximum 8 photos per room reached.';
+        return;
+      }
 
-      // High-res for Drive storage, low-res for inline analysis
-      const compressed = await compressChargePhoto(base64);   // 1920x1440 for Drive
-      const analysisImg = await compressForAnalysis(base64);  // 800x600 for inline AI
-      photoRoomPending.push({ base64: analysisImg, hiRes: compressed, driveUrl: null });
-      renderPhotoRoomThumbs();
+      statusEl.textContent = 'Processing ' + toProcess.length + ' photo' + (toProcess.length !== 1 ? 's' : '') + '...';
+
+      for (const file of toProcess) {
+        const base64 = await ensureJpegBase64(file);
+        const compressed = await compressChargePhoto(base64);
+        const analysisImg = await compressForAnalysis(base64);
+        const idx = photoRoomPending.length;
+        photoRoomPending.push({ base64: analysisImg, hiRes: compressed, driveUrl: null });
+        renderPhotoRoomThumbs();
+        uploadPhotoRoomToDrive(idx, compressed);
+      }
 
       const count = photoRoomPending.length;
       statusEl.textContent = count + ' photo' + (count !== 1 ? 's' : '') + ' captured' +
-        (count < 4 ? ' — tap Add Photo for more, or Analyze when ready.' : ' — tap Analyze.');
+        (count < maxPhotos ? ' — add more or Analyze when ready.' : ' — tap Analyze.');
       document.getElementById('photoRoomAnalyzeBtn').disabled = false;
       document.getElementById('photoRoomAnalyzeBtn').style.opacity = '1';
-
-      // Upload high-res to Drive in background
-      uploadPhotoRoomToDrive(photoRoomPending.length - 1, compressed);
     }
 
     function renderPhotoRoomThumbs() {
