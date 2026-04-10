@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.4.4 | 2026-04-09">
+  <meta name="crewlogic-version" content="v3.4.5 | 2026-04-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -701,6 +701,8 @@
       cursor: pointer; transition: all 0.2s; position: relative;
     }
     .estimate-card:active { border-color: var(--accent-green); transform: scale(0.99); }
+    .estimate-card-actions:active ~ *, .estimate-card-actions *:active ~ * { transform: none; }
+    .estimate-card:has(.est-action-btn:active) { transform: none; border-color: var(--border); }
     .estimate-card-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 6px; }
     .estimate-card-label { font-size: 15px; font-weight: 600; color: var(--text-primary); flex: 1; margin-right: 8px; }
     .estimate-status-badge {
@@ -722,7 +724,7 @@
       border-radius: var(--radius-sm); color: var(--text-secondary); font-size: 11px;
       font-weight: 600; cursor: pointer; text-align: center; transition: all 0.15s;
     }
-    .est-action-btn:active { background: var(--bg-card); color: var(--text-primary); }
+    .est-action-btn:active { background: var(--accent-green); color: #000; border-color: var(--accent-green); transform: scale(0.95); }
     .est-action-btn.danger:active { background: rgba(248,113,113,0.1); color: var(--accent-red); border-color: var(--accent-red); }
 
     .estimates-empty { text-align: center; padding: 48px 20px; color: var(--text-muted); font-size: 14px; }
@@ -854,7 +856,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.4.4 | 2026-04-09 -->
+<!-- CrewLogic v3.4.5 | 2026-04-09 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3207,7 +3209,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.4.4 | 2026-04-09 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.4.5 | 2026-04-09 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -4021,6 +4023,7 @@
         const actionBtn = e.target.closest('[data-action]');
         if (actionBtn) {
           e.stopPropagation();
+          e.preventDefault();
           const id = actionBtn.dataset.estimateId;
           if (actionBtn.dataset.action === 'clone') cloneEstimate(id);
           if (actionBtn.dataset.action === 'delete') deleteEstimate(id);
@@ -4033,6 +4036,19 @@
         if (card) openEstimate(card.dataset.estimateId);
       };
       estListEl.addEventListener('click', estListEl._listClickHandler);
+
+      // Prevent card :active highlight when action buttons are pressed
+      if (estListEl._actionDownHandler) {
+        estListEl.removeEventListener('mousedown', estListEl._actionDownHandler);
+        estListEl.removeEventListener('touchstart', estListEl._actionDownHandler);
+      }
+      estListEl._actionDownHandler = function(e) {
+        if (e.target.closest('[data-action]')) {
+          e.stopPropagation();
+        }
+      };
+      estListEl.addEventListener('mousedown', estListEl._actionDownHandler);
+      estListEl.addEventListener('touchstart', estListEl._actionDownHandler, { passive: true });
 
       // Load from backend
       try {
