@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.4.2 | 2026-04-09">
+  <meta name="crewlogic-version" content="v3.4.3 | 2026-04-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -854,7 +854,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.4.2 | 2026-04-09 -->
+<!-- CrewLogic v3.4.3 | 2026-04-09 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3207,7 +3207,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.4.2 | 2026-04-09 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.4.3 | 2026-04-09 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -4013,24 +4013,26 @@
 
       // Set up event delegation once using a flag
       const estListEl = document.getElementById('estimatesList');
-      if (!estListEl._delegationAttached) {
-        estListEl._delegationAttached = true;
-        estListEl.addEventListener('click', function(e) {
-          const actionBtn = e.target.closest('[data-action]');
-          if (actionBtn) {
-            e.stopPropagation();
-            const id = actionBtn.dataset.estimateId;
-            if (actionBtn.dataset.action === 'clone') cloneEstimate(id);
-            if (actionBtn.dataset.action === 'delete') deleteEstimate(id);
-            if (actionBtn.dataset.action === 'won') updateEstimateStatus(id, 'won');
-            if (actionBtn.dataset.action === 'lost') updateEstimateStatus(id, 'lost');
-            if (actionBtn.dataset.action === 'reopen') updateEstimateStatus(id, 'submitted');
-            return;
-          }
-          const card = e.target.closest('[data-estimate-id]');
-          if (card) openEstimate(card.dataset.estimateId);
-        });
+      // Remove old listener and re-attach fresh each time
+      if (estListEl._listClickHandler) {
+        estListEl.removeEventListener('click', estListEl._listClickHandler);
       }
+      estListEl._listClickHandler = function(e) {
+        const actionBtn = e.target.closest('[data-action]');
+        if (actionBtn) {
+          e.stopPropagation();
+          const id = actionBtn.dataset.estimateId;
+          if (actionBtn.dataset.action === 'clone') cloneEstimate(id);
+          if (actionBtn.dataset.action === 'delete') deleteEstimate(id);
+          if (actionBtn.dataset.action === 'won') updateEstimateStatus(id, 'won');
+          if (actionBtn.dataset.action === 'lost') updateEstimateStatus(id, 'lost');
+          if (actionBtn.dataset.action === 'reopen') updateEstimateStatus(id, 'submitted');
+          return;
+        }
+        const card = e.target.closest('[data-estimate-id]');
+        if (card) openEstimate(card.dataset.estimateId);
+      };
+      estListEl.addEventListener('click', estListEl._listClickHandler);
 
       // Load from backend
       try {
