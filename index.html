@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.5.0 | 2026-04-10">
+  <meta name="crewlogic-version" content="v3.5.1 | 2026-04-10">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -856,7 +856,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.5.0 | 2026-04-10 -->
+<!-- CrewLogic v3.5.1 | 2026-04-10 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3210,7 +3210,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.5.0 | 2026-04-10 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.5.1 | 2026-04-10 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6075,9 +6075,12 @@
           document.getElementById('estJobIDDisplay').textContent = jobID;
           collapseClientInfo();
 
-          // Show Street View button now that we have an address
+          // Auto-fetch Street View if no cover photo yet
           const svBtn = document.getElementById('streetViewBtn');
           if (svBtn) svBtn.style.display = 'block';
+          if (!currentEstimate.coverPhoto && data.address) {
+            fetchStreetViewPhoto(true); // true = silent/auto mode
+          }
 
           // Auto-fill label: "LastName - City" if label is empty
           const labelEl = document.getElementById('estLabel');
@@ -6589,13 +6592,12 @@
 
 
     // ===== COVER PHOTO =====
-    async function fetchStreetViewPhoto() {
+    async function fetchStreetViewPhoto(autoMode = false) {
       const address = currentEstimate.address;
       if (!address) return;
 
       const btn = document.getElementById('streetViewBtn');
-      btn.textContent = '⏳ Loading...';
-      btn.disabled = true;
+      if (btn) { btn.textContent = '⏳ Loading...'; btn.disabled = true; }
 
       const encodedAddress = encodeURIComponent(address);
       const url = `https://maps.googleapis.com/maps/api/streetview?size=800x480&location=${encodedAddress}&key=${STREET_VIEW_KEY}&return_error_code=true`;
@@ -6603,29 +6605,43 @@
       try {
         const res = await fetch(url);
         if (!res.ok) {
-          btn.textContent = '🏠 Not available';
-          btn.disabled = false;
+          if (btn) { btn.textContent = '🏠 No Street View'; btn.disabled = false; }
           return;
         }
         const blob = await res.blob();
-        // Check if it's a real photo (not the grey "no imagery" placeholder)
+        // Check if it's a real photo (not the grey "no imagery" placeholder ~4KB)
         if (blob.size < 5000) {
-          btn.textContent = '🏠 Not available';
-          btn.disabled = false;
+          if (btn) { btn.textContent = '🏠 No Street View'; btn.disabled = false; }
           return;
         }
         const reader = new FileReader();
         reader.onload = async (e) => {
           const base64 = e.target.result;
-          openCoverPhotoCrop(base64);
-          btn.textContent = '🏠 Street View';
-          btn.disabled = false;
+          if (autoMode) {
+            // Silent mode — set directly as cover photo, show crop option
+            await setCoverPhotoFromBase64(base64);
+            if (btn) { btn.textContent = '🏠 Change'; btn.disabled = false; }
+          } else {
+            // Manual tap — open crop tool
+            openCoverPhotoCrop(base64);
+            if (btn) { btn.textContent = '🏠 Change'; btn.disabled = false; }
+          }
         };
         reader.readAsDataURL(blob);
       } catch(e) {
-        btn.textContent = '🏠 Street View';
-        btn.disabled = false;
+        if (btn) { btn.textContent = '🏠 Street View'; btn.disabled = false; }
       }
+    }
+
+    async function setCoverPhotoFromBase64(base64) {
+      // Compress and set as cover photo directly without cropping
+      const compressed = await compressChargePhoto(base64); // reuse charge photo compression (1920x1440)
+      document.getElementById('coverPhotoImg').src = compressed;
+      document.getElementById('coverPhotoPreview').style.display = 'block';
+      document.getElementById('coverPhotoBtn').style.display = 'none';
+      currentEstimate.coverPhoto = compressed;
+      autoSaveDraft();
+      uploadCoverPhotoToDrive(compressed);
     }
 
     async function handleCoverPhoto(input) {
