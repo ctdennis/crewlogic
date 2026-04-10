@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.5.3 | 2026-04-10">
+  <meta name="crewlogic-version" content="v3.5.4 | 2026-04-10">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -856,7 +856,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.5.3 | 2026-04-10 -->
+<!-- CrewLogic v3.5.4 | 2026-04-10 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3215,7 +3215,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.5.3 | 2026-04-10 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.5.4 | 2026-04-10 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6931,10 +6931,16 @@
       const clientName = est.clientName || 'Customer';
       const address = est.address || '';
       const franchiseName = currentUser.franchiseName || 'The Junkluggers of Southeastern MA & RI';
+      const fmtPhone = (p) => {
+        const d = String(p || '').replace(/\D/g, '');
+        if (d.length === 10) return '(' + d.slice(0,3) + ') ' + d.slice(3,6) + '-' + d.slice(6);
+        if (d.length === 11 && d[0] === '1') return '(' + d.slice(1,4) + ') ' + d.slice(4,7) + '-' + d.slice(7);
+        return String(p || '');
+      };
       const ownerName = currentUser.name || '';
       // For estimators, phone/website/address come from costSettings (owner's settings)
       const cs0 = currentUser.costSettings || {};
-      const phone = currentUser.phone || cs0.phone || '';
+      const phone = fmtPhone(currentUser.phone || cs0.phone || '');
       const website = currentUser.website || cs0.website || '';
       const franchisePhone   = phone;
       const franchiseWebsite = website;
@@ -7768,7 +7774,9 @@
           const subject = encodeURIComponent('Your Junkluggers Estimate — ' + (currentEstimate.label || currentEstimate.clientName || 'Proposal'));
           const emailBodyParts = ['Hi ' + (currentEstimate.clientName ? currentEstimate.clientName.split(',').reverse().join(' ').trim() : 'there') + ',', '', 'Please find your Junkluggers estimate attached.', '', 'Thank you for considering us!', '', (currentUser.name || ''), 'Junkluggers of ' + (currentUser.franchiseName || 'Southeastern MA & RI'), (currentUser.phone || (currentUser.costSettings && currentUser.costSettings.phone) || '')];
           const body = encodeURIComponent(emailBodyParts.join('\n'));
-          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          // On Mac desktop, Web Share opens AirDrop/Notes — skip to mailto fallback
+          const isMacDesktop = /Macintosh/.test(navigator.userAgent) && !/iPhone|iPad/.test(navigator.userAgent);
+          if (!isMacDesktop && navigator.canShare && navigator.canShare({ files: [file] })) {
             // Mobile — native share sheet with PDF attached
             try {
               await navigator.share({
@@ -8047,7 +8055,9 @@ RECYCLING & DONATION
           const subject = encodeURIComponent('Your Junkluggers Estimate — ' + (currentEstimate.label || currentEstimate.clientName || 'Proposal'));
           const emailBodyParts = ['Hi ' + (currentEstimate.clientName ? currentEstimate.clientName.split(',').reverse().join(' ').trim() : 'there') + ',', '', 'Please find your Junkluggers estimate attached.', '', 'Thank you for considering us!', '', (currentUser.name || ''), 'Junkluggers of ' + (currentUser.franchiseName || 'Southeastern MA & RI'), (currentUser.phone || (currentUser.costSettings && currentUser.costSettings.phone) || '')];
           const body = encodeURIComponent(emailBodyParts.join('\n'));
-          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          // On Mac desktop, Web Share opens AirDrop/Notes — skip to mailto fallback
+          const isMacDesktop = /Macintosh/.test(navigator.userAgent) && !/iPhone|iPad/.test(navigator.userAgent);
+          if (!isMacDesktop && navigator.canShare && navigator.canShare({ files: [file] })) {
             // Mobile — native share sheet with PDF attached
             try {
               await navigator.share({
