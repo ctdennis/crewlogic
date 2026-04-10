@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.4.9 | 2026-04-09">
+  <meta name="crewlogic-version" content="v3.5.0 | 2026-04-10">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -856,7 +856,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.4.9 | 2026-04-09 -->
+<!-- CrewLogic v3.5.0 | 2026-04-10 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3210,7 +3210,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.4.9 | 2026-04-09 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.5.0 | 2026-04-10 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -8302,8 +8302,13 @@ RECYCLING & DONATION
       const count = photoRoomPending.length;
       statusEl.textContent = count + ' photo' + (count !== 1 ? 's' : '') + ' captured' +
         (count < maxPhotos ? ' — add more or Analyze when ready.' : ' — tap Analyze.');
-      document.getElementById('photoRoomAnalyzeBtn').disabled = false;
-      document.getElementById('photoRoomAnalyzeBtn').style.opacity = '1';
+      // Analyze button will be enabled by renderPhotoRoomThumbs once all uploads complete
+      const analyzeBtn3 = document.getElementById('photoRoomAnalyzeBtn');
+      if (analyzeBtn3) {
+        analyzeBtn3.disabled = true;
+        analyzeBtn3.style.opacity = '0.5';
+        analyzeBtn3.textContent = '⏳ Uploading 0/' + photoRoomPending.length + '...';
+      }
     }
 
     function renderPhotoRoomThumbs() {
@@ -8323,8 +8328,31 @@ RECYCLING & DONATION
       ).join('') +
       '<div style="font-size:10px;color:var(--text-muted);margin-top:4px;width:100%;">' +
         (photoRoomPending.every(p => p.driveUrl) ? '✓ All uploaded' :
-         '🟡 Uploading... safe to analyze or save') +
+         '🟡 Uploading...') +
       '</div>';
+      // Update analyze button based on upload state
+      const analyzeBtn2 = document.getElementById('photoRoomAnalyzeBtn');
+      const statusEl2 = document.getElementById('photoRoomStatus');
+      if (analyzeBtn2 && photoRoomPending.length > 0) {
+        const allUploaded = photoRoomPending.every(p => p.driveUrl);
+        const uploaded = photoRoomPending.filter(p => p.driveUrl).length;
+        const total = photoRoomPending.length;
+        if (!allUploaded) {
+          analyzeBtn2.disabled = true;
+          analyzeBtn2.style.opacity = '0.5';
+          analyzeBtn2.textContent = '⏳ Uploading ' + uploaded + '/' + total + '...';
+          if (statusEl2 && !statusEl2.textContent.includes('Analyzing')) {
+            statusEl2.textContent = 'Uploading photos (' + uploaded + ' of ' + total + ' done) — Analyze will unlock when ready.';
+          }
+        } else {
+          analyzeBtn2.disabled = false;
+          analyzeBtn2.style.opacity = '1';
+          analyzeBtn2.textContent = '🤖 Analyze';
+          if (statusEl2 && statusEl2.textContent.includes('Uploading')) {
+            statusEl2.textContent = total + ' photo' + (total !== 1 ? 's' : '') + ' ready — tap Analyze.';
+          }
+        }
+      }
     }
 
     function removePhotoRoomPhoto(idx) {
