@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.4.0 | 2026-04-09">
+  <meta name="crewlogic-version" content="v3.4.2 | 2026-04-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -710,6 +710,8 @@
     .estimate-status-badge.draft { background: rgba(251,191,36,0.15); color: var(--accent-yellow); }
     .estimate-status-badge.pending { background: rgba(96,165,250,0.15); color: var(--accent-blue); }
     .estimate-status-badge.submitted { background: rgba(74,222,128,0.15); color: var(--accent-green); }
+    .estimate-status-badge.won { background: rgba(34,197,94,0.2); color: #16a34a; font-weight:700; }
+    .estimate-status-badge.lost { background: rgba(148,163,184,0.15); color: var(--text-muted); text-decoration:line-through; }
     .estimate-card-meta { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
     .estimate-card-totals { display: flex; gap: 16px; margin-bottom: 10px; }
     .estimate-card-total-item { font-size: 12px; color: var(--text-secondary); }
@@ -852,7 +854,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.4.0 | 2026-04-09 -->
+<!-- CrewLogic v3.4.2 | 2026-04-09 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1269,7 +1271,10 @@
       <div class="estimates-section" id="estimatesScreen">
         <div class="estimate-list-header">
           <div class="section-title">Estimates</div>
-          <button class="new-estimate-fab" onclick="newEstimateDoc()">+ New</button>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="estimatesFilterBtn" onclick="toggleEstimatesFilter()" style="padding:4px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px;color:var(--text-muted);cursor:pointer;">Active only</button>
+            <button class="new-estimate-fab" onclick="newEstimateDoc()">+ New</button>
+          </div>
         </div>
         <div id="estimatesList"></div>
       </div>
@@ -3202,7 +3207,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.4.0 | 2026-04-09 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.4.2 | 2026-04-09 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -4017,6 +4022,9 @@
             const id = actionBtn.dataset.estimateId;
             if (actionBtn.dataset.action === 'clone') cloneEstimate(id);
             if (actionBtn.dataset.action === 'delete') deleteEstimate(id);
+            if (actionBtn.dataset.action === 'won') updateEstimateStatus(id, 'won');
+            if (actionBtn.dataset.action === 'lost') updateEstimateStatus(id, 'lost');
+            if (actionBtn.dataset.action === 'reopen') updateEstimateStatus(id, 'submitted');
             return;
           }
           const card = e.target.closest('[data-estimate-id]');
@@ -4051,13 +4059,18 @@
     }
 
     function renderEstimatesList(estimates) {
+      window._cachedEstimates = estimates; // cache for filter toggle
       const listEl = document.getElementById('estimatesList');
-      if (!estimates || estimates.length === 0) {
-        listEl.innerHTML = '<div class="estimates-empty">No estimates yet.<br>Tap + New to create one.</div>';
+      // Filter by active/all
+      const showAll = window._showAllEstimates || false;
+      const filtered = showAll ? estimates : estimates.filter(e => e.status !== 'won' && e.status !== 'lost');
+
+      if (!filtered || filtered.length === 0) {
+        listEl.innerHTML = '<div class="estimates-empty">' + (showAll ? 'No estimates yet.' : 'No active estimates.') + '<br>' + (showAll ? 'Tap + New to create one.' : 'Tap "Active only" to show won/lost.') + '</div>';
         return;
       }
       let html = '';
-      estimates.forEach(function(est) {
+      filtered.forEach(function(est) {
         const status = est.status || 'draft';
         const updated = est.updatedAt ? new Date(est.updatedAt).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : '';
         const trucks = parseFloat(est.totalTrucks) || 0;
@@ -4101,6 +4114,12 @@
 
         // Row 4: actions
         html += '<div class="estimate-card-actions" style="padding-top:8px;">';
+        if (status === 'submitted') {
+          html += '<div class="est-action-btn" data-action="won" data-estimate-id="' + eid + '" style="color:#16a34a;border-color:#16a34a;">✓ Won</div>';
+          html += '<div class="est-action-btn" data-action="lost" data-estimate-id="' + eid + '" style="color:var(--text-muted);">✗ Lost</div>';
+        } else if (status === 'won' || status === 'lost') {
+          html += '<div class="est-action-btn" data-action="reopen" data-estimate-id="' + eid + '">↩ Reopen</div>';
+        }
         html += '<div class="est-action-btn" data-action="clone" data-estimate-id="' + eid + '">Clone</div>';
         html += '<div class="est-action-btn danger" data-action="delete" data-estimate-id="' + eid + '">Delete</div>';
         html += '</div>';
@@ -6416,6 +6435,55 @@
     }
 
     // ===== CLONE & DELETE =====
+    function toggleEstimatesFilter() {
+      window._showAllEstimates = !window._showAllEstimates;
+      const btn = document.getElementById('estimatesFilterBtn');
+      if (btn) btn.textContent = window._showAllEstimates ? 'Show all' : 'Active only';
+      if (btn) btn.style.color = window._showAllEstimates ? 'var(--accent-green)' : 'var(--text-muted)';
+      renderEstimatesList(window._cachedEstimates || []);
+    }
+
+    async function updateEstimateStatus(estimateID, newStatus) {
+      const all = getLocalEstimates();
+      const est = all.find(e => String(e.estimateID) === String(estimateID));
+      if (!est) return;
+
+      est.status = newStatus;
+      est.updatedAt = new Date().toISOString();
+      saveLocalEstimate(est);
+
+      // Save directly to backend without touching currentEstimate
+      try {
+        await apiFetch(N8N_BASE + '/crewlogic-estimate', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'save',
+            email: currentUser.email,
+            franchiseID: currentUser.franchiseID,
+            payload: (function() {
+              const p = Object.assign({}, est);
+              delete p.priceBlocks; delete p.coverPhoto;
+              delete p.payload; delete p.priceBook;
+              delete p.row_number; delete p.costAnalysis;
+              return p;
+            })(),
+            priceBook: est.priceBlocks || [],
+            coverPhoto: est.coverPhoto || '',
+            costAnalysis: est.costAnalysis || {}
+          })
+        });
+      } catch(e) {
+        console.error('Status save error:', e);
+      }
+
+      // Update cached list and re-render
+      if (window._cachedEstimates) {
+        const idx = window._cachedEstimates.findIndex(e => String(e.estimateID) === String(estimateID));
+        if (idx !== -1) window._cachedEstimates[idx].status = newStatus;
+      }
+      renderEstimatesList(window._cachedEstimates || []);
+    }
+
     function cloneEstimate(estimateID) {
       const all = getLocalEstimates();
       const original = all.find(e => String(e.estimateID) === String(estimateID));
