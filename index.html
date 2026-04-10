@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.3.9 | 2026-04-09">
+  <meta name="crewlogic-version" content="v3.4.0 | 2026-04-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -852,7 +852,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.3.9 | 2026-04-09 -->
+<!-- CrewLogic v3.4.0 | 2026-04-09 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1285,10 +1285,13 @@
             <img id="coverPhotoImg" style="width:100%;height:160px;object-fit:cover;border-radius:var(--radius-sm);border:1px solid var(--border);" />
             <button onclick="removeCoverPhoto()" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.6);border:none;border-radius:50%;width:26px;height:26px;color:white;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;">&#215;</button>
           </div>
-          <label id="coverPhotoBtn" style="display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;background:var(--bg-card);border:1px dashed var(--border);border-radius:var(--radius-sm);cursor:pointer;font-size:13px;color:var(--text-muted);">
-            <span>📷 Add Cover Photo</span>
-            <input type="file" id="coverPhotoInput" accept="image/*" capture="environment" style="display:none;" onchange="handleCoverPhoto(this)">
-          </label>
+          <div style="display:flex;gap:8px;">
+            <label id="coverPhotoBtn" style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;background:var(--bg-card);border:1px dashed var(--border);border-radius:var(--radius-sm);cursor:pointer;font-size:13px;color:var(--text-muted);">
+              <span>📷 Add Cover Photo</span>
+              <input type="file" id="coverPhotoInput" accept="image/*" capture="environment" style="display:none;" onchange="handleCoverPhoto(this)">
+            </label>
+            <button id="streetViewBtn" onclick="fetchStreetViewPhoto()" style="display:none;padding:10px 12px;background:var(--bg-card);border:1px dashed var(--border);border-radius:var(--radius-sm);font-size:12px;color:var(--text-muted);cursor:pointer;white-space:nowrap;flex-shrink:0;">🏠 Street View</button>
+          </div>
         </div>
 
         <!-- JOB LOOKUP — compact inline row -->
@@ -2638,6 +2641,7 @@
 
     const SUPABASE_URL = 'https://ozfkpxyachigfpcmvekz.supabase.co';
     const SUPABASE_ANON_KEY = 'sb_publishable_Jcy2e2s2x12kY0Az6jGzUw_Jn3ikNpt';
+    const STREET_VIEW_KEY = 'AIzaSyDZGtQKeH8LKs_rpO2zti8oAkJNkgfhCgM';
 
     async function supabaseFetch(path, opts = {}) {
       const res = await fetch(SUPABASE_URL + path, {
@@ -3198,7 +3202,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.3.9 | 2026-04-09 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.4.0 | 2026-04-09 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -4248,6 +4252,9 @@
       document.getElementById('estAddress').value = currentEstimate.address || '';
       document.getElementById('estNotes').value = currentEstimate.notes || '';
       updateNotesPreview();
+      // Show Street View button if estimate has an address
+      const svBtn2 = document.getElementById('streetViewBtn');
+      if (svBtn2 && currentEstimate.address) svBtn2.style.display = 'block';
 
       // Populate Step 1 job ID field
       if (currentEstimate.jobID) {
@@ -6027,6 +6034,10 @@
           document.getElementById('estJobIDDisplay').textContent = jobID;
           collapseClientInfo();
 
+          // Show Street View button now that we have an address
+          const svBtn = document.getElementById('streetViewBtn');
+          if (svBtn) svBtn.style.display = 'block';
+
           // Auto-fill label: "LastName - City" if label is empty
           const labelEl = document.getElementById('estLabel');
           if (!labelEl.value.trim() && data.clientName) {
@@ -6488,6 +6499,45 @@
 
 
     // ===== COVER PHOTO =====
+    async function fetchStreetViewPhoto() {
+      const address = currentEstimate.address;
+      if (!address) return;
+
+      const btn = document.getElementById('streetViewBtn');
+      btn.textContent = '⏳ Loading...';
+      btn.disabled = true;
+
+      const encodedAddress = encodeURIComponent(address);
+      const url = `https://maps.googleapis.com/maps/api/streetview?size=800x480&location=${encodedAddress}&key=${STREET_VIEW_KEY}&return_error_code=true`;
+
+      try {
+        const res = await fetch(url);
+        if (!res.ok) {
+          btn.textContent = '🏠 Not available';
+          btn.disabled = false;
+          return;
+        }
+        const blob = await res.blob();
+        // Check if it's a real photo (not the grey "no imagery" placeholder)
+        if (blob.size < 5000) {
+          btn.textContent = '🏠 Not available';
+          btn.disabled = false;
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          const base64 = e.target.result;
+          openCoverPhotoCrop(base64);
+          btn.textContent = '🏠 Street View';
+          btn.disabled = false;
+        };
+        reader.readAsDataURL(blob);
+      } catch(e) {
+        btn.textContent = '🏠 Street View';
+        btn.disabled = false;
+      }
+    }
+
     async function handleCoverPhoto(input) {
       if (!input.files || !input.files[0]) return;
       const file = input.files[0];
