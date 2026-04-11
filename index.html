@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.5.6 | 2026-04-10">
+  <meta name="crewlogic-version" content="v3.5.8 | 2026-04-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -856,7 +856,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.5.6 | 2026-04-10 -->
+<!-- CrewLogic v3.5.8 | 2026-04-11 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1918,6 +1918,10 @@
             📧 Email to Client
             <div class="vol-option-sub">Share PDF directly from your device</div>
           </button>
+          <div id="pdfEmailHint" style="display:none;margin:-8px 0 8px;padding:8px 12px;background:var(--bg-input);border-radius:var(--radius-sm);font-size:12px;color:var(--text-muted);display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <span>Send to: <strong id="pdfEmailHintAddr" style="color:var(--text-primary);"></strong></span>
+            <button onclick="navigator.clipboard.writeText(document.getElementById('pdfEmailHintAddr').textContent);this.textContent='✓ Copied!';setTimeout(()=>this.textContent='Copy',1500);" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;font-size:11px;color:var(--text-muted);cursor:pointer;flex-shrink:0;">Copy</button>
+          </div>
           <button class="vol-option-btn" onclick="generateEstimatePDF('download')">
             ⬇️ Download PDF
             <div class="vol-option-sub">Save to your device</div>
@@ -3220,7 +3224,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.5.6 | 2026-04-10 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.5.8 | 2026-04-11 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6525,10 +6529,25 @@
       renderEstimatesList(window._cachedEstimates || []);
     }
 
-    function cloneEstimate(estimateID) {
-      const all = getLocalEstimates();
-      const original = all.find(e => String(e.estimateID) === String(estimateID));
+    async function cloneEstimate(estimateID) {
+      // Always load full estimate from backend to ensure charges/priceBlocks are present
+      let original = null;
+      try {
+        const res = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
+          method: 'POST',
+          body: JSON.stringify({ action: 'load', email: currentUser.email, franchiseID: currentUser.franchiseID, estimateID })
+        });
+        const data = await res.json();
+        if (data.success && data.estimate) original = data.estimate;
+      } catch(e) {}
+
+      // Fall back to local cache if load fails
+      if (!original) {
+        const all = getLocalEstimates();
+        original = all.find(e => String(e.estimateID) === String(estimateID));
+      }
       if (!original) return;
+
       const clone = JSON.parse(JSON.stringify(original));
       clone.estimateID = generateEstimateID();
       clone.label = (original.label || 'Estimate') + ' (copy)';
@@ -6559,7 +6578,7 @@
         clone.payload.vonigoQuoteID = null;
         clone.payload['vonigoQuoteID'] = null;
       }
-      saveLocalEstimate(clone);
+      // Don't save to local storage yet — only save when user explicitly saves
       currentEstimate = clone;
       openEstimateEditor();
       isDirty = true; // clone is unsaved on the backend
@@ -6914,6 +6933,18 @@
     function showPDFOptions() {
       const sub = document.getElementById('pdfModalSubtitle');
       sub.textContent = (currentEstimate.clientName || 'Estimate') + ' — ' + (currentEstimate.address || '');
+      // Show client email hint if available
+      const emailHint = document.getElementById('pdfEmailHint');
+      const emailHintAddr = document.getElementById('pdfEmailHintAddr');
+      const clientEmail = currentEstimate.clientEmail || '';
+      if (emailHint && emailHintAddr) {
+        if (clientEmail) {
+          emailHintAddr.textContent = clientEmail;
+          emailHint.style.display = 'flex';
+        } else {
+          emailHint.style.display = 'none';
+        }
+      }
       document.getElementById('pdfOptionsModal').style.display = 'flex';
     }
 
