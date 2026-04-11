@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.6.7 | 2026-04-11">
+  <meta name="crewlogic-version" content="v3.6.8 | 2026-04-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -857,7 +857,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.6.7 | 2026-04-11 -->
+<!-- CrewLogic v3.6.8 | 2026-04-11 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2555,25 +2555,19 @@
           const raw = hash.slice(9);
           const session = JSON.parse(decodeURIComponent(raw));
           if (session && session.email) {
-            console.log('DEBUG session received - franchiseID:', session.franchiseID, 'role:', session.role, 'email:', session.email);
             currentUser = session;
             // Recover invite token from session (passed via OAuth state parameter)
             if (session.inviteToken) {
-              console.log('DEBUG invite token found in session:', session.inviteToken);
               storage.set('pending_invite_token', session.inviteToken);
               // Look up invite ID from token
               const inviteData = await supabaseFetch('/rest/v1/invites?select=id,franchise_id,role&token=eq.' + session.inviteToken);
-              console.log('DEBUG inviteData from Supabase:', JSON.stringify(inviteData));
               if (inviteData && inviteData[0]) {
                 storage.set('pending_invite_id', inviteData[0].id);
                 storage.set('pending_invite_franchise_id', inviteData[0].franchise_id);
                 storage.set('pending_invite_role', inviteData[0].role || 'estimator');
-                console.log('DEBUG stored invite data, id:', inviteData[0].id);
               } else {
-                console.log('DEBUG no invite found in Supabase for token');
               }
             } else {
-              console.log('DEBUG no inviteToken in session');
             }
             // Process pending invite if present
             const wasInvite = await processPendingInvite(session.email, session.name);
@@ -3272,7 +3266,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.6.7 | 2026-04-11 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.6.8 | 2026-04-11 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -4263,7 +4257,6 @@
           body: JSON.stringify({ action: 'load', email: currentUser.email, franchiseID: currentUser.franchiseID, estimateID })
         });
         const text = await res.text();
-        console.log('Load response:', text.substring(0, 500));
         let data;
         try { data = JSON.parse(text); } catch(e) {
           console.error('Load response not JSON:', text.substring(0, 200));
@@ -8048,7 +8041,6 @@
         } // end hasProposalContent
 
         // Page: Terms -- always render regardless of proposal content
-        console.log('DEBUG: Rendering terms page, customTerms length:', customTerms.length);
         const defaultTerms = `TERMS & CONDITIONS
 
 PRICING
