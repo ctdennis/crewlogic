@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.6.2 | 2026-04-11">
+  <meta name="crewlogic-version" content="v3.6.4 | 2026-04-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -857,7 +857,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.6.2 | 2026-04-11 -->
+<!-- CrewLogic v3.6.4 | 2026-04-11 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3272,7 +3272,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.6.2 | 2026-04-11 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.6.4 | 2026-04-11 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6655,6 +6655,27 @@
       const all = getLocalEstimates();
       const est = all.find(e => String(e.estimateID) === String(estimateID));
       const vonigoQuoteID = est ? (est.vonigoQuoteID || est['vonigoQuoteID'] || null) : null;
+
+      // Delete Supabase Storage photos for this estimate (folder: franchiseID/estimateID/)
+      try {
+        const folder = currentUser.franchiseID + '/' + estimateID;
+        const prefix = folder + '/';
+        console.log('Deleting photos in folder:', folder);
+        const { data: files, error: listErr } = await supabaseClient.storage
+          .from('estimate-photos')
+          .list(folder);
+        console.log('Storage list result:', files, listErr);
+        if (files && files.length > 0) {
+          const paths = files.map(f => prefix + f.name);
+          console.log('Removing paths:', paths);
+          const { error: removeErr } = await supabaseClient.storage.from('estimate-photos').remove(paths);
+          console.log('Remove result:', removeErr);
+        } else {
+          console.log('No files found in folder or list failed');
+        }
+      } catch(e) {
+        console.warn('Photo cleanup failed (non-fatal):', e);
+      }
 
       // Remove locally
       setLocalEstimates(all.filter(e => String(e.estimateID) !== String(estimateID)));
