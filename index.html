@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.5.9 | 2026-04-11">
+  <meta name="crewlogic-version" content="v3.6.0 | 2026-04-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -13,6 +13,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
   <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script>
     // Initialize on DOM ready — no GIS library needed
     window.addEventListener('DOMContentLoaded', function() {
@@ -856,7 +857,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.5.9 | 2026-04-11 -->
+<!-- CrewLogic v3.6.0 | 2026-04-11 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2663,6 +2664,53 @@
 
     const SUPABASE_URL = 'https://ozfkpxyachigfpcmvekz.supabase.co';
     const SUPABASE_ANON_KEY = 'sb_publishable_Jcy2e2s2x12kY0Az6jGzUw_Jn3ikNpt';
+
+    // Supabase JS client (for Storage signed URLs)
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // Signed URL cache — avoids regenerating on every render
+    const signedUrlCache = new Map();
+
+    // Resolves a stored photo path to a displayable URL.
+    // Handles: legacy Drive lh3 URLs, legacy Drive export URLs, new Supabase storage paths.
+    async function resolvePhotoUrl(path) {
+      if (!path) return null;
+      // Legacy Drive URLs — pass through as-is
+      if (path.startsWith('http')) return path;
+      // Supabase storage path — generate signed URL
+      if (signedUrlCache.has(path)) return signedUrlCache.get(path);
+      try {
+        const { data, error } = await supabaseClient.storage
+          .from('estimate-photos')
+          .createSignedUrl(path, 3600);
+        if (error || !data?.signedUrl) return null;
+        signedUrlCache.set(path, data.signedUrl);
+        return data.signedUrl;
+      } catch(e) {
+        console.warn('resolvePhotoUrl failed:', e);
+        return null;
+      }
+    }
+
+    // Uploads a base64 photo directly to Supabase Storage.
+    // Returns the storage path (not a URL) to store in the estimate.
+    async function uploadPhotoToSupabase(base64, estimateID, label) {
+      // Convert base64 to Blob
+      const parts = base64.split(',');
+      const mime = parts[0].match(/:(.*?);/)[1];
+      const binary = atob(parts[1]);
+      const arr = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+      const blob = new Blob([arr], { type: mime });
+      const ext = mime === 'image/png' ? 'png' : 'jpg';
+      const timestamp = Date.now();
+      const path = currentUser.franchiseID + '/' + estimateID + '/' + timestamp + '_' + label + '.' + ext;
+      const { data, error } = await supabaseClient.storage
+        .from('estimate-photos')
+        .upload(path, blob, { contentType: mime, upsert: false });
+      if (error) throw new Error('Supabase upload failed: ' + error.message);
+      return path;
+    }
     const STREET_VIEW_KEY = 'AIzaSyDZGtQKeH8LKs_rpO2zti8oAkJNkgfhCgM';
 
     async function supabaseFetch(path, opts = {}) {
@@ -3224,7 +3272,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.5.9 | 2026-04-11 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.6.0 | 2026-04-11 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5112,33 +5160,20 @@
 
     async function uploadChargePhotoToDrive(chargeIdx, base64, tempIdx) {
       try {
-        const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
-          method: 'POST',
-          body: JSON.stringify({
-            action: 'uploadPhoto',
-            email: currentUser.email,
-            franchiseID: currentUser.franchiseID,
-            estimateID: currentEstimate.estimateID,
-            chargeIdx,
-            photo: base64,
-            label: currentEstimate.charges[chargeIdx].room || 'Room ' + (chargeIdx + 1)
-          })
-        });
-        const data = await response.json();
-        if (data.success && data.photoUrl) {
-          if (!currentEstimate.charges[chargeIdx].photos) {
-            currentEstimate.charges[chargeIdx].photos = [];
-          }
-          // Replace the temp base64 with the Drive URL
-          if (tempIdx !== undefined && currentEstimate.charges[chargeIdx].photos[tempIdx]) {
-            currentEstimate.charges[chargeIdx].photos[tempIdx] = data.photoUrl;
-          } else {
-            currentEstimate.charges[chargeIdx].photos.push(data.photoUrl);
-          }
-          currentEstimate.charges[chargeIdx].photoUrl = data.photoUrl; // keep for backwards compat
-          renderCharges();
-          autoSaveDraft();
+        const label = (currentEstimate.charges[chargeIdx].room || 'room' + chargeIdx).replace(/[^a-z0-9_-]/gi, '_');
+        const path = await uploadPhotoToSupabase(base64, currentEstimate.estimateID, label);
+        if (!currentEstimate.charges[chargeIdx].photos) {
+          currentEstimate.charges[chargeIdx].photos = [];
         }
+        // Replace the temp base64 with the Supabase storage path
+        if (tempIdx !== undefined && currentEstimate.charges[chargeIdx].photos[tempIdx]) {
+          currentEstimate.charges[chargeIdx].photos[tempIdx] = path;
+        } else {
+          currentEstimate.charges[chargeIdx].photos.push(path);
+        }
+        currentEstimate.charges[chargeIdx].photoUrl = path; // keep for backwards compat
+        renderCharges();
+        autoSaveDraft();
       } catch(e) {
         console.warn('Photo upload failed:', e);
       }
@@ -6846,32 +6881,14 @@
       feedbackEl.textContent = '📷 Uploading cover photo...';
       feedbackEl.className = 'settings-feedback loading';
 
-      // Upload to Drive — only save to sheet once we have a compact Drive URL
+      // Upload directly to Supabase Storage
       try {
-        const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
-          method: 'POST',
-          body: JSON.stringify({
-            action: 'uploadPhoto',
-            email: currentUser.email,
-            franchiseID: currentUser.franchiseID,
-            estimateID: currentEstimate.estimateID,
-            chargeIdx: 'cover',
-            label: 'cover',
-            photo: base64
-          })
-        });
-        const data = await response.json();
-        if (data.success && data.photoUrl) {
-          currentEstimate.coverPhoto = data.photoUrl;
-          feedbackEl.textContent = '';
-          saveEstimateDraft(); // now save with compact Drive URL
-        } else {
-          // Drive upload failed — warn user photo may not persist after refresh
-          feedbackEl.textContent = '⚠️ Cover photo upload failed — photo may be lost on refresh';
-          feedbackEl.className = 'settings-feedback error';
-        }
+        const path = await uploadPhotoToSupabase(base64, currentEstimate.estimateID, 'cover');
+        currentEstimate.coverPhoto = path;
+        feedbackEl.textContent = '';
+        saveEstimateDraft(); // save with Supabase storage path
       } catch(e) {
-        console.warn('Cover photo Drive upload failed:', e);
+        console.warn('Cover photo upload failed:', e);
         feedbackEl.textContent = '⚠️ Cover photo upload failed — photo may be lost on refresh';
         feedbackEl.className = 'settings-feedback error';
       }
@@ -8534,40 +8551,26 @@ RECYCLING & DONATION
 
     async function uploadPhotoRoomToDrive(idx, base64) {
       try {
-        const res = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
-          method: 'POST',
-          body: JSON.stringify({
-            action: 'uploadPhoto',
-            email: currentUser.email,
-            franchiseID: currentUser.franchiseID,
-            estimateID: currentEstimate.estimateID,
-            label: 'room_' + idx,
-            chargeIdx: idx,
-            photo: base64
-          })
-        });
-        const data = await res.json();
-        if (data.photoUrl) {
-          // Update pending array if panel is still open
-          if (photoRoomPending[idx]) {
-            photoRoomPending[idx].driveUrl = data.photoUrl;
-            renderPhotoRoomThumbs(); // show green dot
-          }
-          // Also replace base64 with Drive URL in any charge rows that have it
-          // (happens when panel was closed before upload completed)
-          if (currentEstimate && currentEstimate.charges) {
-            currentEstimate.charges.forEach(charge => {
-              if (charge.photos) {
-                const photoIdx = charge.photos.indexOf(base64);
-                if (photoIdx !== -1) {
-                  charge.photos[photoIdx] = data.photoUrl;
-                  if (charge.photoUrl === base64) charge.photoUrl = data.photoUrl;
-                }
+        const path = await uploadPhotoToSupabase(base64, currentEstimate.estimateID, 'room_' + idx);
+        // Update pending array if panel is still open
+        if (photoRoomPending[idx]) {
+          photoRoomPending[idx].driveUrl = path; // reuse driveUrl field for storage path
+          renderPhotoRoomThumbs(); // show green dot
+        }
+        // Also replace base64 with Supabase path in any charge rows that have it
+        // (happens when panel was closed before upload completed)
+        if (currentEstimate && currentEstimate.charges) {
+          currentEstimate.charges.forEach(charge => {
+            if (charge.photos) {
+              const photoIdx = charge.photos.indexOf(base64);
+              if (photoIdx !== -1) {
+                charge.photos[photoIdx] = path;
+                if (charge.photoUrl === base64) charge.photoUrl = path;
               }
-            });
-            renderCharges();
-            autoSaveDraft();
-          }
+            }
+          });
+          renderCharges();
+          autoSaveDraft();
         }
       } catch(e) {
         console.warn('Photo room upload failed:', e);
