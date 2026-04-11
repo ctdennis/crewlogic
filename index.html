@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.6.1 | 2026-04-11">
+  <meta name="crewlogic-version" content="v3.6.2 | 2026-04-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -857,7 +857,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.6.1 | 2026-04-11 -->
+<!-- CrewLogic v3.6.2 | 2026-04-11 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3272,7 +3272,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.6.1 | 2026-04-11 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.6.2 | 2026-04-11 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -4856,6 +4856,14 @@
           ? (charge.room ? charge.room + ': ' : '') + charge.description
           : '[PHOTO ANALYSIS — no voice transcript. Analyze the provided photos to identify items and estimate volume.]';
 
+        // Resolve Supabase storage paths to signed URLs before sending to n8n
+        const resolvedPhotos = hasPhotos
+          ? await Promise.all(allPhotos.map(async p => {
+              const resolved = await resolvePhotoUrl(p);
+              return resolved || p;
+            }))
+          : undefined;
+
         const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
           method: 'POST',
           body: JSON.stringify({
@@ -4864,7 +4872,7 @@
             franchiseID: currentUser.franchiseID,
             transcript,
             areas: availableAreas,
-            photos: hasPhotos ? allPhotos : undefined
+            photos: resolvedPhotos
           })
         });
 
@@ -8604,16 +8612,19 @@ RECYCLING & DONATION
 
       if (photoRoomPending.length === 0) return;
 
-      // Use Drive URLs where available, inline base64 for anything still uploading
-      // This allows analysis to proceed immediately regardless of connection quality
-      const photosToAnalyze = photoRoomPending.map(p => p.driveUrl || p.base64);
-
+      // Resolve storage paths to signed URLs before analysis
+      // Fall back to base64 for anything still uploading
       analyzeBtn.disabled = true;
       analyzeBtn.textContent = '⏳ Analyzing...';
       const usingBase64 = photoRoomPending.some(p => !p.driveUrl);
-      statusEl.textContent = 'Sending ' + photosToAnalyze.length + ' photo' +
-        (photosToAnalyze.length !== 1 ? 's' : '') + ' to AI...' +
+      statusEl.textContent = 'Sending ' + photoRoomPending.length + ' photo' +
+        (photoRoomPending.length !== 1 ? 's' : '') + ' to AI...' +
         (usingBase64 ? ' (uploading in background)' : '');
+      const photosToAnalyze = await Promise.all(photoRoomPending.map(async p => {
+        if (!p.driveUrl) return p.base64; // still uploading — use base64
+        const resolved = await resolvePhotoUrl(p.driveUrl);
+        return resolved || p.base64;
+      }));
 
       try {
         const controller = new AbortController();
