@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.6.0 | 2026-04-11">
+  <meta name="crewlogic-version" content="v3.6.1 | 2026-04-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -857,7 +857,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.6.0 | 2026-04-11 -->
+<!-- CrewLogic v3.6.1 | 2026-04-11 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3272,7 +3272,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.6.0 | 2026-04-11 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.6.1 | 2026-04-11 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -4157,18 +4157,18 @@
         const trucks = parseFloat(est.totalTrucks) || 0;
         const price = parseFloat(est.totalPrice) || 0;
         const eid = String(est.estimateID);
-        const coverThumb = (() => {
-          const url = est.coverPhoto;
-          if (!url || url.startsWith('data:')) return url;
-          const m = url.match(/[?&]id=([^&]+)/);
-          return m ? 'https://lh3.googleusercontent.com/d/' + m[1] : url;
-        })();
+        const coverRaw = est.coverPhoto || '';
+        const coverIsLegacy = coverRaw.startsWith('http') || coverRaw.startsWith('data:');
+        const coverThumbSrc = coverIsLegacy ? (() => {
+          const m = coverRaw.match(/[?&]id=([^&]+)/);
+          return m ? 'https://lh3.googleusercontent.com/d/' + m[1] : coverRaw;
+        })() : '';
 
         html += '<div class="estimate-card" data-estimate-id="' + eid + '" style="display:flex;gap:10px;align-items:stretch;">';
 
         // Thumbnail — 64x64 square
-        if (coverThumb) {
-          html += '<img src="' + coverThumb + '" style="width:64px;height:64px;object-fit:cover;border-radius:var(--radius-sm);flex-shrink:0;align-self:center;">';
+        if (coverRaw) {
+          html += '<img id="cover-list-' + eid + '" src="' + coverThumbSrc + '" data-photo-path="' + (coverIsLegacy ? '' : coverRaw) + '" style="width:64px;height:64px;object-fit:cover;border-radius:var(--radius-sm);flex-shrink:0;align-self:center;background:var(--surface-2);">';
         } else {
           html += '<div style="width:64px;height:64px;border-radius:var(--radius-sm);background:var(--surface-2);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:24px;align-self:center;">🚛</div>';
         }
@@ -4212,6 +4212,7 @@
         html += '</div>';
       });
       listEl.innerHTML = html;
+      resolvePhotoThumbnails();
 
       // Event delegation is set up once in initEstimatesList, not here
     }    
@@ -4378,14 +4379,18 @@
 
       // Restore cover photo
       if (currentEstimate.coverPhoto) {
-        // Convert Drive uc?export=view URLs to lh3 format to bypass CORS restrictions
-        const coverSrc = (() => {
-          const url = currentEstimate.coverPhoto;
-          if (!url || url.startsWith('data:')) return url;
-          const m = url.match(/[?&]id=([^&]+)/);
-          return m ? 'https://lh3.googleusercontent.com/d/' + m[1] : url;
-        })();
-        document.getElementById('coverPhotoImg').src = coverSrc;
+        const coverRaw = currentEstimate.coverPhoto;
+        const coverImg = document.getElementById('coverPhotoImg');
+        if (coverRaw.startsWith('data:') || coverRaw.startsWith('http')) {
+          // Legacy: base64 or Drive URL — resolve inline
+          const m = coverRaw.match(/[?&]id=([^&]+)/);
+          coverImg.src = m ? 'https://lh3.googleusercontent.com/d/' + m[1] : coverRaw;
+        } else {
+          // Supabase storage path — resolve async
+          coverImg.src = '';
+          coverImg.setAttribute('data-photo-path', coverRaw);
+          resolvePhotoUrl(coverRaw).then(url => { if (url) coverImg.src = url; });
+        }
         document.getElementById('coverPhotoPreview').style.display = 'block';
         document.getElementById('coverPhotoBtn').style.display = 'none';
       } else {
@@ -5198,42 +5203,35 @@
       removeChargePhotoIdx(chargeIdx, 0);
     }
 
-    function viewChargePhotoIdx(chargeIdx, photoIdx) {
+    async function viewChargePhotoIdx(chargeIdx, photoIdx) {
       const charge = currentEstimate.charges[chargeIdx];
       if (!charge.photos) charge.photos = charge.photoUrl ? [charge.photoUrl] : [];
       const url = charge.photos[photoIdx];
       if (!url) return;
-      const m = url.match(/[?&]id=([^&]+)/);
-      const src = m ? 'https://lh3.googleusercontent.com/d/' + m[1] : url;
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:999;display:flex;align-items:center;justify-content:center;cursor:pointer;';
       overlay.onclick = () => document.body.removeChild(overlay);
       const img = document.createElement('img');
-      img.src = src;
       img.style.cssText = 'max-width:95vw;max-height:90vh;object-fit:contain;border-radius:8px;';
       overlay.appendChild(img);
       document.body.appendChild(overlay);
+      const src = await resolvePhotoUrl(url);
+      if (src) img.src = src;
     }
 
-    function viewChargePhoto(chargeIdx) {
+    async function viewChargePhoto(chargeIdx) {
       const charge = currentEstimate.charges[chargeIdx];
-      // Use lh3 URL for Drive photos (works cross-origin), fall back to inline base64
-      let src = null;
-      if (charge.photo) {
-        src = charge.photo; // inline base64
-      } else if (charge.photoUrl) {
-        const m = charge.photoUrl.match(/[?&]id=([^&]+)/);
-        src = m ? 'https://lh3.googleusercontent.com/d/' + m[1] : charge.photoUrl;
-      }
-      if (!src) return;
+      const rawUrl = charge.photo || charge.photoUrl;
+      if (!rawUrl) return;
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);z-index:999;display:flex;align-items:center;justify-content:center;cursor:pointer;';
       overlay.onclick = () => document.body.removeChild(overlay);
       const img = document.createElement('img');
-      img.src = src;
       img.style.cssText = 'max-width:95vw;max-height:90vh;object-fit:contain;border-radius:8px;';
       overlay.appendChild(img);
       document.body.appendChild(overlay);
+      const src = await resolvePhotoUrl(rawUrl);
+      if (src) img.src = src;
     }
 
     // ===== VOICE INPUT =====
@@ -5619,11 +5617,16 @@
           if (photos.length > 0) {
             html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">';
             photos.forEach((url, pi) => {
-              const thumbSrc = url.includes('drive.google.com')
-                ? url.replace('uc?export=view&id=', 'thumbnail?id=').replace('drive.google.com/uc', 'drive.google.com/thumbnail')
-                : url;
+              // Use data-photo-path for async resolution; pass raw URL for legacy Drive/base64
+              const isLegacy = url.startsWith('http') || url.startsWith('data:');
+              const thumbSrc = isLegacy
+                ? (url.includes('drive.google.com')
+                    ? url.replace('uc?export=view&id=', 'thumbnail?id=').replace('drive.google.com/uc', 'drive.google.com/thumbnail')
+                    : url)
+                : '';
+              const imgId = 'photo-thumb-' + globalIdx + '-' + pi;
               html += '<div style="position:relative;flex-shrink:0;">';
-              html += '<img src="' + thumbSrc + '" style="width:72px;height:56px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer;" onclick="viewChargePhotoIdx(' + globalIdx + ',' + pi + ')" />';
+              html += '<img id="' + imgId + '" src="' + thumbSrc + '" data-photo-path="' + (isLegacy ? '' : url) + '" style="width:72px;height:56px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer;background:var(--surface-2);" onclick="viewChargePhotoIdx(' + globalIdx + ',' + pi + ')" />';
               html += '<button onclick="removeChargePhotoIdx(' + globalIdx + ',' + pi + ')" style="position:absolute;top:-4px;right:-4px;background:#ef4444;border:none;border-radius:50%;width:16px;height:16px;color:#fff;font-size:10px;cursor:pointer;line-height:16px;text-align:center;padding:0;">✕</button>';
               html += '</div>';
             });
@@ -5695,6 +5698,20 @@
       }
 
       container.innerHTML = html;
+      // Async-resolve Supabase storage paths for photo thumbnails
+      resolvePhotoThumbnails();
+    }
+
+    async function resolvePhotoThumbnails() {
+      const imgs = document.querySelectorAll('img[data-photo-path]');
+      for (const img of imgs) {
+        const path = img.getAttribute('data-photo-path');
+        if (!path) continue;
+        try {
+          const url = await resolvePhotoUrl(path);
+          if (url) img.src = url;
+        } catch(e) {}
+      }
     }
 
     // ===== VOLUME CHARGE AUTO-CALC =====
@@ -7717,7 +7734,8 @@
         });
         await Promise.all(allPhotoUrls.map(async url => {
           try {
-            const fetchUrl = toDriveImgUrl(url);
+            const resolvedUrl = await resolvePhotoUrl(url);
+            const fetchUrl = resolvedUrl ? toDriveImgUrl(resolvedUrl) : toDriveImgUrl(url);
             photoCache[url] = await loadImageFromUrl(fetchUrl);
           } catch(e) {
             console.warn('Photo load failed:', url, e);
@@ -8165,12 +8183,15 @@ RECYCLING & DONATION
     } // end generateEstimatePDF
 
     // Convert a URL to base64 data URI — used by PDF generation for Drive-hosted photos
-    function loadImageAsBase64(url) {
-      // Convert Drive uc?export=view URLs to lh3 format to bypass CORS
+    async function loadImageAsBase64(url) {
+      if (!url) return null;
+      // Resolve Supabase storage paths to signed URLs first
+      const resolved = await resolvePhotoUrl(url);
       const fetchUrl = (() => {
-        if (!url || url.startsWith('data:')) return url;
-        const m = url.match(/[?&]id=([^&]+)/);
-        return m ? 'https://lh3.googleusercontent.com/d/' + m[1] + '=s1600' : url;
+        const u = resolved || url;
+        if (!u || u.startsWith('data:')) return u;
+        const m = u.match(/[?&]id=([^&]+)/);
+        return m ? 'https://lh3.googleusercontent.com/d/' + m[1] + '=s1600' : u;
       })();
       return new Promise((resolve, reject) => {
         const img = new Image();
