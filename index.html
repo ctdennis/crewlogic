@@ -2939,18 +2939,25 @@
           resultsEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">No clients found.</div>';
           return;
         }
+        window._clientSearchResults = data.clients;
         let html = '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-top:4px;">';
-        data.clients.forEach(c => {
+        data.clients.forEach((c, ci) => {
           const addr = (c.address || '').split('\n').join(', ');
-          const safeName = c.name.replace(/'/g, '&#39;');
-          const safeAddr = addr.replace(/'/g, '&#39;');
-          html += '<div onclick="selectVonigoClient("' + JSON.stringify(c.clientID) + ',' + JSON.stringify(c.name) + ',' + JSON.stringify(addr) + ')" style="padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--bg-card);" onmouseover="this.style.background=\'var(--surface-2)\'" onmouseout="this.style.background=\'var(--bg-card)\'">' ;
+          html += '<div data-client-idx="' + ci + '" class="client-search-result" style="padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--bg-card);">';
           html += '<div style="font-weight:600;font-size:13px;color:var(--text-primary);">' + c.name + '</div>';
           if (addr) html += '<div style="font-size:11px;color:var(--text-muted);">' + addr + '</div>';
           html += '</div>';
         });
         html += '</div>';
         resultsEl.innerHTML = html;
+        // Attach click handlers via data attributes
+        resultsEl.querySelectorAll('[data-client-idx]').forEach(el => {
+          el.addEventListener('click', () => {
+            const idx = parseInt(el.getAttribute('data-client-idx'));
+            const c = window._clientSearchResults[idx];
+            if (c) selectVonigoClient(c.clientID, c.name, (c.address || '').split('\n').join(', '));
+          });
+        });
       } catch(e) {
         resultsEl.innerHTML = '<div style="font-size:12px;color:#ef4444;">Search failed.</div>';
       }
