@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.7.3 | 2026-04-12">
+  <meta name="crewlogic-version" content="v3.7.4 | 2026-04-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -857,7 +857,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.7.3 | 2026-04-12 -->
+<!-- CrewLogic v3.7.4 | 2026-04-12 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1327,7 +1327,14 @@
             <div style="margin-bottom:16px;">
               <div class="form-label" style="margin-bottom:8px;">Volume Discounts</div>
               <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Set discount per truck size. Leave 0 for no discount.</div>
-              <div id="volumeDiscountRows" style="display:flex;flex-direction:column;gap:6px;"></div>
+              <div style="display:flex;gap:8px;margin-bottom:6px;font-size:11px;color:var(--text-muted);">
+              <div style="width:90px;">Size</div>
+              <div style="width:56px;text-align:right;">Standard</div>
+              <div style="width:65px;padding-left:4px;">Discount</div>
+              <div style="width:80px;"></div>
+              <div id="volumeDiscountPriceLabel" style="font-size:10px;color:var(--accent-green);align-self:center;"></div>
+            </div>
+            <div id="volumeDiscountRows" style="display:flex;flex-direction:column;gap:4px;" oninput="renderVolumeDiscountRows(getVolumeDiscounts())"></div>
             </div>
 
             <!-- Other Discounts -->
@@ -2906,14 +2913,25 @@
       const container = document.getElementById('volumeDiscountRows');
       let html = '';
       TRUCK_FRACTIONS.forEach((f, i) => {
-        const ex = existing.find(e => e.fraction === f.value) || { type: 'flat', amount: 0 };
-        html += '<div style="display:flex;align-items:center;gap:8px;">';
-        html += '<div style="width:80px;font-size:12px;color:var(--text-muted);">' + f.label + '</div>';
-        html += '<input type="number" class="form-input" data-fraction="' + f.value + '" data-field="amount" placeholder="0" min="0" value="' + (ex.amount || 0) + '" style="width:70px;">';
+        const ex = (existing || []).find(e => e.fraction === f.value) || { type: 'flat', amount: 0 };
+        const stdPrice = getStandardPriceForFraction(f.value);
+        html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">';
+        html += '<div style="width:90px;font-size:12px;color:var(--text-muted);">' + f.label + '</div>';
+        if (stdPrice !== null) {
+          html += '<div style="width:56px;font-size:12px;color:var(--text-secondary);text-align:right;">$' + stdPrice.toFixed(0) + '</div>';
+        } else {
+          html += '<div style="width:56px;"></div>';
+        }
+        html += '<input type="number" class="form-input" data-fraction="' + f.value + '" data-field="amount" placeholder="0" min="0" value="' + (ex.amount || 0) + '" style="width:65px;">';
         html += '<select class="form-input" data-fraction="' + f.value + '" data-field="type" style="padding:8px 4px;font-size:12px;">';
         html += '<option value="flat"' + (ex.type === 'flat' ? ' selected' : '') + '>$ off</option>';
         html += '<option value="pct"' + (ex.type === 'pct' ? ' selected' : '') + '>% off</option>';
         html += '</select>';
+        if (stdPrice !== null && (ex.amount || 0) > 0) {
+          const disc = ex.type === 'pct' ? stdPrice * (ex.amount / 100) : ex.amount;
+          const net = stdPrice - disc;
+          html += '<div style="font-size:11px;color:var(--accent-green);width:48px;">→ $' + Math.max(0, net).toFixed(0) + '</div>';
+        }
         html += '</div>';
       });
       container.innerHTML = html;
@@ -2955,7 +2973,7 @@
           el.addEventListener('click', () => {
             const idx = parseInt(el.getAttribute('data-client-idx'));
             const c = window._clientSearchResults[idx];
-            if (c) selectVonigoClient(c.clientID, c.name, (c.address || '').split('\n').join(', '));
+            if (c) selectVonigoClient(c.clientID, c.name, (c.address || '').split('\n').join(', '), c.zip || '');
           });
         });
       } catch(e) {
@@ -2963,7 +2981,7 @@
       }
     }
 
-    function selectVonigoClient(clientID, name, address) {
+    async function selectVonigoClient(clientID, name, address, zip) {
       selectedClientID = clientID;
       selectedClientName = name;
       selectedClientAddress = address;
@@ -2972,6 +2990,54 @@
       document.getElementById('selectedClientDisplay').style.display = '';
       document.getElementById('clientSearchResults').innerHTML = '';
       document.getElementById('clientSearchInput').value = '';
+      // Fetch standard pricing for this zip to show alongside discount fields
+      if (zip) {
+        const priceLabel = document.getElementById('volumeDiscountPriceLabel');
+        if (priceLabel) priceLabel.textContent = 'Loading standard prices...';
+        try {
+          const res = await apiFetch(N8N_BASE + '/crewlogic-price-lookup', {
+            method: 'POST',
+            body: JSON.stringify({ zipCode: zip, franchiseID: currentUser.franchiseID, email: currentUser.email })
+          });
+          const data = await res.json();
+          if (data.success && data.blocks) {
+            window._cplStandardPrices = buildPriceMap(data.blocks);
+            renderVolumeDiscountRows(getVolumeDiscounts());
+            if (priceLabel) priceLabel.textContent = 'Standard prices for ZIP ' + zip;
+          }
+        } catch(e) {
+          if (priceLabel) priceLabel.textContent = '';
+        }
+      }
+    }
+
+    function buildPriceMap(blocks) {
+      const map = {};
+      blocks.forEach(block => {
+        (block.items || []).forEach(item => {
+          if (item.name) map[item.name.toLowerCase()] = parseFloat(item.value) || 0;
+        });
+      });
+      return map;
+    }
+
+    function getStandardPriceForFraction(fraction) {
+      if (!window._cplStandardPrices) return null;
+      const labels = {
+        0.125: ['1/8 truckload', '1/8 truck'],
+        0.25:  ['1/4 truckload', '1/4 truck', 'quarter truckload'],
+        0.375: ['3/8 truckload', '3/8 truck'],
+        0.5:   ['1/2 truckload', '1/2 truck', 'half truckload'],
+        0.625: ['5/8 truckload', '5/8 truck'],
+        0.75:  ['3/4 truckload', '3/4 truck'],
+        0.875: ['7/8 truckload', '7/8 truck'],
+        1.0:   ['full truckload', 'full truck', '1 truckload']
+      };
+      const candidates = labels[fraction] || [];
+      for (const label of candidates) {
+        if (window._cplStandardPrices[label] !== undefined) return window._cplStandardPrices[label];
+      }
+      return null;
     }
 
     function getVolumeDiscounts() {
@@ -3643,7 +3709,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.7.3 | 2026-04-12 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.7.4 | 2026-04-12 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
