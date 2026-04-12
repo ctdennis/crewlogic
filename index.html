@@ -1019,6 +1019,7 @@
           <button class="settings-tab" id="stab-cost" onclick="showSettingsTab('cost')">💰 Cost</button>
           <button class="settings-tab" id="stab-proposal" onclick="showSettingsTab('proposal')">📄 Proposal</button>
           <button class="settings-tab" id="stab-account" onclick="showSettingsTab('account')">⚙️ Account</button>
+          <button class="settings-tab" id="stab-pricing" onclick="showSettingsTab('pricing')">★ Pricing</button>
         </div>
 
         <!-- TAB: Franchise -->
@@ -1283,6 +1284,86 @@
           </div>
 
         </div><!-- end account tab -->
+
+        <!-- TAB: Customer Pricing -->
+        <div id="stab-content-pricing" style="display:none;">
+          <div class="settings-card fade-in fade-in-delay-2" id="customerPricingCard">
+            <div class="settings-card-title" style="display:flex;align-items:center;justify-content:space-between;">
+              <span>Customer Price Lists</span>
+              <button onclick="showAddCustomerPricing()" style="padding:5px 12px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;">+ Add</button>
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">Set negotiated pricing for commercial customers. Discounts auto-apply when their job is looked up.</div>
+            <div id="customerPricingList" style="font-size:13px;color:var(--text-muted);">Loading...</div>
+          </div>
+
+          <!-- Add/Edit Customer Price List Form -->
+          <div class="settings-card fade-in fade-in-delay-3" id="customerPricingForm" style="display:none;">
+            <div class="settings-card-title" id="customerPricingFormTitle">Add Customer Price List</div>
+
+            <!-- Client Search -->
+            <div style="margin-bottom:12px;" id="clientSearchSection">
+              <div class="form-label">Search Vonigo Client</div>
+              <div style="display:flex;gap:8px;">
+                <input type="text" class="form-input" id="clientSearchInput" placeholder="Customer name..." style="flex:1;" onkeydown="if(event.key==='Enter')searchVonigoClients()">
+                <button onclick="searchVonigoClients()" style="padding:8px 14px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;">Search</button>
+              </div>
+              <div id="clientSearchResults" style="margin-top:8px;"></div>
+            </div>
+
+            <!-- Selected Client Display -->
+            <div id="selectedClientDisplay" style="display:none;margin-bottom:12px;padding:10px;background:var(--bg-input);border-radius:var(--radius-sm);border:1px solid var(--accent-green);">
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:2px;">Selected Client</div>
+              <div style="font-weight:700;color:var(--text-primary);" id="selectedClientName"></div>
+              <div style="font-size:12px;color:var(--text-muted);" id="selectedClientAddress"></div>
+            </div>
+
+            <!-- Notes -->
+            <div style="margin-bottom:16px;">
+              <div class="form-label">Notes (optional)</div>
+              <input type="text" class="form-input" id="cplNotes" placeholder="e.g. Carpionato Group — negotiated 2024">
+            </div>
+
+            <!-- Volume Discounts -->
+            <div style="margin-bottom:16px;">
+              <div class="form-label" style="margin-bottom:8px;">Volume Discounts</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Set discount per truck size. Leave 0 for no discount.</div>
+              <div id="volumeDiscountRows" style="display:flex;flex-direction:column;gap:6px;"></div>
+            </div>
+
+            <!-- Other Discounts -->
+            <div style="margin-bottom:16px;">
+              <div class="form-label" style="margin-bottom:8px;">Other Discounts</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <div>
+                  <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Recycling/Surcharges</div>
+                  <div style="display:flex;gap:4px;align-items:center;">
+                    <input type="number" class="form-input" id="cplRecyclingAmt" placeholder="0" min="0" style="width:70px;">
+                    <select class="form-input" id="cplRecyclingType" style="padding:8px 4px;font-size:12px;">
+                      <option value="flat">$ off</option>
+                      <option value="pct">% off</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Single Items</div>
+                  <div style="display:flex;gap:4px;align-items:center;">
+                    <input type="number" class="form-input" id="cplSingleItemAmt" placeholder="0" min="0" style="width:70px;">
+                    <select class="form-input" id="cplSingleItemType" style="padding:8px 4px;font-size:12px;">
+                      <option value="flat">$ off</option>
+                      <option value="pct">% off</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:8px;">
+              <button onclick="saveCustomerPriceList()" style="flex:1;padding:10px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;">Save</button>
+              <button onclick="cancelCustomerPricing()" style="padding:10px 16px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;">Cancel</button>
+            </div>
+            <div class="settings-feedback" id="cplFeedback"></div>
+          </div>
+        </div><!-- end pricing tab -->
 
       </div>
 
@@ -2738,6 +2819,259 @@
       return res.json();
     }
 
+
+    // ===== CUSTOMER PRICING =====
+    const TRUCK_FRACTIONS = [
+      { label: '1/8 Truck', value: 0.125 },
+      { label: '1/4 Truck', value: 0.25 },
+      { label: '3/8 Truck', value: 0.375 },
+      { label: '1/2 Truck', value: 0.5 },
+      { label: '5/8 Truck', value: 0.625 },
+      { label: '3/4 Truck', value: 0.75 },
+      { label: '7/8 Truck', value: 0.875 },
+      { label: 'Full Truck', value: 1.0 }
+    ];
+
+    let editingPriceListID = null;
+    let selectedClientID = null;
+    let selectedClientName = null;
+    let selectedClientAddress = null;
+
+    async function loadCustomerPricingList() {
+      const el = document.getElementById('customerPricingList');
+      if (!el) return;
+      el.textContent = 'Loading...';
+      try {
+        const franchiseUUID = await getFranchiseUUID();
+        if (!franchiseUUID) { el.textContent = 'Could not load franchise info.'; return; }
+        const data = await supabaseFetch(
+          '/rest/v1/customer_price_lists?franchise_id=eq.' + franchiseUUID +
+          '&is_active=eq.true&order=name.asc'
+        );
+        if (!data || data.length === 0) {
+          el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0;">No customer price lists yet. Tap + Add to create one.</div>';
+          return;
+        }
+        let html = '';
+        data.forEach(cpl => {
+          html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);">';
+          html += '<div>';
+          html += '<div style="font-weight:600;color:var(--text-primary);">' + cpl.name + '</div>';
+          if (cpl.notes) html += '<div style="font-size:11px;color:var(--text-muted);">' + cpl.notes + '</div>';
+          html += '</div>';
+          html += '<div style="display:flex;gap:8px;">';
+          html += '<button onclick="editCustomerPriceList('' + cpl.id + '')" style="padding:4px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;color:var(--text-secondary);cursor:pointer;">Edit</button>';
+          html += '<button onclick="deleteCustomerPriceList('' + cpl.id + '')" style="padding:4px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;color:#ef4444;cursor:pointer;">Delete</button>';
+          html += '</div></div>';
+        });
+        el.innerHTML = html;
+      } catch(e) {
+        el.textContent = 'Error loading price lists.';
+        console.error(e);
+      }
+    }
+
+    async function getFranchiseUUID() {
+      try {
+        const data = await supabaseFetch(
+          '/rest/v1/franchises?select=id&external_id=eq.' + currentUser.franchiseID +
+          '&tenant_id=eq.946a4535-aa61-45b6-a6fb-9190ff546d41'
+        );
+        return data && data[0] ? data[0].id : null;
+      } catch(e) { return null; }
+    }
+
+    function showAddCustomerPricing() {
+      editingPriceListID = null;
+      selectedClientID = null;
+      selectedClientName = null;
+      selectedClientAddress = null;
+      document.getElementById('customerPricingFormTitle').textContent = 'Add Customer Price List';
+      document.getElementById('clientSearchSection').style.display = '';
+      document.getElementById('clientSearchInput').value = '';
+      document.getElementById('clientSearchResults').innerHTML = '';
+      document.getElementById('selectedClientDisplay').style.display = 'none';
+      document.getElementById('cplNotes').value = '';
+      document.getElementById('cplRecyclingAmt').value = '0';
+      document.getElementById('cplRecyclingType').value = 'flat';
+      document.getElementById('cplSingleItemAmt').value = '0';
+      document.getElementById('cplSingleItemType').value = 'flat';
+      document.getElementById('cplFeedback').textContent = '';
+      renderVolumeDiscountRows([]);
+      document.getElementById('customerPricingForm').style.display = '';
+      document.getElementById('customerPricingForm').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function renderVolumeDiscountRows(existing) {
+      const container = document.getElementById('volumeDiscountRows');
+      let html = '';
+      TRUCK_FRACTIONS.forEach((f, i) => {
+        const ex = existing.find(e => e.fraction === f.value) || { type: 'flat', amount: 0 };
+        html += '<div style="display:flex;align-items:center;gap:8px;">';
+        html += '<div style="width:80px;font-size:12px;color:var(--text-muted);">' + f.label + '</div>';
+        html += '<input type="number" class="form-input" data-fraction="' + f.value + '" data-field="amount" placeholder="0" min="0" value="' + (ex.amount || 0) + '" style="width:70px;">';
+        html += '<select class="form-input" data-fraction="' + f.value + '" data-field="type" style="padding:8px 4px;font-size:12px;">';
+        html += '<option value="flat"' + (ex.type === 'flat' ? ' selected' : '') + '>$ off</option>';
+        html += '<option value="pct"' + (ex.type === 'pct' ? ' selected' : '') + '>% off</option>';
+        html += '</select>';
+        html += '</div>';
+      });
+      container.innerHTML = html;
+    }
+
+    async function searchVonigoClients() {
+      const q = document.getElementById('clientSearchInput').value.trim();
+      if (!q) return;
+      const resultsEl = document.getElementById('clientSearchResults');
+      resultsEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">Searching...</div>';
+      try {
+        const res = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'searchClients',
+            email: currentUser.email,
+            franchiseID: currentUser.franchiseID,
+            searchPar: q
+          })
+        });
+        const data = await res.json();
+        if (!data.success || !data.clients.length) {
+          resultsEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">No clients found.</div>';
+          return;
+        }
+        let html = '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-top:4px;">';
+        data.clients.forEach(c => {
+          const addr = (c.address || '').replace(/
+/g, ', ');
+          html += '<div onclick="selectVonigoClient('' + c.clientID + '','' + c.name.replace(/'/g,"\'") + '','' + addr.replace(/'/g,"\'") + '')" style="padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--bg-card);" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='var(--bg-card)'">';
+          html += '<div style="font-weight:600;font-size:13px;color:var(--text-primary);">' + c.name + '</div>';
+          if (addr) html += '<div style="font-size:11px;color:var(--text-muted);">' + addr + '</div>';
+          html += '</div>';
+        });
+        html += '</div>';
+        resultsEl.innerHTML = html;
+      } catch(e) {
+        resultsEl.innerHTML = '<div style="font-size:12px;color:#ef4444;">Search failed.</div>';
+      }
+    }
+
+    function selectVonigoClient(clientID, name, address) {
+      selectedClientID = clientID;
+      selectedClientName = name;
+      selectedClientAddress = address;
+      document.getElementById('selectedClientName').textContent = name;
+      document.getElementById('selectedClientAddress').textContent = address;
+      document.getElementById('selectedClientDisplay').style.display = '';
+      document.getElementById('clientSearchResults').innerHTML = '';
+      document.getElementById('clientSearchInput').value = '';
+    }
+
+    function getVolumeDiscounts() {
+      const rows = document.querySelectorAll('#volumeDiscountRows [data-fraction]');
+      const discounts = [];
+      TRUCK_FRACTIONS.forEach(f => {
+        const amtEl = document.querySelector('#volumeDiscountRows [data-fraction="' + f.value + '"][data-field="amount"]');
+        const typeEl = document.querySelector('#volumeDiscountRows [data-fraction="' + f.value + '"][data-field="type"]');
+        if (amtEl && typeEl) {
+          discounts.push({
+            fraction: f.value,
+            type: typeEl.value,
+            amount: parseFloat(amtEl.value) || 0
+          });
+        }
+      });
+      return discounts;
+    }
+
+    async function saveCustomerPriceList() {
+      const feedback = document.getElementById('cplFeedback');
+      if (!editingPriceListID && !selectedClientID) {
+        feedback.textContent = 'Please search and select a client first.';
+        feedback.className = 'settings-feedback error';
+        return;
+      }
+      feedback.textContent = 'Saving...';
+      feedback.className = 'settings-feedback loading';
+      try {
+        const franchiseUUID = await getFranchiseUUID();
+        if (!franchiseUUID) throw new Error('Could not find franchise');
+        const payload = {
+          franchise_id: franchiseUUID,
+          vonigo_client_id: selectedClientID,
+          name: selectedClientName,
+          notes: document.getElementById('cplNotes').value.trim(),
+          volume_discounts: getVolumeDiscounts(),
+          recycling_discount: {
+            type: document.getElementById('cplRecyclingType').value,
+            amount: parseFloat(document.getElementById('cplRecyclingAmt').value) || 0
+          },
+          single_item_discount: {
+            type: document.getElementById('cplSingleItemType').value,
+            amount: parseFloat(document.getElementById('cplSingleItemAmt').value) || 0
+          },
+          is_active: true,
+          updated_at: new Date().toISOString()
+        };
+        if (editingPriceListID) {
+          await supabaseFetch('/rest/v1/customer_price_lists?id=eq.' + editingPriceListID, {
+            method: 'PATCH',
+            body: JSON.stringify(payload)
+          });
+        } else {
+          await supabaseFetch('/rest/v1/customer_price_lists', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          });
+        }
+        feedback.textContent = '✓ Saved';
+        feedback.className = 'settings-feedback ok';
+        document.getElementById('customerPricingForm').style.display = 'none';
+        loadCustomerPricingList();
+      } catch(e) {
+        feedback.textContent = 'Save failed: ' + e.message;
+        feedback.className = 'settings-feedback error';
+      }
+    }
+
+    async function editCustomerPriceList(id) {
+      try {
+        const data = await supabaseFetch('/rest/v1/customer_price_lists?id=eq.' + id);
+        if (!data || !data[0]) return;
+        const cpl = data[0];
+        editingPriceListID = id;
+        selectedClientID = cpl.vonigo_client_id;
+        selectedClientName = cpl.name;
+        document.getElementById('customerPricingFormTitle').textContent = 'Edit: ' + cpl.name;
+        document.getElementById('clientSearchSection').style.display = 'none';
+        document.getElementById('selectedClientName').textContent = cpl.name;
+        document.getElementById('selectedClientAddress').textContent = '';
+        document.getElementById('selectedClientDisplay').style.display = '';
+        document.getElementById('cplNotes').value = cpl.notes || '';
+        document.getElementById('cplRecyclingAmt').value = cpl.recycling_discount?.amount || 0;
+        document.getElementById('cplRecyclingType').value = cpl.recycling_discount?.type || 'flat';
+        document.getElementById('cplSingleItemAmt').value = cpl.single_item_discount?.amount || 0;
+        document.getElementById('cplSingleItemType').value = cpl.single_item_discount?.type || 'flat';
+        document.getElementById('cplFeedback').textContent = '';
+        renderVolumeDiscountRows(cpl.volume_discounts || []);
+        document.getElementById('customerPricingForm').style.display = '';
+        document.getElementById('customerPricingForm').scrollIntoView({ behavior: 'smooth' });
+      } catch(e) { alert('Could not load price list.'); }
+    }
+
+    async function deleteCustomerPriceList(id) {
+      if (!confirm('Delete this customer price list?')) return;
+      try {
+        await supabaseFetch('/rest/v1/customer_price_lists?id=eq.' + id, { method: 'DELETE' });
+        loadCustomerPricingList();
+      } catch(e) { alert('Delete failed.'); }
+    }
+
+    function cancelCustomerPricing() {
+      document.getElementById('customerPricingForm').style.display = 'none';
+      editingPriceListID = null;
+      selectedClientID = null;
+    }
+
     async function generateInviteLink() {
       const feedback = document.getElementById('inviteLinkFeedback');
       const panel = document.getElementById('inviteLinkPanel');
@@ -2973,6 +3307,8 @@
         // Estimator — hide all owner-only features
 
         // Hide Franchise, Cost and Proposal settings tabs
+        const pricingTab = document.getElementById('stab-pricing');
+        if (pricingTab) pricingTab.style.display = 'none';
         const franchiseTab = document.getElementById('stab-franchise');
         if (franchiseTab) franchiseTab.style.display = 'none';
         const costTab = document.getElementById('stab-cost');
@@ -8949,13 +9285,16 @@ RECYCLING & DONATION
 
     // ===== SETTINGS TABS =====
     function showSettingsTab(tab) {
-      ['franchise','cost','proposal','account'].forEach(t => {
-        document.getElementById('stab-content-' + t).style.display = t === tab ? 'block' : 'none';
+      ['franchise','cost','proposal','account','pricing'].forEach(t => {
+        const el = document.getElementById('stab-content-' + t);
+        if (el) el.style.display = t === tab ? 'block' : 'none';
         const btn = document.getElementById('stab-' + t);
         if (btn) btn.classList.toggle('active', t === tab);
       });
       // Render facility lists when switching to cost tab
       if (tab === 'cost') renderAllFacilityLists();
+      // Load customer pricing list when switching to pricing tab
+      if (tab === 'pricing') loadCustomerPricingList();
     }
 
     // ===== PROPOSAL SETTINGS =====
