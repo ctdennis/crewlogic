@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.8.0 | 2026-04-12">
+  <meta name="crewlogic-version" content="v3.8.1 | 2026-04-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -857,7 +857,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.8.0 | 2026-04-12 -->
+<!-- CrewLogic v3.8.1 | 2026-04-12 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3131,8 +3131,8 @@
         ? charge.truckVolume / charge.truckQty
         : null;
       if (fraction === null) return null;
-      const volBlock = (window._cplPriceBlocks || currentEstimate.priceBlocks || [])
-        .find(b => b.name === 'Volume Charges');
+      const blocks = window._cplPriceBlocks || currentEstimate.priceBlocks || priceBlocks || [];
+      const volBlock = blocks.find(b => b.name === 'Volume Charges');
       if (!volBlock) return null;
       const fractionLabels = {
         0.0625: 'Minimum', 0.125: '1/8', 0.25: '1/4', 0.375: '3/8',
@@ -3910,7 +3910,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.8.0 | 2026-04-12 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.8.1 | 2026-04-12 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6659,18 +6659,31 @@
         // Volume discounts
         const splitOn2 = !!currentEstimate.splitPricing;
         const volCalc2 = splitOn2 ? calcVolumePriceSplit(totalTrucks) : calcVolumePrice(totalTrucks);
-        if (volCalc2.lines) {
-          volCalc2.lines.forEach(line => {
-            if (line.priceItemID) {
-              const fakeCharge = { type: 'volume', priceItemID: line.priceItemID, truckVolume: line.fraction * line.qty, truckQty: line.qty };
-              const disc = getCustomerDiscount(fakeCharge, line.amount / line.qty) * line.qty;
-              customerDiscountTotal += disc;
+        // Volume discount — use category mode directly against each price line
+        const volCatData = (cpl.surcharge_discounts || {})['volume'];
+        if (volCatData) {
+          const splitOn2 = !!currentEstimate.splitPricing;
+          const volCalc2 = splitOn2 ? calcVolumePriceSplit(totalTrucks) : calcVolumePrice(totalTrucks);
+          const linesToDiscount = volCalc2.lines || (volCalc2.total > 0 ? [{ amount: volCalc2.total, qty: 1, fraction: totalTrucks }] : []);
+          linesToDiscount.forEach(line => {
+            const basePerUnit = line.amount / (line.qty || 1);
+            let disc = 0;
+            if (volCatData.mode === 'category' && volCatData.category?.amount > 0) {
+              const d = volCatData.category.type === 'pct'
+                ? basePerUnit * (volCatData.category.amount / 100)
+                : volCatData.category.amount;
+              disc = Math.min(d, basePerUnit) * (line.qty || 1);
+            } else if (volCatData.mode === 'per_item' && line.priceItemID) {
+              const itemDisc = (volCatData.items || {})[String(line.priceItemID)];
+              if (itemDisc && itemDisc.amount > 0) {
+                const d = itemDisc.type === 'pct'
+                  ? basePerUnit * (itemDisc.amount / 100)
+                  : itemDisc.amount;
+                disc = Math.min(d, basePerUnit) * (line.qty || 1);
+              }
             }
+            customerDiscountTotal += disc;
           });
-        } else if (volCalc2.total > 0) {
-          // Single line — use full truck fraction
-          const fakeCharge = { type: 'volume', truckVolume: totalTrucks, truckQty: 1 };
-          customerDiscountTotal += getCustomerDiscount(fakeCharge, volCalc2.total);
         }
         // Surcharge discounts
         nonVolumeCharges.filter(c => c.type !== 'discount').forEach(c => {
