@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.8.7 | 2026-04-12">
+  <meta name="crewlogic-version" content="v3.8.8 | 2026-04-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -857,7 +857,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.8.7 | 2026-04-12 -->
+<!-- CrewLogic v3.8.8 | 2026-04-12 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3095,7 +3095,12 @@
           isMatch = true;
         } else if (cat.key !== 'volume') {
           const items = getCategoryItems(cat.blockNames);
-          isMatch = items.some(i => i.priceItemID === charge.priceItemID);
+          const chargeName = (charge.name || '').toLowerCase().trim();
+          // Match by name (works across price list zones) or priceItemID
+          isMatch = items.some(i =>
+            i.priceItemID === charge.priceItemID ||
+            i.name.toLowerCase().trim() === chargeName
+          );
         }
 
         if (isMatch) {
@@ -3108,10 +3113,16 @@
               : catData.category.amount;
             return Math.max(0, basePrice - disc);
           } else if (catData.mode === 'per_item') {
-            // For volume, key by priceItemID; match from price blocks
+            const items = getCategoryItems(cat.blockNames);
+            const chargeName = (charge.name || '').toLowerCase().trim();
+            // Find the matching item in the price blocks to get its stored priceItemID
+            const matchedItem = items.find(i =>
+              i.priceItemID === charge.priceItemID ||
+              i.name.toLowerCase().trim() === chargeName
+            );
             const itemKey = cat.key === 'volume'
               ? getVolumePriceItemID(charge)
-              : String(charge.priceItemID);
+              : matchedItem ? String(matchedItem.priceItemID) : String(charge.priceItemID);
             if (itemKey) {
               const itemDisc = (catData.items || {})[itemKey];
               if (itemDisc && itemDisc.amount > 0) {
@@ -3930,7 +3941,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.8.7 | 2026-04-12 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.8.8 | 2026-04-12 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6732,24 +6743,29 @@
             customerDiscountTotal += disc;
           });
         } else {
-          // No price blocks — match per_item discounts directly by priceItemID
+          // No price blocks — match per_item by name using stored item names in surcharge_discounts
+          // Build a name->discount map from all per_item categories
+          const nameDiscountMap = {};
+          for (const cat of CPL_CATEGORIES) {
+            if (cat.key === 'volume') continue;
+            const catData = (sd[cat.key] || {});
+            if (catData.mode === 'per_item' && catData.itemNames) {
+              Object.entries(catData.itemNames || {}).forEach(([id, name]) => {
+                const disc = (catData.items || {})[id];
+                if (disc && disc.amount > 0) nameDiscountMap[name.toLowerCase()] = disc;
+              });
+            }
+          }
           nonVolumeCharges.filter(c => c.type !== 'discount').forEach(c => {
-            if (!c.priceItemID) return;
             const basePerUnit = parseFloat(c.unitPrice) || 0;
             const qty = parseFloat(c.qty) || 1;
-            for (const cat of CPL_CATEGORIES) {
-              if (cat.key === 'volume') continue;
-              const catData = (sd[cat.key] || {});
-              if (catData.mode === 'per_item') {
-                const itemDisc = (catData.items || {})[String(c.priceItemID)];
-                if (itemDisc && itemDisc.amount > 0) {
-                  const d = itemDisc.type === 'pct'
-                    ? basePerUnit * (itemDisc.amount / 100)
-                    : itemDisc.amount;
-                  customerDiscountTotal += Math.min(d, basePerUnit) * qty;
-                  break;
-                }
-              }
+            const chargeName = (c.name || '').toLowerCase().trim();
+            const itemDisc = nameDiscountMap[chargeName];
+            if (itemDisc && itemDisc.amount > 0) {
+              const d = itemDisc.type === 'pct'
+                ? basePerUnit * (itemDisc.amount / 100)
+                : itemDisc.amount;
+              customerDiscountTotal += Math.min(d, basePerUnit) * qty;
             }
           });
         }
