@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.8.1 | 2026-04-12">
+  <meta name="crewlogic-version" content="v3.8.2 | 2026-04-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -857,7 +857,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.8.1 | 2026-04-12 -->
+<!-- CrewLogic v3.8.2 | 2026-04-12 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1531,24 +1531,24 @@
                 </div>
               </div>
             </div>
-            <div id="splitPricingBreakdown" style="display:none;font-size:12px;color:var(--text-secondary);font-family:'Space Mono',monospace;border-top:1px solid var(--border);padding-top:8px;line-height:1.8;"></div>
+            <!-- Pricing breakdown (split lines) -->
+            <div id="splitPricingBreakdown" style="display:none;font-size:12px;color:var(--text-secondary);font-family:'Space Mono',monospace;border-top:1px solid var(--border);padding-top:8px;line-height:1.8;margin-top:8px;"></div>
+            <!-- Customer discount line -->
+            <div id="estCustomerDiscountLine" style="display:none;font-size:12px;color:var(--accent-green);font-family:'Space Mono',monospace;font-weight:600;margin-top:4px;"></div>
+            <!-- Quote total -->
+            <div style="display:flex;align-items:baseline;justify-content:space-between;border-top:1px solid var(--border);margin-top:8px;padding-top:8px;">
+              <div>
+                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">Quote Total</div>
+                <div style="font-size:11px;color:var(--accent-green);font-family:'Space Mono',monospace;margin-top:1px;" id="estPriceListDisplay"></div>
+              </div>
+              <div style="text-align:right;">
+                <div class="est-total-amount" id="estGrandTotal">$0.00</div>
+                <div id="estActualMarginDisplay" style="display:none;margin-top:3px;font-size:11px;font-family:monospace;font-weight:600;"></div>
+              </div>
+            </div>
           </div>
 
           <hr class="form-divider">
-
-                    <!-- Total bar -->
-          <div class="est-total-bar">
-            <div>
-              <div class="est-total-label" style="font-size:11px;">Price List</div>
-              <div style="font-size:11px;color:var(--accent-green);font-family:'Space Mono',monospace;" id="estPriceListDisplay"></div>
-            </div>
-            <div style="text-align:right">
-              <div id="estCustomerDiscountLine" style="display:none;font-size:11px;color:var(--accent-green);margin-bottom:2px;font-weight:600;"></div>
-              <div class="est-total-label">Quote Total</div>
-              <div class="est-total-amount" id="estGrandTotal">$0.00</div>
-              <div id="estActualMarginDisplay" style="display:none;margin-top:3px;font-size:11px;font-family:monospace;font-weight:600;"></div>
-            </div>
-          </div>
 
 
           <!-- COST ANALYSIS PANEL -->
@@ -3910,7 +3910,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.8.1 | 2026-04-12 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.8.2 | 2026-04-12 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6634,8 +6634,16 @@
           breakdownEl.style.display = 'block';
           breakdownEl.innerHTML = volCalc.lines.map(l =>
             '<div style="display:flex;justify-content:space-between;"><span>' + l.label + '</span><span style="color:var(--accent-green)">$' + l.amount.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</span></div>'
-          ).join('') +
-          '<div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);margin-top:4px;padding-top:4px;font-weight:700;"><span>Volume Total</span><span style="color:var(--accent-green)">$' + volumeTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</span></div>';
+          ).join('');
+        } else if (!splitOn && volumeTotal > 0) {
+          // Show single line even when split is off
+          breakdownEl.style.display = 'block';
+          const item = findVolumeItem(roundToNearestEighth(totalTrucks <= 1 ? totalTrucks : 1.0));
+          const rate = item ? parseFloat(item.value) : 0;
+          const label = totalTrucks <= 1
+            ? (Object.entries({0.125:'1/8',0.25:'1/4',0.375:'3/8',0.5:'1/2',0.625:'5/8',0.75:'3/4',0.875:'7/8',1.0:'Full'})[Math.round(totalTrucks*8)-1] || ['',''])[1] + ' × $' + rate.toFixed(2)
+            : totalTrucks.toFixed(3) + ' × $' + rate.toFixed(2);
+          breakdownEl.innerHTML = '<div style="display:flex;justify-content:space-between;"><span>' + label + '</span><span style="color:var(--accent-green)">$' + volumeTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</span></div>';
         } else {
           breakdownEl.style.display = 'none';
         }
@@ -6702,7 +6710,7 @@
       if (discLineEl) {
         if (customerDiscountTotal > 0) {
           discLineEl.style.display = '';
-          discLineEl.textContent = '★ ' + (cpl ? cpl.name : 'Negotiated') + ': -$' + customerDiscountTotal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+          discLineEl.innerHTML = '<div style="display:flex;justify-content:space-between;"><span>★ ' + (cpl ? cpl.name : 'Negotiated') + '</span><span>-$' + customerDiscountTotal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</span></div>';
         } else {
           discLineEl.style.display = 'none';
         }
