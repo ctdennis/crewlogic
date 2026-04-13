@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.9.6 | 2026-04-13">
+  <meta name="crewlogic-version" content="v3.9.7 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -857,7 +857,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.9.6 | 2026-04-13 -->
+<!-- CrewLogic v3.9.7 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3974,7 +3974,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.9.6 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.9.7 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5488,18 +5488,25 @@
             // Match against loaded priceBlocks
             const matched = matchSurchargeItem(charge.name);
             if (matched) {
-              currentEstimate.charges.push({
-                type: 'surcharge',
-                priceItemID: matched.priceItemID,
-                name: matched.name,
-                blockName: matched.blockName,
-                priceBlockID: matched.priceBlockID,
-                qty: charge.qty || 1,
-                unitPrice: matched.value,
-                area: charge.area || '',
-                description: charge.description || '',
-                taxID: matched.taxID || 146
-              });
+              const existingCharge = currentEstimate.charges.find(
+                ec => ec.type === 'surcharge' && ec.priceItemID === matched.priceItemID
+              );
+              if (existingCharge) {
+                existingCharge.qty = (parseFloat(existingCharge.qty) || 0) + (charge.qty || 1);
+              } else {
+                currentEstimate.charges.push({
+                  type: 'surcharge',
+                  priceItemID: matched.priceItemID,
+                  name: matched.name,
+                  blockName: matched.blockName,
+                  priceBlockID: matched.priceBlockID,
+                  qty: charge.qty || 1,
+                  unitPrice: matched.value,
+                  area: charge.area || '',
+                  description: charge.description || '',
+                  taxID: matched.taxID || 146
+                });
+              }
               addedCount++;
             }
           }
@@ -5622,18 +5629,25 @@
           // Add any surcharges identified
           results.filter(c => c.type === 'surcharge').forEach(s => {
             const matched = matchSurchargeItem(s.name);
-            if (matched && !currentEstimate.charges.some(ec => ec.type === 'surcharge' && ec.priceItemID === matched.priceItemID)) {
-              currentEstimate.charges.push({
-                type: 'surcharge',
-                priceItemID: matched.priceItemID,
-                name: matched.name,
-                blockName: matched.blockName,
-                priceBlockID: matched.priceBlockID,
-                qty: s.qty || 1,
-                unitPrice: matched.value,
-                area: charge.area || '',
-                taxID: matched.taxID || 146
-              });
+            if (matched) {
+              const existingCharge = currentEstimate.charges.find(
+                ec => ec.type === 'surcharge' && ec.priceItemID === matched.priceItemID
+              );
+              if (existingCharge) {
+                existingCharge.qty = (parseFloat(existingCharge.qty) || 0) + (s.qty || 1);
+              } else {
+                currentEstimate.charges.push({
+                  type: 'surcharge',
+                  priceItemID: matched.priceItemID,
+                  name: matched.name,
+                  blockName: matched.blockName,
+                  priceBlockID: matched.priceBlockID,
+                  qty: s.qty || 1,
+                  unitPrice: matched.value,
+                  area: charge.area || '',
+                  taxID: matched.taxID || 146
+                });
+              }
             }
           });
           // Clear old separate photo analysis box
@@ -5778,10 +5792,12 @@
           surcharges.forEach(s => {
             const matched = matchSurchargeItem(s.name);
             if (matched) {
-              const alreadyExists = currentEstimate.charges.some(
+              const existingCharge = currentEstimate.charges.find(
                 ec => ec.type === 'surcharge' && ec.priceItemID === matched.priceItemID
               );
-              if (!alreadyExists) {
+              if (existingCharge) {
+                existingCharge.qty = (parseFloat(existingCharge.qty) || 0) + (s.qty || 1);
+              } else {
                 currentEstimate.charges.push({
                   type: 'surcharge',
                   priceItemID: matched.priceItemID,
@@ -9643,10 +9659,12 @@ RECYCLING & DONATION
             } else if (charge.type === 'surcharge') {
               const matched = matchSurchargeItem(charge.name);
               if (matched) {
-                const alreadyExists = currentEstimate.charges.some(
+                const existingCharge = currentEstimate.charges.find(
                   ec => ec.type === 'surcharge' && ec.priceItemID === matched.priceItemID
                 );
-                if (!alreadyExists) {
+                if (existingCharge) {
+                  existingCharge.qty = (parseFloat(existingCharge.qty) || 0) + (charge.qty || 1);
+                } else {
                   currentEstimate.charges.push({
                     type: 'surcharge',
                     priceItemID: matched.priceItemID,
