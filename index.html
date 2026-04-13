@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.8.5 | 2026-04-12">
+  <meta name="crewlogic-version" content="v3.8.7 | 2026-04-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -857,7 +857,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.8.5 | 2026-04-12 -->
+<!-- CrewLogic v3.8.7 | 2026-04-12 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3930,7 +3930,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.8.5 | 2026-04-12 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.8.7 | 2026-04-12 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6697,14 +6697,11 @@
       const cpl = currentEstimate.customerPriceList;
       let customerDiscountTotal = 0;
       if (cpl) {
-        // Volume discounts
-        const splitOn2 = !!currentEstimate.splitPricing;
-        const volCalc2 = splitOn2 ? calcVolumePriceSplit(totalTrucks) : calcVolumePrice(totalTrucks);
-        // Volume discount — use category mode directly against each price line
-        const volCatData = (cpl.surcharge_discounts || {})['volume'];
+        const sd = cpl.surcharge_discounts || {};
+        // Volume discount
+        const volCatData = sd['volume'];
         if (volCatData) {
-          const splitOn2 = !!currentEstimate.splitPricing;
-          const volCalc2 = splitOn2 ? calcVolumePriceSplit(totalTrucks) : calcVolumePrice(totalTrucks);
+          const volCalc2 = splitOn ? calcVolumePriceSplit(totalTrucks) : calcVolumePrice(totalTrucks);
           const linesToDiscount = volCalc2.lines || (volCalc2.total > 0 ? [{ amount: volCalc2.total, qty: 1, fraction: totalTrucks }] : []);
           linesToDiscount.forEach(line => {
             const basePerUnit = line.amount / (line.qty || 1);
@@ -6726,41 +6723,38 @@
             customerDiscountTotal += disc;
           });
         }
-        // Surcharge discounts — match directly by priceItemID across all categories
-        nonVolumeCharges.filter(c => c.type !== 'discount').forEach(c => {
-          const base = (parseFloat(c.qty) || 0) * (parseFloat(c.unitPrice) || 0);
-          if (base <= 0 || !c.priceItemID) return;
-          const basePerUnit = parseFloat(c.unitPrice) || 0;
-          const qty = parseFloat(c.qty) || 1;
-          // Check each non-volume category
-          for (const cat of CPL_CATEGORIES) {
-            if (cat.key === 'volume') continue;
-            const catData = (sd[cat.key] || {});
-            if (catData.mode === 'category' && catData.category?.amount > 0) {
-              // Apply category discount to all items in this category
-              // We can't know which category without price blocks, so check per_item first
-              // Fall through to per_item check
-            }
-            if (catData.mode === 'per_item') {
-              const itemDisc = (catData.items || {})[String(c.priceItemID)];
-              if (itemDisc && itemDisc.amount > 0) {
-                const d = itemDisc.type === 'pct'
-                  ? basePerUnit * (itemDisc.amount / 100)
-                  : itemDisc.amount;
-                customerDiscountTotal += Math.min(d, basePerUnit) * qty;
-                return; // found match, stop checking categories
-              }
-            }
-          }
-          // Category-level fallback — try all categories' category discount
-          // This requires knowing which category the item belongs to
-          // Use price blocks if available, otherwise skip
-          if (window._cplPriceBlocks) {
+        // Surcharge discounts — use price blocks if available
+        if (window._cplPriceBlocks) {
+          nonVolumeCharges.filter(c => c.type !== 'discount').forEach(c => {
+            const base = (parseFloat(c.qty) || 0) * (parseFloat(c.unitPrice) || 0);
+            if (base <= 0) return;
             const disc = getCustomerDiscount(c, base);
             customerDiscountTotal += disc;
-          }
-        });
+          });
+        } else {
+          // No price blocks — match per_item discounts directly by priceItemID
+          nonVolumeCharges.filter(c => c.type !== 'discount').forEach(c => {
+            if (!c.priceItemID) return;
+            const basePerUnit = parseFloat(c.unitPrice) || 0;
+            const qty = parseFloat(c.qty) || 1;
+            for (const cat of CPL_CATEGORIES) {
+              if (cat.key === 'volume') continue;
+              const catData = (sd[cat.key] || {});
+              if (catData.mode === 'per_item') {
+                const itemDisc = (catData.items || {})[String(c.priceItemID)];
+                if (itemDisc && itemDisc.amount > 0) {
+                  const d = itemDisc.type === 'pct'
+                    ? basePerUnit * (itemDisc.amount / 100)
+                    : itemDisc.amount;
+                  customerDiscountTotal += Math.min(d, basePerUnit) * qty;
+                  break;
+                }
+              }
+            }
+          });
+        }
       }
+
 
       const subtotal = volumeTotal + surchargeTotal;
       const totalPrice = subtotal + discountTotal - customerDiscountTotal;
