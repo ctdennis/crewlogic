@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v3.9.8 | 2026-04-13">
+  <meta name="crewlogic-version" content="v3.9.9 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -857,7 +857,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v3.9.8 | 2026-04-13 -->
+<!-- CrewLogic v3.9.9 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1533,8 +1533,18 @@
             </div>
             <!-- Pricing breakdown (split lines) -->
             <div id="splitPricingBreakdown" style="display:none;font-size:12px;color:var(--text-secondary);font-family:'Space Mono',monospace;border-top:1px solid var(--border);padding-top:8px;line-height:1.8;margin-top:8px;"></div>
-            <!-- Customer discount line -->
-            <div id="estCustomerDiscountLine" style="display:none;font-size:12px;color:var(--accent-green);font-family:'Space Mono',monospace;font-weight:600;margin-top:4px;"></div>
+            <!-- Customer discount line — collapsible breakdown -->
+            <div id="estCustomerDiscountLine" style="display:none;margin-top:6px;">
+              <div onclick="toggleDiscountBreakdown()" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;padding:5px 8px;background:rgba(0,238,118,0.08);border-radius:var(--radius-sm);border:1px solid rgba(0,238,118,0.2);">
+                <span style="font-size:12px;color:#f59e0b;font-weight:700;" id="cplDiscountBadgeLabel">★ VIP</span>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:12px;color:var(--accent-green);font-family:'Space Mono',monospace;font-weight:700;" id="cplDiscountTotal"></span>
+                  <span id="cplDiscountChevron" style="font-size:10px;color:var(--text-muted);">▸</span>
+                </div>
+              </div>
+              <div id="cplDiscountBreakdown" style="display:none;padding:6px 8px 2px;border:1px solid rgba(0,238,118,0.15);border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);">
+              </div>
+            </div>
             <!-- Quote total -->
             <div style="display:flex;align-items:baseline;justify-content:space-between;border-top:1px solid var(--border);margin-top:8px;padding-top:8px;">
               <div>
@@ -3069,6 +3079,15 @@
       }
     }
 
+    function toggleDiscountBreakdown() {
+      const bd = document.getElementById('cplDiscountBreakdown');
+      const ch = document.getElementById('cplDiscountChevron');
+      if (!bd) return;
+      const open = bd.style.display !== 'none';
+      bd.style.display = open ? 'none' : 'block';
+      if (ch) ch.textContent = open ? '▸' : '▾';
+    }
+
     function showNegotiatedRateBadge(name) {
       const badge = document.getElementById('negotiatedRateBadge');
       const nameEl = document.getElementById('negotiatedRateName');
@@ -3974,7 +3993,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v3.9.8 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v3.9.9 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -4891,6 +4910,7 @@
         html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">';
         html += '<span style="font-size:12px;color:var(--text-secondary);">🚛 <strong style="color:var(--accent-green);font-family:\'Space Mono\',monospace;">' + trucks.toFixed(2) + '</strong></span>';
         html += '<span style="font-size:12px;color:var(--text-secondary);">💰 <strong style="color:var(--accent-green);font-family:\'Space Mono\',monospace;">$' + price.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0}) + '</strong></span>';
+        if (est.customerPriceList || (est.payload && est.payload.customerPriceList)) html += '<span style="font-size:11px;font-weight:700;color:#f59e0b;letter-spacing:0.3px;">★ VIP</span>';
         if (est.vonigoQuoteID && !est.clonedFrom) html += '<span style="font-size:11px;color:var(--accent-green);">✓ Vonigo</span>';
         if (updated) html += '<span style="font-size:11px;color:var(--text-muted);margin-left:auto;">' + updated + '</span>';
         html += '</div>';
@@ -6851,12 +6871,61 @@
       currentEstimate.totalPrice = Math.round(totalPrice * 100) / 100;
       document.getElementById('estGrandTotal').textContent = (totalPrice < 0 ? '-' : '') + '$' + Math.abs(totalPrice).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
 
-      // Show customer discount line
+      // Show customer discount collapsible breakdown
       const discLineEl = document.getElementById('estCustomerDiscountLine');
       if (discLineEl) {
-        if (customerDiscountTotal > 0) {
+        if (customerDiscountTotal > 0 && cpl) {
           discLineEl.style.display = '';
-          discLineEl.innerHTML = '<div style="display:flex;justify-content:space-between;"><span>★ ' + (cpl ? cpl.name : 'Negotiated') + '</span><span>-$' + customerDiscountTotal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</span></div>';
+          // Update badge label and total
+          const badgeLabel = document.getElementById('cplDiscountBadgeLabel');
+          const discTotal = document.getElementById('cplDiscountTotal');
+          if (badgeLabel) badgeLabel.textContent = '★ ' + cpl.name;
+          if (discTotal) discTotal.textContent = '-$' + customerDiscountTotal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+          // Build breakdown rows
+          const breakdownEl = document.getElementById('cplDiscountBreakdown');
+          if (breakdownEl) {
+            const sd = cpl.surcharge_discounts || {};
+            let bhtml = '';
+            const fmtD = n => '-$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+            // Volume discount
+            const volCat = sd['volume'];
+            if (volCat && volCat.mode === 'category' && volCat.category?.amount > 0) {
+              const volCalcB = splitOn ? calcVolumePriceSplit(totalTrucks) : calcVolumePrice(totalTrucks);
+              let volDiscAmt = 0;
+              const lines = volCalcB.lines || (volCalcB.total > 0 ? [{amount: volCalcB.total, qty: 1}] : []);
+              lines.forEach(line => {
+                const base = line.amount / (line.qty || 1);
+                const d = volCat.category.type === 'pct' ? base * (volCat.category.amount / 100) : volCat.category.amount;
+                volDiscAmt += Math.min(d, base) * (line.qty || 1);
+              });
+              if (volDiscAmt > 0) bhtml += '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-secondary);padding:3px 0;border-bottom:1px solid var(--border);"><span>Volume charges</span><span style="font-family:monospace;color:var(--accent-green);">' + fmtD(volDiscAmt) + '</span></div>';
+            }
+            // Per-item surcharge discounts
+            nonVolumeCharges.filter(c => c.type !== 'discount').forEach(c => {
+              const base = (parseFloat(c.qty)||0) * (parseFloat(c.unitPrice)||0);
+              if (base <= 0) return;
+              const chargeName = (c.name || '').toLowerCase().trim();
+              let itemDisc = null;
+              for (const cat of CPL_CATEGORIES) {
+                if (cat.key === 'volume') continue;
+                const catData = sd[cat.key] || {};
+                if (catData.mode === 'per_item') {
+                  itemDisc = (catData.itemNames || {})[chargeName] || (catData.items || {})[String(c.priceItemID)];
+                  if (itemDisc && itemDisc.amount > 0) break;
+                  itemDisc = null;
+                }
+              }
+              if (itemDisc && itemDisc.amount > 0) {
+                const basePerUnit = parseFloat(c.unitPrice) || 0;
+                const qty = parseFloat(c.qty) || 1;
+                const d = itemDisc.type === 'pct' ? basePerUnit * (itemDisc.amount / 100) : itemDisc.amount;
+                const discAmt = Math.min(d, basePerUnit) * qty;
+                if (discAmt > 0) bhtml += '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-secondary);padding:3px 0;border-bottom:1px solid var(--border);"><span>' + c.name + (qty > 1 ? ' × ' + qty : '') + '</span><span style="font-family:monospace;color:var(--accent-green);">' + fmtD(discAmt) + '</span></div>';
+              }
+            });
+            bhtml += '<div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;padding:4px 0 2px;"><span style="color:var(--text-secondary);">Total saved</span><span style="font-family:monospace;color:var(--accent-green);">-$' + customerDiscountTotal.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) + '</span></div>';
+            breakdownEl.innerHTML = bhtml;
+          }
         } else {
           discLineEl.style.display = 'none';
         }
@@ -8193,12 +8262,15 @@
 
       // Column positions - right-aligned numbers
       y += 44;
+      const pdfCpl = est.customerPriceList;
+      const hasCplDiscount = !!(pdfCpl && pdfCpl.surcharge_discounts);
       const col = {
         area: margin + 4,
-        trucks: 400,
-        cy: 500,
+        cy: 390,
+        trucks: 480,
         price: 620,
-        total: W - margin - 8
+        total: hasCplDiscount ? 740 : W - margin - 8,
+        vip: W - margin - 8
       };
 
       // Table header
@@ -8208,10 +8280,11 @@
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8.5);
       doc.text('Area (includes labor, disposal & recycling)', col.area, y - 1);
-      doc.text('Trucks', col.trucks, y - 1, { align: 'right' });
       doc.text('CY', col.cy, y - 1, { align: 'right' });
+      doc.text('Trucks', col.trucks, y - 1, { align: 'right' });
       doc.text('Price / Truck', col.price, y - 1, { align: 'right' });
       doc.text('Total', col.total, y - 1, { align: 'right' });
+      if (hasCplDiscount) doc.text('VIP Price', col.vip, y - 1, { align: 'right' });
       y += 10;
 
       // Group volume charges by area
@@ -8268,10 +8341,10 @@
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
         doc.text(area, col.area, y + 10);
-        doc.text(trucks.toFixed(3), col.trucks, y + 10, { align: 'right' });
         doc.setTextColor(...gray);
         doc.text((trucks * 16).toFixed(1), col.cy, y + 10, { align: 'right' });
         doc.setTextColor(...dark);
+        doc.text(trucks.toFixed(3), col.trucks, y + 10, { align: 'right' });
         rowIdx++;
         y += 20;
       });
@@ -8286,8 +8359,8 @@
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
       doc.text('Total Volume (trucks)', col.area, y + 13);
-      doc.text(totalTrucks.toFixed(3), col.trucks, y + 13, { align: 'right' });
       doc.text((totalTrucks * 16).toFixed(1), col.cy, y + 13, { align: 'right' });
+      doc.text(totalTrucks.toFixed(3), col.trucks, y + 13, { align: 'right' });
       if (!hasRealSplit) {
         // Single tier — use the actual rate for this fraction, not full truck price
         const singleRate = (pdfVolumeLines && pdfVolumeLines.length === 1)
@@ -8298,6 +8371,21 @@
       } else {
         // Real split — just show total here, detail rows follow
         if (pdfVolumePrice > 0) doc.text(fmtMoney(pdfVolumePrice), col.total, y + 13, { align: 'right' });
+      }
+      // VIP Price on volume total row
+      if (hasCplDiscount) {
+        const pdfVolCat = (pdfCpl.surcharge_discounts || {})['volume'];
+        if (pdfVolCat && pdfVolCat.mode === 'category' && pdfVolCat.category?.amount > 0) {
+          const pdfVolDisc = pdfVolCat.category.type === 'pct'
+            ? pdfVolumePrice * (pdfVolCat.category.amount / 100)
+            : pdfVolCat.category.amount * totalTrucks;
+          const pdfVolNet = pdfVolumePrice - Math.min(pdfVolDisc, pdfVolumePrice);
+          doc.setTextColor(...green);
+          doc.setFont('helvetica', 'bold');
+          doc.text(fmtMoney(pdfVolNet), col.vip, y + 13, { align: 'right' });
+          doc.setTextColor(...white);
+          doc.setFont('helvetica', 'bold');
+        }
       }
       y += 28;
 
@@ -8338,6 +8426,34 @@
         const isNeg = lineTotal < 0;
         doc.setTextColor(isNeg ? 220 : dark[0], isNeg ? 50 : dark[1], isNeg ? 50 : dark[2]);
         doc.text(fmtMoney(lineTotal), col.total, y + 10, { align: 'right' });
+        // VIP Price for surcharge rows
+        if (hasCplDiscount && c.type === 'surcharge') {
+          const chargeName = (c.name || '').toLowerCase().trim();
+          const pdfSd = pdfCpl.surcharge_discounts || {};
+          let itemDisc = null;
+          for (const cat of CPL_CATEGORIES) {
+            if (cat.key === 'volume') continue;
+            const catData = pdfSd[cat.key] || {};
+            if (catData.mode === 'category' && catData.category?.amount > 0) {
+              // would need price blocks to know category — skip for now
+            } else if (catData.mode === 'per_item') {
+              const d = (catData.itemNames || {})[chargeName]
+                || (catData.items || {})[String(c.priceItemID)];
+              if (d && d.amount > 0) { itemDisc = d; break; }
+            }
+          }
+          if (itemDisc) {
+            const discAmt = itemDisc.type === 'pct'
+              ? lineTotal * (itemDisc.amount / 100)
+              : itemDisc.amount * qty;
+            const netAmt = lineTotal - Math.min(discAmt, lineTotal);
+            doc.setTextColor(...green);
+            doc.setFont('helvetica', 'bold');
+            doc.text(fmtMoney(netAmt), col.vip, y + 10, { align: 'right' });
+            doc.setTextColor(...dark);
+            doc.setFont('helvetica', 'normal');
+          }
+        }
         y += 20;
       };
 
@@ -8350,6 +8466,10 @@
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(8);
         doc.text('RECYCLING, LABOR & OTHER CHARGES', col.area, y + 13);
+        if (hasCplDiscount) {
+          doc.setTextColor(...green);
+          doc.text('VIP Price', col.vip, y + 13, { align: 'right' });
+        }
         y += 20;
       }
       surchargeCharges.forEach((c, i) => renderPDFChargeRow(c, i));
@@ -8403,7 +8523,6 @@
         .reduce((s, c) => s + ((parseFloat(c.qty)||0) * (parseFloat(c.unitPrice)||0)), 0);
 
       // Customer price list discount
-      const pdfCpl = est.customerPriceList;
       let pdfCustomerDiscount = 0;
       if (pdfCpl) {
         const pdfSd = pdfCpl.surcharge_discounts || {};
@@ -8452,31 +8571,19 @@
 
       const pdfGrandTotal = pdfVolumePrice + pdfSurchargeTotal - pdfCustomerDiscount;
 
-      // Show customer discount row if applicable
+      // CPL summary row — ★ Name — Negotiated Rate  |  Total Saved  |  Net Total
       if (pdfCustomerDiscount > 0) {
         y += 4;
-        doc.setFillColor(...dark);
+        doc.setFillColor(20, 35, 48);
         doc.rect(margin, y, W - 2 * margin, 22, 'F');
+        doc.setTextColor(251, 191, 36); // amber
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text('★ ' + pdfCpl.name + ' — Negotiated Rate', col.area, y + 15);
         doc.setTextColor(...white);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(9);
-        if (discountCharges.length === 0) {
-          // No manual discounts — show sub total first
-          doc.text('Sub Total', col.area, y + 15);
-          doc.text(fmtMoney(pdfVolumePrice + pdfSurchargeTotal), col.total, y + 15, { align: 'right' });
-          y += 28;
-        }
-        // Customer discount row
-        if (discountCharges.length === 0) {
-          doc.setFillColor(...offwhite);
-          doc.rect(margin, y - 2, W - 2 * margin, 18, 'F');
-        }
-        doc.setTextColor(30, 80, 180);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(9);
-        doc.text('★ ' + pdfCpl.name + ' — Negotiated Rate', col.area, y + 10);
-        doc.text(fmtMoney(-pdfCustomerDiscount), col.total, y + 10, { align: 'right' });
-        y += 20;
+        doc.text('Saved: ' + fmtMoney(-pdfCustomerDiscount), col.total, y + 15, { align: 'right' });
+        if (hasCplDiscount) doc.text(fmtMoney(pdfGrandTotal), col.vip, y + 15, { align: 'right' });
+        y += 28;
       }
 
       y += 6;
