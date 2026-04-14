@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.0.5 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.0.6 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -857,7 +857,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.0.5 | 2026-04-13 -->
+<!-- CrewLogic v4.0.6 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3993,7 +3993,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.0.5 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.0.6 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6834,7 +6834,10 @@
         const volCatData = sd['volume'];
         if (volCatData) {
           const volCalc2 = splitOn ? calcVolumePriceSplit(totalTrucks) : calcVolumePrice(totalTrucks);
-          const linesToDiscount = volCalc2.lines || (volCalc2.total > 0 ? [{ amount: volCalc2.total, qty: 1, fraction: totalTrucks }] : []);
+          const linesToDiscount = volCalc2.lines || (volCalc2.total > 0 ? [{ amount: volCalc2.total, qty: 1, fraction: roundToNearestEighth(totalTrucks <= 1 ? totalTrucks : 1.0), priceItemID: null }] : []);
+          const volFracLabels = {0.125:'1/8 truckload',0.25:'1/4 truckload',0.375:'3/8 truckload',
+            0.5:'1/2 truckload',0.625:'5/8 truckload',0.75:'3/4 truckload',
+            0.875:'7/8 truckload',1.0:'full truckload',0.0625:'minimum truckload'};
           linesToDiscount.forEach(line => {
             const basePerUnit = line.amount / (line.qty || 1);
             let disc = 0;
@@ -6843,8 +6846,9 @@
                 ? basePerUnit * (volCatData.category.amount / 100)
                 : volCatData.category.amount;
               disc = Math.min(d, basePerUnit) * (line.qty || 1);
-            } else if (volCatData.mode === 'per_item' && line.priceItemID) {
-              const itemDisc = (volCatData.items || {})[String(line.priceItemID)];
+            } else if (volCatData.mode === 'per_item') {
+              const itemDisc = (line.priceItemID ? (volCatData.items || {})[String(line.priceItemID)] : null)
+                || (line.fraction != null ? (volCatData.itemNames || {})[volFracLabels[line.fraction]] : null);
               if (itemDisc && itemDisc.amount > 0) {
                 const d = itemDisc.type === 'pct'
                   ? basePerUnit * (itemDisc.amount / 100)
@@ -6914,16 +6918,28 @@
             const sd = cpl.surcharge_discounts || {};
             let bhtml = '';
             const fmtD = n => '-$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
-            // Volume discount
+            // Volume discount — handles category and per_item modes
             const volCat = sd['volume'];
-            if (volCat && volCat.mode === 'category' && volCat.category?.amount > 0) {
+            if (volCat) {
               const volCalcB = splitOn ? calcVolumePriceSplit(totalTrucks) : calcVolumePrice(totalTrucks);
               let volDiscAmt = 0;
-              const lines = volCalcB.lines || (volCalcB.total > 0 ? [{amount: volCalcB.total, qty: 1}] : []);
-              lines.forEach(line => {
+              const volLines = volCalcB.lines || (volCalcB.total > 0 ? [{ amount: volCalcB.total, qty: 1, fraction: roundToNearestEighth(totalTrucks <= 1 ? totalTrucks : 1.0), priceItemID: null }] : []);
+              const fractionLabels = {0.125:'1/8 truckload',0.25:'1/4 truckload',0.375:'3/8 truckload',
+                0.5:'1/2 truckload',0.625:'5/8 truckload',0.75:'3/4 truckload',
+                0.875:'7/8 truckload',1.0:'full truckload',0.0625:'minimum truckload'};
+              volLines.forEach(line => {
                 const base = line.amount / (line.qty || 1);
-                const d = volCat.category.type === 'pct' ? base * (volCat.category.amount / 100) : volCat.category.amount;
-                volDiscAmt += Math.min(d, base) * (line.qty || 1);
+                if (volCat.mode === 'category' && volCat.category?.amount > 0) {
+                  const d = volCat.category.type === 'pct' ? base * (volCat.category.amount / 100) : volCat.category.amount;
+                  volDiscAmt += Math.min(d, base) * (line.qty || 1);
+                } else if (volCat.mode === 'per_item') {
+                  const itemDisc = (line.priceItemID ? (volCat.items || {})[String(line.priceItemID)] : null)
+                    || (line.fraction != null ? (volCat.itemNames || {})[fractionLabels[line.fraction]] : null);
+                  if (itemDisc && itemDisc.amount > 0) {
+                    const d = itemDisc.type === 'pct' ? base * (itemDisc.amount / 100) : itemDisc.amount;
+                    volDiscAmt += Math.min(d, base) * (line.qty || 1);
+                  }
+                }
               });
               if (volDiscAmt > 0) bhtml += '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-secondary);padding:3px 0;border-bottom:1px solid var(--border);"><span>Volume charges</span><span style="font-family:monospace;color:var(--accent-green);">' + fmtD(volDiscAmt) + '</span></div>';
             }
