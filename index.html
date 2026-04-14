@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.1.1 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.1.2 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.1.1 | 2026-04-13 -->
+<!-- CrewLogic v4.1.2 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4062,7 +4062,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.1.1 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.1.2 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -7578,21 +7578,33 @@
       const charges = [...volLines, ...otherLines];
 
       try {
-        // Collect photos from charges to upload to Vonigo via n8n
-        const photos = [];
+        // Collect photos from charges — resolve Supabase paths to signed URLs, pass Drive URLs as-is
+        const photoItems = [];
         (currentEstimate.charges || [])
           .filter(c => c.type === 'volume')
           .forEach(c => {
             const urls = (c.photos || (c.photoUrl ? [c.photoUrl] : []))
-              .filter(u => u && !u.startsWith('data:')); // Drive URLs only
+              .filter(u => u && !u.startsWith('data:'));
             urls.forEach(url => {
-              // Handle both Drive URL formats:
-              // uc?export=view&id=FILEID  (standard Drive URL)
-              // lh3.googleusercontent.com/d/FILEID  (converted display URL)
-              const m = url.match(/[?&]id=([^&]+)/) || url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-              if (m) photos.push({ fileId: m[1], room: c.room || '', area: c.area || '' });
+              photoItems.push({ url, room: c.room || '', area: c.area || '' });
             });
           });
+
+        // Resolve all photo URLs (Supabase paths → signed URLs, Drive URLs → kept as-is)
+        const resolvedPhotos = await Promise.all(photoItems.map(async p => {
+          const isSupabasePath = !p.url.startsWith('http') && !p.url.startsWith('data:');
+          const isDriveUrl = p.url.includes('googleusercontent.com') || p.url.includes('drive.google.com');
+          let signedUrl = null;
+          if (isSupabasePath) {
+            signedUrl = await resolvePhotoUrl(p.url);
+          } else if (isDriveUrl) {
+            // Extract Drive fileId for legacy photos
+            const m = p.url.match(/[?&]id=([^&]+)/) || p.url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+            if (m) signedUrl = 'https://lh3.googleusercontent.com/d/' + m[1];
+          }
+          return signedUrl ? { signedUrl, room: p.room, area: p.area } : null;
+        }));
+        const photos = resolvedPhotos.filter(Boolean);
 
         // Generate PDF as base64 for Vonigo document upload
         let pdfBase64 = null;
