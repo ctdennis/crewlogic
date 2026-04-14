@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.1.9 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.2.0 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.1.9 | 2026-04-13 -->
+<!-- CrewLogic v4.2.0 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2103,18 +2103,21 @@
         <div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;">
           <div style="font-size:16px;font-weight:700;margin-bottom:4px;color:var(--text-primary);">Clone Estimate</div>
           <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Copy charges, pricing, and room descriptions to a new draft.</div>
-          <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Photos</div>
-          <button class="vol-option-btn" onclick="executeClone('copy')">
-            Copy Photos
-            <div class="vol-option-sub">Duplicate photos to the new estimate's folder — takes a moment</div>
-          </button>
-          <button class="vol-option-btn" onclick="executeClone('clear')">
-            No Photos
-            <div class="vol-option-sub">Start fresh — take new photos on site</div>
-          </button>
-          <button class="calc-btn" style="background:var(--bg-input);color:var(--text-secondary);margin-top:8px;" onclick="document.getElementById('cloneOptionsModal').style.display='none'">
-            <span class="btn-text">Cancel</span>
-          </button>
+          <div id="cloneStatusMsg" style="display:none;margin-bottom:12px;padding:10px 12px;background:rgba(0,238,118,0.08);border:1px solid rgba(0,238,118,0.2);border-radius:var(--radius-sm);font-size:13px;color:var(--accent-green);"></div>
+          <div id="cloneModalButtons">
+            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Photos</div>
+            <button class="vol-option-btn" id="cloneCopyBtn" onclick="executeClone('copy')">
+              Copy Photos
+              <div class="vol-option-sub">Duplicate photos to the new estimate's folder — takes a moment for large estimates</div>
+            </button>
+            <button class="vol-option-btn" onclick="executeClone('clear')">
+              No Photos
+              <div class="vol-option-sub">Start fresh — take new photos on site</div>
+            </button>
+            <button class="calc-btn" style="background:var(--bg-input);color:var(--text-secondary);margin-top:8px;" onclick="document.getElementById('cloneOptionsModal').style.display='none'">
+              <span class="btn-text">Cancel</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -4099,7 +4102,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.1.9 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.2.0 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -7766,9 +7769,23 @@
     }
 
     async function executeClone(photoChoice) {
-      document.getElementById('cloneOptionsModal').style.display = 'none';
       const estimateID = _clonePendingEstimateID;
       if (!estimateID) return;
+
+      const statusEl = document.getElementById('cloneStatusMsg');
+      const buttonsEl = document.getElementById('cloneModalButtons');
+      const setStatus = (msg) => {
+        statusEl.textContent = msg;
+        statusEl.style.display = msg ? '' : 'none';
+      };
+
+      if (photoChoice === 'copy') {
+        // Show loading state — keep modal open
+        buttonsEl.style.display = 'none';
+        setStatus('⏳ Loading estimate...');
+      } else {
+        document.getElementById('cloneOptionsModal').style.display = 'none';
+      }
 
       // Load full estimate from backend
       let original = null;
@@ -7785,8 +7802,13 @@
         const all = getLocalEstimates();
         original = all.find(e => String(e.estimateID) === String(estimateID));
       }
-      if (!original) return;
+      if (!original) {
+        document.getElementById('cloneOptionsModal').style.display = 'none';
+        document.getElementById('cloneModalButtons').style.display = '';
+        return;
+      }
 
+      if (photoChoice === 'copy') setStatus('⏳ Preparing clone...');
       const clone = JSON.parse(JSON.stringify(original));
       clone.estimateID = generateEstimateID();
       clone.label = (original.label || 'Estimate') + ' (copy)';
@@ -7818,28 +7840,54 @@
         // Copy each photo file to the new estimate's storage folder
         const newEstID = clone.estimateID;
         const franchiseID = currentUser.franchiseID;
+
+        // Count total photos to copy
+        let totalPhotos = 0;
+        if (clone.coverPhoto && !clone.coverPhoto.startsWith('http') && !clone.coverPhoto.startsWith('data:')) totalPhotos++;
+        (clone.charges || []).forEach(c => {
+          (c.photos || []).forEach(p => { if (p && !p.startsWith('http') && !p.startsWith('data:')) totalPhotos++; });
+        });
+        let copied = 0;
+
         const copyPath = async (oldPath) => {
           if (!oldPath || oldPath.startsWith('http') || oldPath.startsWith('data:')) return oldPath;
           try {
-            const { data: fileData, error: dlErr } = await supabaseClient.storage
-              .from('estimate-photos').download(oldPath);
-            if (dlErr || !fileData) return oldPath;
+            const signedUrl = await resolvePhotoUrl(oldPath);
+            if (!signedUrl) return oldPath;
+            const res = await fetch(signedUrl);
+            if (!res.ok) return oldPath;
+            const blob = await res.blob();
             const filename = oldPath.split('/').pop().replace(/^\d+_/, '');
             const newPath = franchiseID + '/' + newEstID + '/' + Date.now() + '_' + filename;
             const { error: upErr } = await supabaseClient.storage
-              .from('estimate-photos').upload(newPath, fileData, { contentType: 'image/jpeg', upsert: false });
+              .from('estimate-photos').upload(newPath, blob, { contentType: 'image/jpeg', upsert: false });
+            if (!upErr) {
+              copied++;
+              setStatus('📸 Copying photos... ' + copied + ' of ' + totalPhotos);
+            }
             return upErr ? oldPath : newPath;
           } catch(e) { return oldPath; }
         };
+
+        setStatus('📸 Copying photos... 0 of ' + totalPhotos);
         if (clone.coverPhoto && !clone.coverPhoto.startsWith('http') && !clone.coverPhoto.startsWith('data:')) {
           clone.coverPhoto = await copyPath(clone.coverPhoto);
         }
         if (clone.charges) {
           for (const c of clone.charges) {
             if (!c.photos || c.photos.length === 0) continue;
-            c.photos = await Promise.all(c.photos.map(p => copyPath(p)));
+            const newPhotos = [];
+            for (const p of c.photos) {
+              newPhotos.push(await copyPath(p));
+            }
+            c.photos = newPhotos;
           }
         }
+        setStatus('✓ ' + copied + ' photos copied — opening estimate...');
+        await new Promise(r => setTimeout(r, 800)); // brief pause to show completion
+        document.getElementById('cloneOptionsModal').style.display = 'none';
+        buttonsEl.style.display = '';
+        setStatus('');
       } else {
         // Clear photos — crew will take fresh ones on site
         clone.coverPhoto = '';
