@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.0.9 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.1.0 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.0.9 | 2026-04-13 -->
+<!-- CrewLogic v4.1.0 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1143,11 +1143,11 @@
                     <input type="number" class="form-input cost-compact-input" id="settingsRoyaltyPct" placeholder="14" inputmode="decimal" min="0" max="100" step="0.1">
                   </div>
                   <div class="settings-input-group">
-                    <label class="settings-input-label">Disposal $/ton</label>
+                    <label class="settings-input-label">Default Disposal $/ton</label>
                     <input type="number" class="form-input cost-compact-input" id="settingsDisposalCost" placeholder="200" inputmode="decimal" min="0">
                   </div>
                   <div class="settings-input-group">
-                    <label class="settings-input-label">Recycling $/truck</label>
+                    <label class="settings-input-label">Default Recycling $/truck</label>
                     <input type="number" class="form-input cost-compact-input" id="settingsRecyclingRevenue" placeholder="130" inputmode="decimal" min="0">
                   </div>
                 </div>
@@ -1212,14 +1212,26 @@
 
             <!-- Disposal Sites -->
             <div style="margin-bottom:10px;">
-              <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">🗑 Disposal Sites</div>
+              <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">🗑 Disposal Sites</div>
+              <div style="display:flex;gap:6px;padding:0 0 4px 38px;font-size:10px;color:var(--text-muted);">
+                <span style="flex:1;">Name</span>
+                <span style="flex:2;">Address</span>
+                <span style="width:72px;text-align:center;">$/ton</span>
+                <span style="width:34px;"></span>
+              </div>
               <div id="settingsDisposalSitesList"></div>
               <button onclick="addFacility('disposal')" style="width:100%;padding:7px;background:none;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;margin-top:4px;">+ Add Disposal Site</button>
             </div>
 
             <!-- Recycling Sites -->
             <div style="margin-bottom:10px;">
-              <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">♻️ Recycling Sites</div>
+              <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">♻️ Recycling Sites</div>
+              <div style="display:flex;gap:6px;padding:0 0 4px 38px;font-size:10px;color:var(--text-muted);">
+                <span style="flex:1;">Name</span>
+                <span style="flex:2;">Address</span>
+                <span style="width:72px;text-align:center;">$/truck</span>
+                <span style="width:34px;"></span>
+              </div>
               <div id="settingsRecyclingSitesList"></div>
               <button onclick="addFacility('recycling')" style="width:100%;padding:7px;background:none;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;margin-top:4px;">+ Add Recycling Site</button>
             </div>
@@ -4050,7 +4062,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.0.9 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.1.0 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -7045,10 +7057,13 @@
           if (hasJobInputs) {
             // Recalculate costs fresh using settings with fallbacks
             const crewRate = parseFloat(cs.crewRate) || 25;
-            const disposalCost = parseFloat(cs.disposalCost) || 200;
             const mpg      = parseFloat(cs.mpg || cs.MPG) || 10;
             const fuelCost = parseFloat(cs.fuelCost) || 3.50;
-            const recycRevRate  = parseFloat(cs.recyclingRevenue) || 0;
+            // Per-site cost/revenue — resolve from selected facility, fall back to global
+            const _dispAddr = ((currentEstimate.costAnalysis || {}).disposalSite || '').trim();
+            const _recycAddr = ((currentEstimate.costAnalysis || {}).recyclingSite || '').trim();
+            const disposalCost = getDisposalCost(_dispAddr);
+            const recycRevRate = getRecyclingRevenue(_recycAddr);
 
             // Routing from current charges
             const volCharges = (currentEstimate.charges || []).filter(c => c.type === 'volume');
@@ -9993,6 +10008,17 @@ RECYCLING & DONATION
           ? 'flex-shrink:0;padding:7px 9px;background:none;border:1px solid var(--accent-green);border-radius:var(--radius-sm);color:var(--accent-green);font-size:13px;cursor:pointer;'
           : 'flex-shrink:0;padding:7px 9px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:13px;cursor:pointer;';
         const star = isDefault ? '★' : '☆';
+        // Per-site cost/revenue field for disposal and recycling
+        let costField = '';
+        if (type === 'disposal') {
+          costField = '<input type="number" class="form-input" style="width:72px;flex-shrink:0;font-size:12px;padding:7px 8px;text-align:center;" placeholder="$/ton" min="0" value="' + (f.cost != null ? f.cost : '') + '" ' +
+            'title="Disposal cost $/ton (overrides default)" ' +
+            'oninput="updateFacility(\'' + type + '\',' + i + ',\'cost\',this.value ? parseFloat(this.value) : null)">';
+        } else if (type === 'recycling') {
+          costField = '<input type="number" class="form-input" style="width:72px;flex-shrink:0;font-size:12px;padding:7px 8px;text-align:center;" placeholder="$/truck" min="0" value="' + (f.revenue != null ? f.revenue : '') + '" ' +
+            'title="Recycling revenue $/truck (overrides default)" ' +
+            'oninput="updateFacility(\'' + type + '\',' + i + ',\'revenue\',this.value ? parseFloat(this.value) : null)">';
+        }
         return '<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:6px;">' +
           '<button title="Set as default" onclick="setDefaultFacility(\'' + type + '\',' + i + ')" style="' + starStyle + '">' + star + '</button>' +
           '<div style="flex:1;display:flex;gap:6px;">' +
@@ -10000,6 +10026,7 @@ RECYCLING & DONATION
               'oninput="updateFacility(\'' + type + '\',' + i + ',\'name\',this.value)">' +
             '<input class="form-input" style="flex:2;font-size:12px;padding:7px 10px;" placeholder="Address" value="' + (f.address||'').replace(/"/g,'&quot;') + '" ' +
               'oninput="updateFacility(\'' + type + '\',' + i + ',\'address\',this.value)">' +
+            costField +
           '</div>' +
           '<button onclick="removeFacility(\'' + type + '\',' + i + ')" style="flex-shrink:0;padding:7px 9px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;">✕</button>' +
         '</div>';
@@ -10010,6 +10037,26 @@ RECYCLING & DONATION
       renderFacilityList('disposal');
       renderFacilityList('recycling');
       renderFacilityList('donation');
+    }
+
+    // Resolve per-site disposal cost or recycling revenue
+    // Matches selected site address to facility object, falls back to global setting
+    function getDisposalCost(selectedAddress) {
+      const cs = (currentUser && currentUser.costSettings) || {};
+      if (selectedAddress) {
+        const site = getFacilities('disposal').find(f => f.address === selectedAddress);
+        if (site && site.cost != null && site.cost !== '') return parseFloat(site.cost);
+      }
+      return parseFloat(cs.disposalCost) || 200;
+    }
+
+    function getRecyclingRevenue(selectedAddress) {
+      const cs = (currentUser && currentUser.costSettings) || {};
+      if (selectedAddress) {
+        const site = getFacilities('recycling').find(f => f.address === selectedAddress);
+        if (site && site.revenue != null && site.revenue !== '') return parseFloat(site.revenue);
+      }
+      return parseFloat(cs.recyclingRevenue) || 0;
     }
 
     function addFacility(type) {
@@ -10289,8 +10336,11 @@ RECYCLING & DONATION
       const mpg          = parseFloat(cs.mpg || cs.MPG) || 10;
       const fuelCost     = parseFloat(cs.fuelCost) || 3.50;
       const crewRate     = parseFloat(cs.crewRate) || 25;
-      const disposalCost = parseFloat(cs.disposalCost) || 200;
-      const recycRevRate = parseFloat(cs.recyclingRevenue) || 0;
+      // Resolve per-site cost/revenue — falls back to global default if site has no override
+      const disposalSiteAddr = (ca.disposalSite || '').trim();
+      const recyclingSiteAddr = (ca.recyclingSite || '').trim();
+      const disposalCost = getDisposalCost(disposalSiteAddr);
+      const recycRevRate = getRecyclingRevenue(recyclingSiteAddr);
       const royaltyPct   = parseFloat(cs.royaltyPct) || 14;
       const dispWait     = parseFloat(cs.disposalWait) || 15;
       const recycWait    = parseFloat(cs.recyclingWait) || 20;
