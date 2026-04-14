@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.1.4 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.1.6 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.1.4 | 2026-04-13 -->
+<!-- CrewLogic v4.1.6 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2069,7 +2069,21 @@
       <div id="submitVonigoModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:200;align-items:flex-end;justify-content:center;">
         <div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;">
           <div style="font-size:16px;font-weight:700;margin-bottom:4px;color:var(--text-primary);">Submit to Vonigo</div>
-          <div style="font-size:13px;color:var(--text-muted);margin-bottom:20px;" id="submitVonigoClient"></div>
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;" id="submitVonigoClient"></div>
+          <div style="margin-bottom:16px;">
+            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Upload to Vonigo</div>
+            <div style="display:flex;gap:16px;">
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);cursor:pointer;">
+                <input type="radio" name="vonigoUpload" value="both" checked style="accent-color:var(--accent-green);"> Both
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);cursor:pointer;">
+                <input type="radio" name="vonigoUpload" value="photos"> Photos only
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);cursor:pointer;">
+                <input type="radio" name="vonigoUpload" value="pdf"> PDF only
+              </label>
+            </div>
+          </div>
           <button class="vol-option-btn" id="submitAsDraftBtn" onclick="executeVonigoSubmit(false)">
             Submit as Draft
             <div class="vol-option-sub">Creates a standalone estimate in Vonigo — attach to a job later</div>
@@ -4065,7 +4079,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.1.4 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.1.6 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -7609,12 +7623,19 @@
         }));
         const photos = resolvedPhotos.filter(Boolean);
 
-        // Generate PDF as base64 for Vonigo document upload
+        // Read upload preference from modal radio buttons
+        const uploadChoice = document.querySelector('input[name="vonigoUpload"]:checked')?.value || 'both';
+        const uploadPhotos = uploadChoice === 'both' || uploadChoice === 'photos';
+        const uploadPDF    = uploadChoice === 'both' || uploadChoice === 'pdf';
+
+        // Generate PDF as base64 for Vonigo document upload (if requested)
         let pdfBase64 = null;
-        try {
-          pdfBase64 = await generateEstimatePDF('base64', { skipBoilerplate: true, skipPhotos: true });
-        } catch(e) {
-          console.warn('PDF generation for Vonigo failed:', e);
+        if (uploadPDF) {
+          try {
+            pdfBase64 = await generateEstimatePDF('base64', { skipBoilerplate: true, skipPhotos: false });
+          } catch(e) {
+            console.warn('PDF generation for Vonigo failed:', e);
+          }
         }
 
         const clientLabel = (currentEstimate.clientName || 'Estimate').replace(/[^a-zA-Z0-9 _-]/g, '').trim();
@@ -7633,7 +7654,7 @@
             franchiseID: currentUser.franchiseID,
             email: currentUser.email,
             zip: currentEstimate.zip || '',
-            photos,
+            photos: uploadPhotos ? photos : [],
             pdfBase64: pdfBase64 || null,
             pdfFilename
           })
