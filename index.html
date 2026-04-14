@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.1.0 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.1.1 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.1.0 | 2026-04-13 -->
+<!-- CrewLogic v4.1.1 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4062,7 +4062,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.1.0 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.1.1 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -7500,31 +7500,80 @@
 
       // Build Vonigo charges: volume lines from conversion + all non-volume charges
       const volBlock = priceBlocks.find(b => b.name.toLowerCase().includes('volume'));
+      const cpl = currentEstimate.customerPriceList;
+      const cplSd = cpl ? (cpl.surcharge_discounts || {}) : null;
+      const volFracLabelsSubmit = {0.125:'1/8 truckload',0.25:'1/4 truckload',0.375:'3/8 truckload',
+        0.5:'1/2 truckload',0.625:'5/8 truckload',0.75:'3/4 truckload',
+        0.875:'7/8 truckload',1.0:'full truckload',0.0625:'minimum truckload'};
+      const fmtSubmit = n => '$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+      // Helper: get volume line discount amount
+      const getVolLineDisc = (item, lineAmt, fraction) => {
+        if (!cplSd) return 0;
+        const volCat = cplSd['volume'];
+        if (!volCat) return 0;
+        if (volCat.mode === 'category' && volCat.category?.amount > 0) {
+          const d = volCat.category.type === 'pct'
+            ? lineAmt * (volCat.category.amount / 100)
+            : volCat.category.amount;
+          return Math.min(d, lineAmt);
+        } else if (volCat.mode === 'per_item') {
+          const itemDisc = (item ? (volCat.items || {})[String(item.priceItemID)] : null)
+            || (fraction != null ? (volCat.itemNames || {})[volFracLabelsSubmit[fraction]] : null);
+          if (itemDisc && itemDisc.amount > 0) {
+            const d = itemDisc.type === 'pct'
+              ? lineAmt * (itemDisc.amount / 100)
+              : itemDisc.amount;
+            return Math.min(d, lineAmt);
+          }
+        }
+        return 0;
+      };
+
       const volLines = (currentEstimate._pendingVolumeLines || []).map(line => {
         const item = findVolumeItem(line.fraction);
         if (!item) return null;
+        const basePrice = parseFloat(item.value);
+        const lineTotal = basePrice; // qty handled by Vonigo field 9288
+        const discAmt = getVolLineDisc(item, lineTotal, line.fraction);
+        const netPrice = lineTotal - discAmt;
+        let desc = '';
+        if (cpl && discAmt > 0) {
+          desc = 'VIP Rate — Reg. ' + fmtSubmit(basePrice) + ', Discount -' + fmtSubmit(discAmt) + ', Your Price ' + fmtSubmit(netPrice);
+        }
         return {
           priceItemID: String(item.priceItemID),
           Fields: [
             { fieldID: 9290, fieldValue: item.name },
-            { fieldID: 9289, fieldValue: '' },
+            { fieldID: 9289, fieldValue: desc },
             { fieldID: 9288, fieldValue: String(line.qty) },
-            { fieldID: 9287, fieldValue: String(parseFloat(item.value).toFixed(2)) }
+            { fieldID: 9287, fieldValue: String(netPrice.toFixed(2)) }
           ]
         };
       }).filter(Boolean);
 
       const otherLines = (currentEstimate.charges || [])
         .filter(c => c.type !== 'volume')
-        .map(c => ({
-          priceItemID: String(c.priceItemID),
-          Fields: [
-            { fieldID: 9290, fieldValue: c.name },
-            { fieldID: 9289, fieldValue: c.description || '' },
-            { fieldID: 9288, fieldValue: String(c.qty) },
-            { fieldID: 9287, fieldValue: String(parseFloat(c.unitPrice).toFixed(2)) }
-          ]
-        }));
+        .map(c => {
+          const basePrice = parseFloat(c.unitPrice) || 0;
+          const lineTotal = basePrice * (parseFloat(c.qty) || 1);
+          const discAmt = cpl ? getCustomerDiscount(c, lineTotal) : 0;
+          const netPrice = basePrice - (discAmt / (parseFloat(c.qty) || 1));
+          let desc = c.description || '';
+          if (cpl && discAmt > 0) {
+            const vipBlurb = 'VIP Rate — Reg. ' + fmtSubmit(basePrice) + ', Discount -' + fmtSubmit(discAmt / (parseFloat(c.qty)||1)) + ', Your Price ' + fmtSubmit(netPrice);
+            desc = desc ? vipBlurb + ' | ' + desc : vipBlurb;
+          }
+          return {
+            priceItemID: String(c.priceItemID),
+            Fields: [
+              { fieldID: 9290, fieldValue: c.name },
+              { fieldID: 9289, fieldValue: desc },
+              { fieldID: 9288, fieldValue: String(c.qty) },
+              { fieldID: 9287, fieldValue: String(netPrice.toFixed(2)) }
+            ]
+          };
+        });
 
       const charges = [...volLines, ...otherLines];
 
@@ -7545,6 +7594,17 @@
             });
           });
 
+        // Generate PDF as base64 for Vonigo document upload
+        let pdfBase64 = null;
+        try {
+          pdfBase64 = await generateEstimatePDF('base64', { skipBoilerplate: true, skipPhotos: true });
+        } catch(e) {
+          console.warn('PDF generation for Vonigo failed:', e);
+        }
+
+        const clientLabel = (currentEstimate.clientName || 'Estimate').replace(/[^a-zA-Z0-9 _-]/g, '').trim();
+        const pdfFilename = 'CrewLogic_' + clientLabel.replace(/\s+/g, '_') + '_Estimate.pdf';
+
         const res = await apiFetch(N8N_BASE + '/crewlogic-submit-quote', {
           method: 'POST',
           body: JSON.stringify({
@@ -7558,7 +7618,9 @@
             franchiseID: currentUser.franchiseID,
             email: currentUser.email,
             zip: currentEstimate.zip || '',
-            photos
+            photos,
+            pdfBase64: pdfBase64 || null,
+            pdfFilename
           })
         });
         const data = await res.json();
