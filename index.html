@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.0.1 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.0.2 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -857,7 +857,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.0.1 | 2026-04-13 -->
+<!-- CrewLogic v4.0.2 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3993,7 +3993,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.0.1 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.0.2 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -8380,16 +8380,35 @@
       // VIP Price on volume total row
       if (hasCplDiscount) {
         const pdfVolCat = (pdfCpl.surcharge_discounts || {})['volume'];
-        if (pdfVolCat && pdfVolCat.mode === 'category' && pdfVolCat.category?.amount > 0) {
-          const pdfVolDisc = pdfVolCat.category.type === 'pct'
-            ? pdfVolumePrice * (pdfVolCat.category.amount / 100)
-            : pdfVolCat.category.amount * totalTrucks;
-          const pdfVolNet = pdfVolumePrice - Math.min(pdfVolDisc, pdfVolumePrice);
-          const pdfVolDiscAmt = pdfVolumePrice - pdfVolNet;
-          doc.setTextColor(...white);
-          doc.setFont('helvetica', 'bold');
-          doc.text('-' + fmtMoney(pdfVolDiscAmt), col.discount, y + 13, { align: 'right' });
-          doc.text(fmtMoney(pdfVolNet), col.vip, y + 13, { align: 'right' });
+        if (pdfVolCat) {
+          const pdfVolCalc2 = pdfSplit ? calcVolumePriceSplit(totalTrucks) : calcVolumePrice(totalTrucks);
+          const pdfVolLines2 = pdfVolCalc2.lines || (pdfVolCalc2.total > 0 ? [{ amount: pdfVolCalc2.total, qty: 1, fraction: totalTrucks, priceItemID: null }] : []);
+          let pdfVolDiscTotal = 0;
+          pdfVolLines2.forEach(line => {
+            const basePerUnit = line.amount / (line.qty || 1);
+            if (pdfVolCat.mode === 'category' && pdfVolCat.category?.amount > 0) {
+              const d = pdfVolCat.category.type === 'pct'
+                ? basePerUnit * (pdfVolCat.category.amount / 100)
+                : pdfVolCat.category.amount;
+              pdfVolDiscTotal += Math.min(d, basePerUnit) * (line.qty || 1);
+            } else if (pdfVolCat.mode === 'per_item') {
+              // Match by priceItemID
+              const itemDisc = line.priceItemID ? (pdfVolCat.items || {})[String(line.priceItemID)] : null;
+              if (itemDisc && itemDisc.amount > 0) {
+                const d = itemDisc.type === 'pct'
+                  ? basePerUnit * (itemDisc.amount / 100)
+                  : itemDisc.amount;
+                pdfVolDiscTotal += Math.min(d, basePerUnit) * (line.qty || 1);
+              }
+            }
+          });
+          if (pdfVolDiscTotal > 0) {
+            const pdfVolNet = pdfVolumePrice - pdfVolDiscTotal;
+            doc.setTextColor(...white);
+            doc.setFont('helvetica', 'bold');
+            doc.text('-' + fmtMoney(pdfVolDiscTotal), col.discount, y + 13, { align: 'right' });
+            doc.text(fmtMoney(pdfVolNet), col.vip, y + 13, { align: 'right' });
+          }
         }
       }
       y += 28;
@@ -8534,18 +8553,27 @@
       let pdfCustomerDiscount = 0;
       if (pdfCpl) {
         const pdfSd = pdfCpl.surcharge_discounts || {};
-        // Volume discount
+        // Volume discount — handles both category and per_item modes
         const pdfVolCat = pdfSd['volume'];
-        if (pdfVolCat && pdfVolCat.mode === 'category' && pdfVolCat.category?.amount > 0) {
-          const pdfVolLines = pdfSplit
-            ? calcVolumePriceSplit(est.totalTrucks).lines
-            : [{ amount: pdfVolumePrice, qty: 1 }];
-          (pdfVolLines || []).forEach(line => {
+        if (pdfVolCat) {
+          const pdfVolCalcGT = pdfSplit ? calcVolumePriceSplit(est.totalTrucks) : calcVolumePrice(est.totalTrucks);
+          const pdfVolLinesGT = pdfVolCalcGT.lines || (pdfVolCalcGT.total > 0 ? [{ amount: pdfVolCalcGT.total, qty: 1, fraction: est.totalTrucks, priceItemID: null }] : []);
+          pdfVolLinesGT.forEach(line => {
             const base = line.amount / (line.qty || 1);
-            const d = pdfVolCat.category.type === 'pct'
-              ? base * (pdfVolCat.category.amount / 100)
-              : pdfVolCat.category.amount;
-            pdfCustomerDiscount += Math.min(d, base) * (line.qty || 1);
+            if (pdfVolCat.mode === 'category' && pdfVolCat.category?.amount > 0) {
+              const d = pdfVolCat.category.type === 'pct'
+                ? base * (pdfVolCat.category.amount / 100)
+                : pdfVolCat.category.amount;
+              pdfCustomerDiscount += Math.min(d, base) * (line.qty || 1);
+            } else if (pdfVolCat.mode === 'per_item' && line.priceItemID) {
+              const itemDisc = (pdfVolCat.items || {})[String(line.priceItemID)];
+              if (itemDisc && itemDisc.amount > 0) {
+                const d = itemDisc.type === 'pct'
+                  ? base * (itemDisc.amount / 100)
+                  : itemDisc.amount;
+                pdfCustomerDiscount += Math.min(d, base) * (line.qty || 1);
+              }
+            }
           });
         }
         // Surcharge discounts
