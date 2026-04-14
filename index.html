@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.0.0 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.0.1 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -857,7 +857,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.0.0 | 2026-04-13 -->
+<!-- CrewLogic v4.0.1 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3993,7 +3993,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.0.0 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.0.1 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -8269,10 +8269,11 @@
       const hasCplDiscount = !!(pdfCpl && pdfCpl.surcharge_discounts);
       const col = {
         area: margin + 4,
-        cy: 390,
-        trucks: 480,
-        price: 620,
-        total: hasCplDiscount ? 740 : W - margin - 8,
+        cy: 360,
+        trucks: 450,
+        price: 580,
+        total: hasCplDiscount ? 700 : W - margin - 8,
+        discount: hasCplDiscount ? 800 : null,
         vip: W - margin - 8
       };
 
@@ -8287,6 +8288,7 @@
       doc.text('Trucks', col.trucks, y - 1, { align: 'right' });
       doc.text('Price / Truck', col.price, y - 1, { align: 'right' });
       doc.text('Total', col.total, y - 1, { align: 'right' });
+      if (hasCplDiscount) doc.text('Discount', col.discount, y - 1, { align: 'right' });
       if (hasCplDiscount) doc.text('VIP Price', col.vip, y - 1, { align: 'right' });
       y += 10;
 
@@ -8383,8 +8385,10 @@
             ? pdfVolumePrice * (pdfVolCat.category.amount / 100)
             : pdfVolCat.category.amount * totalTrucks;
           const pdfVolNet = pdfVolumePrice - Math.min(pdfVolDisc, pdfVolumePrice);
+          const pdfVolDiscAmt = pdfVolumePrice - pdfVolNet;
           doc.setTextColor(...white);
           doc.setFont('helvetica', 'bold');
+          doc.text('-' + fmtMoney(pdfVolDiscAmt), col.discount, y + 13, { align: 'right' });
           doc.text(fmtMoney(pdfVolNet), col.vip, y + 13, { align: 'right' });
         }
       }
@@ -8448,6 +8452,9 @@
               ? lineTotal * (itemDisc.amount / 100)
               : itemDisc.amount * qty;
             const netAmt = lineTotal - Math.min(discAmt, lineTotal);
+            doc.setTextColor(100, 120, 140);
+            doc.setFont('helvetica', 'normal');
+            doc.text('-' + fmtMoney(discAmt), col.discount, y + 10, { align: 'right' });
             doc.setTextColor(...dark);
             doc.setFont('helvetica', 'bold');
             doc.text(fmtMoney(netAmt), col.vip, y + 10, { align: 'right' });
@@ -8468,6 +8475,7 @@
         doc.text('RECYCLING, LABOR & OTHER CHARGES', col.area, y + 13);
         if (hasCplDiscount) {
           doc.setTextColor(...green);
+          doc.text('Discount', col.discount, y + 13, { align: 'right' });
           doc.text('VIP Price', col.vip, y + 13, { align: 'right' });
         }
         y += 20;
@@ -8581,8 +8589,12 @@
         doc.setFontSize(9);
         doc.text('★ ' + pdfCpl.name + ' — Negotiated Rate', col.area, y + 15);
         doc.setTextColor(...white);
-        doc.text('Saved: ' + fmtMoney(-pdfCustomerDiscount), col.total, y + 15, { align: 'right' });
-        if (hasCplDiscount) doc.text(fmtMoney(pdfGrandTotal), col.vip, y + 15, { align: 'right' });
+        if (hasCplDiscount) {
+          doc.text('-' + fmtMoney(pdfCustomerDiscount), col.discount, y + 15, { align: 'right' });
+          doc.text(fmtMoney(pdfGrandTotal), col.vip, y + 15, { align: 'right' });
+        } else {
+          doc.text('-' + fmtMoney(pdfCustomerDiscount), col.total, y + 15, { align: 'right' });
+        }
         y += 28;
       }
 
