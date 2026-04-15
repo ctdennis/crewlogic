@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.2.0 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.2.2 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.2.0 | 2026-04-13 -->
+<!-- CrewLogic v4.2.2 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4102,7 +4102,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.2.0 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.2.2 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -7654,19 +7654,12 @@
         const uploadPhotos = uploadChoice === 'both' || uploadChoice === 'photos';
         const uploadPDF    = uploadChoice === 'both' || uploadChoice === 'pdf';
 
-        // Generate PDF as base64 for Vonigo document upload (if requested)
-        let pdfBase64 = null;
-        if (uploadPDF) {
-          try {
-            pdfBase64 = await generateEstimatePDF('base64', { skipBoilerplate: true, skipPhotos: false });
-          } catch(e) {
-            console.warn('PDF generation for Vonigo failed:', e);
-          }
-        }
-
         const clientLabel = (currentEstimate.clientName || 'Estimate').replace(/[^a-zA-Z0-9 _-]/g, '').trim();
         const pdfFilename = 'CrewLogic_' + clientLabel.replace(/\s+/g, '_') + '_Estimate.pdf';
 
+        // Step 1: Submit charges + photos (no PDF — keeps request fast)
+        feedbackEl.textContent = 'Submitting to Vonigo...';
+        feedbackEl.className = 'settings-feedback loading';
         const res = await apiFetch(N8N_BASE + '/crewlogic-submit-quote', {
           method: 'POST',
           body: JSON.stringify({
@@ -7681,7 +7674,7 @@
             email: currentUser.email,
             zip: currentEstimate.zip || '',
             photos: uploadPhotos ? photos : [],
-            pdfBase64: pdfBase64 || null,
+            pdfBase64: null,
             pdfFilename
           })
         });
@@ -7694,12 +7687,36 @@
           await saveEstimateDraft();
           feedbackEl.textContent = '✓ Submitted to Vonigo — Estimate #' + data.quoteID;
           feedbackEl.className = 'settings-feedback ok';
-          // Don't auto-hide — keep quote ID visible
           btn.disabled = true;
           btn.querySelector('.btn-text').textContent = 'Submitted ✓';
-          // Update the ZIP card to show submitted status
           document.getElementById('estZipStatus').textContent = '✓ ' + (currentEstimate.priceListName || '') + '  |  Vonigo #' + data.quoteID;
           document.getElementById('estZipStatus').className = 'zip-status ok';
+
+          // Step 2: Generate and upload PDF separately (async, non-blocking)
+          if (uploadPDF) {
+            feedbackEl.textContent = '✓ Submitted — generating PDF...';
+            try {
+              const pdfBase64 = await generateEstimatePDF('base64', { skipBoilerplate: true, skipPhotos: false });
+              if (pdfBase64) {
+                await apiFetch(N8N_BASE + '/crewlogic-submit-quote', {
+                  method: 'POST',
+                  body: JSON.stringify({
+                    action: 'uploadPDF',
+                    quoteID: data.quoteID,
+                    franchiseID: currentUser.franchiseID,
+                    email: currentUser.email,
+                    pdfBase64,
+                    pdfFilename
+                  })
+                });
+                feedbackEl.textContent = '✓ Submitted to Vonigo — Estimate #' + data.quoteID + ' (PDF uploaded)';
+              }
+            } catch(e) {
+              // PDF upload failure is non-fatal — quote is already submitted
+              feedbackEl.textContent = '✓ Submitted to Vonigo — Estimate #' + data.quoteID + ' (PDF upload failed)';
+              console.warn('PDF upload failed:', e);
+            }
+          }
         } else {
           feedbackEl.textContent = data.error || 'Submission failed';
           feedbackEl.className = 'settings-feedback error';
@@ -7909,16 +7926,23 @@
     }
 
     async function deleteEstimate(estimateID) {
-      if (!confirm('Delete this estimate?')) return;
+      // Find estimate info before confirming
+      const all = getLocalEstimates();
+      const est = all.find(e => String(e.estimateID) === String(estimateID));
+      const vonigoQuoteID = est ? (est.vonigoQuoteID || est['vonigoQuoteID'] || null) : null;
+
+      // Warn more strongly if submitted to Vonigo
+      if (vonigoQuoteID) {
+        const msg = 'WARNING: This estimate was submitted to Vonigo as Quote #' + vonigoQuoteID + '.\n\nDeleting will permanently remove it from both CrewLogic AND Vonigo, including all photos.\n\nThis cannot be undone. Are you sure?';
+        if (!confirm(msg)) return;
+        if (!confirm('Delete Quote #' + vonigoQuoteID + ' from Vonigo? Last chance to cancel.')) return;
+      } else {
+        if (!confirm('Delete this estimate?')) return;
+      }
 
       // Show immediate feedback
       const listEl = document.getElementById('estimatesList');
       listEl.innerHTML = '<div class="price-loading"><span class="spinner-inline"></span>Deleting estimate...</div>';
-
-      // Find vonigoQuoteID from local cache
-      const all = getLocalEstimates();
-      const est = all.find(e => String(e.estimateID) === String(estimateID));
-      const vonigoQuoteID = est ? (est.vonigoQuoteID || est['vonigoQuoteID'] || null) : null;
 
       // Delete Supabase Storage photos for this estimate (folder: franchiseID/estimateID/)
       try {
@@ -8298,7 +8322,18 @@
       const offwhite = [245, 248, 252];
 
 
-      const est = currentEstimate;
+      const est = JSON.parse(JSON.stringify(currentEstimate)); // deep copy — prevent PDF mutations from affecting live estimate
+
+      // Ensure costSettings has latest proposal fields from Supabase before rendering
+      if (!currentUser.costSettings?.proposalTagline && !opts.skipBoilerplate) {
+        try {
+          const csData = await supabaseFetch('/rest/v1/profiles?select=franchises(cost_settings)&email=eq.' + encodeURIComponent(currentUser.email));
+          if (csData && csData[0] && csData[0].franchises && csData[0].franchises.cost_settings) {
+            currentUser.costSettings = csData[0].franchises.cost_settings;
+          }
+        } catch(e) {}
+      }
+
       const dateStr = new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' });
       const clientName = est.clientName || 'Customer';
       const address = est.address || '';
