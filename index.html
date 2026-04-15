@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.2.8 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.2.9 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.2.8 | 2026-04-13 -->
+<!-- CrewLogic v4.2.9 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4119,7 +4119,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.2.8 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.2.9 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -7676,7 +7676,19 @@
         const clientLabel = (currentEstimate.clientName || 'Estimate').replace(/[^a-zA-Z0-9 _-]/g, '').trim();
         const pdfFilename = 'CrewLogic_' + clientLabel.replace(/\s+/g, '_') + '_Estimate.pdf';
 
-        // Step 1: Submit charges + photos (no PDF — keeps request fast)
+        // Generate PDF if requested
+        let pdfBase64 = null;
+        if (uploadPDF) {
+          feedbackEl.textContent = 'Generating PDF...';
+          feedbackEl.className = 'settings-feedback loading';
+          try {
+            pdfBase64 = await generateEstimatePDF('base64', { skipBoilerplate: true, skipPhotos: false });
+          } catch(e) {
+            console.warn('PDF generation failed:', e);
+          }
+        }
+
+        // Submit to Vonigo
         feedbackEl.textContent = 'Submitting to Vonigo...';
         feedbackEl.className = 'settings-feedback loading';
         const res = await apiFetch(N8N_BASE + '/crewlogic-submit-quote', {
