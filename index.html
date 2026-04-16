@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.3.3 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.3.4 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.3.3 | 2026-04-13 -->
+<!-- CrewLogic v4.3.4 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2118,8 +2118,8 @@
           </div>
           <!-- Capture button -->
           <button id="photoCaptureBtn" onclick="triggerPhotoCapture()" style="width:100%;max-width:320px;padding:16px;background:var(--accent-green);border:none;border-radius:12px;font-size:16px;font-weight:700;color:#000;cursor:pointer;">📷 Take Photo</button>
-          <!-- Done button -->
-          <button onclick="closePhotoCaptureOverlay()" style="width:100%;max-width:320px;padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:12px;font-size:14px;color:var(--text-secondary);cursor:pointer;">✓ Done</button>
+          <!-- Action buttons — change based on mode -->
+          <div id="photoCaptureActions" style="width:100%;max-width:320px;display:flex;flex-direction:column;gap:8px;"></div>
         </div>
       </div>
 
@@ -4144,7 +4144,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.3.3 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.3.4 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6030,17 +6030,8 @@
       if (charge.photos.length >= 8) { alert('Maximum 8 photos per room.'); return; }
 
       _photoCaptureIdx = chargeIdx;
-
-      // Update overlay UI
-      const roomLabel = [charge.room, charge.area].filter(Boolean).join(' · ') || 'Photo';
-      document.getElementById('photoCaptureRoom').textContent = roomLabel;
+      _showPhotoCaptureOverlay('charge');
       updatePhotoCaptureOverlay();
-
-      // Show overlay
-      const overlay = document.getElementById('photoCaptureOverlay');
-      overlay.style.display = 'flex';
-      // Scroll to top so overlay is fully visible
-      window.scrollTo(0, 0);
     }
 
     function updatePhotoCaptureOverlay() {
@@ -9975,21 +9966,36 @@ RECYCLING & DONATION
     let photoRoomPending = []; // array of { base64, driveUrl } — driveUrl filled after upload
 
     function startPhotoCapture() {
-      // Open camera immediately — show panel first so input is in DOM
-      const panel = document.getElementById('photoRoomPanel');
-      if (panel.style.display === 'none') {
-        photoRoomPending = [];
-        renderPhotoRoomThumbs();
-        document.getElementById('photoRoomStatus').textContent = 'Take up to 4 photos of the room, then tap Analyze.';
-        const ab = document.getElementById('photoRoomAnalyzeBtn');
-        ab.disabled = true;
-        ab.style.opacity = '0.4';
-        ab.textContent = 'Analyze';
-        panel.style.display = 'block';
-        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
+      // Reset pending photos and open overlay
+      photoRoomPending = [];
+      _photoCaptureIdx = null; // null = room mode, number = charge mode
+      _showPhotoCaptureOverlay('room');
       // Trigger camera immediately
       document.getElementById('photoRoomInput').click();
+    }
+
+    function _showPhotoCaptureOverlay(mode) {
+      const overlay = document.getElementById('photoCaptureOverlay');
+      const roomEl = document.getElementById('photoCaptureRoom');
+      const actionsEl = document.getElementById('photoCaptureActions');
+
+      if (mode === 'room') {
+        roomEl.textContent = 'New Room Photos';
+        actionsEl.innerHTML =
+          '<button id="photoCaptureBtn" onclick="addPhotoRoomPhoto()" style="width:100%;padding:16px;background:var(--accent-green);border:none;border-radius:12px;font-size:16px;font-weight:700;color:#000;cursor:pointer;">📷 Take Photo</button>' +
+          '<button onclick="analyzeRoomPhotosFromOverlay()" id="photoCaptureAnalyzeBtn" style="width:100%;padding:12px;background:var(--accent-blue);border:none;border-radius:12px;font-size:14px;font-weight:700;color:#fff;cursor:pointer;opacity:0.4;" disabled>🤖 Analyze</button>' +
+          '<button onclick="savePhotosAndCloseOverlay()" style="width:100%;padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:12px;font-size:13px;color:var(--text-secondary);cursor:pointer;">💾 Save &amp; analyze later</button>';
+      } else {
+        const charge = currentEstimate.charges[_photoCaptureIdx];
+        const roomLabel = [charge.room, charge.area].filter(Boolean).join(' · ') || 'Photo';
+        roomEl.textContent = roomLabel;
+        actionsEl.innerHTML =
+          '<button id="photoCaptureBtn" onclick="triggerPhotoCapture()" style="width:100%;padding:16px;background:var(--accent-green);border:none;border-radius:12px;font-size:16px;font-weight:700;color:#000;cursor:pointer;">📷 Take Photo</button>' +
+          '<button onclick="closePhotoCaptureOverlay()" style="width:100%;padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:12px;font-size:14px;color:var(--text-secondary);cursor:pointer;">✓ Done</button>';
+      }
+
+      overlay.style.display = 'flex';
+      window.scrollTo(0, 0);
     }
 
     function togglePhotoPanel() {
@@ -10081,6 +10087,10 @@ RECYCLING & DONATION
       const count = photoRoomPending.length;
       statusEl.textContent = count + ' photo' + (count !== 1 ? 's' : '') + ' captured' +
         (count < maxPhotos ? ' — add more or Analyze when ready.' : ' — tap Analyze.');
+
+      // Update overlay if showing
+      _updateRoomCaptureOverlay();
+
       // Analyze button will be enabled by renderPhotoRoomThumbs once all uploads complete
       const analyzeBtn3 = document.getElementById('photoRoomAnalyzeBtn');
       if (analyzeBtn3) {
@@ -10088,6 +10098,51 @@ RECYCLING & DONATION
         analyzeBtn3.style.opacity = '0.5';
         analyzeBtn3.textContent = '⏳ Uploading 0/' + photoRoomPending.length + '...';
       }
+    }
+
+    function _updateRoomCaptureOverlay() {
+      const overlay = document.getElementById('photoCaptureOverlay');
+      if (!overlay || overlay.style.display === 'none') return;
+      if (_photoCaptureIdx !== null) return; // charge mode, handled separately
+
+      const count = photoRoomPending.length;
+      document.getElementById('photoCaptureCount').textContent =
+        count === 0 ? 'No photos yet' : count + ' photo' + (count !== 1 ? 's' : '') + ' taken';
+
+      const lastEl = document.getElementById('photoCaptureLast');
+      const emptyEl = document.getElementById('photoCaptureEmpty');
+
+      if (count > 0) {
+        lastEl.style.display = '';
+        emptyEl.style.display = 'none';
+        const last = photoRoomPending[count - 1];
+        document.getElementById('photoCaptureLastImg').src = last.hiRes || last.base64 || '';
+      } else {
+        lastEl.style.display = 'none';
+        emptyEl.style.display = '';
+      }
+
+      // Update capture button
+      const btn = document.getElementById('photoCaptureBtn');
+      if (btn) btn.textContent = count === 0 ? '📷 Take Photo' : '📷 Take Another';
+
+      // Enable analyze button once we have photos
+      const analyzeBtn = document.getElementById('photoCaptureAnalyzeBtn');
+      if (analyzeBtn && count > 0) {
+        analyzeBtn.disabled = false;
+        analyzeBtn.style.opacity = '1';
+      }
+    }
+
+    function analyzeRoomPhotosFromOverlay() {
+      // Close overlay and trigger analysis
+      document.getElementById('photoCaptureOverlay').style.display = 'none';
+      analyzeRoomPhotos();
+    }
+
+    function savePhotosAndCloseOverlay() {
+      document.getElementById('photoCaptureOverlay').style.display = 'none';
+      closePhotoPanel(); // this saves pending photos as blank charge row
     }
 
     function renderPhotoRoomThumbs() {
