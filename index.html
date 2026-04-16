@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.3.4 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.3.5 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.3.4 | 2026-04-13 -->
+<!-- CrewLogic v4.3.5 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2105,21 +2105,19 @@
           <div id="photoCaptureRoom" style="font-size:14px;color:#94a3b8;text-align:center;"></div>
           <!-- Photo count -->
           <div id="photoCaptureCount" style="font-size:12px;color:#475569;text-align:center;"></div>
-          <!-- Last photo thumbnail -->
-          <div id="photoCaptureLast" style="display:none;width:100%;max-width:320px;aspect-ratio:4/3;border-radius:12px;overflow:hidden;border:2px solid var(--accent-green);">
-            <img id="photoCaptureLastImg" style="width:100%;height:100%;object-fit:cover;" />
+          <!-- Thumbnails row -->
+          <div id="photoCaptureThumbsWrap" style="display:none;width:100%;max-width:480px;">
+            <div id="photoCaptureThumbs" style="display:flex;gap:8px;overflow-x:auto;padding:4px 0 8px;-webkit-overflow-scrolling:touch;scroll-snap-type:x mandatory;"></div>
           </div>
           <!-- No photos yet placeholder -->
-          <div id="photoCaptureEmpty" style="width:100%;max-width:320px;aspect-ratio:4/3;border-radius:12px;border:2px dashed #2d3f4f;display:flex;align-items:center;justify-content:center;">
+          <div id="photoCaptureEmpty" style="width:100%;max-width:320px;aspect-ratio:16/9;border-radius:12px;border:2px dashed #2d3f4f;display:flex;align-items:center;justify-content:center;">
             <div style="text-align:center;color:#475569;">
               <div style="font-size:48px;margin-bottom:8px;">📷</div>
               <div style="font-size:13px;">No photos yet</div>
             </div>
           </div>
-          <!-- Capture button -->
-          <button id="photoCaptureBtn" onclick="triggerPhotoCapture()" style="width:100%;max-width:320px;padding:16px;background:var(--accent-green);border:none;border-radius:12px;font-size:16px;font-weight:700;color:#000;cursor:pointer;">📷 Take Photo</button>
           <!-- Action buttons — change based on mode -->
-          <div id="photoCaptureActions" style="width:100%;max-width:320px;display:flex;flex-direction:column;gap:8px;"></div>
+          <div id="photoCaptureActions" style="width:100%;max-width:480px;display:flex;flex-direction:column;gap:8px;"></div>
         </div>
       </div>
 
@@ -4144,7 +4142,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.3.4 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.3.5 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6034,7 +6032,7 @@
       updatePhotoCaptureOverlay();
     }
 
-    function updatePhotoCaptureOverlay() {
+    async function updatePhotoCaptureOverlay() {
       const idx = _photoCaptureIdx;
       if (idx === null) return;
       const charge = currentEstimate.charges[idx];
@@ -6044,29 +6042,19 @@
       document.getElementById('photoCaptureCount').textContent =
         count === 0 ? 'No photos yet' : count + ' photo' + (count !== 1 ? 's' : '') + ' taken';
 
-      const lastEl = document.getElementById('photoCaptureLast');
-      const emptyEl = document.getElementById('photoCaptureEmpty');
+      // Render thumbnails (resolve Supabase paths async)
+      const thumbPhotos = await Promise.all(photos.map(async p => {
+        if (!p || p.startsWith('data:')) return p;
+        if (p.startsWith('http')) return p;
+        return (await resolvePhotoUrl(p)) || p;
+      }));
+      _renderOverlayThumbs(thumbPhotos);
 
-      if (count > 0) {
-        lastEl.style.display = '';
-        emptyEl.style.display = 'none';
-        const lastPhoto = photos[count - 1];
-        const lastImg = document.getElementById('photoCaptureLastImg');
-        if (lastPhoto.startsWith('data:')) {
-          lastImg.src = lastPhoto;
-        } else {
-          resolvePhotoUrl(lastPhoto).then(url => { if (url) lastImg.src = url; });
-        }
-      } else {
-        lastEl.style.display = 'none';
-        emptyEl.style.display = '';
-      }
+      const retakeBtn = document.getElementById('photoCaptureRetakeBtn');
+      if (retakeBtn) retakeBtn.style.display = count > 0 ? '' : 'none';
 
-      // Update capture button
       const btn = document.getElementById('photoCaptureBtn');
-      const remaining = 8 - count;
-      btn.textContent = count === 0 ? '📷 Take Photo' : '📷 Take Another (' + remaining + ' remaining)';
-      btn.disabled = count >= 8;
+      if (btn) btn.disabled = count >= 8;
     }
 
     function triggerPhotoCapture() {
@@ -9982,15 +9970,21 @@ RECYCLING & DONATION
       if (mode === 'room') {
         roomEl.textContent = 'New Room Photos';
         actionsEl.innerHTML =
-          '<button id="photoCaptureBtn" onclick="addPhotoRoomPhoto()" style="width:100%;padding:16px;background:var(--accent-green);border:none;border-radius:12px;font-size:16px;font-weight:700;color:#000;cursor:pointer;">📷 Take Photo</button>' +
+          '<div style="display:flex;gap:8px;">' +
+            '<button id="photoCaptureBtn" onclick="document.getElementById(\'photoRoomInput\').click()" style="flex:1;padding:14px;background:var(--accent-green);border:none;border-radius:12px;font-size:14px;font-weight:700;color:#000;cursor:pointer;">📷 Add Photo</button>' +
+            '<button id="photoCaptureRetakeBtn" onclick="retakeLastRoomPhoto()" style="padding:14px 16px;background:var(--bg-input);border:1px solid var(--border);border-radius:12px;font-size:14px;color:var(--text-secondary);cursor:pointer;display:none;">🔄 Retake</button>' +
+          '</div>' +
           '<button onclick="analyzeRoomPhotosFromOverlay()" id="photoCaptureAnalyzeBtn" style="width:100%;padding:12px;background:var(--accent-blue);border:none;border-radius:12px;font-size:14px;font-weight:700;color:#fff;cursor:pointer;opacity:0.4;" disabled>🤖 Analyze</button>' +
-          '<button onclick="savePhotosAndCloseOverlay()" style="width:100%;padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:12px;font-size:13px;color:var(--text-secondary);cursor:pointer;">💾 Save &amp; analyze later</button>';
+          '<button onclick="savePhotosAndCloseOverlay()" style="width:100%;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:12px;font-size:13px;color:var(--text-secondary);cursor:pointer;">💾 Save &amp; analyze later</button>';
       } else {
         const charge = currentEstimate.charges[_photoCaptureIdx];
         const roomLabel = [charge.room, charge.area].filter(Boolean).join(' · ') || 'Photo';
         roomEl.textContent = roomLabel;
         actionsEl.innerHTML =
-          '<button id="photoCaptureBtn" onclick="triggerPhotoCapture()" style="width:100%;padding:16px;background:var(--accent-green);border:none;border-radius:12px;font-size:16px;font-weight:700;color:#000;cursor:pointer;">📷 Take Photo</button>' +
+          '<div style="display:flex;gap:8px;">' +
+            '<button id="photoCaptureBtn" onclick="triggerPhotoCapture()" style="flex:1;padding:14px;background:var(--accent-green);border:none;border-radius:12px;font-size:14px;font-weight:700;color:#000;cursor:pointer;">📷 Add Photo</button>' +
+            '<button id="photoCaptureRetakeBtn" onclick="retakeLastChargePhoto()" style="padding:14px 16px;background:var(--bg-input);border:1px solid var(--border);border-radius:12px;font-size:14px;color:var(--text-secondary);cursor:pointer;display:none;">🔄 Retake</button>' +
+          '</div>' +
           '<button onclick="closePhotoCaptureOverlay()" style="width:100%;padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:12px;font-size:14px;color:var(--text-secondary);cursor:pointer;">✓ Done</button>';
       }
 
@@ -10100,38 +10094,65 @@ RECYCLING & DONATION
       }
     }
 
+    function _renderOverlayThumbs(photos) {
+      const wrap = document.getElementById('photoCaptureThumbsWrap');
+      const container = document.getElementById('photoCaptureThumbs');
+      const emptyEl = document.getElementById('photoCaptureEmpty');
+      if (!wrap || !container) return;
+      if (photos.length === 0) {
+        wrap.style.display = 'none';
+        if (emptyEl) emptyEl.style.display = '';
+        return;
+      }
+      wrap.style.display = '';
+      if (emptyEl) emptyEl.style.display = 'none';
+      container.innerHTML = photos.map((src, i) => {
+        const imgSrc = typeof src === 'object' ? (src.hiRes || src.base64 || '') : (src || '');
+        const isLast = i === photos.length - 1;
+        return '<div style="flex-shrink:0;position:relative;">' +
+          '<img src="' + imgSrc + '" style="width:120px;height:90px;object-fit:cover;border-radius:8px;border:2px solid ' + (isLast ? 'var(--accent-green)' : 'var(--border)') + ';">' +
+          '<div style="position:absolute;bottom:4px;right:4px;background:rgba(0,0,0,0.6);color:#fff;font-size:10px;padding:1px 5px;border-radius:4px;">' + (i+1) + '</div>' +
+          '</div>';
+      }).join('');
+      setTimeout(() => { container.scrollLeft = container.scrollWidth; }, 50);
+    }
+
     function _updateRoomCaptureOverlay() {
       const overlay = document.getElementById('photoCaptureOverlay');
       if (!overlay || overlay.style.display === 'none') return;
-      if (_photoCaptureIdx !== null) return; // charge mode, handled separately
+      if (_photoCaptureIdx !== null) return;
 
       const count = photoRoomPending.length;
       document.getElementById('photoCaptureCount').textContent =
         count === 0 ? 'No photos yet' : count + ' photo' + (count !== 1 ? 's' : '') + ' taken';
 
-      const lastEl = document.getElementById('photoCaptureLast');
-      const emptyEl = document.getElementById('photoCaptureEmpty');
+      _renderOverlayThumbs(photoRoomPending);
 
-      if (count > 0) {
-        lastEl.style.display = '';
-        emptyEl.style.display = 'none';
-        const last = photoRoomPending[count - 1];
-        document.getElementById('photoCaptureLastImg').src = last.hiRes || last.base64 || '';
-      } else {
-        lastEl.style.display = 'none';
-        emptyEl.style.display = '';
-      }
+      const retakeBtn = document.getElementById('photoCaptureRetakeBtn');
+      if (retakeBtn) retakeBtn.style.display = count > 0 ? '' : 'none';
 
-      // Update capture button
-      const btn = document.getElementById('photoCaptureBtn');
-      if (btn) btn.textContent = count === 0 ? '📷 Take Photo' : '📷 Take Another';
-
-      // Enable analyze button once we have photos
       const analyzeBtn = document.getElementById('photoCaptureAnalyzeBtn');
-      if (analyzeBtn && count > 0) {
-        analyzeBtn.disabled = false;
-        analyzeBtn.style.opacity = '1';
+      if (analyzeBtn) {
+        analyzeBtn.disabled = count === 0;
+        analyzeBtn.style.opacity = count > 0 ? '1' : '0.4';
       }
+    }
+
+    function retakeLastRoomPhoto() {
+      if (photoRoomPending.length === 0) return;
+      photoRoomPending.pop();
+      _updateRoomCaptureOverlay();
+      document.getElementById('photoRoomInput').click();
+    }
+
+    function retakeLastChargePhoto() {
+      const idx = _photoCaptureIdx;
+      if (idx === null) return;
+      const photos = currentEstimate.charges[idx].photos;
+      if (!photos || photos.length === 0) return;
+      photos.pop();
+      updatePhotoCaptureOverlay();
+      triggerPhotoCapture();
     }
 
     function analyzeRoomPhotosFromOverlay() {
