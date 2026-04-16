@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.3.7 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.3.8 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.3.7 | 2026-04-13 -->
+<!-- CrewLogic v4.3.8 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1449,8 +1449,9 @@
           <div id="estClientInfoBar" style="margin-top:8px;margin-bottom:4px;display:none;align-items:center;justify-content:space-between;gap:8px;">
             <div style="flex:1;min-width:0;">
               <div id="estClientNameDisplay" style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
-              <div id="estAddressDisplay" style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;"></div>
-              <div id="estEmailDisplay" style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;display:none;"></div>
+              <a id="estAddressDisplay" style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;display:block;text-decoration:none;" target="_blank"></a>
+              <a id="estEmailDisplay" style="font-size:11px;color:var(--accent-green);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;display:none;text-decoration:none;"></a>
+              <a id="estPhoneDisplay" style="font-size:11px;color:var(--accent-green);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;display:none;text-decoration:none;"></a>
             </div>
             <button onclick="toggleClientInfoExpanded()" style="background:none;border:1px solid var(--border);color:var(--text-muted);font-size:11px;cursor:pointer;flex-shrink:0;padding:3px 8px;border-radius:4px;">edit</button>
           </div>
@@ -1467,6 +1468,10 @@
             <div class="form-group">
               <div class="form-label">Client Email</div>
               <input type="email" class="form-input" id="estClientEmail" placeholder="client@example.com" oninput="autoSaveDraft();updateClientInfoBar()" inputmode="email" autocomplete="email">
+            </div>
+            <div class="form-group">
+              <div class="form-label">Client Phone</div>
+              <input type="tel" class="form-input" id="estClientPhone" placeholder="(508) 555-1234" oninput="autoSaveDraft();updateClientInfoBar()" inputmode="tel" autocomplete="tel">
             </div>
             <div class="form-group">
               <div class="form-label">Vonigo Job #</div>
@@ -4143,7 +4148,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.3.7 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.3.8 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5233,6 +5238,7 @@
       document.getElementById('estClientName').value = currentEstimate.clientName || '';
       document.getElementById('estAddress').value = currentEstimate.address || '';
       if (document.getElementById('estClientEmail')) document.getElementById('estClientEmail').value = currentEstimate.clientEmail || '';
+      if (document.getElementById('estClientPhone')) document.getElementById('estClientPhone').value = currentEstimate.clientPhone || '';
       document.getElementById('estNotes').value = currentEstimate.notes || '';
       updateNotesPreview();
       // Show Street View button if estimate has an address
@@ -7313,6 +7319,11 @@
           if (data.clientEmail) {
             document.getElementById('estClientEmail').value = data.clientEmail;
             currentEstimate.clientEmail = data.clientEmail;
+          }
+          if (data.clientPhone) {
+            const phoneEl = document.getElementById('estClientPhone');
+            if (phoneEl) phoneEl.value = data.clientPhone;
+            currentEstimate.clientPhone = data.clientPhone;
           }
           document.getElementById('estJobIDDisplay').textContent = jobID;
           collapseClientInfo();
@@ -9859,15 +9870,40 @@ RECYCLING & DONATION
 
     // ===== CLIENT INFO BAR =====
     function updateClientInfoBar() {
-      const name = document.getElementById('estClientName').value.trim();
-      const addr = document.getElementById('estAddress').value.trim();
+      const name  = document.getElementById('estClientName').value.trim();
+      const addr  = document.getElementById('estAddress').value.trim();
       const email = document.getElementById('estClientEmail') ? document.getElementById('estClientEmail').value.trim() : '';
+      const phone = document.getElementById('estClientPhone') ? document.getElementById('estClientPhone').value.trim() : (currentEstimate.clientPhone || '');
+
       document.getElementById('estClientNameDisplay').textContent = name || 'No client name';
-      document.getElementById('estAddressDisplay').textContent = addr || '';
-      const emailDisplay = document.getElementById('estEmailDisplay');
-      if (emailDisplay) {
-        emailDisplay.textContent = email || '';
-        emailDisplay.style.display = email ? 'block' : 'none';
+
+      // Address — links to Google Maps
+      const addrEl = document.getElementById('estAddressDisplay');
+      if (addrEl) {
+        addrEl.textContent = addr || '';
+        addrEl.href = addr ? 'https://maps.google.com/?q=' + encodeURIComponent(addr) : '';
+        addrEl.style.display = addr ? 'block' : 'none';
+      }
+
+      // Email — mailto link
+      const emailEl = document.getElementById('estEmailDisplay');
+      if (emailEl) {
+        emailEl.textContent = email || '';
+        emailEl.href = email ? 'mailto:' + email : '';
+        emailEl.style.display = email ? 'block' : 'none';
+      }
+
+      // Phone — tel link
+      const phoneEl = document.getElementById('estPhoneDisplay');
+      if (phoneEl) {
+        phoneEl.textContent = phone || '';
+        phoneEl.href = phone ? 'tel:' + phone.replace(/[^0-9+]/g, '') : '';
+        phoneEl.style.display = phone ? 'block' : 'none';
+      }
+
+      // Keep currentEstimate in sync
+      if (currentEstimate) {
+        currentEstimate.clientPhone = phone;
       }
     }
 
