@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.4.1 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.4.2 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.4.1 | 2026-04-13 -->
+<!-- CrewLogic v4.4.2 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4148,7 +4148,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.4.1 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.4.2 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -9902,11 +9902,17 @@ RECYCLING & DONATION
         emailEl.style.display = email ? 'block' : 'none';
       }
 
-      // Phone — tel link
+      // Phone — tel link, formatted as XXX-XXX-XXXX
       const phoneEl = document.getElementById('estPhoneDisplay');
       if (phoneEl) {
-        phoneEl.textContent = phone || '';
-        phoneEl.href = phone ? 'tel:' + phone.replace(/[^0-9+]/g, '') : '';
+        const digits = phone.replace(/\D/g, '');
+        const fmtPhoneStr = digits.length === 10
+          ? digits.slice(0,3) + '-' + digits.slice(3,6) + '-' + digits.slice(6)
+          : digits.length === 11 && digits[0] === '1'
+            ? digits.slice(1,4) + '-' + digits.slice(4,7) + '-' + digits.slice(7)
+            : phone;
+        phoneEl.textContent = fmtPhoneStr || '';
+        phoneEl.href = phone ? 'tel:' + digits : '';
         phoneEl.style.display = phone ? 'block' : 'none';
       }
 
