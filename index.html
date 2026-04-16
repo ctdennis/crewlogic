@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.3.9 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.4.0 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.3.9 | 2026-04-13 -->
+<!-- CrewLogic v4.4.0 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4148,7 +4148,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.3.9 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.4.0 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5336,13 +5336,25 @@
         zipStatus.textContent = '✓ ' + clientLabel;
         zipStatus.className = 'zip-status ok';
       } else if (currentEstimate.jobID) {
-        // Has job but no prices cached — auto-reload via job lookup
-        document.getElementById('estMainContent').style.display = 'none';
-        const statusEl = document.getElementById('estZipStatus');
-        statusEl.textContent = 'Reloading prices...';
-        statusEl.className = 'zip-status loading';
-        // Trigger job lookup which will auto-load prices
-        setTimeout(() => lookupEstimateJobStep1(), 300);
+        const hasCharges = currentEstimate.charges && currentEstimate.charges.length > 0;
+        const hasPrice = currentEstimate.totalPrice > 0;
+        if (hasCharges || hasPrice) {
+          // Already estimated — show main content without re-fetching prices
+          // Price book will be re-fetched lazily if user tries to add new charges
+          document.getElementById('estMainContent').style.display = 'block';
+          document.getElementById('estPriceListDisplay').textContent = currentEstimate.priceListName || '';
+          const zipStatus = document.getElementById('estZipStatus');
+          const vonigoLabel = currentEstimate.vonigoQuoteID ? '  |  Vonigo #' + currentEstimate.vonigoQuoteID : '';
+          zipStatus.textContent = '✓ ' + (currentEstimate.clientName || '') + (currentEstimate.priceListName ? '  |  ' + currentEstimate.priceListName : '') + vonigoLabel;
+          zipStatus.className = 'zip-status ok';
+        } else {
+          // No charges yet — auto-reload via job lookup
+          document.getElementById('estMainContent').style.display = 'none';
+          const statusEl = document.getElementById('estZipStatus');
+          statusEl.textContent = 'Reloading prices...';
+          statusEl.className = 'zip-status loading';
+          setTimeout(() => lookupEstimateJobStep1(), 300);
+        }
       } else {
         document.getElementById('estMainContent').style.display = 'none';
       }
