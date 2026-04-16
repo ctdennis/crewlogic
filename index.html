@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.4.2 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.4.3 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.4.2 | 2026-04-13 -->
+<!-- CrewLogic v4.4.3 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4148,7 +4148,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.4.2 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.4.3 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -4989,30 +4989,39 @@
       estListEl.addEventListener('mousedown', estListEl._actionDownHandler);
       estListEl.addEventListener('touchstart', estListEl._actionDownHandler, { passive: true });
 
-      // Load from backend
+      // Load directly from Supabase — no n8n overhead, no payload column (not needed for list)
       try {
-        const res = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
-          method: 'POST',
-          body: JSON.stringify({ action: 'list', email: currentUser.email, franchiseID: currentUser.franchiseID })
-        });
-        const data = await res.json();
-        if (data.success && data.estimates) {
-          // Parse payload for each server estimate so we have full data
-          const serverEstimates = data.estimates.map(function(est) {
-            if (est.payload) {
-              try {
-                const p = typeof est.payload === 'string' ? JSON.parse(est.payload) : est.payload;
-                return {...est, ...p};
-              } catch(e) {}
-            }
-            return est;
-          });
-          // Replace local cache with server data — server is source of truth
-          setLocalEstimates(serverEstimates);
-          renderEstimatesList(serverEstimates);
+        const rows = await supabaseFetch(
+          '/rest/v1/estimates?owner_email=eq.' + encodeURIComponent(currentUser.email) +
+          '&status=not.eq.deleted' +
+          '&order=updated_at.desc' +
+          '&select=estimate_id,owner_email,label,status,client_name,address,zip,total_price,total_trucks,split_pricing,vonigo_quote_id,job_id,cover_photo,cloned_from,created_at,updated_at,customer_price_list'
+        );
+        if (rows && Array.isArray(rows)) {
+          const estimates = rows.map(r => ({
+            estimateID:       r.estimate_id,
+            ownerEmail:       r.owner_email,
+            label:            r.label || '',
+            status:           r.status || 'draft',
+            clientName:       r.client_name || '',
+            address:          r.address || '',
+            zip:              r.zip || '',
+            totalPrice:       r.total_price,
+            totalTrucks:      r.total_trucks,
+            splitPricing:     r.split_pricing,
+            vonigoQuoteID:    r.vonigo_quote_id,
+            jobID:            r.job_id,
+            coverPhoto:       r.cover_photo || '',
+            clonedFrom:       r.cloned_from,
+            createdAt:        r.created_at,
+            updatedAt:        r.updated_at,
+            customerPriceList: r.customer_price_list || null
+          }));
+          setLocalEstimates(estimates);
+          renderEstimatesList(estimates);
           return;
         }
-      } catch(e) {}
+      } catch(e) { console.error('Supabase list error:', e); }
 
       // Fallback to local only
       renderEstimatesList(getLocalEstimates());
