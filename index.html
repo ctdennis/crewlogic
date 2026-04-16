@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.3.2 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.3.3 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.3.2 | 2026-04-13 -->
+<!-- CrewLogic v4.3.3 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2095,6 +2095,31 @@
           <button class="calc-btn" style="background:var(--bg-input);color:var(--text-secondary);margin-top:8px;" onclick="document.getElementById('submitVonigoModal').style.display='none'">
             <span class="btn-text">Cancel</span>
           </button>
+        </div>
+      </div>
+
+      <!-- PHOTO CAPTURE OVERLAY -->
+      <div id="photoCaptureOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#000;z-index:300;flex-direction:column;align-items:center;justify-content:center;">
+        <div style="width:100%;max-width:480px;padding:24px;display:flex;flex-direction:column;align-items:center;gap:16px;">
+          <!-- Room label -->
+          <div id="photoCaptureRoom" style="font-size:14px;color:#94a3b8;text-align:center;"></div>
+          <!-- Photo count -->
+          <div id="photoCaptureCount" style="font-size:12px;color:#475569;text-align:center;"></div>
+          <!-- Last photo thumbnail -->
+          <div id="photoCaptureLast" style="display:none;width:100%;max-width:320px;aspect-ratio:4/3;border-radius:12px;overflow:hidden;border:2px solid var(--accent-green);">
+            <img id="photoCaptureLastImg" style="width:100%;height:100%;object-fit:cover;" />
+          </div>
+          <!-- No photos yet placeholder -->
+          <div id="photoCaptureEmpty" style="width:100%;max-width:320px;aspect-ratio:4/3;border-radius:12px;border:2px dashed #2d3f4f;display:flex;align-items:center;justify-content:center;">
+            <div style="text-align:center;color:#475569;">
+              <div style="font-size:48px;margin-bottom:8px;">📷</div>
+              <div style="font-size:13px;">No photos yet</div>
+            </div>
+          </div>
+          <!-- Capture button -->
+          <button id="photoCaptureBtn" onclick="triggerPhotoCapture()" style="width:100%;max-width:320px;padding:16px;background:var(--accent-green);border:none;border-radius:12px;font-size:16px;font-weight:700;color:#000;cursor:pointer;">📷 Take Photo</button>
+          <!-- Done button -->
+          <button onclick="closePhotoCaptureOverlay()" style="width:100%;max-width:320px;padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:12px;font-size:14px;color:var(--text-secondary);cursor:pointer;">✓ Done</button>
         </div>
       </div>
 
@@ -4119,7 +4144,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.3.2 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.3.3 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5997,10 +6022,69 @@
     }
 
     // ===== CHARGE PHOTO CAPTURE =====
+    let _photoCaptureIdx = null;
+
     function captureChargePhoto(chargeIdx) {
       const charge = currentEstimate.charges[chargeIdx];
       if (!charge.photos) charge.photos = charge.photoUrl ? [charge.photoUrl] : [];
       if (charge.photos.length >= 8) { alert('Maximum 8 photos per room.'); return; }
+
+      _photoCaptureIdx = chargeIdx;
+
+      // Update overlay UI
+      const roomLabel = [charge.room, charge.area].filter(Boolean).join(' · ') || 'Photo';
+      document.getElementById('photoCaptureRoom').textContent = roomLabel;
+      updatePhotoCaptureOverlay();
+
+      // Show overlay
+      const overlay = document.getElementById('photoCaptureOverlay');
+      overlay.style.display = 'flex';
+      // Scroll to top so overlay is fully visible
+      window.scrollTo(0, 0);
+    }
+
+    function updatePhotoCaptureOverlay() {
+      const idx = _photoCaptureIdx;
+      if (idx === null) return;
+      const charge = currentEstimate.charges[idx];
+      const photos = charge.photos || [];
+      const count = photos.length;
+
+      document.getElementById('photoCaptureCount').textContent =
+        count === 0 ? 'No photos yet' : count + ' photo' + (count !== 1 ? 's' : '') + ' taken';
+
+      const lastEl = document.getElementById('photoCaptureLast');
+      const emptyEl = document.getElementById('photoCaptureEmpty');
+
+      if (count > 0) {
+        lastEl.style.display = '';
+        emptyEl.style.display = 'none';
+        const lastPhoto = photos[count - 1];
+        const lastImg = document.getElementById('photoCaptureLastImg');
+        if (lastPhoto.startsWith('data:')) {
+          lastImg.src = lastPhoto;
+        } else {
+          resolvePhotoUrl(lastPhoto).then(url => { if (url) lastImg.src = url; });
+        }
+      } else {
+        lastEl.style.display = 'none';
+        emptyEl.style.display = '';
+      }
+
+      // Update capture button
+      const btn = document.getElementById('photoCaptureBtn');
+      const remaining = 8 - count;
+      btn.textContent = count === 0 ? '📷 Take Photo' : '📷 Take Another (' + remaining + ' remaining)';
+      btn.disabled = count >= 8;
+    }
+
+    function triggerPhotoCapture() {
+      const idx = _photoCaptureIdx;
+      if (idx === null) return;
+      const charge = currentEstimate.charges[idx];
+      if (!charge.photos) charge.photos = [];
+      if (charge.photos.length >= 8) return;
+
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = 'image/*';
@@ -6009,22 +6093,23 @@
         const file = e.target.files[0];
         if (!file) return;
         const base64 = await ensureJpegBase64(file);
-        // Compress
         const compressed = await compressChargePhoto(base64);
-        currentEstimate.charges[chargeIdx].photo = compressed;
-        // Push inline base64 immediately so thumbnail shows right away
-        if (!currentEstimate.charges[chargeIdx].photos) {
-          currentEstimate.charges[chargeIdx].photos = [];
-        }
-        const tempIdx = currentEstimate.charges[chargeIdx].photos.length;
-        currentEstimate.charges[chargeIdx].photos.push(compressed);
-        renderCharges();
+        const tempIdx = currentEstimate.charges[idx].photos.length;
+        currentEstimate.charges[idx].photos.push(compressed);
+        updatePhotoCaptureOverlay();
         autoSaveDraft();
-        // Upload to Google Drive in background, replace temp with Drive URL
-        uploadChargePhotoToDrive(chargeIdx, compressed, tempIdx);
+        uploadChargePhotoToDrive(idx, compressed, tempIdx);
       };
       input.click();
     }
+
+    function closePhotoCaptureOverlay() {
+      document.getElementById('photoCaptureOverlay').style.display = 'none';
+      _photoCaptureIdx = null;
+      renderCharges();
+    }
+
+
 
     // Convert HEIC/HEIF to JPEG blob if needed
     async function ensureJpegBase64(file) {
