@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.4.5 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.4.6 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.4.5 | 2026-04-13 -->
+<!-- CrewLogic v4.4.6 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4148,7 +4148,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.4.5 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.4.6 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5219,9 +5219,11 @@
     }
 
     function restorePriceBlocks() {
-      // Restore priceBlocks from saved estimate so charges can be added/edited
-      if (currentEstimate.priceBlocks && currentEstimate.priceBlocks.length > 0) {
-        priceBlocks = currentEstimate.priceBlocks;
+      // Restore priceBlocks from saved estimate — check both priceBlocks and priceBook field names
+      const saved = currentEstimate.priceBlocks || currentEstimate.priceBook || [];
+      const blocks = Array.isArray(saved) ? saved : (typeof saved === 'string' ? JSON.parse(saved) : []);
+      if (blocks.length > 0) {
+        priceBlocks = blocks;
         priceListID = currentEstimate.priceListID || null;
         priceListName = currentEstimate.priceListName || '';
       } else {
