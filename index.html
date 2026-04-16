@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.3.8 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.3.9 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.3.8 | 2026-04-13 -->
+<!-- CrewLogic v4.3.9 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4148,7 +4148,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.3.8 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.3.9 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5140,48 +5140,42 @@
       // Always fetch from backend to get latest data (including coverPhoto from other devices)
       // Local cache used only as fallback if backend fails
 
-      // Always try backend (required when localStorage is sandboxed)
+      // Always load fresh from Supabase — bypasses n8n payload stripping issues
       try {
-        const res = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
-          method: 'POST',
-          body: JSON.stringify({ action: 'load', email: currentUser.email, franchiseID: currentUser.franchiseID, estimateID })
+        const rows = await supabaseFetch(
+          '/rest/v1/estimates?estimate_id=eq.' + estimateID +
+          '&select=*'
+        );
+        if (!rows || !rows.length) throw new Error('Not found in Supabase');
+        const row = rows[0];
+        // payload column is the source of truth for charges/photos/descriptions
+        const payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : (row.payload || {});
+        // Merge row-level columns over payload — columns are always authoritative
+        currentEstimate = Object.assign({}, payload, {
+          estimateID:       row.estimate_id,
+          ownerEmail:       row.owner_email,
+          franchiseID:      row.franchise_id,
+          label:            row.label,
+          status:           row.status,
+          clientName:       row.client_name,
+          address:          row.address,
+          zip:              row.zip,
+          totalPrice:       row.total_price,
+          totalTrucks:      row.total_trucks,
+          splitPricing:     row.split_pricing,
+          vonigoQuoteID:    row.vonigo_quote_id,
+          jobID:            row.job_id,
+          clientID:         row.client_id,
+          contactID:        row.contact_id,
+          locationID:       row.location_id,
+          coverPhoto:       row.cover_photo,
+          costAnalysis:     row.cost_analysis,
+          priceBook:        row.price_book,
+          clonedFrom:       row.cloned_from,
+          createdAt:        row.created_at,
+          updatedAt:        row.updated_at
         });
-        const text = await res.text();
-        let data;
-        try { data = JSON.parse(text); } catch(e) {
-          console.error('Load response not JSON:', text.substring(0, 200));
-          document.getElementById('estimatesList').innerHTML = '<div class="price-error">Server error: ' + text.substring(0, 100) + '</div>';
-          return;
-        }
-        if (data.success && data.estimate) {
-          currentEstimate = data.estimate;
-          // Parse payload if it came back as string
-          if (currentEstimate.payload && typeof currentEstimate.payload === 'string') {
-            try {
-              const p = JSON.parse(currentEstimate.payload);
-              // Strip ALL row-identity and submission fields — row-level columns are source of truth
-              ['estimateID','row_number','ownerEmail','franchiseID','status','vonigoQuoteID',
-               'vonigoQuoteID','_pendingVolumeLines','clonedFrom','createdAt','updatedAt',
-               'label','totalTrucks','totalPrice','splitPricing','coverPhoto','payload','costAnalysis']
-              .forEach(k => delete p[k]);
-              // Also strip any col_N bleed-through from extra sheet columns
-              Object.keys(p).forEach(k => { if (/^col_\d+$/.test(k)) delete p[k]; });
-              const savedCoverPhoto = currentEstimate.coverPhoto;
-              currentEstimate = {...currentEstimate, ...p};
-              // Ensure coverPhoto from sheet row is never overwritten by payload merge
-              if (savedCoverPhoto) currentEstimate.coverPhoto = savedCoverPhoto;
-            } catch(e) {
-              console.warn('Payload parse failed, trying localStorage fallback');
-              // Payload may be truncated — merge from localStorage if available
-              const local = getLocalEstimates().find(e => String(e.estimateID) === String(estimateID));
-              if (local) {
-                // Keep coverPhoto from server, everything else from local
-                const serverPhoto = currentEstimate.coverPhoto;
-                currentEstimate = {...local};
-                if (serverPhoto) currentEstimate.coverPhoto = serverPhoto;
-              }
-            }
-          }
+        if (currentEstimate) {
           // Clear pending volume lines for clones but keep vonigoQuoteID
           // (clone may have been submitted — openEstimateEditor handles button state)
           if (currentEstimate.clonedFrom) {
