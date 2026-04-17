@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.5.4 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.5.5 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.5.4 | 2026-04-13 -->
+<!-- CrewLogic v4.5.5 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1777,18 +1777,15 @@
               </div>
               <!-- Results grid -->
               <div id="caContainerResults" style="display:none;">
-                <div style="display:grid;grid-template-columns:90px 1fr 1fr 1fr;gap:0;font-size:11px;margin-bottom:6px;">
+                <div style="display:grid;grid-template-columns:90px 1fr 1fr;gap:0;font-size:11px;margin-bottom:6px;">
                   <div></div>
-                  <div style="text-align:center;padding:4px 6px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);">Trucks</div>
-                  <div style="text-align:center;padding:4px 6px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);">Container</div>
-                  <div style="text-align:center;padding:4px 6px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);">Hybrid</div>
+                  <div style="text-align:center;padding:4px 6px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);">Trucks Only</div>
+                  <div style="text-align:center;padding:4px 6px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);">Container + Trucks</div>
                   <div style="padding:6px 4px;color:var(--text-secondary);font-weight:600;">Total Cost</div>
                   <div style="text-align:center;padding:6px 4px;"><span id="ccTruckCost" style="font-family:monospace;font-size:12px;font-weight:700;color:var(--text-primary);"></span></div>
-                  <div style="text-align:center;padding:6px 4px;"><span id="ccContainerCost" style="font-family:monospace;font-size:12px;font-weight:700;"></span></div>
                   <div style="text-align:center;padding:6px 4px;"><span id="ccHybridCost" style="font-family:monospace;font-size:12px;font-weight:700;"></span></div>
                   <div style="padding:4px;color:var(--text-secondary);font-weight:600;">vs Trucks</div>
                   <div style="text-align:center;padding:4px;">—</div>
-                  <div style="text-align:center;padding:4px;"><span id="ccContainerSaving" style="font-family:monospace;font-size:12px;font-weight:700;"></span></div>
                   <div style="text-align:center;padding:4px;"><span id="ccHybridSaving" style="font-family:monospace;font-size:12px;font-weight:700;"></span></div>
                 </div>
                 <div id="ccSuggestedCount" style="display:none;font-size:11px;color:#fbbf24;margin-top:6px;padding:6px 8px;background:rgba(251,191,36,0.08);border-radius:6px;"></div>
@@ -4239,7 +4236,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.5.4 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.5.5 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -11057,66 +11054,50 @@ RECYCLING & DONATION
       const ca = currentEstimate.costAnalysis || {};
       const truckTotal = parseFloat(ca.netCost) || 0;
 
-      // Volume overflow — CY that won't fit in containers
+      // CY overflow — what containers can't hold, trucks must take to disposal
       const overflowCY = Math.max(0, jobCY - containerCapacityCY);
       const overflowTrucks = overflowCY / 16;
       const overflowFraction = totalTrucks > 0 ? overflowTrucks / totalTrucks : 0;
+      const containersCY = Math.min(jobCY, containerCapacityCY);
+      const containerFraction = totalTrucks > 0 ? (containersCY / 16) / totalTrucks : 1;
 
-      // Weight overage — tons over included limit (secondary check)
-      const overageTons = Math.max(0, totalTrucks - (count * includedTons));
+      // Weight overage on containers (secondary)
+      const overageTons = Math.max(0, totalTrucks * containerFraction - (count * includedTons));
 
-      // Container cost = rental + weight overage if any
+      // Container + Trucks total
       const containerCost = (count * rate) + (overageTons * overage);
-
-      // Container-only scenario — only valid if containers hold full job
-      const containerOnlyTotal = overflowCY <= 0 ? containerCost : null;
-
-      // Hybrid — containers handle what they can, trucks handle overflow proportionally
       const overflowTruckCost = overflowFraction * truckTotal;
       const hybridTotal = containerCost + overflowTruckCost;
 
       // Color coding
-      const allCosts = [truckTotal > 0 ? truckTotal : Infinity];
-      if (containerOnlyTotal !== null) allCosts.push(containerOnlyTotal);
-      allCosts.push(hybridTotal);
-      const bestCost = Math.min(...allCosts);
-
-      const containerDisplayCost = containerOnlyTotal !== null ? containerOnlyTotal : hybridTotal;
-      const containerColor = containerDisplayCost <= bestCost ? '#00EE76' : '#f87171';
-      const hybridColor = hybridTotal <= bestCost ? '#00EE76' : hybridTotal < truckTotal ? '#fbbf24' : '#f87171';
+      const hybridColor = hybridTotal < truckTotal ? '#00EE76' : hybridTotal === truckTotal ? '#fbbf24' : '#f87171';
+      const hybridSaving = truckTotal - hybridTotal;
 
       document.getElementById('ccTruckCost').textContent = truckTotal > 0 ? fmt(truckTotal) : '—';
-      document.getElementById('ccContainerCost').textContent = containerOnlyTotal !== null ? fmt(containerOnlyTotal) : '—';
-      document.getElementById('ccContainerCost').style.color = containerOnlyTotal !== null ? containerColor : 'var(--text-muted)';
       document.getElementById('ccHybridCost').textContent = fmt(hybridTotal);
       document.getElementById('ccHybridCost').style.color = hybridColor;
-
-      const containerSaving = containerOnlyTotal !== null ? truckTotal - containerOnlyTotal : null;
-      const hybridSaving = truckTotal - hybridTotal;
-      document.getElementById('ccContainerSaving').textContent = containerSaving !== null && truckTotal > 0 ? fmtSaving(containerSaving) : '—';
-      document.getElementById('ccContainerSaving').style.color = containerSaving > 0 ? '#00EE76' : '#f87171';
       document.getElementById('ccHybridSaving').textContent = truckTotal > 0 ? fmtSaving(hybridSaving) : '—';
       document.getElementById('ccHybridSaving').style.color = hybridSaving > 0 ? '#00EE76' : '#f87171';
 
-      // Hints
+      // Hint line
       const suggestedEl = document.getElementById('ccSuggestedCount');
       if (suggestedEl) {
         const hints = [];
+        const containersTrucks = (containerCapacityCY / 16).toFixed(2);
+        hints.push('📦 ' + count + 'x ' + size + '-yd handles ' + Math.min(containerCapacityCY, jobCY).toFixed(0) + ' of ' + jobCY.toFixed(0) + ' CY (' + Math.min(parseFloat(containersTrucks), totalTrucks).toFixed(2) + ' trucks)');
         if (overflowCY > 0) {
-          hints.push('⚠️ ' + count + 'x ' + size + '-yd holds ' + containerCapacityCY + ' CY — ' + overflowCY.toFixed(0) + ' CY overflow (' + overflowTrucks.toFixed(2) + ' trucks) goes to disposal');
-        }
-        const suggestedCount = Math.ceil(jobCY / size);
-        if (suggestedCount !== count) {
-          hints.push('💡 ' + suggestedCount + ' containers needed to handle full ' + jobCY.toFixed(0) + ' CY job');
+          hints.push('🚛 Trucks take remaining ' + overflowCY.toFixed(0) + ' CY (' + overflowTrucks.toFixed(2) + ' trucks) to disposal');
+        } else {
+          hints.push('✓ Containers handle full job — no truck disposal needed');
         }
         suggestedEl.innerHTML = hints.join('<br>');
-        suggestedEl.style.display = hints.length > 0 ? 'block' : 'none';
+        suggestedEl.style.display = 'block';
       }
 
-      // Note line
-      let note = count + 'x ' + size + '-yd = ' + containerCapacityCY + ' CY vs ' + jobCY.toFixed(0) + ' CY job';
-      if (includedTons > 0) note += ' · ' + (count * includedTons).toFixed(1) + ' tons included';
-      if (overageTons > 0) note += ' · ' + overageTons.toFixed(2) + ' ton weight overage @ $' + overage + '/ton';
+      // Note line — cost breakdown
+      let note = 'Container: ' + fmt(containerCost) + ' (' + count + 'x $' + rate + ')';
+      if (overflowTrucks > 0) note += '  ·  Truck overflow: ' + fmt(overflowTruckCost) + ' (' + overflowTrucks.toFixed(2) + ' trucks)';
+      if (overageTons > 0) note += '  ·  Weight overage: ' + fmt(overageTons.toFixed(2) * overage);
       document.getElementById('ccNote').textContent = note;
       document.getElementById('caContainerResults').style.display = 'block';
 
