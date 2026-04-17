@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.5.0 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.5.1 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.5.0 | 2026-04-13 -->
+<!-- CrewLogic v4.5.1 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1691,19 +1691,20 @@
                     <span id="caPriceDiff" style="font-weight:700;font-family:'Space Mono',monospace;"></span>
                   </div>
                   <div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px;">
-                    <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-bottom:4px;">
-                      <span>Net Margin @ Rec. Price</span>
-                      <span id="caActualMargin" style="font-family:monospace;font-size:16px;"></span>
-                    </div>
-                    <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-bottom:6px;">
-                      <span>Gross Margin @ Rec. Price</span>
-                      <span id="caGrossMargin" style="font-family:monospace;font-size:16px;"></span>
-                    </div>
-                    <div style="border-top:1px solid var(--border);padding-top:6px;">
-                      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px;">
-                        <span style="color:var(--text-secondary);">Realized Gross Margin @ Current Price</span>
-                        <span id="caRealizedMargin" style="font-family:monospace;font-size:13px;font-weight:700;"></span>
-                      </div>
+                    <!-- Margin grid -->
+                    <div style="display:grid;grid-template-columns:80px 1fr 1fr;gap:0;font-size:11px;">
+                      <!-- Header row -->
+                      <div></div>
+                      <div style="text-align:center;padding:4px 6px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);">Recommended</div>
+                      <div style="text-align:center;padding:4px 6px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);">Realized</div>
+                      <!-- Net row -->
+                      <div style="padding:6px 4px 4px;color:var(--text-secondary);font-weight:600;display:flex;align-items:center;">Net</div>
+                      <div style="text-align:center;padding:6px 4px 4px;"><span id="caActualMargin" style="font-family:monospace;font-size:13px;font-weight:700;"></span></div>
+                      <div style="text-align:center;padding:6px 4px 4px;"><span id="caRealizedNetMargin" style="font-family:monospace;font-size:13px;font-weight:700;"></span></div>
+                      <!-- Gross row -->
+                      <div style="padding:4px 4px 6px;color:var(--text-secondary);font-weight:600;display:flex;align-items:center;">Gross</div>
+                      <div style="text-align:center;padding:4px 4px 6px;"><span id="caGrossMargin" style="font-family:monospace;font-size:13px;font-weight:700;"></span></div>
+                      <div style="text-align:center;padding:4px 4px 6px;"><span id="caRealizedMargin" style="font-family:monospace;font-size:13px;font-weight:700;"></span></div>
                     </div>
                   </div>
                 </div>
@@ -4154,7 +4155,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.5.0 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.5.1 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -11230,19 +11231,25 @@ RECYCLING & DONATION
       document.getElementById('caGrossMargin').style.color = color;
       document.getElementById('caGrossMargin').textContent = '(' + fmt(grossMarginDollars) + ') ' + grossMarginPct + '%';
 
-      // Realized margin at current estimate price
+      // Realized margins at current estimate price
       const realizedEl = document.getElementById('caRealizedMargin');
-      if (realizedEl && currentPrice > 0 && netCost > 0) {
+      const realizedNetEl = document.getElementById('caRealizedNetMargin');
+      if (currentPrice > 0 && netCost > 0) {
         const realizedGross = (currentPrice - netCost) / currentPrice;
-        const realizedPct = Math.round(realizedGross * 100);
-        const realizedDollars = currentPrice - netCost;
+        const realizedGrossPct = Math.round(realizedGross * 100);
+        const realizedGrossDollars = currentPrice - netCost;
+        const realizedRoyalty = currentPrice * royaltyFrac;
+        const realizedNet = (currentPrice - netCost - realizedRoyalty) / currentPrice;
+        const realizedNetPct = Math.round(realizedNet * 100);
+        const realizedNetDollars = currentPrice - netCost - realizedRoyalty;
         const isGreenR = realizedGross >= (margin - 0.02);
         const isAmberR = !isGreenR && realizedGross >= (margin - 0.10);
-        realizedEl.style.color = isGreenR ? '#00EE76' : isAmberR ? '#fbbf24' : '#f87171';
-        realizedEl.textContent = '(' + fmt(realizedDollars) + ') ' + realizedPct + '%';
-      } else if (realizedEl) {
-        realizedEl.textContent = '—';
-        realizedEl.style.color = 'var(--text-muted)';
+        const rColor = isGreenR ? '#00EE76' : isAmberR ? '#fbbf24' : '#f87171';
+        if (realizedEl) { realizedEl.style.color = rColor; realizedEl.textContent = '(' + fmt(realizedGrossDollars) + ') ' + realizedGrossPct + '%'; }
+        if (realizedNetEl) { realizedNetEl.style.color = rColor; realizedNetEl.textContent = '(' + fmt(realizedNetDollars) + ') ' + realizedNetPct + '%'; }
+      } else {
+        if (realizedEl) { realizedEl.textContent = '—'; realizedEl.style.color = 'var(--text-muted)'; }
+        if (realizedNetEl) { realizedNetEl.textContent = '—'; realizedNetEl.style.color = 'var(--text-muted)'; }
       }
 
       // Validation: warn if recycling/donation site missing when needed
