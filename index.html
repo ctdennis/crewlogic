@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.5.2 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.5.3 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.5.2 | 2026-04-13 -->
+<!-- CrewLogic v4.5.3 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1791,6 +1791,7 @@
                   <div style="text-align:center;padding:4px;"><span id="ccContainerSaving" style="font-family:monospace;font-size:12px;font-weight:700;"></span></div>
                   <div style="text-align:center;padding:4px;"><span id="ccHybridSaving" style="font-family:monospace;font-size:12px;font-weight:700;"></span></div>
                 </div>
+                <div id="ccSuggestedCount" style="display:none;font-size:11px;color:#fbbf24;margin-top:6px;padding:6px 8px;background:rgba(251,191,36,0.08);border-radius:6px;"></div>
                 <div id="ccNote" style="font-size:10px;color:var(--text-muted);margin-top:4px;"></div>
               </div>
             </div>
@@ -4238,7 +4239,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.5.2 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.5.3 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -11079,14 +11080,29 @@ RECYCLING & DONATION
       document.getElementById('ccContainerCost').style.color = containerColor;
       document.getElementById('ccHybridCost').textContent = hybridTotal > 0 ? fmt(hybridTotal) : '—';
       document.getElementById('ccHybridCost').style.color = hybridColor;
-      document.getElementById('ccContainerSaving').textContent = truckTotal > 0 ? fmtDiff(containerSaving) : '—';
+      // vs Trucks row — show "Save $X" or "Extra $X"
+      const fmtSaving = n => n > 0 ? 'Save ' + fmt(n) : 'Extra ' + fmt(-n);
+      document.getElementById('ccContainerSaving').textContent = truckTotal > 0 ? fmtSaving(containerSaving) : '—';
       document.getElementById('ccContainerSaving').style.color = containerSaving > 0 ? '#00EE76' : '#f87171';
-      document.getElementById('ccHybridSaving').textContent = truckTotal > 0 && hybridTotal > 0 ? fmtDiff(hybridSaving) : '—';
+      document.getElementById('ccHybridSaving').textContent = truckTotal > 0 && hybridTotal > 0 ? fmtSaving(hybridSaving) : '—';
       document.getElementById('ccHybridSaving').style.color = hybridSaving > 0 ? '#00EE76' : '#f87171';
+
+      // Suggested container count
+      const suggestedCount = includedTons > 0 ? Math.ceil(tons / includedTons) : count;
+      const suggestedEl = document.getElementById('ccSuggestedCount');
+      if (suggestedEl) {
+        if (suggestedCount !== count) {
+          suggestedEl.textContent = '💡 ' + tons.toFixed(2) + ' tons ÷ ' + includedTons + ' tons/container = ' + suggestedCount + ' containers suggested';
+          suggestedEl.style.display = 'block';
+        } else {
+          suggestedEl.style.display = 'none';
+        }
+      }
 
       // Note about overage
       let note = count + 'x ' + size + '-yd container' + (count > 1 ? 's' : '') + ' — ' + totalIncluded.toFixed(1) + ' tons included';
       if (overageTons > 0) note += ', ' + overageTons.toFixed(2) + ' tons overage @ $' + overage + '/ton';
+      else note += ', no overage';
       document.getElementById('ccNote').textContent = note;
       document.getElementById('caContainerResults').style.display = 'block';
 
