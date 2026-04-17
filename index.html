@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.5.3 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.5.4 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.5.3 | 2026-04-13 -->
+<!-- CrewLogic v4.5.4 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1771,7 +1771,7 @@
                   <input type="number" class="form-input cost-compact-input" id="caContainerOverage" placeholder="80" inputmode="decimal" min="0" oninput="updateContainerComparison()">
                 </div>
                 <div class="settings-input-group">
-                  <label class="settings-input-label">Est. Tons (1 truck=1 ton)</label>
+                  <label class="settings-input-label">Job Size (CY / trucks)</label>
                   <input type="number" class="form-input cost-compact-input" id="caContainerTonsEst" placeholder="0" inputmode="decimal" min="0" step="0.125" oninput="updateContainerComparison()" readonly style="background:var(--bg-input);color:var(--text-muted);">
                 </div>
               </div>
@@ -4239,7 +4239,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.5.3 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.5.4 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -11036,73 +11036,87 @@ RECYCLING & DONATION
     }
 
     function updateContainerComparison() {
-      const size = document.getElementById('caContainerSize').value;
+      const size = parseInt(document.getElementById('caContainerSize').value) || 30;
       const count = parseFloat(document.getElementById('caContainerCount').value) || 1;
       const rate = parseFloat(document.getElementById('caContainerRate').value) || 0;
       const includedTons = parseFloat(document.getElementById('caContainerTons').value) || 0;
       const overage = parseFloat(document.getElementById('caContainerOverage').value) || 0;
-      const tons = parseFloat(currentEstimate.totalTrucks || 0);
+      const totalTrucks = parseFloat(currentEstimate.totalTrucks || 0);
+      const jobCY = totalTrucks * 16;
+      const containerCapacityCY = count * size;
 
-      // Update tons display
-      document.getElementById('caContainerTonsEst').value = tons.toFixed(3);
+      // Update job CY display
+      document.getElementById('caContainerTonsEst').value = jobCY.toFixed(0) + ' CY (' + totalTrucks.toFixed(2) + ' trucks)';
 
       if (!rate) return;
 
       const fmt = n => '$' + Math.round(n).toLocaleString('en-US');
-      const fmtDiff = n => (n >= 0 ? '+' : '') + '$' + Math.abs(Math.round(n)).toLocaleString('en-US');
+      const fmtSaving = n => n > 0 ? 'Save ' + fmt(n) : 'Extra ' + fmt(-n);
 
-      // Container cost — total for all containers
-      const totalIncluded = count * includedTons;
-      const overageTons = Math.max(0, tons - totalIncluded);
-      const containerTotal = (count * rate) + (overageTons * overage);
-
-      // Truck cost — from existing cost analysis netCost
-      const truckTotal = parseFloat((currentEstimate.costAnalysis || {}).netCost) || 0;
-
-      // Hybrid cost — container for volume, trucks for recycling/donation only
-      // Remove disposal leg cost from truck: disposal fuel + disposal time labor
+      // Truck total from cost analysis
       const ca = currentEstimate.costAnalysis || {};
-      const disposalCostOnly = parseFloat(ca.disposalCost) || 0;
-      const disposalFuelPortion = parseFloat(ca.disposalFuelCost) || 0;
-      const disposalLaborPortion = parseFloat(ca.disposalLaborCost) || 0;
-      const disposalSavings = disposalCostOnly + disposalFuelPortion + disposalLaborPortion;
-      const hybridTotal = containerTotal + Math.max(0, truckTotal - disposalSavings);
+      const truckTotal = parseFloat(ca.netCost) || 0;
+
+      // Volume overflow — CY that won't fit in containers
+      const overflowCY = Math.max(0, jobCY - containerCapacityCY);
+      const overflowTrucks = overflowCY / 16;
+      const overflowFraction = totalTrucks > 0 ? overflowTrucks / totalTrucks : 0;
+
+      // Weight overage — tons over included limit (secondary check)
+      const overageTons = Math.max(0, totalTrucks - (count * includedTons));
+
+      // Container cost = rental + weight overage if any
+      const containerCost = (count * rate) + (overageTons * overage);
+
+      // Container-only scenario — only valid if containers hold full job
+      const containerOnlyTotal = overflowCY <= 0 ? containerCost : null;
+
+      // Hybrid — containers handle what they can, trucks handle overflow proportionally
+      const overflowTruckCost = overflowFraction * truckTotal;
+      const hybridTotal = containerCost + overflowTruckCost;
 
       // Color coding
-      const bestCost = Math.min(truckTotal > 0 ? truckTotal : Infinity, containerTotal, hybridTotal > 0 ? hybridTotal : Infinity);
-      const containerColor = containerTotal <= bestCost ? '#00EE76' : containerTotal < truckTotal ? '#00EE76' : '#f87171';
-      const hybridColor = hybridTotal > 0 && hybridTotal <= bestCost ? '#00EE76' : hybridTotal > 0 && hybridTotal < truckTotal ? '#fbbf24' : '#f87171';
-      const containerSaving = truckTotal - containerTotal;
-      const hybridSaving = truckTotal - hybridTotal;
+      const allCosts = [truckTotal > 0 ? truckTotal : Infinity];
+      if (containerOnlyTotal !== null) allCosts.push(containerOnlyTotal);
+      allCosts.push(hybridTotal);
+      const bestCost = Math.min(...allCosts);
+
+      const containerDisplayCost = containerOnlyTotal !== null ? containerOnlyTotal : hybridTotal;
+      const containerColor = containerDisplayCost <= bestCost ? '#00EE76' : '#f87171';
+      const hybridColor = hybridTotal <= bestCost ? '#00EE76' : hybridTotal < truckTotal ? '#fbbf24' : '#f87171';
 
       document.getElementById('ccTruckCost').textContent = truckTotal > 0 ? fmt(truckTotal) : '—';
-      document.getElementById('ccContainerCost').textContent = fmt(containerTotal);
-      document.getElementById('ccContainerCost').style.color = containerColor;
-      document.getElementById('ccHybridCost').textContent = hybridTotal > 0 ? fmt(hybridTotal) : '—';
+      document.getElementById('ccContainerCost').textContent = containerOnlyTotal !== null ? fmt(containerOnlyTotal) : '—';
+      document.getElementById('ccContainerCost').style.color = containerOnlyTotal !== null ? containerColor : 'var(--text-muted)';
+      document.getElementById('ccHybridCost').textContent = fmt(hybridTotal);
       document.getElementById('ccHybridCost').style.color = hybridColor;
-      // vs Trucks row — show "Save $X" or "Extra $X"
-      const fmtSaving = n => n > 0 ? 'Save ' + fmt(n) : 'Extra ' + fmt(-n);
-      document.getElementById('ccContainerSaving').textContent = truckTotal > 0 ? fmtSaving(containerSaving) : '—';
+
+      const containerSaving = containerOnlyTotal !== null ? truckTotal - containerOnlyTotal : null;
+      const hybridSaving = truckTotal - hybridTotal;
+      document.getElementById('ccContainerSaving').textContent = containerSaving !== null && truckTotal > 0 ? fmtSaving(containerSaving) : '—';
       document.getElementById('ccContainerSaving').style.color = containerSaving > 0 ? '#00EE76' : '#f87171';
-      document.getElementById('ccHybridSaving').textContent = truckTotal > 0 && hybridTotal > 0 ? fmtSaving(hybridSaving) : '—';
+      document.getElementById('ccHybridSaving').textContent = truckTotal > 0 ? fmtSaving(hybridSaving) : '—';
       document.getElementById('ccHybridSaving').style.color = hybridSaving > 0 ? '#00EE76' : '#f87171';
 
-      // Suggested container count
-      const suggestedCount = includedTons > 0 ? Math.ceil(tons / includedTons) : count;
+      // Hints
       const suggestedEl = document.getElementById('ccSuggestedCount');
       if (suggestedEl) {
-        if (suggestedCount !== count) {
-          suggestedEl.textContent = '💡 ' + tons.toFixed(2) + ' tons ÷ ' + includedTons + ' tons/container = ' + suggestedCount + ' containers suggested';
-          suggestedEl.style.display = 'block';
-        } else {
-          suggestedEl.style.display = 'none';
+        const hints = [];
+        if (overflowCY > 0) {
+          hints.push('⚠️ ' + count + 'x ' + size + '-yd holds ' + containerCapacityCY + ' CY — ' + overflowCY.toFixed(0) + ' CY overflow (' + overflowTrucks.toFixed(2) + ' trucks) goes to disposal');
         }
+        const suggestedCount = Math.ceil(jobCY / size);
+        if (suggestedCount !== count) {
+          hints.push('💡 ' + suggestedCount + ' containers needed to handle full ' + jobCY.toFixed(0) + ' CY job');
+        }
+        suggestedEl.innerHTML = hints.join('<br>');
+        suggestedEl.style.display = hints.length > 0 ? 'block' : 'none';
       }
 
-      // Note about overage
-      let note = count + 'x ' + size + '-yd container' + (count > 1 ? 's' : '') + ' — ' + totalIncluded.toFixed(1) + ' tons included';
-      if (overageTons > 0) note += ', ' + overageTons.toFixed(2) + ' tons overage @ $' + overage + '/ton';
-      else note += ', no overage';
+      // Note line
+      let note = count + 'x ' + size + '-yd = ' + containerCapacityCY + ' CY vs ' + jobCY.toFixed(0) + ' CY job';
+      if (includedTons > 0) note += ' · ' + (count * includedTons).toFixed(1) + ' tons included';
+      if (overageTons > 0) note += ' · ' + overageTons.toFixed(2) + ' ton weight overage @ $' + overage + '/ton';
       document.getElementById('ccNote').textContent = note;
       document.getElementById('caContainerResults').style.display = 'block';
 
