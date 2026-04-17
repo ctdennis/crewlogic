@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.4.9 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.5.0 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.4.9 | 2026-04-13 -->
+<!-- CrewLogic v4.5.0 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4154,7 +4154,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.4.9 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.5.0 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -11220,20 +11220,26 @@ RECYCLING & DONATION
       // Gross margin (before royalty) = target + royalty%
       const grossMarginPct = Math.round((margin + royaltyFrac) * 100);
 
+      // Dollar amounts for margin display
+      const royaltyAmt = recommendedPrice * royaltyFrac;
+      const netMarginDollars = recommendedPrice - netCost - royaltyAmt;
+      const grossMarginDollars = recommendedPrice - netCost;
+
       document.getElementById('caActualMargin').style.color = color;
-      document.getElementById('caActualMargin').textContent = targetPct + '%';
+      document.getElementById('caActualMargin').textContent = '(' + fmt(netMarginDollars) + ') ' + targetPct + '%';
       document.getElementById('caGrossMargin').style.color = color;
-      document.getElementById('caGrossMargin').textContent = grossMarginPct + '%';
+      document.getElementById('caGrossMargin').textContent = '(' + fmt(grossMarginDollars) + ') ' + grossMarginPct + '%';
 
       // Realized margin at current estimate price
       const realizedEl = document.getElementById('caRealizedMargin');
       if (realizedEl && currentPrice > 0 && netCost > 0) {
         const realizedGross = (currentPrice - netCost) / currentPrice;
         const realizedPct = Math.round(realizedGross * 100);
+        const realizedDollars = currentPrice - netCost;
         const isGreenR = realizedGross >= (margin - 0.02);
         const isAmberR = !isGreenR && realizedGross >= (margin - 0.10);
         realizedEl.style.color = isGreenR ? '#00EE76' : isAmberR ? '#fbbf24' : '#f87171';
-        realizedEl.textContent = realizedPct + '%';
+        realizedEl.textContent = '(' + fmt(realizedDollars) + ') ' + realizedPct + '%';
       } else if (realizedEl) {
         realizedEl.textContent = '—';
         realizedEl.style.color = 'var(--text-muted)';
