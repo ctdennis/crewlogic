@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.5.1 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.5.2 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -590,7 +590,7 @@
     .cost-section-header { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:var(--surface-2); font-size:13px; font-weight:600; color:var(--text-primary); cursor:pointer; user-select:none; }
     .cost-section-header:hover { background:var(--bg-input); }
     .cost-section-header span:last-child { font-size:10px; color:var(--text-muted); }
-    #cost-section-ops, #cost-section-wait, #cost-section-recycle { padding:10px 12px; }
+    #cost-section-ops, #cost-section-wait, #cost-section-recycle, #cost-section-container { padding:10px 12px; }
     .cost-compact-input { padding:5px 8px !important; font-size:13px !important; text-align:center; }
     .settings-input-label { font-size:10px !important; margin-bottom:3px !important; }
 
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.5.1 | 2026-04-13 -->
+<!-- CrewLogic v4.5.2 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1203,6 +1203,29 @@
                   <div class="settings-input-group">
                     <label class="settings-input-label">Paint Can</label>
                     <input type="number" class="form-input cost-compact-input" id="settingsCostPaint" placeholder="5" inputmode="decimal" min="0">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Section: Container Defaults -->
+            <div class="cost-section">
+              <div class="cost-section-header" onclick="toggleCostSection('container')">
+                <span>📦 Container Defaults <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(per-estimate overridable)</span></span><span id="cost-chevron-container">▾</span>
+              </div>
+              <div id="cost-section-container">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+                  <div class="settings-input-group">
+                    <label class="settings-input-label">Rental Rate ($)</label>
+                    <input type="number" class="form-input cost-compact-input" id="settingsContainerRate" placeholder="400" inputmode="decimal" min="0">
+                  </div>
+                  <div class="settings-input-group">
+                    <label class="settings-input-label">Included Tons</label>
+                    <input type="number" class="form-input cost-compact-input" id="settingsContainerTons" placeholder="3" inputmode="decimal" min="0" step="0.5">
+                  </div>
+                  <div class="settings-input-group">
+                    <label class="settings-input-label">Overage $/ton</label>
+                    <input type="number" class="form-input cost-compact-input" id="settingsContainerOverage" placeholder="80" inputmode="decimal" min="0">
                   </div>
                 </div>
               </div>
@@ -1710,6 +1733,66 @@
                 </div>
               </div>
 
+            </div>
+          </div>
+
+          <!-- Container Comparison -->
+          <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-top:8px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-bottom:8px;" onclick="toggleContainerComparison()">
+              <span style="font-size:13px;font-weight:600;color:var(--text-primary);">📦 Container vs Truck Comparison</span>
+              <span id="containerCompChevron" style="font-size:11px;color:var(--text-muted);">▸ Expand</span>
+            </div>
+            <div id="containerCompContent" style="display:none;">
+              <!-- Inputs -->
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+                <div class="settings-input-group">
+                  <label class="settings-input-label">Container Size</label>
+                  <select class="form-select" id="caContainerSize" onchange="updateContainerComparison()" style="font-size:12px;padding:6px 10px;height:auto;">
+                    <option value="20">20 Yard</option>
+                    <option value="30" selected>30 Yard</option>
+                    <option value="40">40 Yard</option>
+                    <option value="50">50 Yard</option>
+                  </select>
+                </div>
+                <div class="settings-input-group">
+                  <label class="settings-input-label"># of Containers</label>
+                  <input type="number" class="form-input cost-compact-input" id="caContainerCount" value="1" min="1" step="1" inputmode="numeric" oninput="updateContainerComparison()">
+                </div>
+                <div class="settings-input-group">
+                  <label class="settings-input-label">Rental Rate ($)</label>
+                  <input type="number" class="form-input cost-compact-input" id="caContainerRate" placeholder="400" inputmode="decimal" min="0" oninput="updateContainerComparison()">
+                </div>
+                <div class="settings-input-group">
+                  <label class="settings-input-label">Included Tons</label>
+                  <input type="number" class="form-input cost-compact-input" id="caContainerTons" placeholder="3" inputmode="decimal" min="0" step="0.5" oninput="updateContainerComparison()">
+                </div>
+                <div class="settings-input-group">
+                  <label class="settings-input-label">Overage $/ton</label>
+                  <input type="number" class="form-input cost-compact-input" id="caContainerOverage" placeholder="80" inputmode="decimal" min="0" oninput="updateContainerComparison()">
+                </div>
+                <div class="settings-input-group">
+                  <label class="settings-input-label">Est. Tons (1 truck=1 ton)</label>
+                  <input type="number" class="form-input cost-compact-input" id="caContainerTonsEst" placeholder="0" inputmode="decimal" min="0" step="0.125" oninput="updateContainerComparison()" readonly style="background:var(--bg-input);color:var(--text-muted);">
+                </div>
+              </div>
+              <!-- Results grid -->
+              <div id="caContainerResults" style="display:none;">
+                <div style="display:grid;grid-template-columns:90px 1fr 1fr 1fr;gap:0;font-size:11px;margin-bottom:6px;">
+                  <div></div>
+                  <div style="text-align:center;padding:4px 6px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);">Trucks</div>
+                  <div style="text-align:center;padding:4px 6px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);">Container</div>
+                  <div style="text-align:center;padding:4px 6px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);">Hybrid</div>
+                  <div style="padding:6px 4px;color:var(--text-secondary);font-weight:600;">Total Cost</div>
+                  <div style="text-align:center;padding:6px 4px;"><span id="ccTruckCost" style="font-family:monospace;font-size:12px;font-weight:700;color:var(--text-primary);"></span></div>
+                  <div style="text-align:center;padding:6px 4px;"><span id="ccContainerCost" style="font-family:monospace;font-size:12px;font-weight:700;"></span></div>
+                  <div style="text-align:center;padding:6px 4px;"><span id="ccHybridCost" style="font-family:monospace;font-size:12px;font-weight:700;"></span></div>
+                  <div style="padding:4px;color:var(--text-secondary);font-weight:600;">vs Trucks</div>
+                  <div style="text-align:center;padding:4px;">—</div>
+                  <div style="text-align:center;padding:4px;"><span id="ccContainerSaving" style="font-family:monospace;font-size:12px;font-weight:700;"></span></div>
+                  <div style="text-align:center;padding:4px;"><span id="ccHybridSaving" style="font-family:monospace;font-size:12px;font-weight:700;"></span></div>
+                </div>
+                <div id="ccNote" style="font-size:10px;color:var(--text-muted);margin-top:4px;"></div>
+              </div>
             </div>
           </div>
 
@@ -4155,7 +4238,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.5.1 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.5.2 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -10813,7 +10896,8 @@ RECYCLING & DONATION
       'truckHome','MPG','fuelCost','crewRate','disposalCost',
       'disposalWait','recyclingWait','donationWait',
       'recyclingRevenue','royaltyPct',
-      'costMattress','costTV','costFreon','costTire','costPaint'
+      'costMattress','costTV','costFreon','costTire','costPaint',
+      'containerRateDefault','containerIncludedTonsDefault','containerOverageDefault'
     ];
 
     async function saveCostSettings() {
@@ -10918,6 +11002,102 @@ RECYCLING & DONATION
       ca.cans     = parseFloat(document.getElementById('caCans').value) || 0;
       ca.canCost  = parseFloat(document.getElementById('caCanCost').value) || 0;
       isDirty = true;
+    }
+
+    function toggleContainerComparison() {
+      const content = document.getElementById('containerCompContent');
+      const chevron = document.getElementById('containerCompChevron');
+      const isOpen = content.style.display !== 'none';
+      content.style.display = isOpen ? 'none' : 'block';
+      chevron.textContent = isOpen ? '▸ Expand' : '▾ Collapse';
+      if (!isOpen) {
+        // Pre-fill from costSettings defaults and current estimate
+        const cs = currentUser.costSettings || {};
+        const caContainerRate = document.getElementById('caContainerRate');
+        const caContainerTons = document.getElementById('caContainerTons');
+        const caContainerOverage = document.getElementById('caContainerOverage');
+        const caContainerTonsEst = document.getElementById('caContainerTonsEst');
+        // Pre-fill defaults if fields are empty
+        if (!caContainerRate.value && cs.containerRateDefault) caContainerRate.value = cs.containerRateDefault;
+        if (!caContainerTons.value && cs.containerIncludedTonsDefault) caContainerTons.value = cs.containerIncludedTonsDefault;
+        if (!caContainerOverage.value && cs.containerOverageDefault) caContainerOverage.value = cs.containerOverageDefault;
+        // Restore saved values from costAnalysis
+        const ca = currentEstimate.costAnalysis || {};
+        if (ca.containerSize) document.getElementById('caContainerSize').value = ca.containerSize;
+        if (ca.containerCount) document.getElementById('caContainerCount').value = ca.containerCount;
+        if (ca.containerRate) caContainerRate.value = ca.containerRate;
+        if (ca.containerIncludedTons) caContainerTons.value = ca.containerIncludedTons;
+        if (ca.containerOverage) caContainerOverage.value = ca.containerOverage;
+        // Set estimated tons from totalTrucks (1 truck = 1 ton)
+        caContainerTonsEst.value = parseFloat(currentEstimate.totalTrucks || 0).toFixed(3);
+        updateContainerComparison();
+      }
+    }
+
+    function updateContainerComparison() {
+      const size = document.getElementById('caContainerSize').value;
+      const count = parseFloat(document.getElementById('caContainerCount').value) || 1;
+      const rate = parseFloat(document.getElementById('caContainerRate').value) || 0;
+      const includedTons = parseFloat(document.getElementById('caContainerTons').value) || 0;
+      const overage = parseFloat(document.getElementById('caContainerOverage').value) || 0;
+      const tons = parseFloat(currentEstimate.totalTrucks || 0);
+
+      // Update tons display
+      document.getElementById('caContainerTonsEst').value = tons.toFixed(3);
+
+      if (!rate) return;
+
+      const fmt = n => '$' + Math.round(n).toLocaleString('en-US');
+      const fmtDiff = n => (n >= 0 ? '+' : '') + '$' + Math.abs(Math.round(n)).toLocaleString('en-US');
+
+      // Container cost — total for all containers
+      const totalIncluded = count * includedTons;
+      const overageTons = Math.max(0, tons - totalIncluded);
+      const containerTotal = (count * rate) + (overageTons * overage);
+
+      // Truck cost — from existing cost analysis netCost
+      const truckTotal = parseFloat((currentEstimate.costAnalysis || {}).netCost) || 0;
+
+      // Hybrid cost — container for volume, trucks for recycling/donation only
+      // Remove disposal leg cost from truck: disposal fuel + disposal time labor
+      const ca = currentEstimate.costAnalysis || {};
+      const disposalCostOnly = parseFloat(ca.disposalCost) || 0;
+      const disposalFuelPortion = parseFloat(ca.disposalFuelCost) || 0;
+      const disposalLaborPortion = parseFloat(ca.disposalLaborCost) || 0;
+      const disposalSavings = disposalCostOnly + disposalFuelPortion + disposalLaborPortion;
+      const hybridTotal = containerTotal + Math.max(0, truckTotal - disposalSavings);
+
+      // Color coding
+      const bestCost = Math.min(truckTotal > 0 ? truckTotal : Infinity, containerTotal, hybridTotal > 0 ? hybridTotal : Infinity);
+      const containerColor = containerTotal <= bestCost ? '#00EE76' : containerTotal < truckTotal ? '#00EE76' : '#f87171';
+      const hybridColor = hybridTotal > 0 && hybridTotal <= bestCost ? '#00EE76' : hybridTotal > 0 && hybridTotal < truckTotal ? '#fbbf24' : '#f87171';
+      const containerSaving = truckTotal - containerTotal;
+      const hybridSaving = truckTotal - hybridTotal;
+
+      document.getElementById('ccTruckCost').textContent = truckTotal > 0 ? fmt(truckTotal) : '—';
+      document.getElementById('ccContainerCost').textContent = fmt(containerTotal);
+      document.getElementById('ccContainerCost').style.color = containerColor;
+      document.getElementById('ccHybridCost').textContent = hybridTotal > 0 ? fmt(hybridTotal) : '—';
+      document.getElementById('ccHybridCost').style.color = hybridColor;
+      document.getElementById('ccContainerSaving').textContent = truckTotal > 0 ? fmtDiff(containerSaving) : '—';
+      document.getElementById('ccContainerSaving').style.color = containerSaving > 0 ? '#00EE76' : '#f87171';
+      document.getElementById('ccHybridSaving').textContent = truckTotal > 0 && hybridTotal > 0 ? fmtDiff(hybridSaving) : '—';
+      document.getElementById('ccHybridSaving').style.color = hybridSaving > 0 ? '#00EE76' : '#f87171';
+
+      // Note about overage
+      let note = count + 'x ' + size + '-yd container' + (count > 1 ? 's' : '') + ' — ' + totalIncluded.toFixed(1) + ' tons included';
+      if (overageTons > 0) note += ', ' + overageTons.toFixed(2) + ' tons overage @ $' + overage + '/ton';
+      document.getElementById('ccNote').textContent = note;
+      document.getElementById('caContainerResults').style.display = 'block';
+
+      // Save to costAnalysis
+      if (!currentEstimate.costAnalysis) currentEstimate.costAnalysis = {};
+      currentEstimate.costAnalysis.containerSize = size;
+      currentEstimate.costAnalysis.containerCount = count;
+      currentEstimate.costAnalysis.containerRate = rate;
+      currentEstimate.costAnalysis.containerIncludedTons = includedTons;
+      currentEstimate.costAnalysis.containerOverage = overage;
+      autoSaveDraft();
     }
 
     function updateCostAnalysis() {
@@ -11058,6 +11238,14 @@ RECYCLING & DONATION
         currentEstimate.costAnalysis.netCost = netCost;
         currentEstimate.costAnalysis.recommendedPrice = recommendedPrice;
         currentEstimate.costAnalysis.actualMargin = actualMargin;
+        // Save disposal cost components for container hybrid comparison
+        const dispFuelMiles = dispMi * 2 * loadsDisposal;
+        const dispFuelCost = (dispFuelMiles / mpg) * fuelCost;
+        const dispLaborMin = ((dispMin * 2 + dispWait) * Math.max(0, loadsDisposal - 1)) + ((dispMin + dispWait) * (loadsDisposal > 0 ? 1 : 0));
+        const dispLaborCost = (dispLaborMin / 60) * crewRate;
+        currentEstimate.costAnalysis.disposalCost = dispCost;
+        currentEstimate.costAnalysis.disposalFuelCost = dispFuelCost;
+        currentEstimate.costAnalysis.disposalLaborCost = dispLaborCost;
       }
 
       // Render cost lines
