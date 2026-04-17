@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.5.6 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.5.7 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.5.6 | 2026-04-13 -->
+<!-- CrewLogic v4.5.7 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4236,7 +4236,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.5.6 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.5.7 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5404,17 +5404,16 @@
       // Restore split pricing toggle
       updateSplitToggleUI();
 
-      // Restore cover photo
+      // Restore cover photo — always clear first to prevent stale photo from previous estimate
+      const coverImg = document.getElementById('coverPhotoImg');
+      coverImg.src = '';
+      coverImg.removeAttribute('data-photo-path');
       if (currentEstimate.coverPhoto) {
         const coverRaw = currentEstimate.coverPhoto;
-        const coverImg = document.getElementById('coverPhotoImg');
         if (coverRaw.startsWith('data:') || coverRaw.startsWith('http')) {
-          // Legacy: base64 or Drive URL — resolve inline
           const m = coverRaw.match(/[?&]id=([^&]+)/);
           coverImg.src = m ? 'https://lh3.googleusercontent.com/d/' + m[1] : coverRaw;
         } else {
-          // Supabase storage path — resolve async
-          coverImg.src = '';
           coverImg.setAttribute('data-photo-path', coverRaw);
           resolvePhotoUrl(coverRaw).then(url => { if (url) coverImg.src = url; });
         }
