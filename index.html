@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.6.0 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.6.1 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.6.0 | 2026-04-13 -->
+<!-- CrewLogic v4.6.1 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4236,7 +4236,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.6.0 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.6.1 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5004,6 +5004,7 @@
     let availableAreas = [];
     let _pendingUploads = 0; // count of in-flight photo uploads
     let _suppressAutoSave = false; // true during initial field population to prevent stale writes
+    let _lookupSessionID = 0; // incremented on each estimate open — stale lookups can check this
     let priceBlocks = [];
     let priceListID = null;
     let priceListName = '';
@@ -5232,6 +5233,7 @@
 
     async function openEstimate(estimateID) {
       isDirty = false; // reset before loading new estimate
+      _lookupSessionID++; // invalidate any in-flight lookups from previous estimate
       // Show loading state
       hideAll();
       document.getElementById('estimatesScreen').classList.add('active');
@@ -7429,6 +7431,8 @@
       const btn = document.getElementById('estZipBtn');
       if (!jobID) { statusEl.textContent = 'Enter a Vonigo job number'; statusEl.className = 'zip-status error'; return; }
 
+      const mySessionID = _lookupSessionID; // capture session at start of lookup
+
       btn.classList.add('loading');
       statusEl.textContent = 'Looking up job...';
       statusEl.className = 'zip-status loading';
@@ -7508,7 +7512,9 @@
                 document.getElementById('estPriceListDisplay').textContent = priceListName;
 
                 // Offer price update if price list changed and there are non-volume charges
-                if (oldPriceListID && oldPriceListID !== priceListID &&
+                // Only show if this lookup is still for the current estimate (not stale from previous)
+                if (mySessionID === _lookupSessionID &&
+                    oldPriceListID && oldPriceListID !== priceListID &&
                     currentEstimate.charges && currentEstimate.charges.some(c => c.type !== 'volume')) {
                   const msgEl = document.getElementById('priceUpdateMsg');
                   msgEl.textContent = 'Price list changed from "' + oldPriceListName + '" to "' + priceListName + '". Would you like to update existing charge prices to the new rate schedule?';
