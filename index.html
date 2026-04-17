@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.4.6 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.4.8 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.4.6 | 2026-04-13 -->
+<!-- CrewLogic v4.4.8 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2865,24 +2865,30 @@
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     // Signed URL cache — avoids regenerating on every render
-    const signedUrlCache = new Map();
+    const signedUrlCache = new Map(); // path -> { url, expires }
+    const SIGNED_URL_TTL = 43200; // 12 hours in seconds
 
     // Resolves a stored photo path to a displayable URL.
     // Handles: legacy Drive lh3 URLs, legacy Drive export URLs, new Supabase storage paths.
     async function resolvePhotoUrl(path) {
       if (!path) return null;
-      // Inline base64 — pass through as-is (temp state before upload completes)
       if (path.startsWith('data:')) return path;
-      // Legacy Drive URLs — pass through as-is
       if (path.startsWith('http')) return path;
-      // Supabase storage path — generate signed URL
-      if (signedUrlCache.has(path)) return signedUrlCache.get(path);
+      // Check cache — only use if not expired
+      if (signedUrlCache.has(path)) {
+        const cached = signedUrlCache.get(path);
+        if (cached.expires > Date.now()) return cached.url;
+        signedUrlCache.delete(path); // expired — regenerate
+      }
       try {
         const { data, error } = await supabaseClient.storage
           .from('estimate-photos')
-          .createSignedUrl(path, 3600);
+          .createSignedUrl(path, SIGNED_URL_TTL);
         if (error || !data?.signedUrl) return null;
-        signedUrlCache.set(path, data.signedUrl);
+        signedUrlCache.set(path, {
+          url: data.signedUrl,
+          expires: Date.now() + (SIGNED_URL_TTL - 60) * 1000 // expire 1min early for safety
+        });
         return data.signedUrl;
       } catch(e) {
         console.warn('resolvePhotoUrl failed:', e);
@@ -4148,7 +4154,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.4.6 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.4.8 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -7539,7 +7545,7 @@
               // collapseState stays in payload for cross-device sync
               return p;
             })(),
-            priceBook: currentEstimate.priceBlocks || [],
+            priceBook: priceBlocks && priceBlocks.length > 0 ? priceBlocks : (currentEstimate.priceBlocks || currentEstimate.priceBook || []),
             coverPhoto: currentEstimate.coverPhoto || '',
             costAnalysis: currentEstimate.costAnalysis || {},
             clientPhone: currentEstimate.clientPhone || ''
