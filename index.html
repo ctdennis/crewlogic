@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.5.7 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.5.9 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.5.7 | 2026-04-13 -->
+<!-- CrewLogic v4.5.9 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4236,7 +4236,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.5.7 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.5.9 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6328,11 +6328,17 @@
       overlay.appendChild(spinner);
       document.body.appendChild(overlay);
       try {
-        const src = await resolvePhotoUrl(url);
+        let src = await resolvePhotoUrl(url);
+        // Convert legacy Drive export URLs to lh3 proxy for full-size viewing
+        if (src && (src.includes('drive.google.com/uc') || src.includes('drive.google.com/file'))) {
+          const m = src.match(/[?&]id=([^&]+)/) || src.match(/\/d\/([a-zA-Z0-9_-]+)/);
+          if (m) src = 'https://lh3.googleusercontent.com/d/' + m[1] + '=s1600';
+        }
         if (src) {
           const img = document.createElement('img');
           img.style.cssText = 'max-width:95vw;max-height:90vh;object-fit:contain;border-radius:8px;';
           img.src = src;
+          img.onerror = () => { spinner.textContent = 'Photo unavailable — may have been removed from Google Drive.'; overlay.replaceChild(spinner, img); };
           overlay.replaceChild(img, spinner);
         } else {
           spinner.textContent = 'Could not load photo.';
@@ -8078,16 +8084,38 @@
         document.getElementById('cloneOptionsModal').style.display = 'none';
       }
 
-      // Load full estimate from backend
+      // Load full estimate directly from Supabase
       let original = null;
       try {
-        const res = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
-          method: 'POST',
-          body: JSON.stringify({ action: 'load', email: currentUser.email, franchiseID: currentUser.franchiseID, estimateID })
-        });
-        const data = await res.json();
-        if (data.success && data.estimate) original = data.estimate;
-      } catch(e) {}
+        const rows = await supabaseFetch('/rest/v1/estimates?estimate_id=eq.' + estimateID + '&select=*');
+        if (rows && rows.length) {
+          const row = rows[0];
+          const payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : (row.payload || {});
+          original = Object.assign({}, payload, {
+            estimateID:    row.estimate_id,
+            ownerEmail:    row.owner_email,
+            label:         row.label,
+            status:        row.status,
+            clientName:    row.client_name,
+            address:       row.address,
+            zip:           row.zip,
+            totalPrice:    row.total_price,
+            totalTrucks:   row.total_trucks,
+            splitPricing:  row.split_pricing,
+            vonigoQuoteID: row.vonigo_quote_id,
+            jobID:         row.job_id,
+            clientID:      row.client_id,
+            contactID:     row.contact_id,
+            locationID:    row.location_id,
+            coverPhoto:    row.cover_photo,
+            costAnalysis:  row.cost_analysis,
+            priceBook:     row.price_book,
+            clonedFrom:    row.cloned_from,
+            createdAt:     row.created_at,
+            updatedAt:     row.updated_at
+          });
+        }
+      } catch(e) { console.warn('Clone load error:', e); }
 
       if (!original) {
         const all = getLocalEstimates();
