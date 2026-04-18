@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.6.7 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.6.8 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.6.7 | 2026-04-13 -->
+<!-- CrewLogic v4.6.8 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4380,7 +4380,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.6.7 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.6.8 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6035,6 +6035,23 @@
     }
 
     // ===== CHARGE ANALYZE — uses photos + description via analyzeVoice =====
+    async function downloadPhotoAsBlob(src, filename) {
+      try {
+        const res = await fetch(src);
+        if (!res.ok) throw new Error('fetch failed');
+        const blob = await res.blob();
+        const objUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objUrl;
+        a.download = filename;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(objUrl), 5000);
+      } catch(e) {
+        // Fallback — open in new tab
+        window.open(src, '_blank');
+      }
+    }
+
     async function downloadChargePhotos(chargeIdx) {
       const charge = currentEstimate.charges[chargeIdx];
       if (!charge.photos || !charge.photos.length) return;
@@ -6050,13 +6067,8 @@
             const m = src.match(/[?&]id=([^&]+)/) || src.match(/\/d\/([a-zA-Z0-9_-]+)/);
             if (m) src = 'https://lh3.googleusercontent.com/d/' + m[1] + '=s1600';
           }
-          const a = document.createElement('a');
-          a.href = src;
-          a.download = label + '_' + (i + 1) + '.jpg';
-          a.target = '_blank';
-          a.click();
-          // Stagger downloads slightly
-          await new Promise(r => setTimeout(r, 400));
+          await downloadPhotoAsBlob(src, label + '_' + (i + 1) + '.jpg');
+          await new Promise(r => setTimeout(r, 500));
         } catch(e) {}
       }
     }
@@ -6528,13 +6540,10 @@
           const dlBtn = document.createElement('button');
           dlBtn.textContent = '⬇ Download';
           dlBtn.style.cssText = 'padding:8px 20px;background:var(--accent-green);border:none;border-radius:8px;font-size:13px;font-weight:700;color:#000;cursor:pointer;';
-          dlBtn.onclick = (e) => {
+          dlBtn.onclick = async (e) => {
             e.stopPropagation();
-            const a = document.createElement('a');
-            a.href = src;
-            a.download = url.split('/').pop() || 'photo.jpg';
-            a.target = '_blank';
-            a.click();
+            const filename = url.split('/').pop() || 'photo.jpg';
+            await downloadPhotoAsBlob(src, filename);
           };
           wrapper.appendChild(img);
           wrapper.appendChild(dlBtn);
