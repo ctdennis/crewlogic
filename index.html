@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.8.2 | 2026-04-18">
+  <meta name="crewlogic-version" content="v4.8.3 | 2026-04-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.8.2 | 2026-04-18 -->
+<!-- CrewLogic v4.8.3 | 2026-04-18 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4380,7 +4380,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.8.2 | 2026-04-18 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.8.3 | 2026-04-18 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6076,6 +6076,22 @@
     // ===== CHARGE DRAG TO REORDER =====
     let _dragState = null;
 
+    function _cleanupDrag() {
+      document.querySelectorAll('.charge-drag-ghost').forEach(g => g.remove());
+      document.querySelectorAll('#estChargesList .room-row, #estChargesList .charge-row').forEach(r => {
+        r.style.borderTop = '';
+        r.style.borderBottom = '';
+        if (r.firstElementChild) {
+          r.firstElementChild.style.outline = '';
+          r.firstElementChild.style.outlineOffset = '';
+        }
+      });
+      _dragState = null;
+    }
+
+    document.addEventListener('visibilitychange', () => { if (_dragState) _cleanupDrag(); });
+    document.addEventListener('scroll', () => { if (_dragState) _cleanupDrag(); }, true);
+
     function startChargeDrag(e, globalIdx) {
       e.preventDefault();
       e.stopPropagation();
@@ -6090,8 +6106,8 @@
       const allRows = Array.from(container.querySelectorAll('.room-row, .charge-row'));
       const rowIdx = allRows.indexOf(row);
 
-      // Clear any stale ghosts
-      document.querySelectorAll('.charge-drag-ghost').forEach(g => g.remove());
+      // Clear any stale ghosts or indicators from previous drags
+      _cleanupDrag();
 
       // Ghost from header div ONLY (first child), not the full row
       const headerDiv = row.firstElementChild;
@@ -6141,24 +6157,26 @@
         document.removeEventListener('touchend', onEnd);
         document.removeEventListener('touchcancel', onEnd);
 
-        ghost.remove();
-        _dragState.headerDiv.style.outline = '';
-        _dragState.headerDiv.style.outlineOffset = '';
-        allRows.forEach(r => { r.style.borderTop = ''; r.style.borderBottom = ''; });
+        const targetRowIdx = _dragState ? _dragState.currentTarget : null;
+        const lastClientY = _dragState ? _dragState.lastClientY : 0;
+        const savedAllRows = _dragState ? _dragState.allRows : [];
+        const savedRowIdx = _dragState ? _dragState.rowIdx : rowIdx;
+        const savedCharges = _dragState ? _dragState.charges : charges;
 
-        const targetRowIdx = _dragState.currentTarget;
-        if (targetRowIdx !== null && targetRowIdx !== rowIdx) {
-          const fromChargeIdx = parseInt(allRows[rowIdx].querySelector('[data-charge-idx]')?.getAttribute('data-charge-idx'));
-          const toChargeIdx = parseInt(allRows[targetRowIdx].querySelector('[data-charge-idx]')?.getAttribute('data-charge-idx'));
+        _cleanupDrag();
+
+        if (targetRowIdx !== null && targetRowIdx !== savedRowIdx) {
+          const fromChargeIdx = parseInt(savedAllRows[savedRowIdx].querySelector('[data-charge-idx]')?.getAttribute('data-charge-idx'));
+          const toChargeIdx = parseInt(savedAllRows[targetRowIdx].querySelector('[data-charge-idx]')?.getAttribute('data-charge-idx'));
           if (!isNaN(fromChargeIdx) && !isNaN(toChargeIdx) && fromChargeIdx !== toChargeIdx) {
-            const fromCharge = charges[fromChargeIdx];
-            const toCharge = charges[toChargeIdx];
+            const fromCharge = savedCharges[fromChargeIdx];
+            const toCharge = savedCharges[toChargeIdx];
             if (fromCharge && toCharge && (fromCharge.type === 'volume') === (toCharge.type === 'volume')) {
-              const targetRect = allRows[targetRowIdx].getBoundingClientRect();
-              const insertBefore = (_dragState.lastClientY || 0) < targetRect.top + targetRect.height / 2;
-              charges.splice(fromChargeIdx, 1);
-              const newToIdx = charges.indexOf(toCharge);
-              charges.splice(insertBefore ? newToIdx : newToIdx + 1, 0, fromCharge);
+              const targetRect = savedAllRows[targetRowIdx].getBoundingClientRect();
+              const insertBefore = (lastClientY || 0) < targetRect.top + targetRect.height / 2;
+              savedCharges.splice(fromChargeIdx, 1);
+              const newToIdx = savedCharges.indexOf(toCharge);
+              savedCharges.splice(insertBefore ? newToIdx : newToIdx + 1, 0, fromCharge);
               isDirty = true;
               renderCharges();
               updateTotals();
@@ -6166,7 +6184,6 @@
             }
           }
         }
-        _dragState = null;
       };
 
       document.addEventListener('mousemove', onMove);
