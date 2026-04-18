@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.7.3 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.7.4 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.7.3 | 2026-04-13 -->
+<!-- CrewLogic v4.7.4 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4380,7 +4380,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.7.3 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.7.4 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6091,11 +6091,15 @@
       const allRows = Array.from(container.querySelectorAll('.room-row, .charge-row'));
       const rowIdx = allRows.indexOf(row);
 
-      // Ghost element
-      const ghost = row.cloneNode(true);
-      ghost.style.cssText = 'position:fixed;left:' + row.getBoundingClientRect().left + 'px;top:' + row.getBoundingClientRect().top + 'px;width:' + row.offsetWidth + 'px;opacity:0.85;pointer-events:none;z-index:999;box-shadow:0 8px 24px rgba(0,0,0,0.4);border-radius:var(--radius-sm);';
+      // Ghost — clone only the header div (first child), not the expanded body
+      const headerDiv = row.firstElementChild;
+      const ghost = document.createElement('div');
+      ghost.innerHTML = headerDiv ? headerDiv.outerHTML : row.firstElementChild.outerHTML;
+      ghost.style.cssText = 'position:fixed;left:' + row.getBoundingClientRect().left + 'px;top:' + row.getBoundingClientRect().top + 'px;width:' + row.offsetWidth + 'px;opacity:0.9;pointer-events:none;z-index:999;box-shadow:0 8px 24px rgba(0,0,0,0.5);border-radius:var(--radius-sm);background:var(--bg-card);border:1px solid var(--accent-green);';
       document.body.appendChild(ghost);
-      row.style.opacity = '0.3';
+      // Highlight source row with a border, not opacity change
+      row.style.outline = '2px solid var(--accent-green)';
+      row.style.outlineOffset = '-2px';
 
       _dragState = { globalIdx, rowIdx, row, ghost, startY, container, allRows, charges };
 
@@ -6127,7 +6131,8 @@
         document.removeEventListener('touchend', onEnd);
 
         ghost.remove();
-        row.style.opacity = '';
+        row.style.outline = '';
+        row.style.outlineOffset = '';
         allRows.forEach(r => r.style.borderTop = '');
 
         const targetRowIdx = _dragState.currentTarget;
