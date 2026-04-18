@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.6.1 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.6.2 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.6.1 | 2026-04-13 -->
+<!-- CrewLogic v4.6.2 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -979,6 +979,12 @@
             <div class="module-icon">💲</div>
             <div class="module-name">Price Lookup</div>
             <div class="module-desc">Look up Vonigo pricing by ZIP code</div>
+          </div>
+
+          <div class="module-card fade-in fade-in-delay-4" id="signsModuleCard" style="display:none;" onclick="openModule('signs')">
+            <div class="module-icon">🪧</div>
+            <div class="module-name">Yard Signs</div>
+            <div class="module-desc">Track sign placements & crew rewards</div>
           </div>
 
           <div class="module-card fade-in fade-in-delay-4" onclick="openModule('settings')">
@@ -2761,6 +2767,111 @@
         <button class="new-estimate-btn fade-in fade-in-delay-3" onclick="newMattressCalc()">← New Calculation</button>
       </div>
 
+      <!-- SIGNS MODULE -->
+      <div class="estimates-section" id="signsScreen" style="display:none;">
+
+        <!-- OWNER VIEW -->
+        <div id="signsOwnerView">
+          <div class="estimate-list-header">
+            <div class="section-title">🪧 Yard Signs</div>
+            <div style="display:flex;gap:8px;">
+              <button onclick="openSignsView('map')" id="signsViewMapBtn" style="padding:4px 10px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-size:11px;font-weight:600;cursor:pointer;">🗺 Map</button>
+              <button onclick="openSignsView('list')" id="signsViewListBtn" style="padding:4px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px;color:var(--text-muted);cursor:pointer;">📋 List</button>
+              <button onclick="openSignsView('leaderboard')" id="signsViewLBBtn" style="padding:4px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px;color:var(--text-muted);cursor:pointer;">🏆 Board</button>
+            </div>
+          </div>
+
+          <!-- Filters -->
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+            <select class="form-select" id="signsFilterCampaign" onchange="renderSignsView()" style="flex:1;font-size:12px;padding:6px 10px;height:auto;">
+              <option value="">All Campaigns</option>
+            </select>
+            <select class="form-select" id="signsFilterCrew" onchange="renderSignsView()" style="flex:1;font-size:12px;padding:6px 10px;height:auto;">
+              <option value="">All Crew</option>
+            </select>
+            <select class="form-select" id="signsFilterStatus" onchange="renderSignsView()" style="flex:1;font-size:12px;padding:6px 10px;height:auto;">
+              <option value="">All Signs</option>
+              <option value="active">Active</option>
+              <option value="removed">Removed</option>
+            </select>
+          </div>
+
+          <!-- View containers -->
+          <div id="signsMapContainer" style="width:100%;height:400px;border-radius:var(--radius-sm);overflow:hidden;margin-bottom:12px;display:none;background:var(--bg-card);"></div>
+          <div id="signsListContainer" style="display:none;"></div>
+          <div id="signsLeaderboardContainer" style="display:none;"></div>
+
+          <!-- Action buttons -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
+            <button class="calc-btn" style="margin-top:0;background:var(--bg-card);color:var(--accent-green);border:1px solid var(--accent-green);" onclick="openSignsManagement()">⚙️ Manage</button>
+            <button class="calc-btn" style="margin-top:0;background:var(--accent-green);color:#000;" onclick="startSignsSession()">📍 Place Signs</button>
+          </div>
+        </div>
+
+        <!-- CREW VIEW -->
+        <div id="signsCrewView" style="display:none;">
+          <div class="estimate-list-header">
+            <div class="section-title">🪧 Place Signs</div>
+          </div>
+          <div id="signsCrewContent"></div>
+        </div>
+
+      </div>
+
+      <!-- SIGNS SESSION OVERLAY -->
+      <div id="signsSessionOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#0f1923;z-index:200;overflow-y:auto;">
+        <div style="padding:16px;max-width:480px;margin:0 auto;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <div style="font-size:16px;font-weight:700;color:var(--text-primary);" id="signsSessionTitle">Sign Placement Session</div>
+            <button onclick="endSignsSession()" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:6px 12px;border-radius:var(--radius-sm);font-size:12px;cursor:pointer;">End Session</button>
+          </div>
+          <!-- Session info bar -->
+          <div style="background:var(--bg-card);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:16px;font-size:12px;color:var(--text-muted);">
+            <div id="signsSessionInfo"></div>
+          </div>
+          <!-- Signs placed counter -->
+          <div style="text-align:center;margin-bottom:20px;">
+            <div style="font-size:48px;font-weight:700;font-family:'Space Mono',monospace;color:var(--accent-green);" id="signsSessionCount">0</div>
+            <div style="font-size:12px;color:var(--text-muted);">signs placed this session</div>
+          </div>
+          <!-- Place sign button -->
+          <button id="signsPlaceBtn" onclick="placeSign()" style="width:100%;padding:20px;background:var(--accent-green);border:none;border-radius:12px;font-size:18px;font-weight:700;color:#000;cursor:pointer;margin-bottom:12px;">📍 Place Sign</button>
+          <button onclick="removeLastSign()" id="signsUndoBtn" style="width:100%;padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:12px;font-size:13px;color:var(--text-muted);cursor:pointer;display:none;">↩ Undo Last Sign</button>
+          <!-- Recent signs in session -->
+          <div id="signsSessionRecent" style="margin-top:16px;"></div>
+          <!-- Hidden file input for photo capture -->
+          <input type="file" id="signsPhotoInput" accept="image/*" capture="environment" style="display:none;" onchange="handleSignPhoto(this)">
+        </div>
+      </div>
+
+      <!-- SIGNS MANAGEMENT PANEL -->
+      <div id="signsManagementOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#0f1923;z-index:200;overflow-y:auto;">
+        <div style="padding:16px;max-width:480px;margin:0 auto;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <div style="font-size:16px;font-weight:700;">⚙️ Signs Management</div>
+            <button onclick="document.getElementById('signsManagementOverlay').style.display='none'" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:6px 12px;border-radius:var(--radius-sm);font-size:12px;cursor:pointer;">✕ Close</button>
+          </div>
+          <!-- Tabs -->
+          <div style="display:flex;gap:8px;margin-bottom:16px;">
+            <button onclick="openMgmtTab('crew')" id="mgmtTabCrew" style="flex:1;padding:8px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-size:12px;font-weight:600;cursor:pointer;">👥 Crew</button>
+            <button onclick="openMgmtTab('campaigns')" id="mgmtTabCampaigns" style="flex:1;padding:8px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-muted);border-radius:var(--radius-sm);font-size:12px;cursor:pointer;">📋 Campaigns</button>
+            <button onclick="openMgmtTab('rewards')" id="mgmtTabRewards" style="flex:1;padding:8px;background:var(--bg-card);border:1px solid var(--border);color:var(--text-muted);border-radius:var(--radius-sm);font-size:12px;cursor:pointer;">🎁 Rewards</button>
+          </div>
+          <div id="mgmtTabContent"></div>
+        </div>
+      </div>
+
+      <!-- SIGNS APPROVAL PAGE (owner approves solo run) -->
+      <div id="signsApprovalOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#0f1923;z-index:300;display:flex;align-items:center;justify-content:center;">
+        <div style="background:var(--bg-card);border-radius:var(--radius);padding:24px;max-width:360px;width:90%;text-align:center;">
+          <div style="font-size:32px;margin-bottom:12px;">🪧</div>
+          <div style="font-size:16px;font-weight:700;margin-bottom:8px;" id="approvalTitle">Solo Sign Run Request</div>
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:20px;" id="approvalMsg"></div>
+          <button onclick="approveSoloRun()" style="width:100%;padding:14px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:15px;font-weight:700;color:#000;cursor:pointer;margin-bottom:8px;">✓ Approve Solo Run</button>
+          <button onclick="denySoloRun()" style="width:100%;padding:10px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-muted);cursor:pointer;">✕ Deny</button>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -3972,6 +4083,12 @@
       const routerCard = document.getElementById('routerCard');
       if (routerCard) routerCard.style.display = (String(currentUser.franchiseID) === '90' && currentUser.role === 'owner') ? '' : 'none';
 
+      // Initialize Signs module visibility
+      initSignsModule();
+
+      // Check for solo approval token in URL
+      checkApprovalToken();
+
       goHome();
     }
 
@@ -4001,13 +4118,17 @@
       'routerScreen', 'routeResultScreen',
       'storageScreen', 'storageResultsScreen',
       'mattressScreen', 'mattressResultsScreen',
-      'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen'
+      'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen'
     ];
 
     function hideAll() {
       allScreens.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
+        if (id === 'signsScreen') {
+          el.style.display = 'none';
+          return;
+        }
         if (el.classList.contains('estimator-section') || el.classList.contains('router-section') ||
             el.classList.contains('route-result-section') || el.classList.contains('price-lookup-section') ||
             el.classList.contains('settings-section') || el.classList.contains('estimates-section') ||
@@ -4045,6 +4166,15 @@
       }
       hideAll();
       document.getElementById('backBtn').classList.add('visible');
+
+      // Signs module — custom handling
+      if (module === 'signs') {
+        document.getElementById('signsScreen').style.display = 'block';
+        document.getElementById('headerTitle').textContent = 'Yard Signs';
+        currentScreen = 'signs';
+        openSignsScreen();
+        return;
+      }
 
       const moduleMap = {
         estimator:   { screen: 'estimatorScreen',  title: 'Shed Estimator',    type: 'estimator-section' },
@@ -4236,7 +4366,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.6.1 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.6.2 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -11980,6 +12110,788 @@ RECYCLING & DONATION
       const abs = Math.abs(n);
       const str = '$' + abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       return n < 0 ? '(' + str + ')' : str;
+    }
+
+    // ===== BOOT =====
+    // If GIS script hasn't loaded by DOMContentLoaded, we wait for the onload callback.
+    // If session exists, initGoogleSignIn() handles it immediately on GIS load.
+
+    // ===== SIGNS MODULE =====
+    let _signsCurrentSession = null;
+    let _signsSessionSigns = [];
+    let _signsMap = null;
+    let _signsMarkers = [];
+    let _signsPendingApprovalToken = null;
+    let _signsRealtimeSub = null;
+
+    // Show/hide Signs module based on subscription tier and role
+    function initSignsModule() {
+      const tier = currentUser?.subscriptionTier || currentUser?.costSettings?.subscriptionTier || 'free';
+      const role = currentUser?.role || 'owner';
+      const card = document.getElementById('signsModuleCard');
+      // Show for pro/enterprise owners, or any crew member
+      if (card) card.style.display = (tier === 'pro' || tier === 'enterprise' || role === 'crew') ? '' : 'none';
+    }
+
+    async function openSignsScreen() {
+      const role = currentUser?.role || 'owner';
+      document.getElementById('signsOwnerView').style.display = role === 'owner' ? 'block' : 'none';
+      document.getElementById('signsCrewView').style.display = role === 'crew' ? 'block' : 'none';
+      if (role === 'owner') {
+        await loadSignsFilters();
+        openSignsView('map');
+      } else {
+        renderCrewSignsView();
+      }
+    }
+
+    async function loadSignsFilters() {
+      const franchiseUUID = await getFranchiseUUID();
+      if (!franchiseUUID) return;
+      try {
+        // Load campaigns
+        const campaigns = await supabaseFetch('/rest/v1/campaigns?franchise_id=eq.' + franchiseUUID + '&status=eq.active&order=name.asc&select=id,name');
+        const campaignSel = document.getElementById('signsFilterCampaign');
+        campaignSel.innerHTML = '<option value="">All Campaigns</option>' +
+          (campaigns || []).map(c => '<option value="' + c.id + '">' + c.name + '</option>').join('');
+        // Load crew
+        const crew = await supabaseFetch('/rest/v1/crew_members?franchise_id=eq.' + franchiseUUID + '&status=eq.active&order=first_name.asc&select=email,first_name,last_name');
+        const crewSel = document.getElementById('signsFilterCrew');
+        crewSel.innerHTML = '<option value="">All Crew</option>' +
+          (crew || []).map(c => '<option value="' + c.email + '">' + c.first_name + ' ' + c.last_name + '</option>').join('');
+      } catch(e) { console.warn('Signs filter load error:', e); }
+    }
+
+    function openSignsView(view) {
+      ['map','list','leaderboard'].forEach(v => {
+        document.getElementById('signsMap' + (v === 'map' ? 'Container' : v === 'list' ? 'ListContainer' : 'LeaderboardContainer') || 'signsMapContainer').style.display = 'none';
+      });
+      document.getElementById('signsMapContainer').style.display = view === 'map' ? 'block' : 'none';
+      document.getElementById('signsListContainer').style.display = view === 'list' ? 'block' : 'none';
+      document.getElementById('signsLeaderboardContainer').style.display = view === 'leaderboard' ? 'block' : 'none';
+      // Update buttons
+      document.getElementById('signsViewMapBtn').style.background = view === 'map' ? 'var(--accent-green)' : 'var(--bg-card)';
+      document.getElementById('signsViewMapBtn').style.color = view === 'map' ? '#000' : 'var(--text-muted)';
+      document.getElementById('signsViewMapBtn').style.border = view === 'map' ? 'none' : '1px solid var(--border)';
+      document.getElementById('signsViewListBtn').style.background = view === 'list' ? 'var(--accent-green)' : 'var(--bg-card)';
+      document.getElementById('signsViewListBtn').style.color = view === 'list' ? '#000' : 'var(--text-muted)';
+      document.getElementById('signsViewListBtn').style.border = view === 'list' ? 'none' : '1px solid var(--border)';
+      document.getElementById('signsViewLBBtn').style.background = view === 'leaderboard' ? 'var(--accent-green)' : 'var(--bg-card)';
+      document.getElementById('signsViewLBBtn').style.color = view === 'leaderboard' ? '#000' : 'var(--text-muted)';
+      document.getElementById('signsViewLBBtn').style.border = view === 'leaderboard' ? 'none' : '1px solid var(--border)';
+      renderSignsView(view);
+    }
+
+    async function renderSignsView(view) {
+      const franchiseUUID = await getFranchiseUUID();
+      if (!franchiseUUID) return;
+      const campaignFilter = document.getElementById('signsFilterCampaign')?.value;
+      const crewFilter = document.getElementById('signsFilterCrew')?.value;
+      const statusFilter = document.getElementById('signsFilterStatus')?.value;
+
+      let url = '/rest/v1/yard_signs?franchise_id=eq.' + franchiseUUID + '&order=placed_at.desc';
+      if (campaignFilter) url += '&campaign_id=eq.' + campaignFilter;
+      if (crewFilter) url += '&placed_by=eq.' + encodeURIComponent(crewFilter);
+      if (statusFilter) url += '&status=eq.' + statusFilter;
+
+      try {
+        const signs = await supabaseFetch(url + '&select=*&limit=500');
+        const activeView = view || (document.getElementById('signsMapContainer').style.display !== 'none' ? 'map' : document.getElementById('signsListContainer').style.display !== 'none' ? 'list' : 'leaderboard');
+        if (activeView === 'map') renderSignsMap(signs || []);
+        else if (activeView === 'list') renderSignsList(signs || []);
+        else renderSignsLeaderboard(signs || []);
+      } catch(e) { console.warn('Signs render error:', e); }
+    }
+
+    function renderSignsMap(signs) {
+      const container = document.getElementById('signsMapContainer');
+      if (!signs.length) {
+        container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">No signs to display</div>';
+        return;
+      }
+      // Build Google Maps embed URL with markers
+      const markers = signs.filter(s => s.lat && s.lng).map(s => {
+        const color = s.status === 'active' ? 'green' : 'red';
+        return 'markers=color:' + color + '%7C' + s.lat + ',' + s.lng;
+      }).join('&');
+      const center = signs[0];
+      const apiKey = 'AIzaSyCeNYlMnZXrD77z345Gic1ZLTPUS_dlpuY';
+      container.innerHTML = '<iframe width="100%" height="400" frameborder="0" style="border:0;border-radius:var(--radius-sm);" src="https://maps.googleapis.com/maps/api/staticmap?center=' + center.lat + ',' + center.lng + '&zoom=12&size=600x400&' + markers + '&key=' + apiKey + '" allowfullscreen></iframe>';
+    }
+
+    function renderSignsList(signs) {
+      const container = document.getElementById('signsListContainer');
+      if (!signs.length) { container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:16px;text-align:center;">No signs found</div>'; return; }
+      container.innerHTML = signs.map(s => {
+        const date = new Date(s.placed_at).toLocaleDateString('en-US', {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
+        const statusColor = s.status === 'active' ? 'var(--accent-green)' : '#ef4444';
+        return '<div style="background:var(--bg-card);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:6px;display:flex;align-items:center;gap:10px;">' +
+          (s.photo_path ? '<img src="" data-sign-photo="' + s.photo_path + '" style="width:48px;height:48px;object-fit:cover;border-radius:4px;flex-shrink:0;background:var(--bg-input);">' : '<div style="width:48px;height:48px;background:var(--bg-input);border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:20px;">🪧</div>') +
+          '<div style="flex:1;min-width:0;">' +
+            '<div style="font-size:12px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (s.address || (s.lat.toFixed(4) + ', ' + s.lng.toFixed(4))) + '</div>' +
+            '<div style="font-size:11px;color:var(--text-muted);">' + date + ' · ' + (s.placed_by ? s.placed_by.split('@')[0] : '—') + '</div>' +
+          '</div>' +
+          '<span style="font-size:10px;font-weight:600;color:' + statusColor + ';">' + s.status.toUpperCase() + '</span>' +
+          '</div>';
+      }).join('');
+      // Resolve sign photo thumbnails
+      container.querySelectorAll('img[data-sign-photo]').forEach(async img => {
+        const path = img.getAttribute('data-sign-photo');
+        if (path) {
+          const url = await resolveSignPhotoUrl(path);
+          if (url) img.src = url;
+        }
+      });
+    }
+
+    function renderSignsLeaderboard(signs) {
+      const container = document.getElementById('signsLeaderboardContainer');
+      // Aggregate by crew member
+      const counts = {};
+      signs.filter(s => s.status === 'active').forEach(s => {
+        const key = s.placed_by || 'unknown';
+        counts[key] = (counts[key] || 0) + 1;
+      });
+      const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+      if (!sorted.length) { container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:16px;text-align:center;">No active signs yet</div>'; return; }
+      const medals = ['🥇','🥈','🥉'];
+      container.innerHTML = '<div style="padding:4px 0;">' +
+        sorted.map(([email, count], i) => {
+          const name = email.replace('@', ' ').split('.').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').split(' ')[0] || email;
+          return '<div style="display:flex;align-items:center;gap:10px;background:var(--bg-card);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:6px;">' +
+            '<span style="font-size:20px;width:28px;text-align:center;">' + (medals[i] || (i+1)) + '</span>' +
+            '<div style="flex:1;">' +
+              '<div style="font-size:13px;font-weight:600;color:var(--text-primary);">' + name + '</div>' +
+              '<div style="font-size:11px;color:var(--text-muted);">' + email + '</div>' +
+            '</div>' +
+            '<span style="font-family:monospace;font-size:18px;font-weight:700;color:var(--accent-green);">' + count + '</span>' +
+            '</div>';
+        }).join('') + '</div>';
+    }
+
+    // ===== SESSION FLOW =====
+    async function startSignsSession() {
+      const franchiseUUID = await getFranchiseUUID();
+      if (!franchiseUUID) return;
+      // Load crew roster
+      const crew = await supabaseFetch('/rest/v1/crew_members?franchise_id=eq.' + franchiseUUID + '&status=eq.active&order=first_name.asc&select=id,first_name,last_name,email');
+      const campaigns = await supabaseFetch('/rest/v1/campaigns?franchise_id=eq.' + franchiseUUID + '&status=eq.active&order=name.asc&select=id,name');
+      showSessionStartModal(crew || [], campaigns || []);
+    }
+
+    function showSessionStartModal(crew, campaigns) {
+      const modal = document.createElement('div');
+      modal.id = 'signsStartModal';
+      modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);z-index:250;display:flex;align-items:flex-end;justify-content:center;';
+      modal.innerHTML = '<div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;">' +
+        '<div style="font-size:16px;font-weight:700;margin-bottom:4px;">Start Sign Session</div>' +
+        '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Select crew members and campaign</div>' +
+        '<div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">CREW MEMBERS</div>' +
+        '<div id="signsCrewSelect" style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;">' +
+          crew.map(c => '<label style="display:flex;align-items:center;gap:10px;background:var(--bg-card);padding:10px 12px;border-radius:var(--radius-sm);cursor:pointer;">' +
+            '<input type="checkbox" value="' + c.email + '" data-name="' + c.first_name + ' ' + c.last_name + '" style="width:18px;height:18px;accent-color:var(--accent-green);">' +
+            '<span style="font-size:13px;">' + c.first_name + ' ' + c.last_name + '</span>' +
+          '</label>').join('') +
+        '</div>' +
+        '<div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">CAMPAIGN (optional)</div>' +
+        '<select class="form-select" id="signsSessionCampaign" style="margin-bottom:16px;">' +
+          '<option value="">No Campaign</option>' +
+          campaigns.map(c => '<option value="' + c.id + '">' + c.name + '</option>').join('') +
+        '</select>' +
+        '<button onclick="confirmStartSession()" style="width:100%;padding:14px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:15px;font-weight:700;color:#000;cursor:pointer;margin-bottom:8px;">Start Session</button>' +
+        '<button onclick="document.getElementById(\'signsStartModal\').remove()" style="width:100%;padding:10px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-muted);cursor:pointer;">Cancel</button>' +
+      '</div>';
+      document.body.appendChild(modal);
+    }
+
+    async function confirmStartSession() {
+      const checkboxes = document.querySelectorAll('#signsCrewSelect input[type=checkbox]:checked');
+      const selectedCrew = Array.from(checkboxes).map(cb => ({ email: cb.value, name: cb.dataset.name }));
+      const campaignID = document.getElementById('signsSessionCampaign')?.value || null;
+      const role = currentUser?.role || 'owner';
+
+      if (selectedCrew.length === 0) { alert('Select at least one crew member.'); return; }
+
+      // Solo run approval flow for crew role
+      if (role === 'crew' && selectedCrew.length < 2) {
+        document.getElementById('signsStartModal')?.remove();
+        await requestSoloApproval(selectedCrew[0], campaignID);
+        return;
+      }
+
+      document.getElementById('signsStartModal')?.remove();
+      await createAndStartSession(selectedCrew, campaignID);
+    }
+
+    async function requestSoloApproval(crewMember, campaignID) {
+      const franchiseUUID = await getFranchiseUUID();
+      const token = 'solo_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      // Create pending session
+      const session = await supabaseFetch('/rest/v1/sign_sessions', {
+        method: 'POST',
+        headers: { 'Prefer': 'return=representation' },
+        body: JSON.stringify({
+          franchise_id: franchiseUUID,
+          campaign_id: campaignID || null,
+          crew: [crewMember],
+          status: 'pending',
+          approval_token: token
+        })
+      });
+      // Send approval request via n8n
+      try {
+        await apiFetch(N8N_BASE + '/crewlogic-signs', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'soloApprovalRequest',
+            token,
+            crewName: crewMember.name,
+            crewEmail: crewMember.email,
+            ownerEmail: currentUser.email,
+            franchiseID: currentUser.franchiseID
+          })
+        });
+      } catch(e) {}
+      // Show waiting screen
+      showSoloWaiting(token, crewMember.name);
+    }
+
+    function showSoloWaiting(token, crewName) {
+      const overlay = document.getElementById('signsSessionOverlay');
+      overlay.innerHTML = '<div style="padding:40px 24px;text-align:center;max-width:360px;margin:0 auto;">' +
+        '<div style="font-size:48px;margin-bottom:16px;">⏳</div>' +
+        '<div style="font-size:18px;font-weight:700;margin-bottom:8px;">Waiting for Approval</div>' +
+        '<div style="font-size:13px;color:var(--text-muted);margin-bottom:24px;">' + crewName + ' is requesting a solo sign run. Approval request sent to owner.</div>' +
+        '<div style="font-size:12px;color:var(--text-muted);">This will update automatically when approved...</div>' +
+        '<button onclick="cancelSoloRequest(\'' + token + '\')" style="margin-top:24px;padding:10px 20px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:13px;cursor:pointer;">Cancel Request</button>' +
+      '</div>';
+      overlay.style.display = 'block';
+      // Subscribe to Supabase Realtime for session status change
+      _signsPendingApprovalToken = token;
+      subscribeToSessionApproval(token);
+    }
+
+    function subscribeToSessionApproval(token) {
+      // Poll every 5 seconds checking if session status changed to 'active'
+      const pollInterval = setInterval(async () => {
+        if (_signsPendingApprovalToken !== token) { clearInterval(pollInterval); return; }
+        try {
+          const rows = await supabaseFetch('/rest/v1/sign_sessions?approval_token=eq.' + token + '&select=id,status,crew,campaign_id');
+          if (rows && rows[0] && rows[0].status === 'active') {
+            clearInterval(pollInterval);
+            _signsPendingApprovalToken = null;
+            const session = rows[0];
+            _signsCurrentSession = session;
+            _signsSessionSigns = [];
+            openSessionUI(session);
+          }
+        } catch(e) {}
+      }, 5000);
+    }
+
+    async function cancelSoloRequest(token) {
+      _signsPendingApprovalToken = null;
+      document.getElementById('signsSessionOverlay').style.display = 'none';
+      try {
+        await supabaseFetch('/rest/v1/sign_sessions?approval_token=eq.' + token, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'completed' })
+        });
+      } catch(e) {}
+    }
+
+    async function createAndStartSession(crewList, campaignID) {
+      const franchiseUUID = await getFranchiseUUID();
+      const rows = await supabaseFetch('/rest/v1/sign_sessions', {
+        method: 'POST',
+        headers: { 'Prefer': 'return=representation' },
+        body: JSON.stringify({
+          franchise_id: franchiseUUID,
+          campaign_id: campaignID || null,
+          crew: crewList,
+          status: 'active',
+          started_at: new Date().toISOString()
+        })
+      });
+      if (!rows || !rows[0]) { alert('Could not start session. Please try again.'); return; }
+      _signsCurrentSession = rows[0];
+      _signsSessionSigns = [];
+      openSessionUI(rows[0]);
+    }
+
+    function openSessionUI(session) {
+      const overlay = document.getElementById('signsSessionOverlay');
+      // Rebuild overlay HTML
+      overlay.innerHTML = '<div style="padding:16px;max-width:480px;margin:0 auto;">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">' +
+          '<div style="font-size:16px;font-weight:700;color:var(--text-primary);">Sign Placement Session</div>' +
+          '<button onclick="endSignsSession()" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:6px 12px;border-radius:var(--radius-sm);font-size:12px;cursor:pointer;">End Session</button>' +
+        '</div>' +
+        '<div style="background:var(--bg-card);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:16px;font-size:12px;color:var(--text-muted);" id="signsSessionInfo">' +
+          'Crew: ' + (session.crew || []).map(c => c.name || c.email).join(', ') +
+        '</div>' +
+        '<div style="text-align:center;margin-bottom:20px;">' +
+          '<div style="font-size:64px;font-weight:700;font-family:\'Space Mono\',monospace;color:var(--accent-green);" id="signsSessionCount">0</div>' +
+          '<div style="font-size:12px;color:var(--text-muted);">signs placed this session</div>' +
+        '</div>' +
+        '<button id="signsPlaceBtn" onclick="placeSign()" style="width:100%;padding:20px;background:var(--accent-green);border:none;border-radius:12px;font-size:18px;font-weight:700;color:#000;cursor:pointer;margin-bottom:12px;">📍 Place Sign</button>' +
+        '<button onclick="removeLastSign()" id="signsUndoBtn" style="width:100%;padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:12px;font-size:13px;color:var(--text-muted);cursor:pointer;display:none;">↩ Undo Last Sign</button>' +
+        '<div id="signsSessionRecent" style="margin-top:16px;"></div>' +
+        '<input type="file" id="signsPhotoInput" accept="image/*" capture="environment" style="display:none;" onchange="handleSignPhoto(this)">' +
+      '</div>';
+      overlay.style.display = 'block';
+    }
+
+    function placeSign() {
+      // Open camera to capture sign photo
+      document.getElementById('signsPhotoInput').click();
+    }
+
+    async function handleSignPhoto(input) {
+      const file = input.files[0];
+      if (!file) return;
+      input.value = '';
+
+      const btn = document.getElementById('signsPlaceBtn');
+      btn.textContent = '⏳ Processing...';
+      btn.disabled = true;
+
+      try {
+        // Extract GPS from EXIF before any processing
+        const gps = await extractGPSFromFile(file);
+        // Compress photo
+        const base64 = await ensureJpegBase64(file);
+        const compressed = await compressChargePhoto(base64);
+        // Upload to Supabase Storage
+        const path = currentUser.franchiseID + '/signs/' + _signsCurrentSession.id + '/' + Date.now() + '_sign.jpg';
+        const blob = await (await fetch(compressed)).blob();
+        const { error } = await supabaseClient.storage.from('estimate-photos').upload(path, blob, { contentType: 'image/jpeg', upsert: false });
+        if (error) throw error;
+        // Get reverse geocoded address
+        let address = null;
+        if (gps) {
+          try {
+            const geo = await fetch('https://maps.googleapis.com/maps/api/geocode/json?latlng=' + gps.lat + ',' + gps.lng + '&key=AIzaSyCeNYlMnZXrD77z345Gic1ZLTPUS_dlpuY');
+            const geoData = await geo.json();
+            address = geoData.results?.[0]?.formatted_address || null;
+          } catch(e) {}
+        }
+        // Save to Supabase
+        const franchiseUUID = await getFranchiseUUID();
+        const signRow = await supabaseFetch('/rest/v1/yard_signs', {
+          method: 'POST',
+          headers: { 'Prefer': 'return=representation' },
+          body: JSON.stringify({
+            session_id: _signsCurrentSession.id,
+            franchise_id: franchiseUUID,
+            campaign_id: _signsCurrentSession.campaign_id || null,
+            placed_by: currentUser.email,
+            lat: gps ? gps.lat : 0,
+            lng: gps ? gps.lng : 0,
+            address,
+            photo_path: path,
+            placed_at: new Date().toISOString(),
+            status: 'active'
+          })
+        });
+        if (signRow && signRow[0]) {
+          _signsSessionSigns.push({ ...signRow[0], photoSrc: compressed });
+          updateSessionUI();
+          // Check rewards threshold
+          checkSignsRewardThreshold();
+        }
+      } catch(e) {
+        alert('Could not save sign. Please try again.\n' + e.message);
+      } finally {
+        btn.textContent = '📍 Place Sign';
+        btn.disabled = false;
+      }
+    }
+
+    function updateSessionUI() {
+      const count = _signsSessionSigns.length;
+      const countEl = document.getElementById('signsSessionCount');
+      if (countEl) countEl.textContent = count;
+      const undoBtn = document.getElementById('signsUndoBtn');
+      if (undoBtn) undoBtn.style.display = count > 0 ? '' : 'none';
+      // Show recent signs
+      const recentEl = document.getElementById('signsSessionRecent');
+      if (recentEl && _signsSessionSigns.length > 0) {
+        recentEl.innerHTML = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">This Session</div>' +
+          _signsSessionSigns.slice().reverse().slice(0, 5).map(s =>
+            '<div style="display:flex;align-items:center;gap:8px;background:var(--bg-card);padding:8px 10px;border-radius:var(--radius-sm);margin-bottom:4px;">' +
+              (s.photoSrc ? '<img src="' + s.photoSrc + '" style="width:40px;height:40px;object-fit:cover;border-radius:4px;flex-shrink:0;">' : '<div style="width:40px;height:40px;background:var(--bg-input);border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">🪧</div>') +
+              '<div style="flex:1;min-width:0;">' +
+                '<div style="font-size:11px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (s.address || (s.lat ? s.lat.toFixed(4) + ', ' + s.lng.toFixed(4) : 'No GPS')) + '</div>' +
+                '<div style="font-size:10px;color:var(--accent-green);">✓ Saved</div>' +
+              '</div>' +
+            '</div>'
+          ).join('');
+      }
+    }
+
+    async function removeLastSign() {
+      if (!_signsSessionSigns.length) return;
+      const last = _signsSessionSigns[_signsSessionSigns.length - 1];
+      try {
+        await supabaseFetch('/rest/v1/yard_signs?id=eq.' + last.id, { method: 'DELETE' });
+        // Remove from storage
+        await supabaseClient.storage.from('estimate-photos').remove([last.photo_path]);
+        _signsSessionSigns.pop();
+        updateSessionUI();
+      } catch(e) { alert('Could not undo. Please try again.'); }
+    }
+
+    async function endSignsSession() {
+      if (!_signsCurrentSession) { document.getElementById('signsSessionOverlay').style.display = 'none'; return; }
+      const count = _signsSessionSigns.length;
+      if (count > 0 && !confirm('End session with ' + count + ' sign' + (count !== 1 ? 's' : '') + ' placed?')) return;
+      // Mark session completed
+      try {
+        await supabaseFetch('/rest/v1/sign_sessions?id=eq.' + _signsCurrentSession.id, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'completed', ended_at: new Date().toISOString() })
+        });
+      } catch(e) {}
+      _signsCurrentSession = null;
+      _signsSessionSigns = [];
+      document.getElementById('signsSessionOverlay').style.display = 'none';
+      renderSignsView();
+    }
+
+    // ===== EXIF GPS EXTRACTION =====
+    async function extractGPSFromFile(file) {
+      return new Promise(resolve => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const view = new DataView(e.target.result);
+            if (view.getUint16(0, false) !== 0xFFD8) { resolve(null); return; }
+            let offset = 2;
+            while (offset < view.byteLength) {
+              if (view.getUint16(offset, false) === 0xFFE1) {
+                const exifData = new DataView(e.target.result, offset + 4, view.getUint16(offset + 2, false) - 2);
+                const gps = parseExifGPS(exifData);
+                resolve(gps);
+                return;
+              }
+              offset += 2 + view.getUint16(offset + 2, false);
+            }
+            resolve(null);
+          } catch(e) { resolve(null); }
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsArrayBuffer(file.slice(0, 65536)); // Read first 64KB for EXIF
+      });
+    }
+
+    function parseExifGPS(view) {
+      try {
+        const isLittleEndian = view.getUint16(0) === 0x4949;
+        const ifdOffset = view.getUint32(4, isLittleEndian);
+        const entries = view.getUint16(ifdOffset, isLittleEndian);
+        let gpsOffset = null;
+        for (let i = 0; i < entries; i++) {
+          const tag = view.getUint16(ifdOffset + 2 + i * 12, isLittleEndian);
+          if (tag === 0x8825) { // GPS IFD tag
+            gpsOffset = view.getUint32(ifdOffset + 2 + i * 12 + 8, isLittleEndian);
+            break;
+          }
+        }
+        if (gpsOffset === null) return null;
+        const gpsEntries = view.getUint16(gpsOffset, isLittleEndian);
+        let latRef, latVal, lngRef, lngVal;
+        for (let i = 0; i < gpsEntries; i++) {
+          const tag = view.getUint16(gpsOffset + 2 + i * 12, isLittleEndian);
+          const valOffset = gpsOffset + 2 + i * 12 + 8;
+          if (tag === 1) latRef = String.fromCharCode(view.getUint8(valOffset));
+          if (tag === 3) lngRef = String.fromCharCode(view.getUint8(valOffset));
+          if (tag === 2) latVal = readGPSCoord(view, view.getUint32(valOffset, isLittleEndian), isLittleEndian);
+          if (tag === 4) lngVal = readGPSCoord(view, view.getUint32(valOffset, isLittleEndian), isLittleEndian);
+        }
+        if (!latVal || !lngVal) return null;
+        const lat = latVal * (latRef === 'S' ? -1 : 1);
+        const lng = lngVal * (lngRef === 'W' ? -1 : 1);
+        if (isNaN(lat) || isNaN(lng)) return null;
+        return { lat, lng };
+      } catch(e) { return null; }
+    }
+
+    function readGPSCoord(view, offset, isLittleEndian) {
+      try {
+        const deg = view.getUint32(offset, isLittleEndian) / view.getUint32(offset + 4, isLittleEndian);
+        const min = view.getUint32(offset + 8, isLittleEndian) / view.getUint32(offset + 12, isLittleEndian);
+        const sec = view.getUint32(offset + 16, isLittleEndian) / view.getUint32(offset + 20, isLittleEndian);
+        return deg + min / 60 + sec / 3600;
+      } catch(e) { return null; }
+    }
+
+    // ===== SIGNS PHOTO URL =====
+    async function resolveSignPhotoUrl(path) {
+      if (!path) return null;
+      if (path.startsWith('http')) return path;
+      return resolvePhotoUrl(path); // reuse existing signed URL function
+    }
+
+    // ===== REWARDS CHECK =====
+    async function checkSignsRewardThreshold() {
+      const cs = currentUser.costSettings || {};
+      const threshold = parseInt(cs.signsRewardThreshold) || 0;
+      const rewardAmount = parseFloat(cs.signsRewardAmount) || 0;
+      const pvApiKey = cs.promoVaultApiKey || '';
+      if (!threshold || !rewardAmount || !pvApiKey) return;
+      // Count total active signs placed by this user
+      const franchiseUUID = await getFranchiseUUID();
+      try {
+        const rows = await supabaseFetch('/rest/v1/yard_signs?franchise_id=eq.' + franchiseUUID + '&placed_by=eq.' + encodeURIComponent(currentUser.email) + '&status=eq.active&select=id');
+        const totalSigns = rows ? rows.length : 0;
+        if (totalSigns > 0 && totalSigns % threshold === 0) {
+          // Threshold hit — trigger reward via n8n
+          await apiFetch(N8N_BASE + '/crewlogic-signs', {
+            method: 'POST',
+            body: JSON.stringify({
+              action: 'triggerReward',
+              email: currentUser.email,
+              name: currentUser.name || currentUser.email,
+              amount: rewardAmount,
+              signsCount: totalSigns,
+              pvApiKey,
+              franchiseID: currentUser.franchiseID
+            })
+          });
+        }
+      } catch(e) { console.warn('Reward check failed:', e); }
+    }
+
+    // ===== SOLO APPROVAL (owner side) =====
+    async function checkApprovalToken() {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('approve');
+      if (!token) return;
+      // Load session
+      try {
+        const rows = await supabaseFetch('/rest/v1/sign_sessions?approval_token=eq.' + token + '&select=id,crew,status,campaign_id');
+        if (!rows || !rows[0]) { alert('Approval link invalid or expired.'); return; }
+        const session = rows[0];
+        if (session.status !== 'pending') { alert('This request has already been handled.'); return; }
+        const crewName = (session.crew[0]?.name || session.crew[0]?.email || 'crew member');
+        document.getElementById('approvalMsg').textContent = crewName + ' is requesting a solo sign placement run. Approve?';
+        document.getElementById('signsApprovalOverlay').style.display = 'flex';
+        window._pendingApprovalSessionID = session.id;
+      } catch(e) {}
+    }
+
+    async function approveSoloRun() {
+      const id = window._pendingApprovalSessionID;
+      if (!id) return;
+      await supabaseFetch('/rest/v1/sign_sessions?id=eq.' + id, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'active', started_at: new Date().toISOString() })
+      });
+      document.getElementById('signsApprovalOverlay').style.display = 'none';
+      alert('Solo run approved! The crew member\'s app will update shortly.');
+      history.replaceState(null, '', window.location.pathname);
+    }
+
+    async function denySoloRun() {
+      const id = window._pendingApprovalSessionID;
+      if (!id) return;
+      await supabaseFetch('/rest/v1/sign_sessions?id=eq.' + id, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'completed' })
+      });
+      document.getElementById('signsApprovalOverlay').style.display = 'none';
+      history.replaceState(null, '', window.location.pathname);
+    }
+
+    // ===== MANAGEMENT PANEL =====
+    function openSignsManagement() {
+      document.getElementById('signsManagementOverlay').style.display = 'block';
+      openMgmtTab('crew');
+    }
+
+    function openMgmtTab(tab) {
+      ['crew','campaigns','rewards'].forEach(t => {
+        const btn = document.getElementById('mgmtTab' + t.charAt(0).toUpperCase() + t.slice(1));
+        if (btn) {
+          btn.style.background = t === tab ? 'var(--accent-green)' : 'var(--bg-card)';
+          btn.style.color = t === tab ? '#000' : 'var(--text-muted)';
+          btn.style.border = t === tab ? 'none' : '1px solid var(--border)';
+        }
+      });
+      const content = document.getElementById('mgmtTabContent');
+      if (tab === 'crew') renderCrewManagement(content);
+      else if (tab === 'campaigns') renderCampaignManagement(content);
+      else renderRewardsSettings(content);
+    }
+
+    async function renderCrewManagement(container) {
+      container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Loading crew...</div>';
+      const franchiseUUID = await getFranchiseUUID();
+      const crew = await supabaseFetch('/rest/v1/crew_members?franchise_id=eq.' + franchiseUUID + '&order=first_name.asc&select=*');
+      container.innerHTML =
+        '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">' +
+        (crew || []).map(c =>
+          '<div style="display:flex;align-items:center;gap:10px;background:var(--bg-card);padding:10px 12px;border-radius:var(--radius-sm);">' +
+            '<div style="flex:1;">' +
+              '<div style="font-size:13px;font-weight:600;">' + c.first_name + ' ' + c.last_name + '</div>' +
+              '<div style="font-size:11px;color:var(--text-muted);">' + c.email + '</div>' +
+            '</div>' +
+            '<span style="font-size:11px;font-weight:600;color:' + (c.status === 'active' ? 'var(--accent-green)' : '#ef4444') + ';">' + c.status.toUpperCase() + '</span>' +
+            '<button onclick="toggleCrewStatus(\'' + c.id + '\',\'' + c.status + '\')" style="padding:4px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:11px;cursor:pointer;">' + (c.status === 'active' ? 'Deactivate' : 'Activate') + '</button>' +
+          '</div>'
+        ).join('') +
+        '</div>' +
+        '<div style="font-size:13px;font-weight:600;margin-bottom:8px;">Add Crew Member</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">' +
+          '<input type="text" class="form-input" id="newCrewFirst" placeholder="First Name">' +
+          '<input type="text" class="form-input" id="newCrewLast" placeholder="Last Name">' +
+        '</div>' +
+        '<input type="tel" class="form-input" id="newCrewPhone" placeholder="Phone (optional)" style="margin-bottom:8px;">' +
+        '<button onclick="addCrewMember()" style="width:100%;padding:12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;color:#000;cursor:pointer;">+ Add Crew Member</button>' +
+        '<div id="crewMgmtFeedback" style="font-size:12px;margin-top:6px;min-height:16px;"></div>';
+    }
+
+    async function addCrewMember() {
+      const first = document.getElementById('newCrewFirst').value.trim();
+      const last = document.getElementById('newCrewLast').value.trim();
+      const phone = document.getElementById('newCrewPhone').value.trim();
+      const feedback = document.getElementById('crewMgmtFeedback');
+      if (!first || !last) { feedback.style.color = '#ef4444'; feedback.textContent = 'First and last name required.'; return; }
+      const email = first + '.' + last + '@' + (currentUser.franchiseID || 'crew') + '.crewlogic';
+      const franchiseUUID = await getFranchiseUUID();
+      try {
+        feedback.style.color = 'var(--text-muted)';
+        feedback.textContent = 'Adding...';
+        await supabaseFetch('/rest/v1/crew_members', {
+          method: 'POST',
+          body: JSON.stringify({ franchise_id: franchiseUUID, first_name: first, last_name: last, email, phone: phone || null, status: 'active' })
+        });
+        document.getElementById('newCrewFirst').value = '';
+        document.getElementById('newCrewLast').value = '';
+        document.getElementById('newCrewPhone').value = '';
+        feedback.style.color = 'var(--accent-green)';
+        feedback.textContent = '✓ ' + first + ' ' + last + ' added';
+        openMgmtTab('crew');
+      } catch(e) {
+        feedback.style.color = '#ef4444';
+        feedback.textContent = 'Error adding crew member.';
+      }
+    }
+
+    async function toggleCrewStatus(id, currentStatus) {
+      const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
+      await supabaseFetch('/rest/v1/crew_members?id=eq.' + id, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: newStatus })
+      });
+      openMgmtTab('crew');
+    }
+
+    async function renderCampaignManagement(container) {
+      const franchiseUUID = await getFranchiseUUID();
+      const campaigns = await supabaseFetch('/rest/v1/campaigns?franchise_id=eq.' + franchiseUUID + '&order=created_at.desc&select=*');
+      container.innerHTML =
+        '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">' +
+        (campaigns || []).map(c =>
+          '<div style="background:var(--bg-card);padding:10px 12px;border-radius:var(--radius-sm);">' +
+            '<div style="display:flex;align-items:center;justify-content:space-between;">' +
+              '<div style="font-size:13px;font-weight:600;">' + c.name + '</div>' +
+              '<span style="font-size:10px;font-weight:600;color:' + (c.status === 'active' ? 'var(--accent-green)' : c.status === 'paused' ? '#fbbf24' : 'var(--text-muted)') + ';">' + c.status.toUpperCase() + '</span>' +
+            '</div>' +
+            (c.start_date ? '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + c.start_date + ' → ' + (c.end_date || 'ongoing') + '</div>' : '') +
+          '</div>'
+        ).join('') +
+        '</div>' +
+        '<div style="font-size:13px;font-weight:600;margin-bottom:8px;">New Campaign</div>' +
+        '<input type="text" class="form-input" id="newCampaignName" placeholder="Campaign name" style="margin-bottom:8px;">' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">' +
+          '<input type="date" class="form-input" id="newCampaignStart" placeholder="Start date">' +
+          '<input type="date" class="form-input" id="newCampaignEnd" placeholder="End date">' +
+        '</div>' +
+        '<button onclick="addCampaign()" style="width:100%;padding:12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;color:#000;cursor:pointer;">+ Create Campaign</button>' +
+        '<div id="campaignMgmtFeedback" style="font-size:12px;margin-top:6px;min-height:16px;"></div>';
+    }
+
+    async function addCampaign() {
+      const name = document.getElementById('newCampaignName').value.trim();
+      const start = document.getElementById('newCampaignStart').value;
+      const end = document.getElementById('newCampaignEnd').value;
+      const feedback = document.getElementById('campaignMgmtFeedback');
+      if (!name) { feedback.style.color = '#ef4444'; feedback.textContent = 'Campaign name required.'; return; }
+      const franchiseUUID = await getFranchiseUUID();
+      try {
+        await supabaseFetch('/rest/v1/campaigns', {
+          method: 'POST',
+          body: JSON.stringify({ franchise_id: franchiseUUID, name, start_date: start || null, end_date: end || null, status: 'active', created_by: currentUser.email })
+        });
+        feedback.style.color = 'var(--accent-green)';
+        feedback.textContent = '✓ Campaign created';
+        openMgmtTab('campaigns');
+      } catch(e) {
+        feedback.style.color = '#ef4444';
+        feedback.textContent = 'Error creating campaign.';
+      }
+    }
+
+    function renderRewardsSettings(container) {
+      const cs = currentUser.costSettings || {};
+      container.innerHTML =
+        '<div style="display:flex;flex-direction:column;gap:10px;">' +
+          '<div class="settings-input-group">' +
+            '<label class="settings-input-label">PromoVault API Key</label>' +
+            '<input type="text" class="form-input" id="signsPromoVaultKey" placeholder="pv_live_..." value="' + (cs.promoVaultApiKey || '') + '">' +
+          '</div>' +
+          '<div class="settings-input-group">' +
+            '<label class="settings-input-label">Signs per Reward</label>' +
+            '<input type="number" class="form-input" id="signsRewardThreshold" placeholder="10" value="' + (cs.signsRewardThreshold || '') + '" min="1" inputmode="numeric">' +
+          '</div>' +
+          '<div class="settings-input-group">' +
+            '<label class="settings-input-label">Reward Amount ($)</label>' +
+            '<input type="number" class="form-input" id="signsRewardAmount" placeholder="10" value="' + (cs.signsRewardAmount || '') + '" min="1" inputmode="decimal">' +
+          '</div>' +
+          '<div class="settings-input-group">' +
+            '<label class="settings-input-label">Reward Period</label>' +
+            '<select class="form-select" id="signsRewardPeriod">' +
+              '<option value="monthly"' + (cs.signsRewardPeriod === 'monthly' ? ' selected' : '') + '>Monthly</option>' +
+              '<option value="weekly"' + (cs.signsRewardPeriod === 'weekly' ? ' selected' : '') + '>Weekly</option>' +
+              '<option value="campaign"' + (cs.signsRewardPeriod === 'campaign' ? ' selected' : '') + '>Per Campaign</option>' +
+              '<option value="cumulative"' + (cs.signsRewardPeriod === 'cumulative' ? ' selected' : '') + '>Cumulative</option>' +
+            '</select>' +
+          '</div>' +
+          '<button onclick="saveRewardsSettings()" style="width:100%;padding:12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;color:#000;cursor:pointer;margin-top:4px;">Save Rewards Settings</button>' +
+          '<div id="rewardsMgmtFeedback" style="font-size:12px;margin-top:4px;min-height:16px;"></div>' +
+        '</div>';
+    }
+
+    async function saveRewardsSettings() {
+      const feedback = document.getElementById('rewardsMgmtFeedback');
+      if (!currentUser.costSettings) currentUser.costSettings = {};
+      currentUser.costSettings.promoVaultApiKey = document.getElementById('signsPromoVaultKey').value.trim();
+      currentUser.costSettings.signsRewardThreshold = document.getElementById('signsRewardThreshold').value.trim();
+      currentUser.costSettings.signsRewardAmount = document.getElementById('signsRewardAmount').value.trim();
+      currentUser.costSettings.signsRewardPeriod = document.getElementById('signsRewardPeriod').value;
+      try {
+        feedback.textContent = 'Saving...';
+        feedback.style.color = 'var(--text-muted)';
+        await saveCostSettings();
+        feedback.style.color = 'var(--accent-green)';
+        feedback.textContent = '✓ Saved';
+      } catch(e) {
+        feedback.style.color = '#ef4444';
+        feedback.textContent = 'Save failed.';
+      }
+    }
+
+    function renderCrewSignsView() {
+      const container = document.getElementById('signsCrewContent');
+      container.innerHTML =
+        '<div style="text-align:center;padding:24px 0;">' +
+          '<div style="font-size:48px;margin-bottom:12px;">🪧</div>' +
+          '<div style="font-size:16px;font-weight:700;margin-bottom:4px;">Ready to place signs?</div>' +
+          '<div style="font-size:13px;color:var(--text-muted);margin-bottom:24px;">Start a session to log your sign placements.</div>' +
+          '<button onclick="startSignsSession()" style="padding:14px 32px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:15px;font-weight:700;color:#000;cursor:pointer;">📍 Start Session</button>' +
+        '</div>';
     }
 
     // ===== BOOT =====
