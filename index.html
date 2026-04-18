@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.7.1 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.7.2 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.7.1 | 2026-04-13 -->
+<!-- CrewLogic v4.7.2 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4380,7 +4380,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.7.1 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.7.2 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -9347,15 +9347,28 @@
         const qty = parseFloat(c.qty) || 0;
         const unit = parseFloat(c.unitPrice) || 0;
         const lineTotal = qty * unit;
+        const hasDesc = !!(c.description && c.description.trim());
+        const rowH = hasDesc ? 28 : 18;
         if (i % 2 === 0) {
           doc.setFillColor(...offwhite);
-          doc.rect(margin, y - 2, W - 2 * margin, 18, 'F');
+          doc.rect(margin, y - 2, W - 2 * margin, rowH, 'F');
         }
         doc.setTextColor(...dark);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
         const label = (c.name || '') + (qty !== 1 ? ' × ' + qty : '');
         doc.text(label, col.area, y + 10);
+        // Description line in gray italic below name
+        if (hasDesc) {
+          doc.setFont('helvetica', 'italic');
+          doc.setFontSize(7.5);
+          doc.setTextColor(...gray);
+          const descText = doc.splitTextToSize(c.description.trim(), col.price - col.area - 4);
+          doc.text(descText[0], col.area + 2, y + 20); // show first line only
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9);
+        }
+        doc.setTextColor(...dark);
         doc.text(fmtMoney(Math.abs(unit)), col.price, y + 10, { align: 'right' });
         const isNeg = lineTotal < 0;
         doc.setTextColor(isNeg ? 220 : dark[0], isNeg ? 50 : dark[1], isNeg ? 50 : dark[2]);
@@ -9390,7 +9403,7 @@
             doc.setFont('helvetica', 'normal');
           }
         }
-        y += 20;
+        y += hasDesc ? 32 : 20;
       };
 
       // Section header for surcharges
