@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.7.5 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.7.6 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.7.5 | 2026-04-13 -->
+<!-- CrewLogic v4.7.6 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4380,7 +4380,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.7.5 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.7.6 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6081,9 +6081,7 @@
       e.stopPropagation();
       const charges = currentEstimate.charges;
       const isTouch = e.type === 'touchstart';
-      const startY = isTouch ? e.touches[0].clientY : e.clientY;
 
-      // Find the outer row element
       const handle = e.currentTarget;
       const row = handle.closest('.room-row, .charge-row');
       if (!row) return;
@@ -6091,42 +6089,32 @@
       const allRows = Array.from(container.querySelectorAll('.room-row, .charge-row'));
       const rowIdx = allRows.indexOf(row);
 
-      // Clear any stale ghosts from previous drags
-      document.querySelectorAll('.charge-drag-ghost').forEach(g => g.remove());
+      // Dim the dragging row
+      row.style.opacity = '0.4';
 
-      // Ghost — clone only the header div (first child), not the expanded body
-      const headerDiv = row.firstElementChild;
-      const ghost = document.createElement('div');
-      ghost.className = 'charge-drag-ghost';
-      ghost.innerHTML = headerDiv ? headerDiv.outerHTML : '';
-      const rowRect = row.getBoundingClientRect();
-      ghost.style.cssText = 'position:fixed;left:' + rowRect.left + 'px;top:' + rowRect.top + 'px;width:' + row.offsetWidth + 'px;opacity:0.9;pointer-events:none;z-index:999;box-shadow:0 8px 24px rgba(0,0,0,0.5);border-radius:var(--radius-sm);background:var(--bg-card);border:1px solid var(--accent-green);';
-      document.body.appendChild(ghost);
-      // Highlight source row with a border, not opacity change
-      row.style.outline = '2px solid var(--accent-green)';
-      row.style.outlineOffset = '-2px';
+      _dragState = { globalIdx, rowIdx, row, container, allRows, charges, currentTarget: null, lastClientY: 0 };
 
-      _dragState = { globalIdx, rowIdx, row, ghost, startY, container, allRows, charges };
+      const clearIndicators = () => {
+        allRows.forEach(r => { r.style.borderTop = ''; r.style.borderBottom = ''; });
+      };
 
       const onMove = (ev) => {
+        if (ev.cancelable) ev.preventDefault();
         const clientY = ev.touches ? ev.touches[0].clientY : ev.clientY;
-        const dy = clientY - startY;
-        ghost.style.top = (row.getBoundingClientRect().top + dy) + 'px';
-
-        // Find which row we're hovering over
-        const hoverY = clientY;
-        let targetRowIdx = _dragState.rowIdx;
+        _dragState.lastClientY = clientY;
+        clearIndicators();
+        let found = null;
         allRows.forEach((r, i) => {
+          if (i === rowIdx) return;
           const rect = r.getBoundingClientRect();
-          if (hoverY > rect.top && hoverY < rect.bottom) targetRowIdx = i;
+          if (clientY >= rect.top && clientY <= rect.bottom) {
+            found = i;
+            const mid = rect.top + rect.height / 2;
+            r.style.borderTop = clientY < mid ? '3px solid var(--accent-green)' : '';
+            r.style.borderBottom = clientY >= mid ? '3px solid var(--accent-green)' : '';
+          }
         });
-
-        if (targetRowIdx !== _dragState.currentTarget) {
-          _dragState.currentTarget = targetRowIdx;
-          allRows.forEach((r, i) => {
-            r.style.borderTop = i === targetRowIdx && i !== rowIdx ? '2px solid var(--accent-green)' : '';
-          });
-        }
+        _dragState.currentTarget = found;
       };
 
       const onEnd = () => {
@@ -6134,27 +6122,25 @@
         document.removeEventListener('mouseup', onEnd);
         document.removeEventListener('touchmove', onMove);
         document.removeEventListener('touchend', onEnd);
+        document.removeEventListener('touchcancel', onEnd);
 
-        ghost.remove();
-        row.style.outline = '';
-        row.style.outlineOffset = '';
-        allRows.forEach(r => r.style.borderTop = '');
+        row.style.opacity = '';
+        clearIndicators();
 
         const targetRowIdx = _dragState.currentTarget;
-        if (targetRowIdx != null && targetRowIdx !== rowIdx) {
-          // Map row indices back to charge indices
-          const fromChargeIdx = parseInt(allRows[rowIdx].querySelector('[data-charge-idx]')?.getAttribute('data-charge-idx') ?? allRows[rowIdx].querySelector('[data-idx]')?.getAttribute('data-idx'));
-          const toChargeIdx = parseInt(allRows[targetRowIdx].querySelector('[data-charge-idx]')?.getAttribute('data-charge-idx') ?? allRows[targetRowIdx].querySelector('[data-idx]')?.getAttribute('data-idx'));
-
+        if (targetRowIdx !== null && targetRowIdx !== rowIdx) {
+          const fromChargeIdx = parseInt(allRows[rowIdx].querySelector('[data-charge-idx]')?.getAttribute('data-charge-idx'));
+          const toChargeIdx = parseInt(allRows[targetRowIdx].querySelector('[data-charge-idx]')?.getAttribute('data-charge-idx'));
           if (!isNaN(fromChargeIdx) && !isNaN(toChargeIdx) && fromChargeIdx !== toChargeIdx) {
-            // Only allow reorder within same section (both volume or both non-volume)
             const fromCharge = charges[fromChargeIdx];
             const toCharge = charges[toChargeIdx];
+            // Only reorder within same section
             if (fromCharge && toCharge && (fromCharge.type === 'volume') === (toCharge.type === 'volume')) {
-              // Reorder
+              const targetRect = allRows[targetRowIdx].getBoundingClientRect();
+              const insertBefore = _dragState.lastClientY < targetRect.top + targetRect.height / 2;
               charges.splice(fromChargeIdx, 1);
               const newToIdx = charges.indexOf(toCharge);
-              charges.splice(targetRowIdx < rowIdx ? newToIdx : newToIdx + 1, 0, fromCharge);
+              charges.splice(insertBefore ? newToIdx : newToIdx + 1, 0, fromCharge);
               isDirty = true;
               renderCharges();
               updateTotals();
