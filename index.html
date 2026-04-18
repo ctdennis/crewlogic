@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.6.6 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.6.7 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.6.6 | 2026-04-13 -->
+<!-- CrewLogic v4.6.7 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4380,7 +4380,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.6.6 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.6.7 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5625,8 +5625,14 @@
         (!currentEstimate.clonedFrom && currentEstimate.status === 'submitted');
 
       if (isSubmitted) {
-        submitBtn.disabled = true;
-        submitBtn.querySelector('.btn-text').textContent = 'Submitted ✓';
+        // Only disable if attached to a job — draft submissions can be re-submitted
+        if (currentEstimate.jobID) {
+          submitBtn.disabled = true;
+          submitBtn.querySelector('.btn-text').textContent = 'Submitted ✓';
+        } else {
+          submitBtn.disabled = false;
+          submitBtn.querySelector('.btn-text').textContent = 'Submit to Vonigo';
+        }
         if (currentEstimate.vonigoQuoteID) {
           feedbackEl.textContent = 'Submitted to Vonigo — Estimate #' + currentEstimate.vonigoQuoteID;
           feedbackEl.className = 'settings-feedback ok';
@@ -8132,8 +8138,13 @@
           await saveEstimateDraft();
           feedbackEl.textContent = '✓ Submitted to Vonigo — Estimate #' + data.quoteID;
           feedbackEl.className = 'settings-feedback ok';
-          btn.disabled = true;
-          btn.querySelector('.btn-text').textContent = 'Submitted ✓';
+          // Only disable button if attached to a job — drafts can be re-submitted
+          if (attachToJob) {
+            btn.disabled = true;
+            btn.querySelector('.btn-text').textContent = 'Submitted ✓';
+          } else {
+            btn.querySelector('.btn-text').textContent = 'Submit to Vonigo';
+          }
           document.getElementById('estZipStatus').textContent = '✓ ' + (currentEstimate.priceListName || '') + '  |  Vonigo #' + data.quoteID;
           document.getElementById('estZipStatus').className = 'zip-status ok';
 
