@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.7.9 | 2026-04-18">
+  <meta name="crewlogic-version" content="v4.8.0 | 2026-04-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.7.9 | 2026-04-18 -->
+<!-- CrewLogic v4.8.0 | 2026-04-18 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4380,7 +4380,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.7.9 | 2026-04-18 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.8.0 | 2026-04-18 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6099,28 +6099,31 @@
       ghost.className = 'charge-drag-ghost';
       ghost.innerHTML = headerDiv ? headerDiv.outerHTML : '';
       const rowRect = headerDiv ? headerDiv.getBoundingClientRect() : row.getBoundingClientRect();
+      const ghostOffsetY = rowRect.top - (e.touches ? e.touches[0].clientY : e.clientY);
       ghost.style.cssText = 'position:fixed;left:' + rowRect.left + 'px;top:' + rowRect.top + 'px;width:' + rowRect.width + 'px;height:' + rowRect.height + 'px;opacity:0.9;pointer-events:none;z-index:999;box-shadow:0 8px 24px rgba(0,0,0,0.5);border-radius:var(--radius-sm);background:var(--bg-card);border:1px solid var(--accent-green);overflow:hidden;';
       document.body.appendChild(ghost);
       row.style.outline = '2px solid var(--accent-green)';
       row.style.outlineOffset = '-2px';
 
-      _dragState = { globalIdx, rowIdx, row, ghost, startY, ghostStartTop: rowRect.top, container, allRows, charges, currentTarget: null };
+      _dragState = { globalIdx, rowIdx, row, ghost, ghostOffsetY, container, allRows, charges, currentTarget: null };
 
       const onMove = (ev) => {
         if (ev.cancelable) ev.preventDefault();
         const clientY = ev.touches ? ev.touches[0].clientY : ev.clientY;
         const dy = clientY - startY;
-        ghost.style.top = (_dragState.ghostStartTop + dy) + 'px';
+        ghost.style.top = (clientY + _dragState.ghostOffsetY) + 'px';
 
         // Clear all indicators
         allRows.forEach(r => { r.style.borderTop = ''; r.style.borderBottom = ''; });
 
-        // Find target row
+        // Hit-test against header divs only (firstElementChild) — not full expanded rows
         let targetRowIdx = null;
         allRows.forEach((r, i) => {
           if (i === rowIdx) return;
-          const rect = r.getBoundingClientRect();
-          if (clientY > rect.top && clientY < rect.bottom) {
+          const header = r.firstElementChild;
+          if (!header) return;
+          const rect = header.getBoundingClientRect();
+          if (clientY >= rect.top && clientY <= rect.bottom) {
             targetRowIdx = i;
             const mid = rect.top + rect.height / 2;
             if (clientY < mid) r.style.borderTop = '3px solid var(--accent-green)';
