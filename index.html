@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.7.2 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.7.3 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.7.2 | 2026-04-13 -->
+<!-- CrewLogic v4.7.3 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4380,7 +4380,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.7.2 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.7.3 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6073,6 +6073,94 @@
       }
     }
 
+    // ===== CHARGE DRAG TO REORDER =====
+    let _dragState = null;
+
+    function startChargeDrag(e, globalIdx) {
+      e.preventDefault();
+      e.stopPropagation();
+      const charges = currentEstimate.charges;
+      const isTouch = e.type === 'touchstart';
+      const startY = isTouch ? e.touches[0].clientY : e.clientY;
+
+      // Find the outer row element
+      const handle = e.currentTarget;
+      const row = handle.closest('.room-row, .charge-row');
+      if (!row) return;
+      const container = document.getElementById('estChargesList');
+      const allRows = Array.from(container.querySelectorAll('.room-row, .charge-row'));
+      const rowIdx = allRows.indexOf(row);
+
+      // Ghost element
+      const ghost = row.cloneNode(true);
+      ghost.style.cssText = 'position:fixed;left:' + row.getBoundingClientRect().left + 'px;top:' + row.getBoundingClientRect().top + 'px;width:' + row.offsetWidth + 'px;opacity:0.85;pointer-events:none;z-index:999;box-shadow:0 8px 24px rgba(0,0,0,0.4);border-radius:var(--radius-sm);';
+      document.body.appendChild(ghost);
+      row.style.opacity = '0.3';
+
+      _dragState = { globalIdx, rowIdx, row, ghost, startY, container, allRows, charges };
+
+      const onMove = (ev) => {
+        const clientY = ev.touches ? ev.touches[0].clientY : ev.clientY;
+        const dy = clientY - startY;
+        ghost.style.top = (row.getBoundingClientRect().top + dy) + 'px';
+
+        // Find which row we're hovering over
+        const hoverY = clientY;
+        let targetRowIdx = _dragState.rowIdx;
+        allRows.forEach((r, i) => {
+          const rect = r.getBoundingClientRect();
+          if (hoverY > rect.top && hoverY < rect.bottom) targetRowIdx = i;
+        });
+
+        if (targetRowIdx !== _dragState.currentTarget) {
+          _dragState.currentTarget = targetRowIdx;
+          allRows.forEach((r, i) => {
+            r.style.borderTop = i === targetRowIdx && i !== rowIdx ? '2px solid var(--accent-green)' : '';
+          });
+        }
+      };
+
+      const onEnd = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onEnd);
+        document.removeEventListener('touchmove', onMove);
+        document.removeEventListener('touchend', onEnd);
+
+        ghost.remove();
+        row.style.opacity = '';
+        allRows.forEach(r => r.style.borderTop = '');
+
+        const targetRowIdx = _dragState.currentTarget;
+        if (targetRowIdx != null && targetRowIdx !== rowIdx) {
+          // Map row indices back to charge indices
+          const fromChargeIdx = parseInt(allRows[rowIdx].querySelector('[data-charge-idx]')?.getAttribute('data-charge-idx') ?? allRows[rowIdx].querySelector('[data-idx]')?.getAttribute('data-idx'));
+          const toChargeIdx = parseInt(allRows[targetRowIdx].querySelector('[data-charge-idx]')?.getAttribute('data-charge-idx') ?? allRows[targetRowIdx].querySelector('[data-idx]')?.getAttribute('data-idx'));
+
+          if (!isNaN(fromChargeIdx) && !isNaN(toChargeIdx) && fromChargeIdx !== toChargeIdx) {
+            // Only allow reorder within same section (both volume or both non-volume)
+            const fromCharge = charges[fromChargeIdx];
+            const toCharge = charges[toChargeIdx];
+            if (fromCharge && toCharge && (fromCharge.type === 'volume') === (toCharge.type === 'volume')) {
+              // Reorder
+              charges.splice(fromChargeIdx, 1);
+              const newToIdx = charges.indexOf(toCharge);
+              charges.splice(targetRowIdx < rowIdx ? newToIdx : newToIdx + 1, 0, fromCharge);
+              isDirty = true;
+              renderCharges();
+              updateTotals();
+              autoSaveDraft();
+            }
+          }
+        }
+        _dragState = null;
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onEnd);
+      document.addEventListener('touchmove', onMove, { passive: false });
+      document.addEventListener('touchend', onEnd);
+    }
+
     async function analyzeChargePhoto(chargeIdx) {
       const charge = currentEstimate.charges[chargeIdx];
       if (!charge.photos) charge.photos = charge.photoUrl ? [charge.photoUrl] : [];
@@ -6903,7 +6991,9 @@
           html += '<div class="room-row" style="padding:0;overflow:hidden;">';
 
           // Always-visible header row
-          html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;background:var(--bg-card);" onclick="toggleChargeCollapse(' + globalIdx + ')">';
+          html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--bg-card);" data-charge-idx="' + globalIdx + '">';
+          html += '<div class="drag-handle" onmousedown="startChargeDrag(event,' + globalIdx + ')" ontouchstart="startChargeDrag(event,' + globalIdx + ')" style="cursor:grab;padding:4px 6px;color:var(--text-muted);font-size:14px;flex-shrink:0;touch-action:none;">☰</div>';
+          html += '<div style="flex:1;min-width:0;display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="toggleChargeCollapse(' + globalIdx + ')">';
           html += '<div style="flex:1;min-width:0;">';
           html += '<div style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + roomLabel.replace(/</g,'&lt;') + '</div>';
           if (areaLabel) html += '<div style="font-size:11px;color:var(--text-muted);">' + areaLabel.replace(/</g,'&lt;') + '</div>';
@@ -7025,7 +7115,9 @@
           html += '<div class="charge-row" style="padding:0;overflow:hidden;">';
 
           // Always-visible header
-          html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;background:var(--bg-card);" onclick="toggleChargeCollapse(' + globalIdx + ')">';
+          html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--bg-card);" data-charge-idx="' + globalIdx + '">';
+          html += '<div class="drag-handle" onmousedown="startChargeDrag(event,' + globalIdx + ')" ontouchstart="startChargeDrag(event,' + globalIdx + ')" style="cursor:grab;padding:4px 6px;color:var(--text-muted);font-size:14px;flex-shrink:0;touch-action:none;">☰</div>';
+          html += '<div style="flex:1;min-width:0;display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="toggleChargeCollapse(' + globalIdx + ')">';
           html += '<div style="flex:1;min-width:0;">';
           html += '<div style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (charge.name || '') + '</div>';
           html += '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">' + (charge.type || '') + ' · qty ' + (charge.qty || 0) + '</div>';
