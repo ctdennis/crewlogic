@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.6.5 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.6.6 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.6.5 | 2026-04-13 -->
+<!-- CrewLogic v4.6.6 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4380,7 +4380,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.6.5 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.6.6 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6029,6 +6029,32 @@
     }
 
     // ===== CHARGE ANALYZE — uses photos + description via analyzeVoice =====
+    async function downloadChargePhotos(chargeIdx) {
+      const charge = currentEstimate.charges[chargeIdx];
+      if (!charge.photos || !charge.photos.length) return;
+      const label = (charge.room || 'photo').replace(/[^a-z0-9]/gi, '_');
+      for (let i = 0; i < charge.photos.length; i++) {
+        const url = charge.photos[i];
+        if (!url) continue;
+        try {
+          let src = await resolvePhotoUrl(url);
+          if (!src) continue;
+          // Convert Drive URLs to lh3
+          if (src.includes('drive.google.com')) {
+            const m = src.match(/[?&]id=([^&]+)/) || src.match(/\/d\/([a-zA-Z0-9_-]+)/);
+            if (m) src = 'https://lh3.googleusercontent.com/d/' + m[1] + '=s1600';
+          }
+          const a = document.createElement('a');
+          a.href = src;
+          a.download = label + '_' + (i + 1) + '.jpg';
+          a.target = '_blank';
+          a.click();
+          // Stagger downloads slightly
+          await new Promise(r => setTimeout(r, 400));
+        } catch(e) {}
+      }
+    }
+
     async function analyzeChargePhoto(chargeIdx) {
       const charge = currentEstimate.charges[chargeIdx];
       if (!charge.photos) charge.photos = charge.photoUrl ? [charge.photoUrl] : [];
@@ -6486,11 +6512,27 @@
           if (m) src = 'https://lh3.googleusercontent.com/d/' + m[1] + '=s1600';
         }
         if (src) {
+          const wrapper = document.createElement('div');
+          wrapper.style.cssText = 'position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;';
           const img = document.createElement('img');
-          img.style.cssText = 'max-width:95vw;max-height:90vh;object-fit:contain;border-radius:8px;';
+          img.style.cssText = 'max-width:95vw;max-height:85vh;object-fit:contain;border-radius:8px;';
           img.src = src;
-          img.onerror = () => { spinner.textContent = 'Photo unavailable — may have been removed from Google Drive.'; overlay.replaceChild(spinner, img); };
-          overlay.replaceChild(img, spinner);
+          img.onerror = () => { spinner.textContent = 'Photo unavailable — may have been removed from Google Drive.'; overlay.replaceChild(spinner, wrapper); };
+          // Download button
+          const dlBtn = document.createElement('button');
+          dlBtn.textContent = '⬇ Download';
+          dlBtn.style.cssText = 'padding:8px 20px;background:var(--accent-green);border:none;border-radius:8px;font-size:13px;font-weight:700;color:#000;cursor:pointer;';
+          dlBtn.onclick = (e) => {
+            e.stopPropagation();
+            const a = document.createElement('a');
+            a.href = src;
+            a.download = url.split('/').pop() || 'photo.jpg';
+            a.target = '_blank';
+            a.click();
+          };
+          wrapper.appendChild(img);
+          wrapper.appendChild(dlBtn);
+          overlay.replaceChild(wrapper, spinner);
         } else {
           spinner.textContent = 'Could not load photo.';
         }
@@ -6935,6 +6977,7 @@
             html += '<button onclick="captureChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:var(--text-secondary);cursor:pointer;">📷 Add Photo</button>';
           }
           html += '<button data-analyze="' + globalIdx + '" onclick="analyzeChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:#000;font-weight:600;cursor:pointer;">🤖 Analyze' + (photos.length > 1 ? ' (' + photos.length + ')' : '') + '</button>';
+          if (photos.length > 0) html += '<button onclick="downloadChargePhotos(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:var(--text-secondary);cursor:pointer;">⬇ Download' + (photos.length > 1 ? ' All' : '') + '</button>';
           html += '</div>';
           html += '</div>';
 
