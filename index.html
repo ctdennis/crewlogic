@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.6.3 | 2026-04-13">
+  <meta name="crewlogic-version" content="v4.6.4 | 2026-04-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.6.3 | 2026-04-13 -->
+<!-- CrewLogic v4.6.4 | 2026-04-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2961,7 +2961,7 @@
             if (wasInvite) {
               // Load franchise info from Supabase for the new team member
               const profileData = await supabaseFetch(
-                '/rest/v1/profiles?select=role,franchise_id,franchises(external_id,franchise_name,cost_settings)&email=eq.' + encodeURIComponent(session.email)
+                '/rest/v1/profiles?select=role,franchise_id,franchises(external_id,franchise_name,cost_settings,subscription_tier)&email=eq.' + encodeURIComponent(session.email)
               );
               if (profileData && profileData[0]) {
                 const p = profileData[0];
@@ -2970,6 +2970,7 @@
                   currentUser.franchiseID = p.franchises.external_id;
                   currentUser.franchiseName = p.franchises.franchise_name;
                   currentUser.costSettings = p.franchises.cost_settings || {};
+                  currentUser.subscriptionTier = p.franchises.subscription_tier || 'free';
                   // Also populate top-level currentUser fields from costSettings
                   const _cs = currentUser.costSettings;
                   if (_cs.phone) currentUser.phone = _cs.phone;
@@ -4221,10 +4222,11 @@
 
       // Re-fetch costSettings from Supabase to ensure proposal fields aren't stale/stripped
       supabaseFetch(
-        '/rest/v1/profiles?select=franchises(cost_settings)&email=eq.' + encodeURIComponent(currentUser.email)
+        '/rest/v1/profiles?select=franchises(cost_settings,subscription_tier)&email=eq.' + encodeURIComponent(currentUser.email)
       ).then(data => {
         if (data && data[0] && data[0].franchises && data[0].franchises.cost_settings) {
           currentUser.costSettings = data[0].franchises.cost_settings;
+          if (data[0].franchises.subscription_tier) currentUser.subscriptionTier = data[0].franchises.subscription_tier;
           // Also sync top-level fields
           const _rcs = currentUser.costSettings;
           if (_rcs.phone) currentUser.phone = _rcs.phone;
@@ -4366,7 +4368,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.6.3 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.6.4 | 2026-04-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -8778,7 +8780,7 @@
       // Ensure costSettings has latest proposal fields from Supabase before rendering
       if (!currentUser.costSettings?.proposalTagline && !opts.skipBoilerplate) {
         try {
-          const csData = await supabaseFetch('/rest/v1/profiles?select=franchises(cost_settings)&email=eq.' + encodeURIComponent(currentUser.email));
+          const csData = await supabaseFetch('/rest/v1/profiles?select=franchises(cost_settings,subscription_tier)&email=eq.' + encodeURIComponent(currentUser.email));
           if (csData && csData[0] && csData[0].franchises && csData[0].franchises.cost_settings) {
             currentUser.costSettings = csData[0].franchises.cost_settings;
           }
