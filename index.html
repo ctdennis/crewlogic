@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.9.7 | 2026-04-19">
+  <meta name="crewlogic-version" content="v4.9.8 | 2026-04-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.9.7 | 2026-04-19 -->
+<!-- CrewLogic v4.9.8 | 2026-04-19 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1309,11 +1309,11 @@
             <div class="settings-input-group">
               <label class="settings-input-label">Email body sent with the PDF proposal</label>
               <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">
-                Available tags: <code>{{firstName}}</code> <code>{{fullName}}</code> <code>{{address}}</code> <code>{{city}}</code> <code>{{ownerName}}</code> <code>{{franchiseName}}</code> <code>{{phone}}</code>
+                Available tags: <code>{{firstName}}</code> <code>{{fullName}}</code> <code>{{street}}</code> <code>{{city}}</code> <code>{{address}}</code> <code>{{ownerName}}</code> <code>{{franchiseName}}</code> <code>{{phone}}</code>
               </div>
               <textarea class="form-input" id="settingsProposalEmailTemplate" rows="8" placeholder="Dear {{firstName}},
 
-Thank you for the opportunity to serve you. We've prepared the enclosed proposal for the removal of items at {{address}}, {{city}}, and look forward to making this a seamless experience for you.
+Thank you for the opportunity to serve you. We've prepared the enclosed proposal for your property at {{street}} in {{city}}, and look forward to making this a seamless experience for you.
 
 Our fully insured, background-checked team takes pride in responsible junk removal — recycling and donating what we can to keep items out of landfills.
 
@@ -4432,7 +4432,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.9.7 | 2026-04-19 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.9.8 | 2026-04-19 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -11247,12 +11247,22 @@ RECYCLING & DONATION
     // ===== PROPOSAL SETTINGS =====
     const PROPOSAL_FIELDS = ['Tagline','About','ServiceArea','Terms','EmailTemplate'];
 
+    function toTitleCase(str) {
+      if (!str) return '';
+      // Words that should stay lowercase (unless first word)
+      const lower = new Set(['a','an','the','and','but','or','for','nor','on','at','to','by','in','of','up']);
+      return str.toLowerCase().replace(/\w\S*/g, (word, offset) => {
+        if (offset > 0 && lower.has(word)) return word;
+        return word.charAt(0).toUpperCase() + word.slice(1);
+      });
+    }
+
     function buildEmailBody(estimate) {
       const cs = currentUser.costSettings || {};
-      const template = cs.proposalEmailTemplate || 
+      const template = cs.proposalEmailTemplate ||
 `Dear {{firstName}},
 
-Thank you for the opportunity to serve you. We've prepared the enclosed proposal for the removal of items at {{address}}, {{city}}, and look forward to making this a seamless experience for you.
+Thank you for the opportunity to serve you. We've prepared the enclosed proposal for your property at {{street}} in {{city}}, and look forward to making this a seamless experience for you.
 
 Our fully insured, background-checked team takes pride in responsible junk removal — recycling and donating what we can to keep items out of landfills. You'll receive a donation receipt within 14 business days for any qualifying items.
 
@@ -11261,6 +11271,14 @@ Please review the estimate below. If you have any questions or would like to adj
 {{ownerName}}
 {{franchiseName}}
 {{phone}}`;
+
+      // Parse address — Vonigo returns "123 MAIN ST\nCITY, MA 02345" or "123 MAIN ST, CITY, MA 02345"
+      const rawAddress = estimate.address || '';
+      const normalized = rawAddress.replace(/\n/g, ', ');
+      // Split on comma — first part is street, next is city
+      const parts = normalized.split(',').map(s => s.trim());
+      const street = toTitleCase(parts[0] || '');
+      const city = toTitleCase(parts[1] || '');
 
       const clientNameRaw = estimate.clientName || '';
       const nameParts = clientNameRaw.includes(',')
@@ -11274,8 +11292,9 @@ Please review the estimate below. If you have any questions or would like to adj
       return template
         .replace(/{{firstName}}/g, firstName)
         .replace(/{{fullName}}/g, fullName || firstName)
-        .replace(/{{address}}/g, estimate.address || '')
-        .replace(/{{city}}/g, (estimate.address || '').split(',').pop()?.trim() || estimate.zip || '')
+        .replace(/{{street}}/g, street)
+        .replace(/{{city}}/g, city)
+        .replace(/{{address}}/g, street + (city ? ', ' + city : ''))
         .replace(/{{ownerName}}/g, currentUser.name || '')
         .replace(/{{franchiseName}}/g, 'Junkluggers of ' + (currentUser.franchiseName || ''))
         .replace(/{{phone}}/g, currentUser.phone || cs.phone || '');
