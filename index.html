@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.8.5 | 2026-04-18">
+  <meta name="crewlogic-version" content="v4.8.8 | 2026-04-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.8.5 | 2026-04-18 -->
+<!-- CrewLogic v4.8.8 | 2026-04-19 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2925,6 +2925,21 @@
       return res;
     }
 
+    // ===== ANALYZE VOICE — direct Supabase Edge Function call =====
+    async function callAnalyzeVoice({ transcript, areas, photos }) {
+      const res = await fetch('https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1/crewlogic-ai', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + (currentUser?.token || ''),
+          'apikey': 'sb_publishable_Jcy2e2s2x12kY0Az6jGzUw_Jn3ikNpt'
+        },
+        body: JSON.stringify({ action: 'analyzeEstimate', transcript, areas, photos })
+      });
+      if (!res.ok) throw new Error('crewlogic-ai: HTTP ' + res.status);
+      return res.json();
+    }
+
     // ===== GOOGLE SIGN-IN — OAuth2 popup flow (no GIS/cookies needed) =====
     const OAUTH_REDIRECT = 'https://junkluggers.app.n8n.cloud/webhook/crewlogic-oauth-callback';
 
@@ -4384,7 +4399,7 @@
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.8.5 | 2026-04-18 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v4.8.8 | 2026-04-19 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5925,17 +5940,7 @@
       const allVoiceBtns = document.querySelectorAll('.voice-room-btn');
       const status = document.getElementById('roomVoiceStatus');
       try {
-        const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
-          method: 'POST',
-          body: JSON.stringify({
-            action: 'analyzeVoice',
-            email: currentUser.email,
-            franchiseID: currentUser.franchiseID,
-            transcript,
-            areas: availableAreas
-          })
-        });
-        const data = await response.json();
+        const data = await callAnalyzeVoice({ transcript, areas: availableAreas });
         if (!data.success) throw new Error(data.error || 'Analysis failed');
 
         const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
@@ -6228,19 +6233,7 @@
             }))
           : undefined;
 
-        const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
-          method: 'POST',
-          body: JSON.stringify({
-            action: 'analyzeVoice',
-            email: currentUser.email,
-            franchiseID: currentUser.franchiseID,
-            transcript,
-            areas: availableAreas,
-            photos: resolvedPhotos
-          })
-        });
-
-        const data = await response.json();
+        const data = await callAnalyzeVoice({ transcript, areas: availableAreas, photos: resolvedPhotos });
         if (data.success) {
           const results = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
           const vol = results.find(c => c.type === 'volume');
@@ -6396,17 +6389,7 @@
       if (reanalyzeBtn) { reanalyzeBtn.textContent = '⏳ Analyzing...'; reanalyzeBtn.disabled = true; }
 
       try {
-        const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
-          method: 'POST',
-          body: JSON.stringify({
-            action: 'analyzeVoice',
-            email: currentUser.email,
-            franchiseID: currentUser.franchiseID,
-            transcript: charge.room + ': ' + charge.description,
-            areas: availableAreas
-          })
-        });
-        const data = await response.json();
+        const data = await callAnalyzeVoice({ transcript: charge.room + ': ' + charge.description, areas: availableAreas });
         if (data.success) {
           const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
           const vol = charges.find(c => c.type === 'volume');
@@ -6788,20 +6771,9 @@
       status.textContent = '🤖 Analyzing... "' + transcript + '"';
 
       try {
-        const response = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
-          method: 'POST',
-          body: JSON.stringify({
-            action: 'analyzeVoice',
-            email: currentUser.email,
-            franchiseID: currentUser.franchiseID,
-            transcript,
-            areas: availableAreas
-          })
-        });
-
-        const data = await response.json();
+        const data = await callAnalyzeVoice({ transcript, areas: availableAreas });
         if (!data.success) throw new Error(data.error || 'Analysis failed');
-        const result = data.result;
+        const result = data.charges?.[0] || data.result;
 
         // Pre-fill the volume form fields
         selectChargeType('volume');
@@ -8164,6 +8136,7 @@
         }
         return {
           priceItemID: String(item.priceItemID),
+          taxID: String(item.taxID || 146),
           Fields: [
             { fieldID: 9290, fieldValue: item.name },
             { fieldID: 9289, fieldValue: desc },
@@ -8187,6 +8160,7 @@
           }
           return {
             priceItemID: String(c.priceItemID),
+            taxID: String(c.taxID || 146),
             Fields: [
               { fieldID: 9290, fieldValue: c.name },
               { fieldID: 9289, fieldValue: desc },
@@ -10931,23 +10905,16 @@ RECYCLING & DONATION
         const timeout = setTimeout(() => controller.abort(), 45000); // 45 second timeout
         let res;
         try {
-          res = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
-            method: 'POST',
-            signal: controller.signal,
-            body: JSON.stringify({
-              action: 'analyzeVoice',
-              email: currentUser.email,
-              franchiseID: currentUser.franchiseID,
-              transcript: '[PHOTO ANALYSIS — no voice transcript. Analyze the provided photos to identify items and estimate volume.]',
-              areas: availableAreas,
-              photos: photosToAnalyze
-            })
+          res = await callAnalyzeVoice({
+            transcript: '[PHOTO ANALYSIS — no voice transcript. Analyze the provided photos to identify items and estimate volume.]',
+            areas: availableAreas,
+            photos: photosToAnalyze
           });
         } finally {
           clearTimeout(timeout);
         }
 
-        const data = await res.json();
+        const data = res;
 
         if (data.success) {
           const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
