@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v4.9.8 | 2026-04-19">
+  <meta name="crewlogic-version" content="v5.0.2 | 2026-04-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v4.9.8 | 2026-04-19 -->
+<!-- CrewLogic v5.0.2 | 2026-04-20 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1831,6 +1831,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <span class="btn-text">Submit to Vonigo</span>
           </button>
           <div class="settings-feedback" id="estFeedback" style="margin-top:8px;"></div>
+          <div id="photoPendingBadge" style="display:none;font-size:11px;color:var(--accent-yellow,#f59e0b);margin-top:4px;padding:4px 8px;background:rgba(245,158,11,0.1);border-radius:6px;border:1px solid rgba(245,158,11,0.3);">⏳ photos pending sync</div>
 
         </div><!-- end estMainContent -->
 
@@ -4154,6 +4155,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Check for solo approval token in URL
       checkApprovalToken();
 
+      // Drain any photos that were queued while offline
+      drainPhotoQueue();
+
       goHome();
     }
 
@@ -4432,7 +4436,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v4.9.8 | 2026-04-19 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.0.2 | 2026-04-20 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5200,6 +5204,275 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let availableAreas = [];
     let _pendingUploads = 0; // count of in-flight photo uploads
     let _suppressAutoSave = false; // true during initial field population to prevent stale writes
+
+    // ===== PHOTO QUEUE (IndexedDB) =====
+    // Photos are written to IndexedDB immediately on capture — safe even offline.
+    // Upload to Supabase Storage happens in the background; on success the path
+    // replaces the base64 reference and the estimate re-saves.
+    // On reload, any pending photos are merged back from IndexedDB so nothing is lost.
+
+    const PHOTO_DB_NAME = 'crewlogic_photos';
+    const PHOTO_STORE   = 'photo_queue';
+    let _photoDB = null;
+
+    function openPhotoDB() {
+      if (_photoDB) return Promise.resolve(_photoDB);
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(PHOTO_DB_NAME, 1);
+        req.onupgradeneeded = e => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(PHOTO_STORE)) {
+            const store = db.createObjectStore(PHOTO_STORE, { keyPath: 'photoID' });
+            store.createIndex('by_estimate', 'estimateID', { unique: false });
+            store.createIndex('by_status',   'status',     { unique: false });
+          }
+        };
+        req.onsuccess = e => { _photoDB = e.target.result; resolve(_photoDB); };
+        req.onerror   = e => reject(e.target.error);
+      });
+    }
+
+    async function idbPut(record) {
+      const db = await openPhotoDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(PHOTO_STORE, 'readwrite');
+        tx.objectStore(PHOTO_STORE).put(record);
+        tx.oncomplete = resolve;
+        tx.onerror = e => reject(e.target.error);
+      });
+    }
+
+    async function idbGet(photoID) {
+      const db = await openPhotoDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(PHOTO_STORE, 'readonly');
+        const req = tx.objectStore(PHOTO_STORE).get(photoID);
+        req.onsuccess = e => resolve(e.target.result);
+        req.onerror   = e => reject(e.target.error);
+      });
+    }
+
+    async function idbGetByEstimate(estimateID) {
+      const db = await openPhotoDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(PHOTO_STORE, 'readonly');
+        const idx = tx.objectStore(PHOTO_STORE).index('by_estimate');
+        const req = idx.getAll(estimateID);
+        req.onsuccess = e => resolve(e.target.result || []);
+        req.onerror   = e => reject(e.target.error);
+      });
+    }
+
+    async function idbDelete(photoID) {
+      const db = await openPhotoDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(PHOTO_STORE, 'readwrite');
+        tx.objectStore(PHOTO_STORE).delete(photoID);
+        tx.oncomplete = resolve;
+        tx.onerror = e => reject(e.target.error);
+      });
+    }
+
+    async function idbGetAllPending() {
+      const db = await openPhotoDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(PHOTO_STORE, 'readonly');
+        const req = tx.objectStore(PHOTO_STORE).index('by_status').getAll('pending');
+        req.onsuccess = e => resolve(e.target.result || []);
+        req.onerror   = e => reject(e.target.error);
+      });
+    }
+
+    // Generate a stable photoID for a given estimate + charge + position
+    function makePhotoID(estimateID, chargeIdx, timestamp) {
+      return 'photo_' + estimateID + '_' + chargeIdx + '_' + timestamp;
+    }
+
+    // Called immediately when user captures a photo.
+    // Writes to IndexedDB first (safe), then fires background upload.
+    async function queuePhotoCapture(chargeIdx, base64) {
+      const estimateID = currentEstimate.estimateID;
+      const timestamp  = Date.now();
+      const label      = (currentEstimate.charges[chargeIdx].room || 'room' + chargeIdx).replace(/[^a-z0-9_-]/gi, '_');
+      const photoID    = makePhotoID(estimateID, chargeIdx, timestamp);
+
+      const record = {
+        photoID,
+        estimateID,
+        chargeIdx,
+        label,
+        base64,
+        status: 'pending',       // pending | uploading | uploaded
+        supabasePath: null,
+        createdAt: new Date().toISOString()
+      };
+
+      // 1. Write to IndexedDB — safe even if offline
+      await idbPut(record);
+
+      // 2. Add to charge.photos as the photoID (stable reference)
+      if (!currentEstimate.charges[chargeIdx].photos) currentEstimate.charges[chargeIdx].photos = [];
+      currentEstimate.charges[chargeIdx].photos.push(photoID);
+      autoSaveDraft();
+      renderCharges();
+      updatePhotoCaptureOverlay();
+
+      // 3. Fire background upload — non-blocking
+      _uploadPhotoFromQueue(photoID);
+    }
+
+    // Upload one photo from IndexedDB queue to Supabase.
+    async function _uploadPhotoFromQueue(photoID) {
+      let record;
+      try {
+        record = await idbGet(photoID);
+        if (!record || record.status === 'uploaded') return;
+
+        // Mark as uploading
+        await idbPut({ ...record, status: 'uploading' });
+        _pendingUploads++;
+
+        const path = await uploadPhotoToSupabase(record.base64, record.estimateID, record.label);
+
+        // Success — update IndexedDB
+        await idbPut({ ...record, status: 'uploaded', supabasePath: path, base64: null });
+
+        // Replace photoID reference with real Supabase path in currentEstimate (if still open)
+        if (currentEstimate && currentEstimate.estimateID === record.estimateID) {
+          const charge = currentEstimate.charges[record.chargeIdx];
+          if (charge && charge.photos) {
+            const pos = charge.photos.indexOf(photoID);
+            if (pos !== -1) charge.photos[pos] = path;
+            charge.photoUrl = path; // backwards compat
+          }
+          renderCharges();
+          updatePhotoCaptureOverlay();
+          autoSaveDraft();
+        }
+      } catch(e) {
+        // Upload failed — revert to pending so drain will retry
+        if (record) {
+          await idbPut({ ...record, status: 'pending' }).catch(() => {});
+        }
+        console.warn('Photo upload failed, will retry when online:', e);
+      } finally {
+        _pendingUploads = Math.max(0, _pendingUploads - 1);
+        if (_pendingUploads === 0 && isDirty) {
+          saveEstimateDraft();
+        }
+      }
+    }
+
+    // Drain all pending photos — called on app open and when connectivity returns
+    let _draining = false;
+    async function drainPhotoQueue() {
+      if (_draining) return;
+      _draining = true;
+      try {
+        const pending = await idbGetAllPending();
+        if (!pending.length) return;
+        console.log('Photo queue: draining ' + pending.length + ' pending photos');
+        for (const record of pending) {
+          await _uploadPhotoFromQueue(record.photoID);
+        }
+        // If the currently open estimate was affected, re-save
+        if (currentEstimate) {
+          const remaining = await idbGetByEstimate(currentEstimate.estimateID);
+          const anyPending = remaining.some(r => r.status === 'pending' || r.status === 'uploading');
+          if (!anyPending && isDirty) saveEstimateDraft();
+        }
+        updatePendingPhotoBadge();
+      } finally {
+        _draining = false;
+      }
+    }
+
+    // Merge IndexedDB photos back into an estimate on load.
+    // Handles the case where photos were captured but the estimate save didn't include paths.
+    async function mergeQueuedPhotosIntoEstimate(estimate) {
+      try {
+        const queued = await idbGetByEstimate(estimate.estimateID);
+        if (!queued.length) return estimate;
+
+        let changed = false;
+        for (const record of queued) {
+          const charge = estimate.charges && estimate.charges[record.chargeIdx];
+          if (!charge) continue;
+          if (!charge.photos) charge.photos = [];
+
+          if (record.status === 'uploaded' && record.supabasePath) {
+            // Photo made it to Supabase — ensure path is in charges
+            if (!charge.photos.includes(record.supabasePath)) {
+              // Remove any stale photoID reference
+              const staleIdx = charge.photos.indexOf(record.photoID);
+              if (staleIdx !== -1) charge.photos.splice(staleIdx, 1);
+              charge.photos.push(record.supabasePath);
+              charge.photoUrl = record.supabasePath;
+              changed = true;
+            }
+            // Clean up IndexedDB — no longer needed
+            await idbDelete(record.photoID);
+          } else if (record.status === 'pending' || record.status === 'uploading') {
+            // Photo not yet in Supabase — ensure photoID placeholder is in charges
+            // The thumbnail will render from IndexedDB base64
+            if (!charge.photos.includes(record.photoID) && !charge.photos.includes(record.supabasePath)) {
+              charge.photos.push(record.photoID);
+              changed = true;
+            }
+            // Reset uploading → pending so drain picks it up
+            if (record.status === 'uploading') {
+              await idbPut({ ...record, status: 'pending' });
+            }
+          }
+        }
+
+        if (changed) {
+          isDirty = true;
+          saveEstimateDraft();
+        }
+      } catch(e) {
+        console.warn('mergeQueuedPhotos failed:', e);
+      }
+      return estimate;
+    }
+
+    // Show a badge on the estimate editor if photos are pending sync
+    async function updatePendingPhotoBadge() {
+      if (!currentEstimate) return;
+      try {
+        const queued = await idbGetByEstimate(currentEstimate.estimateID);
+        const pending = queued.filter(r => r.status === 'pending' || r.status === 'uploading');
+        const badge = document.getElementById('photoPendingBadge');
+        if (badge) {
+          badge.style.display = pending.length > 0 ? '' : 'none';
+          badge.textContent = '⏳ ' + pending.length + ' photo' + (pending.length !== 1 ? 's' : '') + ' pending sync';
+        }
+      } catch(e) {}
+    }
+
+    // Resolve a photo reference for display — photoID → base64 from IDB, path → signed URL
+    async function resolvePhotoRef(ref) {
+      if (!ref) return null;
+      if (ref.startsWith('data:')) return ref;  // already base64
+      if (ref.startsWith('http')) return ref;    // already a URL
+      if (ref.startsWith('photo_')) {
+        // IndexedDB reference — load base64
+        try {
+          const record = await idbGet(ref);
+          if (record && record.base64) return record.base64;
+          if (record && record.supabasePath) return resolvePhotoUrl(record.supabasePath);
+        } catch(e) {}
+        return null;
+      }
+      // Supabase storage path
+      return resolvePhotoUrl(ref);
+    }
+
+    // Listen for connectivity returning — drain queue automatically
+    window.addEventListener('online', () => {
+      console.log('Network restored — draining photo queue');
+      drainPhotoQueue();
+    });
     let _lookupSessionID = 0; // incremented on each estimate open — stale lookups can check this
     let priceBlocks = [];
     let priceListID = null;
@@ -5494,6 +5767,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             }
             if (saved) JSON.parse(saved).forEach(idx => chargeCollapsed.add(idx));
           } catch(e) { }
+          // Merge any queued photos from IndexedDB before opening editor
+          await mergeQueuedPhotosIntoEstimate(currentEstimate);
           openEstimateEditor();
           return;
         }
@@ -5539,6 +5814,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.getElementById('estNotes').value = currentEstimate.notes || '';
       updateNotesPreview();
       _suppressAutoSave = false; // re-enable autoSaveDraft after population
+      // Show pending photo badge if any photos are queued
+      updatePendingPhotoBadge();
       // Show Street View button if estimate has an address
       const svBtn2 = document.getElementById('streetViewBtn');
       if (svBtn2 && currentEstimate.address) svBtn2.style.display = 'block';
@@ -6102,7 +6379,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const url = charge.photos[i];
         if (!url) continue;
         try {
-          let src = await resolvePhotoUrl(url);
+          let src = await resolvePhotoRef(url);
           if (!src) continue;
           // Convert Drive URLs to lh3
           if (src.includes('drive.google.com')) {
@@ -6258,10 +6535,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           ? (charge.room ? charge.room + ': ' : '') + charge.description
           : '[PHOTO ANALYSIS — no voice transcript. Analyze the provided photos to identify items and estimate volume.]';
 
-        // Resolve Supabase storage paths to signed URLs before sending to n8n
+        // Resolve all photo refs (IDB photoIDs, Supabase paths, legacy URLs) before sending
         const resolvedPhotos = hasPhotos
           ? await Promise.all(allPhotos.map(async p => {
-              const resolved = await resolvePhotoUrl(p);
+              const resolved = await resolvePhotoRef(p);
               return resolved || p;
             }))
           : undefined;
@@ -6492,11 +6769,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.getElementById('photoCaptureCount').textContent =
         count === 0 ? 'No photos yet' : count + ' photo' + (count !== 1 ? 's' : '') + ' taken';
 
-      // Render thumbnails (resolve Supabase paths async)
+      // Render thumbnails — resolves photoIDs from IndexedDB, paths from Supabase
       const thumbPhotos = await Promise.all(photos.map(async p => {
-        if (!p || p.startsWith('data:')) return p;
-        if (p.startsWith('http')) return p;
-        return (await resolvePhotoUrl(p)) || p;
+        return (await resolvePhotoRef(p)) || p;
       }));
       _renderOverlayThumbs(thumbPhotos);
 
@@ -6523,11 +6798,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (!file) return;
         const base64 = await ensureJpegBase64(file);
         const compressed = await compressChargePhoto(base64);
-        const tempIdx = currentEstimate.charges[idx].photos.length;
-        currentEstimate.charges[idx].photos.push(compressed);
-        updatePhotoCaptureOverlay();
-        autoSaveDraft();
-        uploadChargePhotoToDrive(idx, compressed, tempIdx);
+        // Write to IndexedDB immediately — safe even if offline
+        await queuePhotoCapture(idx, compressed);
+        updatePendingPhotoBadge();
       };
       input.click();
     }
@@ -6601,45 +6874,26 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       });
     }
 
+    // Legacy entry point — now delegates to IndexedDB queue
     async function uploadChargePhotoToDrive(chargeIdx, base64, tempIdx) {
-      _pendingUploads++;
-      try {
-        const label = (currentEstimate.charges[chargeIdx].room || 'room' + chargeIdx).replace(/[^a-z0-9_-]/gi, '_');
-        const path = await uploadPhotoToSupabase(base64, currentEstimate.estimateID, label);
-        if (!currentEstimate.charges[chargeIdx].photos) {
-          currentEstimate.charges[chargeIdx].photos = [];
-        }
-        // Replace the temp base64 with the Supabase storage path
-        if (tempIdx !== undefined && currentEstimate.charges[chargeIdx].photos[tempIdx]) {
-          currentEstimate.charges[chargeIdx].photos[tempIdx] = path;
-        } else {
-          currentEstimate.charges[chargeIdx].photos.push(path);
-        }
-        currentEstimate.charges[chargeIdx].photoUrl = path; // keep for backwards compat
-        renderCharges();
-        autoSaveDraft();
-      } catch(e) {
-        console.warn('Photo upload failed:', e);
-      } finally {
-        _pendingUploads = Math.max(0, _pendingUploads - 1);
-        // If all uploads done and there are unsaved changes, trigger a final save
-        if (_pendingUploads === 0 && isDirty) {
-          autoSaveDraft();
-          saveEstimateDraft();
-        }
-      }
+      await queuePhotoCapture(chargeIdx, base64);
     }
 
 
     function removeChargePhotoIdx(chargeIdx, photoIdx) {
       const charge = currentEstimate.charges[chargeIdx];
       if (!charge.photos) charge.photos = charge.photoUrl ? [charge.photoUrl] : [];
+      const ref = charge.photos[photoIdx];
       charge.photos.splice(photoIdx, 1);
       if (charge.photos.length === 0) {
         charge.photoUrl = null;
         charge.photo = null;
       } else {
         charge.photoUrl = charge.photos[0];
+      }
+      // If this was an IDB-queued photo, delete it from IndexedDB too
+      if (ref && ref.startsWith('photo_')) {
+        idbDelete(ref).catch(() => {});
       }
       renderCharges();
       autoSaveDraft();
@@ -7104,8 +7358,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           if (photos.length > 0) {
             html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">';
             photos.forEach((url, pi) => {
-              // Use data-photo-path for async resolution; pass raw URL for legacy Drive/base64
-              const isLegacy = url.startsWith('http') || url.startsWith('data:');
+              const isPhotoID = url && url.startsWith('photo_');
+              const isLegacy  = url && (url.startsWith('http') || url.startsWith('data:'));
+              // For IDB photoIDs and Supabase paths, use data-photo-ref for async resolution
+              // For legacy Drive/base64 URLs, use directly
               const thumbSrc = isLegacy
                 ? (url.includes('drive.google.com')
                     ? url.replace('uc?export=view&id=', 'thumbnail?id=').replace('drive.google.com/uc', 'drive.google.com/thumbnail')
@@ -7113,7 +7369,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                 : '';
               const imgId = 'photo-thumb-' + globalIdx + '-' + pi;
               html += '<div style="position:relative;flex-shrink:0;">';
-              html += '<img id="' + imgId + '" src="' + thumbSrc + '" data-photo-path="' + (isLegacy ? '' : url) + '" style="width:72px;height:56px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer;background:var(--surface-2);" onclick="viewChargePhotoIdx(' + globalIdx + ',' + pi + ')" />';
+              html += '<img id="' + imgId + '" src="' + thumbSrc + '"'
+                + (isPhotoID ? ' data-photo-ref="' + url + '"' : '')
+                + (!isLegacy && !isPhotoID ? ' data-photo-path="' + url + '"' : '')
+                + ' style="width:72px;height:56px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer;background:var(--surface-2);" onclick="viewChargePhotoIdx(' + globalIdx + ',' + pi + ')" />';
+              if (isPhotoID) {
+                html += '<div style="position:absolute;bottom:2px;left:2px;background:rgba(0,0,0,0.6);border-radius:2px;padding:1px 3px;font-size:9px;color:#fff;">⏳</div>';
+              }
               html += '<button onclick="removeChargePhotoIdx(' + globalIdx + ',' + pi + ')" style="position:absolute;top:-4px;right:-4px;background:#ef4444;border:none;border-radius:50%;width:16px;height:16px;color:#fff;font-size:10px;cursor:pointer;line-height:16px;text-align:center;padding:0;">✕</button>';
               html += '</div>';
             });
@@ -7194,16 +7456,26 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     async function resolvePhotoThumbnails() {
-      const imgs = document.querySelectorAll('img[data-photo-path]');
-      for (const img of imgs) {
+      // Resolve Supabase storage paths
+      const pathImgs = document.querySelectorAll('img[data-photo-path]');
+      for (const img of pathImgs) {
         const path = img.getAttribute('data-photo-path');
         if (!path) continue;
-        // Skip images inside inactive screens — avoid signing URLs for stale editor content
         const screen = img.closest('#estimateEditorScreen, #settingsScreen, #priceLookupScreen');
         if (screen && !screen.classList.contains('active')) continue;
         try {
           const url = await resolvePhotoUrl(path);
           if (url) img.src = url;
+        } catch(e) {}
+      }
+      // Resolve IndexedDB photoID references
+      const refImgs = document.querySelectorAll('img[data-photo-ref]');
+      for (const img of refImgs) {
+        const ref = img.getAttribute('data-photo-ref');
+        if (!ref) continue;
+        try {
+          const src = await resolvePhotoRef(ref);
+          if (src) img.src = src;
         } catch(e) {}
       }
     }
@@ -7974,6 +8246,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               if (p.charges) {
                 p.charges = p.charges.map(c => {
                   if (!c.photos) return c;
+                  // Keep Supabase paths and IDB photoID placeholders; strip raw base64
                   const safePics = c.photos.filter(ph => ph && !ph.startsWith('data:'));
                   return safePics.length === c.photos.length ? c : Object.assign({}, c, { photos: safePics });
                 });
@@ -8209,7 +8482,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Collect photos from charges — resolve Supabase paths to signed URLs, pass Drive URLs as-is
         const photoItems = [];
         (currentEstimate.charges || [])
-          .filter(c => c.type === 'volume')
           .forEach(c => {
             const urls = (c.photos || (c.photoUrl ? [c.photoUrl] : []))
               .filter(u => u && !u.startsWith('data:'));
@@ -8218,15 +8490,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             });
           });
 
-        // Resolve all photo URLs (Supabase paths → signed URLs, Drive URLs → kept as-is)
+        // Resolve all photo refs — IDB photoIDs → base64, paths → signed URLs, Drive → lh3
         const resolvedPhotos = await Promise.all(photoItems.map(async p => {
-          const isSupabasePath = !p.url.startsWith('http') && !p.url.startsWith('data:');
+          const isPhotoID  = p.url.startsWith('photo_');
+          const isSupabasePath = !p.url.startsWith('http') && !p.url.startsWith('data:') && !isPhotoID;
           const isDriveUrl = p.url.includes('googleusercontent.com') || p.url.includes('drive.google.com');
           let signedUrl = null;
-          if (isSupabasePath) {
+          if (isPhotoID) {
+            signedUrl = await resolvePhotoRef(p.url);
+          } else if (isSupabasePath) {
             signedUrl = await resolvePhotoUrl(p.url);
           } else if (isDriveUrl) {
-            // Extract Drive fileId for legacy photos
             const m = p.url.match(/[?&]id=([^&]+)/) || p.url.match(/\/d\/([a-zA-Z0-9_-]+)/);
             if (m) signedUrl = 'https://lh3.googleusercontent.com/d/' + m[1];
           }
@@ -8615,6 +8889,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       // Remove from local cache
       setLocalEstimates(all.filter(e => String(e.estimateID) !== String(estimateID)));
+
+      // Clean up any queued photos for this estimate from IndexedDB
+      try {
+        const queued = await idbGetByEstimate(String(estimateID));
+        for (const r of queued) await idbDelete(r.photoID);
+      } catch(e) {}
 
       // Delete from Vonigo if submitted (Vonigo has no soft delete)
       if (vonigoQuoteID) {
@@ -10796,7 +11076,10 @@ RECYCLING & DONATION
       if (idx === null) return;
       const photos = currentEstimate.charges[idx].photos;
       if (!photos || photos.length === 0) return;
+      const ref = photos[photos.length - 1];
       photos.pop();
+      // Clean up IDB if this was a queued photo
+      if (ref && ref.startsWith('photo_')) idbDelete(ref).catch(() => {});
       updatePhotoCaptureOverlay();
       triggerPhotoCapture();
     }
@@ -10904,8 +11187,9 @@ RECYCLING & DONATION
         console.warn('Photo room upload failed:', e);
       } finally {
         _pendingUploads = Math.max(0, _pendingUploads - 1);
-        if (_pendingUploads === 0 && isDirty) {
-          autoSaveDraft();
+        // Always save when all uploads complete — Supabase paths must replace base64 in payload
+        if (_pendingUploads === 0) {
+          isDirty = true;
           saveEstimateDraft();
         }
       }
@@ -12920,28 +13204,27 @@ Please review the estimate below. If you have any questions or would like to adj
       const cs = currentUser.costSettings || {};
       const threshold = parseInt(cs.signsRewardThreshold) || 0;
       const rewardAmount = parseFloat(cs.signsRewardAmount) || 0;
-      const pvApiKey = cs.promoVaultApiKey || '';
-      if (!threshold || !rewardAmount || !pvApiKey) return;
-      // Count total active signs placed by this user
-      const franchiseUUID = await getFranchiseUUID();
+      if (!threshold || !rewardAmount) return;
+      // Count signs placed this session
+      const sessionCount = _signsSessionSigns ? _signsSessionSigns.length : 0;
+      if (sessionCount <= 0 || sessionCount % threshold !== 0) return;
+      // Get full crew from current session for split
+      const sessionCrew = (_signsCurrentSession && _signsCurrentSession.crew) || [{ email: currentUser.email, name: currentUser.name || currentUser.email }];
+      const crewCount = sessionCrew.length;
+      const splitAmount = Math.round((rewardAmount / crewCount) * 100); // cents per person
       try {
-        const rows = await supabaseFetch('/rest/v1/yard_signs?franchise_id=eq.' + franchiseUUID + '&placed_by=eq.' + encodeURIComponent(currentUser.email) + '&status=eq.active&select=id');
-        const totalSigns = rows ? rows.length : 0;
-        if (totalSigns > 0 && totalSigns % threshold === 0) {
-          // Threshold hit — trigger reward via n8n
-          await apiFetch(N8N_BASE + '/crewlogic-signs', {
-            method: 'POST',
-            body: JSON.stringify({
-              action: 'triggerReward',
-              email: currentUser.email,
-              name: currentUser.name || currentUser.email,
-              amount: rewardAmount,
-              signsCount: totalSigns,
-              pvApiKey,
-              franchiseID: currentUser.franchiseID
-            })
-          });
-        }
+        await apiFetch(N8N_BASE + '/crewlogic-signs', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'triggerReward',
+            crew: sessionCrew,
+            splitAmount,
+            totalAmount: rewardAmount,
+            signsCount: sessionCount,
+            franchiseID: currentUser.franchiseID,
+            franchiseName: currentUser.franchiseName || 'Junkluggers'
+          })
+        });
       } catch(e) { console.warn('Reward check failed:', e); }
     }
 
@@ -13054,6 +13337,20 @@ Please review the estimate below. If you have any questions or would like to adj
         document.getElementById('newCrewPhone').value = '';
         feedback.style.color = 'var(--accent-green)';
         feedback.textContent = '✓ ' + first + ' ' + last + ' added';
+        // Register in Promotion Vault
+        try {
+          await apiFetch(N8N_BASE + '/crewlogic-signs', {
+            method: 'POST',
+            body: JSON.stringify({
+              action: 'registerEmployee',
+              name: first + ' ' + last,
+              email,
+              phone: phone || null,
+              franchiseID: currentUser.franchiseID,
+              franchiseName: currentUser.franchiseName || 'Junkluggers'
+            })
+          });
+        } catch(e) { console.warn('Promotion Vault registration failed:', e); }
         openMgmtTab('crew');
       } catch(e) {
         feedback.style.color = '#ef4444';
