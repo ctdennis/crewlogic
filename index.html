@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.1.1 | 2026-04-20">
+  <meta name="crewlogic-version" content="v5.1.2 | 2026-04-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.1.1 | 2026-04-20 -->
+<!-- CrewLogic v5.1.2 | 2026-04-20 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4442,7 +4442,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.1.1 | 2026-04-20 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.1.2 | 2026-04-20 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -8579,12 +8579,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           console.log('[JobSummary] Response data:', JSON.stringify(summaryData));
           if (summaryRes.ok) {
             itemsList = summaryData.itemsList || '';
-            if (summaryData.customerSituation) {
-              customerSituation = summaryData.customerSituation +
-                (currentEstimate.notes ? '\n\nAccess: ' + currentEstimate.notes : '');
+            const sit = summaryData.customerSituation || '';
+            // Guard against AI returning JSON string in customerSituation (token cutoff)
+            if (sit && !sit.trim().startsWith('{') && !sit.trim().startsWith('[')) {
+              customerSituation = sit + (currentEstimate.notes ? '\n\nAccess: ' + currentEstimate.notes : '');
             }
-            console.log('[JobSummary] itemsList:', itemsList);
-            console.log('[JobSummary] customerSituation:', customerSituation);
+            console.log('[JobSummary] itemsList length:', itemsList.length);
+            console.log('[JobSummary] customerSituation length:', customerSituation.length);
           }
         } catch(e) {
           console.warn('[JobSummary] Failed:', e);
