@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.1.8 | 2026-04-20">
+  <meta name="crewlogic-version" content="v5.1.9 | 2026-04-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.1.8 | 2026-04-20 -->
+<!-- CrewLogic v5.1.9 | 2026-04-20 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4443,7 +4443,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.1.8 | 2026-04-20 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.1.9 | 2026-04-20 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -12046,10 +12046,11 @@ Please review the estimate below. If you have any questions or would like to adj
       });
 
       const totalCosts = laborCost + dispCost + fuelTotal + canTotal + surchargeDisposalCost;
+      const effTotalCosts = effLaborCost + effDispCost + effFuelTotal + effCanTotal + effSurcharge;
 
       // REVENUE OFFSETS
       const recycRevenue = trucksRecycled * recycRevRate;
-      const netCost = totalCosts - recycRevenue;
+      const netCost = effTotalCosts - recycRevenue;
 
       // MARGIN ANALYSIS
       const royaltyFrac = royaltyPct / 100;
@@ -12090,9 +12091,33 @@ Please review the estimate below. If you have any questions or would like to adj
       if (recycMi > 0 && loadsRecycling > 0) fuelSubLines.push({ label: 'Job↔Recycling', mi: recycMi*2*loadsRecycling, each: recycMi });
       if (donMi > 0 && loadsDonation > 0) fuelSubLines.push({ label: 'Job↔Donation', mi: donMi*2*loadsDonation, each: donMi });
 
+      // --- EXCLUDED LINES (cost toggles) ---
+      // Keep window._caExcluded in sync with saved costAnalysis
+      if (!window._caExcluded || !window._toggleInProgress) {
+        window._caExcluded = new Set(ca.excludedLines || []);
+      }
+      const excluded = window._caExcluded;
+      const exc = key => excluded.has(key);
+
+      // Labor sub-row amounts
+      const laborOnsiteCost = laborHrs * crewRate;
+      const laborDriveCost  = totalTruckHrs * crewRate;
+      // If both sub-rows excluded, top-level labor is also excluded
+      const laborOnsiteOff = exc('laborOnsite');
+      const laborDriveOff  = exc('laborDrive');
+      const laborTopOff    = laborOnsiteOff && laborDriveOff;
+      // Effective costs after exclusions
+      const effLaborOnsite = laborOnsiteOff ? 0 : laborOnsiteCost;
+      const effLaborDrive  = laborDriveOff  ? 0 : laborDriveCost;
+      const effLaborCost   = effLaborOnsite + effLaborDrive;
+      const effDispCost    = exc('disposal')      ? 0 : dispCost;
+      const effFuelTotal   = exc('fuel')          ? 0 : fuelTotal;
+      const effSurcharge   = exc('recyclingFees') ? 0 : surchargeDisposalCost;
+      const effCanTotal    = exc('cans')          ? 0 : canTotal;
+
       const lines = [
-        ['Labor (' + totalHrs.toFixed(1) + ' hrs × $' + crewRate + ')', fmt(laborCost)],
-        ['  ↳ On-site (' + days + 'd × ' + crew + ' crew × ' + hrsDay + 'h)', fmt(laborHrs * crewRate)],
+        ['Labor (' + (laborOnsiteOff && laborDriveOff ? 'excluded' : totalHrs.toFixed(1) + ' hrs × $' + crewRate) + ')', fmt(effLaborCost), 'labor', true, laborTopOff],
+        ['  ↳ On-site (' + days + 'd × ' + crew + ' crew × ' + hrsDay + 'h)', fmt(laborOnsiteCost), 'laborOnsite', true, laborOnsiteOff],
       ];
       // Drive/wait time breakdown — fully granular
       if (totalTruckHrs > 0) {
@@ -12124,7 +12149,7 @@ Please review the estimate below. If you have any questions or would like to adj
         }
         if (lastFacilityMin > 0) truckMinBreakdown.push({ label: 'Last stop→Home (est. ≈ job↔home)', min: lastFacilityMin, detail: '~' + Math.round(lastFacilityMin) + ' min' });
         const totalTruckMin2 = truckMinBreakdown.reduce((s, t) => s + t.min, 0);
-        lines.push(['  ↳ Drive + wait (' + Math.round(totalTruckMin2) + ' min = ' + totalTruckHrs.toFixed(2) + ' hrs × $' + crewRate + ')', fmt(totalTruckHrs * crewRate)]);
+        lines.push(['  ↳ Drive + wait (' + Math.round(totalTruckMin2) + ' min = ' + totalTruckHrs.toFixed(2) + ' hrs × $' + crewRate + ')', fmt(laborDriveCost), 'laborDrive', true, laborDriveOff]);
         truckMinBreakdown.forEach(t => {
           if (t.subLines) {
             // Facility header line
@@ -12135,13 +12160,13 @@ Please review the estimate below. If you have any questions or would like to adj
           }
         });
       }
-      lines.push(['Disposal (' + trucksDisposal.toFixed(2) + ' tons × $' + disposalCost + ')', fmt(dispCost)]);
-      lines.push(['Fuel (' + totalMiles.toFixed(0) + ' mi ÷ ' + mpg + ' mpg × $' + fuelCost + ')', fmt(fuelTotal)]);
+      lines.push(['Disposal (' + trucksDisposal.toFixed(2) + ' tons × $' + disposalCost + ')', fmt(dispCost), 'disposal', true, exc('disposal')]);
+      lines.push(['Fuel (' + totalMiles.toFixed(0) + ' mi ÷ ' + mpg + ' mpg × $' + fuelCost + ')', fmt(fuelTotal), 'fuel', true, exc('fuel')]);
       fuelSubLines.forEach(f => {
-        lines.push(['  ↳ ' + f.label + ': ' + f.mi.toFixed(1) + ' mi (' + f.each.toFixed(1) + ' mi each way)', '']);
+        lines.push(['  ↳ ' + f.label + ': ' + f.mi.toFixed(1) + ' mi (' + f.each.toFixed(1) + ' mi each way)', '', null, false, false]);
       });
-      lines.push(['Recycling/Disposal Fees', fmt(surchargeDisposalCost)]);
-      if (cans > 0) lines.push(['Cans (' + cans + ' × $' + canCost + ')', fmt(canTotal)]);
+      lines.push(['Recycling/Disposal Fees', fmt(surchargeDisposalCost), 'recyclingFees', true, exc('recyclingFees')]);
+      if (cans > 0) lines.push(['Cans (' + cans + ' × $' + canCost + ')', fmt(canTotal), 'cans', true, exc('cans')]);
 
       // Recycling revenue inline (credit against costs)
       if (trucksRecycled > 0 && recycRevRate > 0) {
@@ -12159,14 +12184,28 @@ Please review the estimate below. If you have any questions or would like to adj
       // Build collapsible cost lines — labor and fuel are toggleable
       // Store lines reference so renderCostLines can be called from toggle buttons
       window._caCostLines = lines;
+      window._caExcluded = new Set((currentEstimate.costAnalysis || {}).excludedLines || []);
+
+      window.toggleCostLine = function(key) {
+        const excSet = window._caExcluded;
+        if (excSet.has(key)) { excSet.delete(key); } else { excSet.add(key); }
+        if (currentEstimate.costAnalysis) {
+          currentEstimate.costAnalysis.excludedLines = Array.from(excSet);
+        }
+        window._toggleInProgress = true;
+        updateCostAnalysis();
+        window._toggleInProgress = false;
+      };
+
       window.renderCostLines = function() {
         const lines = window._caCostLines || [];
         const el = document.getElementById('caCostLines');
         if (!el) return;
         let html = '';
-        let section = null; // 'labor' | 'fuel' | null
+        let section = null;
+        const excSet = window._caExcluded || new Set();
 
-        lines.forEach(([l, v]) => {
+        lines.forEach(([l, v, key, hasCheckbox, isExcluded]) => {
           const isWarn   = l.startsWith('⚠️');
           const isSep    = l.startsWith('—');
           const isIndent = l.startsWith('  ↳');
@@ -12174,17 +12213,16 @@ Please review the estimate below. If you have any questions or would like to adj
           const isDeeper = l.startsWith('      –');
           const isPos    = typeof v === 'string' && v.startsWith('+');
 
-          // Detect section headers
           if (l.startsWith('Labor (')) section = 'labor';
           else if (l.startsWith('Fuel (')) section = 'fuel';
           else if (!isIndent && !isDeep && !isDeeper) section = null;
 
-          // Hide detail rows when section is collapsed
           const isLaborDetail = (isIndent || isDeep || isDeeper) && section === 'labor';
           const isFuelDetail  = (isIndent || isDeep || isDeeper) && section === 'fuel';
           if (isLaborDetail && !caLaborExpanded) return;
           if (isFuelDetail  && !caFuelExpanded)  return;
 
+          const dimmed = isExcluded ? 'opacity:0.4;text-decoration:line-through;' : '';
           const lColor = isWarn ? '#fbbf24' : isSep ? '#94a3b8' : isDeeper ? '#94a3b8' : isDeep ? '#cbd5e1' : isIndent ? '#e2e8f0' : 'inherit';
           const vColor = isPos  ? '#00EE76' : (typeof v === 'string' && v.startsWith('−')) ? '#00EE76' : isDeeper ? '#94a3b8' : isDeep ? '#cbd5e1' : isIndent ? '#e2e8f0' : 'inherit';
           const lStyle = isSep     ? 'font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-top:4px;' :
@@ -12193,7 +12231,6 @@ Please review the estimate below. If you have any questions or would like to adj
                          isIndent  ? 'font-size:11px;padding-left:12px;' : '';
           const vStyle = (isIndent || isDeep || isDeeper) ? 'font-size:10px;' : 'font-weight:600;';
 
-          // Add toggle chevron to labor and fuel header lines
           let label = l.trim();
           let extraBtn = '';
           if (l.startsWith('Labor (')) {
@@ -12202,8 +12239,15 @@ Please review the estimate below. If you have any questions or would like to adj
             extraBtn = '<button onclick="caFuelExpanded=!caFuelExpanded;renderCostLines();" style="background:none;border:none;color:#6b7280;font-size:11px;cursor:pointer;padding:0 6px;text-decoration:underline;">' + (caFuelExpanded ? 'collapse' : 'expand') + '</button>';
           }
 
-          html += '<div style="display:flex;justify-content:space-between;align-items:baseline;' + lStyle + '">' +
-            '<span style="color:' + lColor + ';display:flex;align-items:center;gap:2px;">' + label + extraBtn + '</span>' +
+          // Checkbox for toggleable dollar lines
+          let checkbox = '';
+          if (hasCheckbox && key && key !== 'labor') {
+            // labor top row is auto-derived, no direct checkbox
+            checkbox = '<input type="checkbox" ' + (isExcluded ? '' : 'checked') + ' onchange="toggleCostLine(\'' + key + '\')" style="width:14px;height:14px;margin-right:6px;accent-color:#00EE76;cursor:pointer;flex-shrink:0;">';
+          }
+
+          html += '<div style="display:flex;justify-content:space-between;align-items:center;' + lStyle + dimmed + '">' +
+            '<span style="color:' + lColor + ';display:flex;align-items:center;gap:2px;">' + checkbox + label + extraBtn + '</span>' +
             (v ? '<span style="' + vStyle + 'color:' + vColor + '">' + v + '</span>' : '') +
             '</div>';
         });
