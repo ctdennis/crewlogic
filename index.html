@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.1.5 | 2026-04-20">
+  <meta name="crewlogic-version" content="v5.1.6 | 2026-04-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.1.5 | 2026-04-20 -->
+<!-- CrewLogic v5.1.6 | 2026-04-20 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4443,7 +4443,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.1.5 | 2026-04-20 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.1.6 | 2026-04-20 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6605,14 +6605,26 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         console.error('Analyze error:', e.message);
         const feedbackEl = document.getElementById('estFeedback');
         const isSessionError = e.message === 'SESSION_REFRESH_NEEDED' || (e.message && e.message.includes('401'));
+        // Re-query button in case DOM was re-rendered
+        const btn2 = document.querySelector('[data-analyze="' + chargeIdx + '"]') || analyzeBtn;
         if (isSessionError) {
-          // Re-query button in case DOM was re-rendered
-          const btn2 = document.querySelector('[data-analyze="' + chargeIdx + '"]') || analyzeBtn;
-          if (btn2) { btn2.textContent = '⚠️ Sign in again'; btn2.disabled = false; btn2.style.background = '#f59e0b'; btn2.style.color = '#000'; }
-          if (feedbackEl) { feedbackEl.textContent = '⚠️ Session expired — please sign out and back in to use AI analysis.'; feedbackEl.className = 'settings-feedback error'; }
+          if (btn2) {
+            btn2.textContent = '⚠️ Sign in again to analyze';
+            btn2.disabled = false;
+            btn2.style.background = '#f59e0b';
+            btn2.style.color = '#000';
+            // Show inline message just below the button
+            let msgEl = btn2.parentNode.querySelector('.analyze-session-msg');
+            if (!msgEl) {
+              msgEl = document.createElement('div');
+              msgEl.className = 'analyze-session-msg';
+              msgEl.style.cssText = 'font-size:11px;color:#f59e0b;margin-top:4px;';
+              btn2.parentNode.appendChild(msgEl);
+            }
+            msgEl.textContent = 'Session expired — sign out and back in to use AI analysis.';
+          }
         } else {
-          const btn2 = document.querySelector('[data-analyze="' + chargeIdx + '"]') || analyzeBtn;
-          if (btn2) { btn2.textContent = '⚠️ Analysis failed'; btn2.disabled = false; }
+          if (btn2) { btn2.textContent = '⚠️ Analysis failed — try again'; btn2.disabled = false; }
           if (feedbackEl) { feedbackEl.textContent = '⚠️ Analysis failed — please try again.'; feedbackEl.className = 'settings-feedback error'; }
         }
       } finally {
