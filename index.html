@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.1.7 | 2026-04-20">
+  <meta name="crewlogic-version" content="v5.1.8 | 2026-04-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.1.7 | 2026-04-20 -->
+<!-- CrewLogic v5.1.8 | 2026-04-20 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4443,7 +4443,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.1.7 | 2026-04-20 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.1.8 | 2026-04-20 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6531,7 +6531,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         return;
       }
 
-      // Show analyzing status on the button
+      // Clear any previous error and show analyzing status
+      charge._analyzeError = null;
       const analyzeBtn = document.querySelector('[data-analyze="' + chargeIdx + '"]');
       if (analyzeBtn) { analyzeBtn.textContent = '⏳...'; analyzeBtn.disabled = true; }
 
@@ -6607,20 +6608,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const feedbackEl = document.getElementById('estFeedback');
         _analyzeError = true;
         const isSessionError = e.message === 'SESSION_REFRESH_NEEDED' || (e.message && e.message.includes('401'));
-        if (feedbackEl) {
-          feedbackEl.textContent = isSessionError
-            ? '⚠️ Session expired — please sign out and back in to use AI analysis.'
-            : '⚠️ Analysis failed — please try again.';
-          feedbackEl.className = 'settings-feedback error';
-          feedbackEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }
+        charge._analyzeError = isSessionError
+          ? '⚠️ Session expired — sign out and back in to analyze'
+          : '⚠️ Analysis failed — please try again';
       } finally {
-        if (!_analyzeError) {
-          // Success — renderCharges will redraw the button correctly
-        } else {
-          // Error — re-enable button via re-render but keep feedback bar message
-          if (analyzeBtn) { analyzeBtn.textContent = '🤖 Analyze' + (charge.photos && charge.photos.length > 1 ? ' (' + charge.photos.length + ')' : ''); analyzeBtn.disabled = false; }
-        }
+        // renderCharges below will re-draw including any _analyzeError message
       }
 
       renderCharges();
@@ -7415,6 +7407,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           html += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">';
           if (photos.length < 8) {
             html += '<button onclick="captureChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:var(--text-secondary);cursor:pointer;">📷 Add Photo</button>';
+          }
+          if (charge._analyzeError) {
+            html += '<div style="font-size:11px;color:#f59e0b;padding:4px 6px;background:rgba(245,158,11,0.1);border-radius:4px;border:1px solid rgba(245,158,11,0.3);">' + charge._analyzeError + '</div>';
           }
           html += '<button data-analyze="' + globalIdx + '" onclick="analyzeChargePhoto(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:#000;font-weight:600;cursor:pointer;">🤖 Analyze' + (photos.length > 1 ? ' (' + photos.length + ')' : '') + '</button>';
           if (photos.length > 0) html += '<button onclick="downloadChargePhotos(' + globalIdx + ')" style="display:flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;color:var(--text-secondary);cursor:pointer;">⬇ Download' + (photos.length > 1 ? ' All' : '') + '</button>';
