@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.2.2 | 2026-04-21">
+  <meta name="crewlogic-version" content="v5.2.3 | 2026-04-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.2.2 | 2026-04-21 -->
+<!-- CrewLogic v5.2.3 | 2026-04-21 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4443,7 +4443,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.2.2 | 2026-04-21 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.2.3 | 2026-04-21 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6602,6 +6602,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           });
           // Clear old separate photo analysis box
           charge.photoAnalysis = null;
+          // Store dwelling type inferred from photos
+          if (data.dwellingType) charge._dwellingType = data.dwellingType;
         }
       } catch(e) {
         console.error('Analyze error:', e.message);
@@ -8569,6 +8571,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         let jobTypeOptionID = 12172; // default: Multiple Items
         let dwellingTypeOptionID = 10447; // default: Private Home
         let parkingOptionID = 11228; // default: Driveway
+
+        // Override dwelling type from photo analysis if available
+        const analyzedDwelling = (currentEstimate.charges || [])
+          .map(c => c._dwellingType).filter(Boolean)[0];
+        if (analyzedDwelling) {
+          const dwellingMap = {
+            'private_home': 10447, 'condominium': 10449, 'apartment': 10450,
+            'storage_unit': 10451, 'office': 10452, 'retail_location': 10453,
+            'assisted_living': 10454
+          };
+          dwellingTypeOptionID = dwellingMap[analyzedDwelling] || 10447;
+        }
+        // Derive parking from dwelling type — homes get driveway, everything else parking lot
+        parkingOptionID = (dwellingTypeOptionID === 10447) ? 11228 : 11229;
         try {
           console.log('[JobSummary] Starting AI call for', (currentEstimate.charges || []).length, 'charges');
           const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
@@ -8596,8 +8612,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               customerSituation = sit + (currentEstimate.notes ? '\n\nAccess: ' + currentEstimate.notes : '');
             }
             if (summaryData.jobTypeOptionID) jobTypeOptionID = summaryData.jobTypeOptionID;
-            if (summaryData.dwellingTypeOptionID) dwellingTypeOptionID = summaryData.dwellingTypeOptionID;
-            if (summaryData.parkingOptionID) parkingOptionID = summaryData.parkingOptionID;
+            // dwelling type and parking already set from photo analysis above
             console.log('[JobSummary] itemsList length:', itemsList.length);
             console.log('[JobSummary] customerSituation length:', customerSituation.length);
             console.log('[JobSummary] jobTypeOptionID:', jobTypeOptionID);
