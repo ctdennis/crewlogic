@@ -2884,23 +2884,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       </div>
 
       <!-- QUICK ESTIMATE SCREEN -->
-      <div id="quickEstimateScreen" class="screen" style="display:none;">
-        <div class="screen-header">
-          <button class="back-btn" onclick="openModule('home')">←</button>
-          <div class="screen-title">📷 Quick Estimate</div>
-          <div style="width:60px;"></div>
+      <div id="quickEstimateScreen" class="estimates-section" style="display:none;">
+        <div class="estimate-list-header">
+          <div class="section-title">📷 Quick Estimate</div>
         </div>
-        <div class="screen-body" style="padding:16px;display:flex;flex-direction:column;gap:12px;">
-          <div id="qePhotos" style="display:flex;flex-wrap:wrap;gap:8px;min-height:80px;"></div>
-          <div style="display:flex;gap:8px;">
-            <button id="qeAddPhotoBtn" onclick="qeAddPhoto()" style="flex:1;padding:14px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#000;cursor:pointer;">📷 Add Photo</button>
-            <button onclick="qeReset()" style="padding:14px 18px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-muted);cursor:pointer;">Reset</button>
-          </div>
-          <input type="file" id="qeFileInput" accept="image/*" capture="environment" style="display:none;" onchange="qeHandlePhoto(this)">
-          <button id="qeAnalyzeBtn" onclick="qeAnalyze()" style="display:none;padding:14px;background:var(--accent-blue);border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#fff;cursor:pointer;">🔍 Analyze</button>
-          <div id="qeResult" style="display:none;background:var(--bg-card);border-radius:var(--radius-sm);padding:14px;"></div>
-          <div id="qeFeedback" style="font-size:12px;color:var(--text-muted);min-height:16px;text-align:center;"></div>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Take 1–8 photos to get an AI volume breakdown — no job number needed.</div>
+        <div id="qePhotos" style="display:flex;flex-wrap:wrap;gap:8px;min-height:60px;margin-bottom:12px;"></div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <button id="qeAddPhotoBtn" onclick="qeAddPhoto()" style="flex:1;padding:14px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#000;cursor:pointer;">📷 Add Photo</button>
+          <button onclick="qeReset()" style="padding:14px 18px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-muted);cursor:pointer;">Reset</button>
         </div>
+        <input type="file" id="qeFileInput" accept="image/*" capture="environment" style="display:none;" onchange="qeHandlePhoto(this)">
+        <button id="qeAnalyzeBtn" onclick="qeAnalyze()" style="display:none;width:100%;padding:14px;background:var(--accent-blue);border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#fff;cursor:pointer;margin-bottom:12px;">🔍 Analyze Photos</button>
+        <div id="qeResult" style="display:none;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;margin-bottom:12px;"></div>
+        <div id="qeFeedback" style="font-size:12px;color:var(--text-muted);min-height:16px;text-align:center;"></div>
+        <button class="new-estimate-btn" style="margin-top:12px;" onclick="openModule('estimates')">← Back to Estimates</button>
       </div>
 
       <!-- SIGNS APPROVAL PAGE (owner approves solo run) -->
@@ -4210,7 +4208,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       'routerScreen', 'routeResultScreen',
       'storageScreen', 'storageResultsScreen',
       'mattressScreen', 'mattressResultsScreen',
-      'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen'
+      'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'quickEstimateScreen'
     ];
 
     function hideAll() {
@@ -4261,7 +4259,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       // Signs module — custom handling
       if (module === 'quickEstimate') {
-        showScreen('quickEstimateScreen');
+        document.getElementById('quickEstimateScreen').classList.add('active');
+        document.getElementById('headerTitle').textContent = 'Quick Estimate';
+        currentScreen = 'quickEstimate';
         qeReset();
         return;
       }
@@ -13640,6 +13640,144 @@ Please review the estimate below. If you have any questions or would like to adj
           '<div style="font-size:13px;color:var(--text-muted);margin-bottom:24px;">Start a session to log your sign placements.</div>' +
           '<button onclick="startSignsSession()" style="padding:14px 32px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:15px;font-weight:700;color:#000;cursor:pointer;">📍 Start Session</button>' +
         '</div>';
+    }
+
+    // ===== QUICK ESTIMATE =====
+    let _qePhotos = []; // array of { base64, analysisBase64 }
+
+    function qeReset() {
+      _qePhotos = [];
+      document.getElementById('qePhotos').innerHTML = '';
+      document.getElementById('qeResult').style.display = 'none';
+      document.getElementById('qeResult').innerHTML = '';
+      document.getElementById('qeAnalyzeBtn').style.display = 'none';
+      document.getElementById('qeFeedback').textContent = '';
+      document.getElementById('qeAddPhotoBtn').disabled = false;
+      document.getElementById('qeFileInput').value = '';
+    }
+
+    function qeAddPhoto() {
+      if (_qePhotos.length >= 8) { alert('Maximum 8 photos.'); return; }
+      document.getElementById('qeFileInput').click();
+    }
+
+    async function qeHandlePhoto(input) {
+      const file = input.files[0];
+      if (!file) return;
+      input.value = '';
+      const feedbackEl = document.getElementById('qeFeedback');
+      feedbackEl.textContent = 'Processing photo...';
+      try {
+        const base64 = await ensureJpegBase64(file);
+        const compressed = await compressChargePhoto(base64);
+        const analysisImg = await compressForAnalysis(base64);
+        _qePhotos.push({ base64: compressed, analysisBase64: analysisImg });
+        qeRenderThumbs();
+        feedbackEl.textContent = _qePhotos.length + ' photo' + (_qePhotos.length !== 1 ? 's' : '') + ' · tap Add Photo for more or Analyze when ready';
+        document.getElementById('qeAnalyzeBtn').style.display = 'block';
+        document.getElementById('qeAddPhotoBtn').disabled = _qePhotos.length >= 8;
+      } catch(e) {
+        feedbackEl.textContent = 'Photo error — try again.';
+      }
+    }
+
+    function qeRenderThumbs() {
+      const container = document.getElementById('qePhotos');
+      container.innerHTML = _qePhotos.map((p, i) =>
+        '<div style="position:relative;flex-shrink:0;">' +
+          '<img src="' + p.base64 + '" style="width:80px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border);">' +
+          '<button onclick="qeRemovePhoto(' + i + ')" style="position:absolute;top:-4px;right:-4px;background:#ef4444;border:none;border-radius:50%;width:18px;height:18px;color:#fff;font-size:11px;cursor:pointer;line-height:18px;text-align:center;padding:0;">✕</button>' +
+        '</div>'
+      ).join('');
+    }
+
+    function qeRemovePhoto(idx) {
+      _qePhotos.splice(idx, 1);
+      qeRenderThumbs();
+      document.getElementById('qeAnalyzeBtn').style.display = _qePhotos.length > 0 ? 'block' : 'none';
+      document.getElementById('qeAddPhotoBtn').disabled = false;
+      document.getElementById('qeFeedback').textContent = _qePhotos.length > 0 ? _qePhotos.length + ' photo' + (_qePhotos.length !== 1 ? 's' : '') : '';
+      if (_qePhotos.length === 0) {
+        document.getElementById('qeResult').style.display = 'none';
+        document.getElementById('qeResult').innerHTML = '';
+      }
+    }
+
+    async function qeAnalyze() {
+      if (!_qePhotos.length) return;
+      const analyzeBtn = document.getElementById('qeAnalyzeBtn');
+      const feedbackEl = document.getElementById('qeFeedback');
+      const resultEl = document.getElementById('qeResult');
+      analyzeBtn.disabled = true;
+      analyzeBtn.textContent = '⏳ Analyzing...';
+      feedbackEl.textContent = 'Sending ' + _qePhotos.length + ' photo' + (_qePhotos.length !== 1 ? 's' : '') + ' to AI...';
+      resultEl.style.display = 'none';
+      try {
+        const photos = _qePhotos.map(p => p.analysisBase64);
+        const data = await callAnalyzeVoice({
+          transcript: '[QUICK ESTIMATE — crew second opinion. Analyze photos and return volume estimate using Vonigo line item labels only. No pricing needed.]',
+          areas: availableAreas,
+          photos
+        });
+        if (!data.success) throw new Error(data.error || 'Analysis failed');
+        const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
+        qeRenderResult(charges);
+        feedbackEl.textContent = 'AI estimate below — not saved to any job.';
+      } catch(e) {
+        feedbackEl.textContent = '⚠️ ' + (e.message || 'Analysis failed — try again.');
+      }
+      analyzeBtn.disabled = false;
+      analyzeBtn.textContent = '🔍 Re-Analyze';
+    }
+
+    function qeRenderResult(charges) {
+      const resultEl = document.getElementById('qeResult');
+      const volCharges = charges.filter(c => c.type === 'volume');
+      const surcharges = charges.filter(c => c.type === 'surcharge');
+      const totalTrucks = volCharges.reduce((s, c) => s + (parseFloat(c.truckVolume) || 0), 0);
+      const snappedTrucks = Math.round(totalTrucks * 8) / 8;
+      const fracLabels = {0.125:'1/8 Truck',0.25:'1/4 Truck',0.375:'3/8 Truck',0.5:'1/2 Truck',0.625:'5/8 Truck',0.75:'3/4 Truck',0.875:'7/8 Truck',1.0:'Full Truck'};
+      let html = '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:10px;">AI Volume Assessment</div>';
+      // Volume summary callout
+      html += '<div style="background:rgba(0,238,118,0.08);border:1px solid var(--accent-green);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;">';
+      html += '<div style="font-size:11px;color:var(--accent-green);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total Volume</div>';
+      html += '<div style="font-family:\'Space Mono\',monospace;font-size:24px;font-weight:700;color:var(--accent-green);">' + (fracLabels[snappedTrucks] || (snappedTrucks.toFixed(3) + ' Trucks')) + '</div>';
+      html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + (snappedTrucks * 16).toFixed(0) + ' CY&ensp;·&ensp;' + snappedTrucks.toFixed(3) + ' trucks</div>';
+      html += '</div>';
+      // Volume breakdown rows
+      if (volCharges.length > 1) {
+        html += '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Breakdown</div>';
+        volCharges.forEach(c => {
+          html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);">';
+          html += '<div><span style="font-size:13px;color:var(--text-primary);">' + (c.room || 'Area') + '</span>' + (c.area ? '<span style="font-size:11px;color:var(--text-muted);"> · ' + c.area + '</span>' : '') + '</div>';
+          html += '<span style="font-family:monospace;font-size:12px;font-weight:600;color:var(--accent-green);">' + (c.truckLabel || '') + (c.truckQty && c.truckQty !== 1 ? ' ×' + c.truckQty : '') + '</span>';
+          html += '</div>';
+          if (c.description) html += '<div style="font-size:11px;color:var(--text-muted);padding:2px 0 4px;">' + c.description + '</div>';
+        });
+      } else if (volCharges[0] && volCharges[0].description) {
+        html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">' + volCharges[0].description + '</div>';
+      }
+      // Recycling / surcharges
+      if (surcharges.length > 0) {
+        html += '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin:12px 0 6px;">Recycling & Surcharges</div>';
+        surcharges.forEach(s => {
+          html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);">';
+          html += '<span style="font-size:13px;color:var(--text-primary);">' + (s.name || '') + '</span>';
+          html += '<span style="font-size:12px;color:var(--text-muted);">× ' + (s.qty || 1) + '</span>';
+          html += '</div>';
+        });
+      }
+      // AI reasoning
+      const firstVol = volCharges[0];
+      if (firstVol && firstVol.reasoning) {
+        const confidenceColor = firstVol.confidence === 'high' ? 'var(--accent-green)' : firstVol.confidence === 'medium' ? '#fbbf24' : '#f87171';
+        html += '<div style="margin-top:12px;padding:8px 10px;background:var(--bg-input);border-radius:var(--radius-sm);">';
+        html += '<span style="font-size:11px;font-weight:600;color:' + confidenceColor + ';">' + (firstVol.confidence || '').toUpperCase() + ' CONFIDENCE</span>';
+        html += '<div style="font-size:11px;color:var(--text-muted);margin-top:3px;font-style:italic;">' + firstVol.reasoning + '</div>';
+        html += '</div>';
+      }
+      resultEl.innerHTML = html;
+      resultEl.style.display = 'block';
     }
 
     // ===== BOOT =====
