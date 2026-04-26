@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.2.4 | 2026-04-21">
+  <meta name="crewlogic-version" content="v5.2.5 | 2026-04-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.2.4 | 2026-04-21 -->
+<!-- CrewLogic v5.2.5 | 2026-04-21 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -985,6 +985,10 @@
             <div class="module-desc">Track sign placements & crew rewards</div>
           </div>
 
+          <div class="module-card fade-in fade-in-delay-4" onclick="openModule('quickEstimate')">
+            <div class="module-icon">📷</div>
+            <div class="module-name">Quick Estimate</div>
+          </div>
           <div class="module-card fade-in fade-in-delay-4" onclick="openModule('settings')">
             <div class="module-icon">⚙️</div>
             <div class="module-name">Settings</div>
@@ -2879,6 +2883,26 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         </div>
       </div>
 
+      <!-- QUICK ESTIMATE SCREEN -->
+      <div id="quickEstimateScreen" class="screen" style="display:none;">
+        <div class="screen-header">
+          <button class="back-btn" onclick="openModule('home')">←</button>
+          <div class="screen-title">📷 Quick Estimate</div>
+          <div style="width:60px;"></div>
+        </div>
+        <div class="screen-body" style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+          <div id="qePhotos" style="display:flex;flex-wrap:wrap;gap:8px;min-height:80px;"></div>
+          <div style="display:flex;gap:8px;">
+            <button id="qeAddPhotoBtn" onclick="qeAddPhoto()" style="flex:1;padding:14px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#000;cursor:pointer;">📷 Add Photo</button>
+            <button onclick="qeReset()" style="padding:14px 18px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-muted);cursor:pointer;">Reset</button>
+          </div>
+          <input type="file" id="qeFileInput" accept="image/*" capture="environment" style="display:none;" onchange="qeHandlePhoto(this)">
+          <button id="qeAnalyzeBtn" onclick="qeAnalyze()" style="display:none;padding:14px;background:var(--accent-blue);border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#fff;cursor:pointer;">🔍 Analyze</button>
+          <div id="qeResult" style="display:none;background:var(--bg-card);border-radius:var(--radius-sm);padding:14px;"></div>
+          <div id="qeFeedback" style="font-size:12px;color:var(--text-muted);min-height:16px;text-align:center;"></div>
+        </div>
+      </div>
+
       <!-- SIGNS APPROVAL PAGE (owner approves solo run) -->
       <div id="signsApprovalOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#0f1923;z-index:300;align-items:center;justify-content:center;">
         <div style="background:var(--bg-card);border-radius:var(--radius);padding:24px;max-width:360px;width:90%;text-align:center;">
@@ -4236,6 +4260,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.getElementById('backBtn').classList.add('visible');
 
       // Signs module — custom handling
+      if (module === 'quickEstimate') {
+        showScreen('quickEstimateScreen');
+        qeReset();
+        return;
+      }
       if (module === 'signs') {
         document.getElementById('signsScreen').style.display = 'block';
         document.getElementById('headerTitle').textContent = 'Yard Signs';
@@ -4435,7 +4464,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.2.4 | 2026-04-21 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.2.5 | 2026-04-21 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
