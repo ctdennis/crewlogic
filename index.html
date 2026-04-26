@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.2.6 | 2026-04-26">
+  <meta name="crewlogic-version" content="v5.3.0 | 2026-04-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.2.6 | 2026-04-26 -->
+<!-- CrewLogic v5.3.0 | 2026-04-26 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -967,7 +967,13 @@
             <div class="module-desc">Create & manage customer estimates</div>
           </div>
 
-          <div class="module-card fade-in fade-in-delay-2" id="routerCard" onclick="openModule('router')" style="display:none;">
+          <div class="module-card fade-in fade-in-delay-2" onclick="openModule('volumeCheck')">
+            <div class="module-icon">📐</div>
+            <div class="module-name">Volume Check</div>
+            <div class="module-desc">Quick AI volume check from photos — no job needed</div>
+          </div>
+
+          <div class="module-card fade-in fade-in-delay-3" id="routerCard" onclick="openModule('router')" style="display:none;">
             <div class="module-icon">🚛</div>
             <div class="module-name">Route Optimizer</div>
             <div class="module-desc">Find optimal transfer stations</div>
@@ -985,10 +991,6 @@
             <div class="module-desc">Track sign placements & crew rewards</div>
           </div>
 
-          <div class="module-card fade-in fade-in-delay-4" onclick="openModule('quickEstimate')">
-            <div class="module-icon">📷</div>
-            <div class="module-name">Quick Estimate</div>
-          </div>
           <div class="module-card fade-in fade-in-delay-4" onclick="openModule('settings')">
             <div class="module-icon">⚙️</div>
             <div class="module-name">Settings</div>
@@ -2883,22 +2885,46 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         </div>
       </div>
 
-      <!-- QUICK ESTIMATE SCREEN -->
-      <div id="quickEstimateScreen" class="estimates-section" style="display:none;">
+      <!-- VOLUME CHECK SCREEN -->
+      <div id="volumeCheckScreen" class="estimates-section" style="display:none;">
         <div class="estimate-list-header">
-          <div class="section-title">📷 Quick Estimate</div>
+          <div class="section-title">📐 Volume Check</div>
+          <button onclick="vcReset()" style="padding:6px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;color:var(--text-muted);cursor:pointer;">Reset</button>
         </div>
-        <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Take 1–8 photos to get an AI volume breakdown — no job number needed.</div>
-        <div id="qePhotos" style="display:flex;flex-wrap:wrap;gap:8px;min-height:60px;margin-bottom:12px;"></div>
-        <div style="display:flex;gap:8px;margin-bottom:12px;">
-          <button id="qeAddPhotoBtn" onclick="qeAddPhoto()" style="flex:1;padding:14px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#000;cursor:pointer;">📷 Add Photo</button>
-          <button onclick="qeReset()" style="padding:14px 18px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-muted);cursor:pointer;">Reset</button>
+
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5;">
+          Take photos of each area to get an AI volume estimate. Useful for sanity-checking your numbers and catching items you may have missed.
         </div>
-        <input type="file" id="qeFileInput" accept="image/*" capture="environment" style="display:none;" onchange="qeHandlePhoto(this)">
-        <button id="qeAnalyzeBtn" onclick="qeAnalyze()" style="display:none;width:100%;padding:14px;background:var(--accent-blue);border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#fff;cursor:pointer;margin-bottom:12px;">🔍 Analyze Photos</button>
-        <div id="qeResult" style="display:none;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;margin-bottom:12px;"></div>
-        <div id="qeFeedback" style="font-size:12px;color:var(--text-muted);min-height:16px;text-align:center;"></div>
-        <button class="new-estimate-btn" style="margin-top:12px;" onclick="openModule('estimates')">← Back to Estimates</button>
+
+        <!-- Areas list -->
+        <div id="vcAreasList" style="margin-bottom:12px;"></div>
+
+        <!-- Add area button -->
+        <button id="vcAddAreaBtn" onclick="vcAddArea()" style="width:100%;padding:12px;background:var(--bg-card);border:1px dashed var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-secondary);cursor:pointer;margin-bottom:12px;">
+          + Add Another Area
+        </button>
+
+        <!-- Analyze button -->
+        <button id="vcAnalyzeBtn" onclick="vcAnalyze()" disabled style="width:100%;padding:14px;background:var(--accent-blue);border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#fff;cursor:pointer;margin-bottom:12px;opacity:0.4;">
+          🔍 Analyze All Areas
+        </button>
+
+        <!-- Result panel -->
+        <div id="vcResult" style="display:none;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;margin-bottom:12px;"></div>
+
+        <!-- Share button — shown after analysis -->
+        <button id="vcShareBtn" onclick="vcShareRecap()" style="display:none;width:100%;padding:12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#000;cursor:pointer;margin-bottom:12px;">
+          💬 Share Recap
+        </button>
+
+        <!-- Feedback -->
+        <div id="vcFeedback" style="font-size:12px;color:var(--text-muted);min-height:16px;text-align:center;margin-bottom:12px;"></div>
+
+        <!-- Hidden file inputs — one for camera, one for library -->
+        <input type="file" id="vcCameraInput" accept="image/*" capture="environment" style="display:none;" onchange="vcHandlePhotos(this)">
+        <input type="file" id="vcLibraryInput" accept="image/*" multiple style="display:none;" onchange="vcHandlePhotos(this)">
+
+        <button class="new-estimate-btn" style="margin-top:12px;" onclick="goHome()">← Back to Home</button>
       </div>
 
       <!-- SIGNS APPROVAL PAGE (owner approves solo run) -->
@@ -4208,7 +4234,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       'routerScreen', 'routeResultScreen',
       'storageScreen', 'storageResultsScreen',
       'mattressScreen', 'mattressResultsScreen',
-      'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'quickEstimateScreen'
+      'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen'
     ];
 
     function hideAll() {
@@ -4258,11 +4284,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.getElementById('backBtn').classList.add('visible');
 
       // Signs module — custom handling
-      if (module === 'quickEstimate') {
-        document.getElementById('quickEstimateScreen').classList.add('active');
-        document.getElementById('headerTitle').textContent = 'Quick Estimate';
-        currentScreen = 'quickEstimate';
-        qeReset();
+      if (module === 'volumeCheck') {
+        document.getElementById('volumeCheckScreen').classList.add('active');
+        document.getElementById('headerTitle').textContent = 'Volume Check';
+        currentScreen = 'volumeCheck';
+        vcReset();
         return;
       }
       if (module === 'signs') {
@@ -4464,7 +4490,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.2.6 | 2026-04-26 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.3.0 | 2026-04-26 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -13676,142 +13702,444 @@ Please review the estimate below. If you have any questions or would like to adj
         '</div>';
     }
 
-    // ===== QUICK ESTIMATE =====
-    let _qePhotos = []; // array of { base64, analysisBase64 }
+    // ===== VOLUME CHECK =====
+    // Multi-area photo-based volume validation. No save, no pricing.
+    let _vcAreas = []; // [{ id, name, photos: [{base64, hiRes, analysisBase64}] }]
+    let _vcActiveAreaIdx = null; // which area is receiving photos right now
+    let _vcResult = null; // last analysis result for share recap
 
-    function qeReset() {
-      _qePhotos = [];
-      document.getElementById('qePhotos').innerHTML = '';
-      document.getElementById('qeResult').style.display = 'none';
-      document.getElementById('qeResult').innerHTML = '';
-      document.getElementById('qeAnalyzeBtn').style.display = 'none';
-      document.getElementById('qeFeedback').textContent = '';
-      document.getElementById('qeAddPhotoBtn').disabled = false;
-      document.getElementById('qeFileInput').value = '';
+    function vcReset() {
+      _vcAreas = [];
+      _vcActiveAreaIdx = null;
+      _vcResult = null;
+      document.getElementById('vcResult').style.display = 'none';
+      document.getElementById('vcResult').innerHTML = '';
+      document.getElementById('vcShareBtn').style.display = 'none';
+      document.getElementById('vcFeedback').textContent = '';
+      document.getElementById('vcCameraInput').value = '';
+      document.getElementById('vcLibraryInput').value = '';
+      const analyzeBtn = document.getElementById('vcAnalyzeBtn');
+      analyzeBtn.textContent = '🔍 Analyze All Areas';
+      analyzeBtn.disabled = true;
+      analyzeBtn.style.opacity = '0.4';
+      // Start with one empty area
+      vcAddArea();
     }
 
-    function qeAddPhoto() {
-      if (_qePhotos.length >= 8) { alert('Maximum 8 photos.'); return; }
-      document.getElementById('qeFileInput').click();
+    function vcAddArea() {
+      if (_vcAreas.length >= 8) {
+        alert('Maximum 8 areas per volume check.');
+        return;
+      }
+      const id = 'area_' + Date.now() + '_' + _vcAreas.length;
+      _vcAreas.push({ id: id, name: 'Area ' + (_vcAreas.length + 1), photos: [] });
+      vcRenderAreas();
     }
 
-    async function qeHandlePhoto(input) {
-      const file = input.files[0];
-      if (!file) return;
+    function vcRemoveArea(idx) {
+      _vcAreas.splice(idx, 1);
+      // Renumber remaining areas
+      _vcAreas.forEach((a, i) => { a.name = 'Area ' + (i + 1); });
+      if (_vcAreas.length === 0) vcAddArea();
+      vcRenderAreas();
+      vcUpdateAnalyzeButton();
+    }
+
+    function vcRenderAreas() {
+      const container = document.getElementById('vcAreasList');
+      container.innerHTML = _vcAreas.map((area, idx) => {
+        const photoCount = area.photos.length;
+        const thumbsHtml = area.photos.map((p, pi) =>
+          '<div style="position:relative;flex-shrink:0;">' +
+            '<img src="' + p.base64 + '" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border);">' +
+            '<button onclick="vcRemovePhoto(' + idx + ',' + pi + ')" style="position:absolute;top:-4px;right:-4px;background:#ef4444;border:none;border-radius:50%;width:18px;height:18px;color:#fff;font-size:11px;cursor:pointer;line-height:18px;text-align:center;padding:0;">✕</button>' +
+          '</div>'
+        ).join('');
+
+        return '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;">' +
+          '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
+            '<div style="font-size:14px;font-weight:600;color:var(--text-primary);">' + area.name + '</div>' +
+            (_vcAreas.length > 1 ? '<button onclick="vcRemoveArea(' + idx + ')" style="background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;padding:0 4px;">✕</button>' : '') +
+          '</div>' +
+          (photoCount > 0
+            ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">' + thumbsHtml + '</div>'
+            : '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">No photos yet</div>'
+          ) +
+          '<div style="display:flex;gap:6px;">' +
+            (photoCount < 8
+              ? '<button onclick="vcAddPhoto(' + idx + ',\'camera\')" style="flex:1;padding:8px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:12px;font-weight:600;color:#000;cursor:pointer;">📷 Camera</button>' +
+                '<button onclick="vcAddPhoto(' + idx + ',\'library\')" style="flex:1;padding:8px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;color:var(--text-secondary);cursor:pointer;">🖼️ Library</button>'
+              : '<div style="flex:1;text-align:center;font-size:11px;color:var(--text-muted);padding:8px;">Maximum 8 photos reached</div>'
+            ) +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    function vcAddPhoto(areaIdx, source) {
+      _vcActiveAreaIdx = areaIdx;
+      if (source === 'camera') {
+        document.getElementById('vcCameraInput').click();
+      } else {
+        document.getElementById('vcLibraryInput').click();
+      }
+    }
+
+    async function vcHandlePhotos(input) {
+      const files = Array.from(input.files || []);
+      if (!files.length || _vcActiveAreaIdx === null) {
+        input.value = '';
+        return;
+      }
       input.value = '';
-      const feedbackEl = document.getElementById('qeFeedback');
-      feedbackEl.textContent = 'Processing photo...';
-      try {
-        const base64 = await ensureJpegBase64(file);
-        const compressed = await compressChargePhoto(base64);
-        const analysisImg = await compressForAnalysis(base64);
-        _qePhotos.push({ base64: compressed, analysisBase64: analysisImg });
-        qeRenderThumbs();
-        feedbackEl.textContent = _qePhotos.length + ' photo' + (_qePhotos.length !== 1 ? 's' : '') + ' · tap Add Photo for more or Analyze when ready';
-        document.getElementById('qeAnalyzeBtn').style.display = 'block';
-        document.getElementById('qeAddPhotoBtn').disabled = _qePhotos.length >= 8;
-      } catch(e) {
-        feedbackEl.textContent = 'Photo error — try again.';
+
+      const area = _vcAreas[_vcActiveAreaIdx];
+      if (!area) return;
+
+      const remaining = 8 - area.photos.length;
+      const toProcess = files.slice(0, remaining);
+
+      if (toProcess.length === 0) {
+        alert('Maximum 8 photos per area reached.');
+        return;
       }
-    }
 
-    function qeRenderThumbs() {
-      const container = document.getElementById('qePhotos');
-      container.innerHTML = _qePhotos.map((p, i) =>
-        '<div style="position:relative;flex-shrink:0;">' +
-          '<img src="' + p.base64 + '" style="width:80px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border);">' +
-          '<button onclick="qeRemovePhoto(' + i + ')" style="position:absolute;top:-4px;right:-4px;background:#ef4444;border:none;border-radius:50%;width:18px;height:18px;color:#fff;font-size:11px;cursor:pointer;line-height:18px;text-align:center;padding:0;">✕</button>' +
-        '</div>'
-      ).join('');
-    }
+      const feedbackEl = document.getElementById('vcFeedback');
+      feedbackEl.textContent = 'Processing ' + toProcess.length + ' photo' + (toProcess.length !== 1 ? 's' : '') + '...';
 
-    function qeRemovePhoto(idx) {
-      _qePhotos.splice(idx, 1);
-      qeRenderThumbs();
-      document.getElementById('qeAnalyzeBtn').style.display = _qePhotos.length > 0 ? 'block' : 'none';
-      document.getElementById('qeAddPhotoBtn').disabled = false;
-      document.getElementById('qeFeedback').textContent = _qePhotos.length > 0 ? _qePhotos.length + ' photo' + (_qePhotos.length !== 1 ? 's' : '') : '';
-      if (_qePhotos.length === 0) {
-        document.getElementById('qeResult').style.display = 'none';
-        document.getElementById('qeResult').innerHTML = '';
+      for (const file of toProcess) {
+        try {
+          const base64 = await ensureJpegBase64(file);
+          const compressed = await compressChargePhoto(base64);
+          const analysisImg = await compressForAnalysis(base64);
+          area.photos.push({ base64: compressed, hiRes: compressed, analysisBase64: analysisImg });
+        } catch(e) {
+          console.warn('Photo processing failed:', e);
+        }
       }
+
+      vcRenderAreas();
+      vcUpdateAnalyzeButton();
+
+      const totalPhotos = _vcAreas.reduce((s, a) => s + a.photos.length, 0);
+      feedbackEl.textContent = totalPhotos + ' photo' + (totalPhotos !== 1 ? 's' : '') + ' total · tap Analyze when ready';
     }
 
-    async function qeAnalyze() {
-      if (!_qePhotos.length) return;
-      const analyzeBtn = document.getElementById('qeAnalyzeBtn');
-      const feedbackEl = document.getElementById('qeFeedback');
-      const resultEl = document.getElementById('qeResult');
+    function vcRemovePhoto(areaIdx, photoIdx) {
+      const area = _vcAreas[areaIdx];
+      if (!area) return;
+      area.photos.splice(photoIdx, 1);
+      vcRenderAreas();
+      vcUpdateAnalyzeButton();
+    }
+
+    function vcUpdateAnalyzeButton() {
+      const btn = document.getElementById('vcAnalyzeBtn');
+      const totalPhotos = _vcAreas.reduce((s, a) => s + a.photos.length, 0);
+      btn.disabled = totalPhotos === 0;
+      btn.style.opacity = totalPhotos > 0 ? '1' : '0.4';
+    }
+
+    async function vcAnalyze() {
+      const totalPhotos = _vcAreas.reduce((s, a) => s + a.photos.length, 0);
+      if (totalPhotos === 0) return;
+
+      const analyzeBtn = document.getElementById('vcAnalyzeBtn');
+      const feedbackEl = document.getElementById('vcFeedback');
+      const resultEl = document.getElementById('vcResult');
+      const shareBtn = document.getElementById('vcShareBtn');
+
       analyzeBtn.disabled = true;
       analyzeBtn.textContent = '⏳ Analyzing...';
-      feedbackEl.textContent = 'Sending ' + _qePhotos.length + ' photo' + (_qePhotos.length !== 1 ? 's' : '') + ' to AI...';
+      feedbackEl.textContent = 'Sending ' + totalPhotos + ' photo' + (totalPhotos !== 1 ? 's' : '') + ' across ' + _vcAreas.length + ' area' + (_vcAreas.length !== 1 ? 's' : '') + ' to AI...';
       resultEl.style.display = 'none';
+      shareBtn.style.display = 'none';
+
       try {
-        const photos = _qePhotos.map(p => p.analysisBase64);
-        const data = await callAnalyzeVoice({
-          transcript: '[QUICK ESTIMATE — crew second opinion. Analyze photos and return volume estimate using Vonigo line item labels only. No pricing needed.]',
-          areas: availableAreas,
-          photos
-        });
-        if (!data.success) throw new Error(data.error || 'Analysis failed');
-        const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
-        qeRenderResult(charges);
-        feedbackEl.textContent = 'AI estimate below — not saved to any job.';
+        // Analyze each area separately so we get per-area volume breakdown
+        const areaResults = [];
+        for (const area of _vcAreas) {
+          if (area.photos.length === 0) continue;
+          const photos = area.photos.map(p => p.analysisBase64);
+          const transcript = '[VOLUME CHECK — crew sanity check for ' + area.name + '. ' +
+            'Analyze photos and return: (1) volume estimate using Vonigo line item labels (Minimum, 1/8 Truck, 1/4 Truck, etc. up to Full Truck × N for multi-truck loads), ' +
+            '(2) recycling line items (Mattress/Box Spring, TV/Monitor, Freon Appliance, Tire, Paint Can) with quantities, ' +
+            '(3) single items (Dishwasher, Dresser, Dryer, Couch, etc.) with quantities, ' +
+            '(4) hazmat warning if you see propane tanks, gasoline, oil paint, chemicals, ammunition, batteries, or other items we cannot transport. ' +
+            'No pricing needed. Brief 1-sentence description listing the main items.]';
+
+          const data = await callAnalyzeVoice({
+            transcript: transcript,
+            areas: ['Area 1', 'Area 2', 'Area 3', 'Area 4', 'Area 5', 'Area 6', 'Area 7', 'Area 8'],
+            photos: photos
+          });
+          if (data && data.success) {
+            const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result].filter(Boolean);
+            areaResults.push({ area: area, charges: charges, hazmat: data.hazmat || null });
+          } else {
+            areaResults.push({ area: area, charges: [], hazmat: null, error: (data && data.error) || 'Analysis failed' });
+          }
+        }
+
+        _vcResult = areaResults;
+        vcRenderResult(areaResults);
+        feedbackEl.textContent = 'Volume check complete — not saved.';
+        shareBtn.style.display = 'block';
+        analyzeBtn.textContent = '🔍 Re-Analyze';
+        analyzeBtn.disabled = false;
       } catch(e) {
+        console.error('vcAnalyze error:', e);
         feedbackEl.textContent = '⚠️ ' + (e.message || 'Analysis failed — try again.');
+        analyzeBtn.textContent = '🔍 Analyze All Areas';
+        analyzeBtn.disabled = false;
       }
-      analyzeBtn.disabled = false;
-      analyzeBtn.textContent = '🔍 Re-Analyze';
     }
 
-    function qeRenderResult(charges) {
-      const resultEl = document.getElementById('qeResult');
-      const volCharges = charges.filter(c => c.type === 'volume');
-      const surcharges = charges.filter(c => c.type === 'surcharge');
-      const totalTrucks = volCharges.reduce((s, c) => s + (parseFloat(c.truckVolume) || 0), 0);
-      const snappedTrucks = Math.round(totalTrucks * 8) / 8;
-      const fracLabels = {0.125:'1/8 Truck',0.25:'1/4 Truck',0.375:'3/8 Truck',0.5:'1/2 Truck',0.625:'5/8 Truck',0.75:'3/4 Truck',0.875:'7/8 Truck',1.0:'Full Truck'};
-      let html = '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:10px;">AI Volume Assessment</div>';
-      // Volume summary callout
-      html += '<div style="background:rgba(0,238,118,0.08);border:1px solid var(--accent-green);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;">';
-      html += '<div style="font-size:11px;color:var(--accent-green);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total Volume</div>';
-      html += '<div style="font-family:\'Space Mono\',monospace;font-size:24px;font-weight:700;color:var(--accent-green);">' + (fracLabels[snappedTrucks] || (snappedTrucks.toFixed(3) + ' Trucks')) + '</div>';
-      html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + (snappedTrucks * 16).toFixed(0) + ' CY&ensp;·&ensp;' + snappedTrucks.toFixed(3) + ' trucks</div>';
-      html += '</div>';
-      // Volume breakdown rows
-      if (volCharges.length > 1) {
-        html += '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Breakdown</div>';
-        volCharges.forEach(c => {
-          html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);">';
-          html += '<div><span style="font-size:13px;color:var(--text-primary);">' + (c.room || 'Area') + '</span>' + (c.area ? '<span style="font-size:11px;color:var(--text-muted);"> · ' + c.area + '</span>' : '') + '</div>';
-          html += '<span style="font-family:monospace;font-size:12px;font-weight:600;color:var(--accent-green);">' + (c.truckLabel || '') + (c.truckQty && c.truckQty !== 1 ? ' ×' + c.truckQty : '') + '</span>';
-          html += '</div>';
-          if (c.description) html += '<div style="font-size:11px;color:var(--text-muted);padding:2px 0 4px;">' + c.description + '</div>';
-        });
-      } else if (volCharges[0] && volCharges[0].description) {
-        html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">' + volCharges[0].description + '</div>';
+    function _vcFracLabels() {
+      return {0.0625:'Minimum',0.125:'1/8 Truck',0.25:'1/4 Truck',0.375:'3/8 Truck',
+        0.5:'1/2 Truck',0.625:'5/8 Truck',0.75:'3/4 Truck',0.875:'7/8 Truck',1.0:'Full Truck'};
+    }
+
+    function _vcLabelToTrucks() {
+      return {'Included':0,'Minimum':0.0625,'1/8':0.125,'1/4':0.25,'3/8':0.375,
+        '1/2':0.5,'5/8':0.625,'3/4':0.75,'7/8':0.875,'Full':1};
+    }
+
+    function _vcAreaTrucks(volCharges) {
+      const labelToTrucks = _vcLabelToTrucks();
+      let trucks = 0;
+      volCharges.forEach(c => {
+        // Try truckVolume first (already computed fraction), then derive from truckLabel
+        if (typeof c.truckVolume === 'number' || (typeof c.truckVolume === 'string' && c.truckVolume !== '')) {
+          const tv = parseFloat(c.truckVolume) || 0;
+          const qty = parseFloat(c.truckQty) || 1;
+          trucks += tv * qty;
+        } else {
+          const lbl = (c.truckLabel || '').replace(' Truck','').replace('Truckload','').trim();
+          const fraction = labelToTrucks[lbl] !== undefined ? labelToTrucks[lbl] : 0;
+          const qty = parseFloat(c.truckQty) || 1;
+          trucks += fraction * qty;
+        }
+      });
+      return trucks;
+    }
+
+    function formatTrucksDisplay(trucks) {
+      const fracLabels = _vcFracLabels();
+      if (trucks <= 0) return 'Included';
+      // Snap to 1/8
+      const snapped = Math.round(trucks * 8) / 8;
+      if (snapped <= 1) {
+        return fracLabels[snapped] || (snapped.toFixed(3) + ' Trucks');
       }
-      // Recycling / surcharges
-      if (surcharges.length > 0) {
-        html += '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin:12px 0 6px;">Recycling & Surcharges</div>';
+      // Multi-truck: show as "1 1/2 Trucks" or "2 Full Trucks"
+      const whole = Math.floor(snapped);
+      const partial = Math.round((snapped - whole) * 8) / 8;
+      if (partial === 0) {
+        return whole + ' Full Truck' + (whole !== 1 ? 's' : '');
+      }
+      const fracText = {0.125:'1/8',0.25:'1/4',0.375:'3/8',0.5:'1/2',0.625:'5/8',0.75:'3/4',0.875:'7/8'}[partial] || partial.toString();
+      return whole + ' ' + fracText + ' Trucks';
+    }
+
+    function vcRenderResult(areaResults) {
+      const resultEl = document.getElementById('vcResult');
+      let totalTrucks = 0;
+      const allRecycling = {}; // name -> qty
+      const allSingleItems = {}; // name -> qty
+      const allHazmat = new Set();
+      const hazardKeywords = ['propane', 'gasoline', 'oil paint', 'ammunition', 'battery', 'batteries', 'chemical', 'hazmat'];
+
+      // Per-area breakdowns
+      let perAreaHtml = '';
+      areaResults.forEach((ar) => {
+        const charges = ar.charges || [];
+        const volCharges = charges.filter(c => c && c.type === 'volume');
+        const surcharges = charges.filter(c => c && c.type === 'surcharge');
+        const singleItems = charges.filter(c => c && c.type === 'singleitem');
+
+        const areaTrucks = _vcAreaTrucks(volCharges);
+        totalTrucks += areaTrucks;
+
+        // Aggregate recycling
         surcharges.forEach(s => {
-          html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);">';
-          html += '<span style="font-size:13px;color:var(--text-primary);">' + (s.name || '') + '</span>';
-          html += '<span style="font-size:12px;color:var(--text-muted);">× ' + (s.qty || 1) + '</span>';
-          html += '</div>';
+          const name = s.name || 'Unknown';
+          allRecycling[name] = (allRecycling[name] || 0) + (parseFloat(s.qty) || 1);
+        });
+
+        // Aggregate single items
+        singleItems.forEach(s => {
+          const name = s.name || 'Unknown';
+          allSingleItems[name] = (allSingleItems[name] || 0) + (parseFloat(s.qty) || 1);
+        });
+
+        // Hazmat — structured field
+        if (ar.hazmat && Array.isArray(ar.hazmat)) {
+          ar.hazmat.forEach(h => allHazmat.add(h));
+        }
+        // Also scan descriptions for hazmat keywords
+        const allText = charges.map(c => (c.description || c.name || '')).join(' ').toLowerCase();
+        hazardKeywords.forEach(kw => { if (allText.indexOf(kw) !== -1) allHazmat.add(kw); });
+
+        // Render this area
+        const areaCY = (areaTrucks * 16).toFixed(1);
+        const areaLabel = formatTrucksDisplay(areaTrucks);
+        const description = volCharges.map(c => c.description).filter(Boolean).join(' ') || 'No items identified';
+
+        perAreaHtml += '<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05);">' +
+          '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;">' +
+            '<span style="font-size:13px;font-weight:600;color:var(--text-primary);">' + ar.area.name + '</span>' +
+            '<span style="font-family:\'Space Mono\',monospace;font-size:14px;font-weight:700;color:var(--accent-green);">' +
+              areaLabel + ' <span style="font-size:11px;color:var(--text-muted);font-weight:400;">(' + areaCY + ' CY)</span>' +
+            '</span>' +
+          '</div>' +
+          '<div style="font-size:11px;color:var(--text-muted);line-height:1.5;">' + description + '</div>' +
+        '</div>';
+      });
+
+      // Total
+      const totalCY = (totalTrucks * 16).toFixed(1);
+      const totalLabel = formatTrucksDisplay(totalTrucks);
+
+      let html = '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:10px;">AI Volume Check</div>';
+
+      // HAZMAT WARNING — top of results, prominent
+      if (allHazmat.size > 0) {
+        const hazmatList = Array.from(allHazmat).join(', ');
+        html += '<div style="background:rgba(239,68,68,0.15);border:1px solid #ef4444;border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;">' +
+          '<div style="font-size:12px;font-weight:700;color:#ef4444;margin-bottom:2px;">⚠️ HAZMAT DETECTED</div>' +
+          '<div style="font-size:12px;color:var(--text-primary);text-transform:capitalize;">' + hazmatList + '</div>' +
+          '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">We cannot transport these items — do not include in estimate.</div>' +
+        '</div>';
+      }
+
+      // Total volume callout
+      html += '<div style="background:rgba(0,238,118,0.08);border:1px solid var(--accent-green);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;">' +
+        '<div style="font-size:11px;color:var(--accent-green);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total Volume</div>' +
+        '<div style="font-family:\'Space Mono\',monospace;font-size:24px;font-weight:700;color:var(--accent-green);">' + totalLabel + '</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + totalCY + ' CY total · across ' + areaResults.length + ' area' + (areaResults.length !== 1 ? 's' : '') + '</div>' +
+      '</div>';
+
+      // Per-area breakdown
+      if (areaResults.length > 1) {
+        html += '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Per Area</div>';
+        html += perAreaHtml;
+      } else if (areaResults.length === 1) {
+        // Single area — just show description
+        const desc = (areaResults[0].charges || []).filter(c => c && c.type === 'volume').map(c => c.description).filter(Boolean).join(' ');
+        if (desc) html += '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px;line-height:1.5;">' + desc + '</div>';
+      }
+
+      // Recycling
+      const recyclingEntries = Object.entries(allRecycling);
+      if (recyclingEntries.length > 0) {
+        html += '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin:14px 0 6px;">Recycling</div>';
+        recyclingEntries.forEach(([name, qty]) => {
+          html += '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);">' +
+            '<span style="font-size:13px;color:var(--text-primary);">' + name + '</span>' +
+            '<span style="font-size:12px;color:var(--text-muted);font-family:\'Space Mono\',monospace;">× ' + qty + '</span>' +
+          '</div>';
         });
       }
-      // AI reasoning
-      const firstVol = volCharges[0];
-      if (firstVol && firstVol.reasoning) {
-        const confidenceColor = firstVol.confidence === 'high' ? 'var(--accent-green)' : firstVol.confidence === 'medium' ? '#fbbf24' : '#f87171';
-        html += '<div style="margin-top:12px;padding:8px 10px;background:var(--bg-input);border-radius:var(--radius-sm);">';
-        html += '<span style="font-size:11px;font-weight:600;color:' + confidenceColor + ';">' + (firstVol.confidence || '').toUpperCase() + ' CONFIDENCE</span>';
-        html += '<div style="font-size:11px;color:var(--text-muted);margin-top:3px;font-style:italic;">' + firstVol.reasoning + '</div>';
-        html += '</div>';
+
+      // Single items
+      const singleItemEntries = Object.entries(allSingleItems);
+      if (singleItemEntries.length > 0) {
+        html += '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin:14px 0 6px;">Single Items</div>';
+        singleItemEntries.forEach(([name, qty]) => {
+          html += '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);">' +
+            '<span style="font-size:13px;color:var(--text-primary);">' + name + '</span>' +
+            '<span style="font-size:12px;color:var(--text-muted);font-family:\'Space Mono\',monospace;">× ' + qty + '</span>' +
+          '</div>';
+        });
       }
+
       resultEl.innerHTML = html;
       resultEl.style.display = 'block';
+    }
+
+    function vcShareRecap() {
+      if (!_vcResult) return;
+      const hazardKeywords = ['propane', 'gasoline', 'oil paint', 'ammunition', 'battery', 'batteries', 'chemical', 'hazmat'];
+
+      let totalTrucks = 0;
+      const allRecycling = {};
+      const allSingleItems = {};
+      const allHazmat = new Set();
+      const areaLines = [];
+
+      _vcResult.forEach(ar => {
+        const charges = ar.charges || [];
+        const volCharges = charges.filter(c => c && c.type === 'volume');
+        const surcharges = charges.filter(c => c && c.type === 'surcharge');
+        const singleItems = charges.filter(c => c && c.type === 'singleitem');
+
+        const areaTrucks = _vcAreaTrucks(volCharges);
+        totalTrucks += areaTrucks;
+
+        surcharges.forEach(s => { allRecycling[s.name || 'Unknown'] = (allRecycling[s.name || 'Unknown'] || 0) + (parseFloat(s.qty) || 1); });
+        singleItems.forEach(s => { allSingleItems[s.name || 'Unknown'] = (allSingleItems[s.name || 'Unknown'] || 0) + (parseFloat(s.qty) || 1); });
+        if (ar.hazmat && Array.isArray(ar.hazmat)) ar.hazmat.forEach(h => allHazmat.add(h));
+        const allText = charges.map(c => (c.description || c.name || '')).join(' ').toLowerCase();
+        hazardKeywords.forEach(kw => { if (allText.indexOf(kw) !== -1) allHazmat.add(kw); });
+
+        const desc = volCharges.map(c => c.description).filter(Boolean).join(' ') || '—';
+        const areaCY = (areaTrucks * 16).toFixed(1);
+        const areaLabel = formatTrucksDisplay(areaTrucks);
+        areaLines.push(ar.area.name + ' — ' + areaLabel + ' (' + areaCY + ' CY)\n' + desc);
+      });
+
+      const totalCY = (totalTrucks * 16).toFixed(1);
+      const totalLabel = formatTrucksDisplay(totalTrucks);
+
+      const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+      let recap = 'Volume Check — ' + dateStr + '\n\n';
+      recap += areaLines.join('\n\n') + '\n\n';
+      recap += 'TOTAL: ' + totalLabel + ' (' + totalCY + ' CY)\n';
+
+      const recyclingEntries = Object.entries(allRecycling);
+      if (recyclingEntries.length > 0) {
+        recap += '\nRecycling:\n';
+        recyclingEntries.forEach(([name, qty]) => { recap += '• ' + name + ' × ' + qty + '\n'; });
+      }
+
+      const singleItemEntries = Object.entries(allSingleItems);
+      if (singleItemEntries.length > 0) {
+        recap += '\nSingle Items:\n';
+        singleItemEntries.forEach(([name, qty]) => { recap += '• ' + name + ' × ' + qty + '\n'; });
+      }
+
+      if (allHazmat.size > 0) {
+        recap += '\n⚠️ Hazmat detected: ' + Array.from(allHazmat).join(', ');
+      }
+
+      // Try native share, fallback to clipboard
+      if (navigator.share) {
+        navigator.share({
+          title: 'Volume Check',
+          text: recap
+        }).catch(e => {
+          if (e && e.name !== 'AbortError') vcCopyToClipboard(recap);
+        });
+      } else {
+        vcCopyToClipboard(recap);
+      }
+    }
+
+    function vcCopyToClipboard(text) {
+      const btn = document.getElementById('vcShareBtn');
+      const orig = btn.textContent;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          btn.textContent = '✓ Copied to clipboard';
+          setTimeout(() => { btn.textContent = orig; }, 2000);
+        }).catch(() => {
+          alert('Recap:\n\n' + text);
+        });
+      } else {
+        alert('Recap:\n\n' + text);
+      }
     }
 
     // ===== BOOT =====
