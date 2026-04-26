@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.2.5 | 2026-04-21">
+  <meta name="crewlogic-version" content="v5.2.6 | 2026-04-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -865,7 +865,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.2.5 | 2026-04-21 -->
+<!-- CrewLogic v5.2.6 | 2026-04-26 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4464,7 +4464,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.2.5 | 2026-04-21 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.2.6 | 2026-04-26 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5820,6 +5820,40 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         priceBlocks = [];
         priceListID = null;
         priceListName = '';
+        // Auto-refetch price list if zip is available — handles older estimates with empty priceBook
+        const zip = currentEstimate.zip;
+        if (zip) {
+          setTimeout(() => autoRefetchPriceBlocks(zip), 300);
+        }
+      }
+    }
+
+    async function autoRefetchPriceBlocks(zip) {
+      const statusEl = document.getElementById('zipLookupStatus');
+      if (statusEl) { statusEl.textContent = 'Reloading prices...'; statusEl.className = 'zip-status loading'; }
+      try {
+        const priceRes = await apiFetch(N8N_BASE + '/crewlogic-price-lookup', {
+          method: 'POST',
+          body: JSON.stringify({ zipCode: zip, franchiseID: currentUser.franchiseID, email: currentUser.email })
+        });
+        const priceData = await priceRes.json();
+        if (priceData.success && priceData.blocks && priceData.blocks.length > 0) {
+          priceBlocks = priceData.blocks;
+          priceListID = priceData.priceListID;
+          priceListName = priceData.priceListName || '';
+          currentEstimate.priceBlocks = priceBlocks;
+          currentEstimate.priceListID = priceListID;
+          currentEstimate.priceListName = priceListName;
+          if (statusEl) { statusEl.textContent = '✓ ' + (currentEstimate.clientName || '') + '  |  ' + priceListName; statusEl.className = 'zip-status ok'; }
+          const plDisplay = document.getElementById('estPriceListDisplay');
+          if (plDisplay) plDisplay.textContent = priceListName;
+          // Re-render charge rows so dropdowns populate
+          renderChargeRows();
+        } else {
+          if (statusEl) { statusEl.textContent = 'Could not reload prices — use Load Pricing button'; statusEl.className = 'zip-status error'; }
+        }
+      } catch(e) {
+        if (statusEl) { statusEl.textContent = 'Could not reload prices — use Load Pricing button'; statusEl.className = 'zip-status error'; }
       }
     }
 
