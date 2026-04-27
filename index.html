@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.7.0 | 2026-04-27">
+  <meta name="crewlogic-version" content="v5.7.2 | 2026-04-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -907,7 +907,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.7.0 | 2026-04-27 -->
+<!-- CrewLogic v5.7.2 | 2026-04-27 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4551,7 +4551,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.7.0 | 2026-04-27 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.7.2 | 2026-04-27 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -13610,6 +13610,73 @@ Please review the estimate below. If you have any questions or would like to adj
     // Calls the crewlogic-ai Edge Function to verify a yard sign is in the photo.
     // Returns { detected: true|false|null, confidence, reasoning, raw }
     // null = check deferred (network error, AI unreachable) — placement allowed but flagged for review
+    // Reverse geocode via crewlogic-ai Edge Function.
+    // The frontend Maps API key has HTTP referrer restrictions which Geocoding API rejects,
+    // so we call through the Edge Function which holds an unrestricted (or IP-restricted) key.
+    async function reverseGeocodeViaEdge(lat, lng) {
+      const url = 'https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1/crewlogic-ai';
+      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 12000);
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          signal: ctrl.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+            'apikey': SUPABASE_ANON_KEY
+          },
+          body: JSON.stringify({ action: 'reverseGeocode', lat, lng })
+        });
+        clearTimeout(timer);
+        if (!res.ok) return '';
+        const data = await res.json();
+        if (data && data.success && data.address) return data.address;
+        if (data && data.error) console.warn('[Signs] Geocode edge fn error:', data.error);
+        return '';
+      } catch(e) {
+        clearTimeout(timer);
+        console.warn('[Signs] Geocode edge fn fetch failed:', e);
+        return '';
+      }
+    }
+
+    // Backfill helper — run from console: backfillSignAddresses()
+    // Walks all yard_signs with empty address, calls reverse geocode for each, updates the row.
+    async function backfillSignAddresses() {
+      const franchiseUUID = await getFranchiseUUID();
+      // Find signs missing address
+      const rows = await supabaseFetch('/rest/v1/yard_signs?franchise_id=eq.' + franchiseUUID + '&or=(address.is.null,address.eq.)&select=id,lat,lng,address&limit=200');
+      console.log('[Signs] Backfill: found', rows.length, 'signs missing address');
+      let success = 0, fail = 0;
+      for (const sign of rows) {
+        if (!sign.lat || !sign.lng) { fail++; continue; }
+        try {
+          const address = await reverseGeocodeViaEdge(sign.lat, sign.lng);
+          if (address) {
+            await supabaseFetch('/rest/v1/yard_signs?id=eq.' + sign.id, {
+              method: 'PATCH',
+              body: JSON.stringify({ address })
+            });
+            console.log('[Signs] Backfilled', sign.id, '→', address);
+            success++;
+          } else {
+            console.warn('[Signs] No address returned for', sign.id);
+            fail++;
+          }
+        } catch(e) {
+          console.warn('[Signs] Backfill error on', sign.id, e);
+          fail++;
+        }
+        // Rate limit — Google free tier is 50 req/sec, be nice
+        await new Promise(r => setTimeout(r, 200));
+      }
+      console.log('[Signs] Backfill done. Success:', success, 'Failed:', fail);
+      return { success, fail, total: rows.length };
+    }
+    window.backfillSignAddresses = backfillSignAddresses;
+
     async function detectYardSign(analysisBase64) {
       const url = 'https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1/crewlogic-ai';
       const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
@@ -13779,12 +13846,10 @@ Please review the estimate below. If you have any questions or would like to adj
         if (upErr) throw upErr;
         console.log('[Signs] Photo uploaded:', path);
 
-        // Reverse geocode
+        // Reverse geocode (via Edge Function — Google key has referrer restriction so we can't call from browser)
         let address = '';
         try {
-          const geo = await fetch('https://maps.googleapis.com/maps/api/geocode/json?latlng=' + gps.lat + ',' + gps.lng + '&key=' + SIGNS_MAPS_KEY);
-          const geoData = await geo.json();
-          if (geoData.results && geoData.results[0]) address = geoData.results[0].formatted_address;
+          address = await reverseGeocodeViaEdge(gps.lat, gps.lng);
           console.log('[Signs] Reverse geocoded:', address || '(empty)');
         } catch(e) { console.warn('[Signs] Geocode failed:', e); }
 
