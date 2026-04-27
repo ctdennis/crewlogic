@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.6.2 | 2026-04-27">
+  <meta name="crewlogic-version" content="v5.6.3 | 2026-04-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -907,7 +907,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.6.2 | 2026-04-27 -->
+<!-- CrewLogic v5.6.3 | 2026-04-27 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2922,6 +2922,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           <!-- Place sign button -->
           <button id="signsPlaceBtn" onclick="placeSign()" style="width:100%;padding:20px;background:var(--accent-green);border:none;border-radius:12px;font-size:18px;font-weight:700;color:#000;cursor:pointer;margin-bottom:12px;">📍 Place Sign</button>
           <button onclick="removeLastSign()" id="signsUndoBtn" style="width:100%;padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:12px;font-size:13px;color:var(--text-muted);cursor:pointer;display:none;">↩ Undo Last Sign</button>
+          <button onclick="signsDownloadLastPhoto()" id="signsDownloadDiagBtn" style="width:100%;padding:10px;background:var(--bg-input);border:1px dashed var(--border);border-radius:12px;font-size:12px;color:var(--text-muted);cursor:pointer;display:none;margin-top:8px;">🔍 Save last captured photo (diagnostic)</button>
 
           <!-- Recent signs in session -->
           <div id="signsSessionRecent" style="margin-top:16px;"></div>
@@ -4538,7 +4539,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.6.2 | 2026-04-27 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.6.3 | 2026-04-27 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -13632,7 +13633,7 @@ Please review the estimate below. If you have any questions or would like to adj
             console.log('[Signs] GPS source: EXIF');
             tierResults.push('EXIF: ✓');
           } else {
-            tierResults.push('EXIF: no GPS in photo (check Settings → Camera → Location)');
+            tierResults.push('EXIF: ' + (_signsLastExifInfo || 'no GPS') + ' [file ' + (file.type || 'unknown') + ', ' + Math.round(file.size/1024) + 'KB]');
           }
         }
 
@@ -13670,7 +13671,12 @@ Please review the estimate below. If you have any questions or would like to adj
         }
 
         if (!gps) {
-          throw new Error('GPS unavailable. Diagnostics:\n• ' + tierResults.join('\n• ') + '\n\nMost likely fix: Settings → Privacy → Location Services → Camera → "While Using the App"');
+          // Save the original captured file globally so user can download/inspect it
+          window._signsLastFailedPhoto = { base64: base64, type: file.type, name: file.name || 'photo.jpg', size: file.size };
+          // Show the diagnostic save button
+          const diagBtn = document.getElementById('signsDownloadDiagBtn');
+          if (diagBtn) diagBtn.style.display = 'block';
+          throw new Error('GPS unavailable. Diagnostics:\n• ' + tierResults.join('\n• ') + '\n\nTap "Save last captured photo" below to inspect the photo manually.');
         }
         console.log('[Signs] Final GPS:', gps);
 
@@ -13847,18 +13853,64 @@ Please review the estimate below. If you have any questions or would like to adj
       if (c.firstChild) c.removeChild(c.firstChild);
     }
 
+    // Diagnostic helper — share the last captured photo (where GPS failed) to camera roll/share sheet
+    // so user can inspect EXIF in any standard photo viewer.
+    // Call from browser console: signsDownloadLastPhoto()
+    async function signsDownloadLastPhoto() {
+      if (!window._signsLastFailedPhoto) {
+        alert('No captured photo cached. Take a photo first.');
+        return;
+      }
+      const p = window._signsLastFailedPhoto;
+      try {
+        // Convert base64 to blob
+        const res = await fetch(p.base64);
+        const blob = await res.blob();
+        const file = new File([blob], p.name, { type: blob.type || p.type || 'image/jpeg' });
+        // Try native share (iOS) — lets user save to Photos
+        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: 'CrewLogic captured photo (GPS diagnostic)' });
+          return;
+        }
+        // Fallback: trigger download via anchor
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = p.name;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+      } catch(e) {
+        alert('Share failed: ' + (e.message || e));
+      }
+    }
+    // Make it globally accessible for console invocation
+    window.signsDownloadLastPhoto = signsDownloadLastPhoto;
+
     // ── EXIF / GPS helpers ──────────────────────────────────────────────────
     // Extract GPS from EXIF data of a JPEG base64 string.
     // This works regardless of browser since EXIF lives in the photo file itself.
     // Input: base64 data URL ("data:image/jpeg;base64,...")
     // Returns: { lat, lng, source: 'exif' } or null if no GPS in EXIF.
+    let _signsLastExifInfo = null;  // diagnostic info from last EXIF parse
     function extractExifGpsFromBase64(jpegBase64) {
+      _signsLastExifInfo = 'no parse attempted';
       try {
         if (typeof piexif === 'undefined') {
           console.warn('[Signs] piexif library not loaded, skipping EXIF GPS');
+          _signsLastExifInfo = 'piexif library not loaded';
           return null;
         }
         const exif = piexif.load(jpegBase64);
+        // Diagnostic: count tags in each section
+        const counts = {
+          '0th': Object.keys(exif['0th'] || {}).length,
+          'Exif': Object.keys(exif['Exif'] || {}).length,
+          'GPS': Object.keys(exif['GPS'] || {}).length,
+          '1st': Object.keys(exif['1st'] || {}).length,
+        };
+        _signsLastExifInfo = 'tags found — 0th:' + counts['0th'] + ' Exif:' + counts['Exif'] + ' GPS:' + counts['GPS'] + ' 1st:' + counts['1st'];
+        console.log('[Signs] EXIF tag counts:', counts, 'full:', exif);
         const gps = exif.GPS;
         if (!gps || !gps[piexif.GPSIFD.GPSLatitude] || !gps[piexif.GPSIFD.GPSLongitude]) {
           console.log('[Signs] No GPS in EXIF metadata');
@@ -13880,6 +13932,7 @@ Please review the estimate below. If you have any questions or would like to adj
         return { lat, lng, source: 'exif' };
       } catch(e) {
         console.warn('[Signs] EXIF GPS extraction failed:', e);
+        _signsLastExifInfo = 'parse error: ' + (e.message || e);
         return null;
       }
     }
