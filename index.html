@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.5.1 | 2026-04-26">
+  <meta name="crewlogic-version" content="v5.5.2 | 2026-04-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -906,7 +906,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.5.1 | 2026-04-26 -->
+<!-- CrewLogic v5.5.2 | 2026-04-26 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4537,7 +4537,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.5.1 | 2026-04-26 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.5.2 | 2026-04-26 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -13567,35 +13567,78 @@ Please review the estimate below. If you have any questions or would like to adj
       }
     }
 
+    // Wrap an image-loading promise with a timeout to prevent iOS hang
+    function withTimeout(promise, ms, label) {
+      return Promise.race([
+        promise,
+        new Promise((_, rej) => setTimeout(() => rej(new Error(label + ' timed out after ' + ms + 'ms')), ms))
+      ]);
+    }
+
+    // Robust version of compressChargePhoto with onerror + timeout
+    function safeCompressPhoto(base64, maxW, maxH, quality, label) {
+      return withTimeout(new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            let w = img.width, h = img.height;
+            if (w > maxW) { h = h * maxW / w; w = maxW; }
+            if (h > maxH) { w = w * maxH / h; h = maxH; }
+            canvas.width = Math.round(w); canvas.height = Math.round(h);
+            canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/jpeg', quality));
+          } catch(e) { reject(e); }
+        };
+        img.onerror = (e) => reject(new Error('Image decode failed'));
+        img.src = base64;
+      }), 15000, label || 'image compression');
+    }
+
     async function handleSignPhoto(input) {
       const file = input.files && input.files[0];
       input.value = '';
       if (!file || !_signsCurrentSession) return;
       const placeBtn = document.getElementById('signsPlaceBtn');
       placeBtn.disabled = true;
-      placeBtn.textContent = '⏳ Checking photo...';
+      placeBtn.textContent = '⏳ Reading photo...';
       try {
-        // Get GPS — try EXIF first, fallback to browser geolocation
-        let gps = null;
-        try { gps = await extractExifGps(file); } catch(e) {}
-        if (!gps) gps = await getBrowserGps();
-        if (!gps) throw new Error('No GPS — enable location services');
+        console.log('[Signs] Photo received:', { type: file.type, size: file.size, name: file.name });
 
-        // Prep image
-        const base64 = await ensureJpegBase64(file);
-        const compressed = await compressChargePhoto(base64);
+        // Get GPS first (with explicit error path)
+        placeBtn.textContent = '📍 Getting location...';
+        let gps = null;
+        try { gps = await extractExifGps(file); } catch(e) { console.log('[Signs] EXIF GPS failed:', e); }
+        if (!gps) {
+          console.log('[Signs] Falling back to browser geolocation');
+          gps = await getBrowserGps();
+        }
+        if (!gps) throw new Error('No GPS — enable location services in iOS Settings → Safari → Location');
+        console.log('[Signs] GPS obtained:', gps);
+
+        // Convert to JPEG base64 (handles HEIC via heic2any)
+        placeBtn.textContent = '🔄 Processing photo...';
+        const base64 = await withTimeout(ensureJpegBase64(file), 30000, 'JPEG conversion');
+        console.log('[Signs] Base64 ready, length:', base64.length);
+
+        // Compress
+        const compressed = await safeCompressPhoto(base64, 1920, 1440, 0.85, 'main compression');
+        console.log('[Signs] Compressed for upload, length:', compressed.length);
 
         // ── AI YARD SIGN CHECK ──
-        // Use a smaller version for AI (faster, cheaper). Falls back to compressed if no separate fn.
-        let analysisImg = compressed;
+        // Build a smaller version for the AI call
+        let analysisImg;
         try {
-          if (typeof compressForAnalysis === 'function') {
-            analysisImg = await compressForAnalysis(base64);
-          }
-        } catch(e) {}
+          analysisImg = await safeCompressPhoto(base64, 800, 600, 0.7, 'analysis compression');
+          console.log('[Signs] Analysis image ready, length:', analysisImg.length);
+        } catch(e) {
+          console.warn('[Signs] Analysis compression failed, using main compressed:', e);
+          analysisImg = compressed;
+        }
 
         placeBtn.textContent = '🔍 Verifying sign...';
         const aiCheck = await detectYardSign(analysisImg);
+        console.log('[Signs] AI check result:', aiCheck);
 
         // If AI clearly says NO (false), reject and prompt for retake
         if (aiCheck.detected === false) {
@@ -13615,6 +13658,7 @@ Please review the estimate below. If you have any questions or would like to adj
         const path = franchiseUUID + '/signs/' + _signsCurrentSession.id + '/' + ts + '.jpg';
         const { error: upErr } = await supabaseClient.storage.from('estimate-photos').upload(path, blob, { contentType: 'image/jpeg', upsert: false });
         if (upErr) throw upErr;
+        console.log('[Signs] Photo uploaded:', path);
 
         // Reverse geocode
         let address = '';
@@ -13640,7 +13684,7 @@ Please review the estimate below. If you have any questions or would like to adj
             photo_path: path,
             status: 'active',
             placed_at: new Date().toISOString(),
-            ai_check_passed: aiCheck.detected,            // true | null (deferred)
+            ai_check_passed: aiCheck.detected,
             ai_check_response: { confidence: aiCheck.confidence, reasoning: aiCheck.reasoning, raw: aiCheck.raw },
             ai_check_at: new Date().toISOString()
           })
@@ -13678,7 +13722,8 @@ Please review the estimate below. If you have any questions or would like to adj
         // Check reward thresholds (background, don't block UI)
         checkAndIssueRewards(_signsCurrentSession.crew_member_ids).catch(e => console.warn('Reward check error:', e));
       } catch(e) {
-        alert('Photo upload failed: ' + (e.message || e));
+        console.error('[Signs] handleSignPhoto error:', e);
+        alert('Photo upload failed: ' + (e.message || e) + '\n\nCheck the browser console for details.');
       } finally {
         placeBtn.disabled = false;
         placeBtn.textContent = '📍 Place Sign';
