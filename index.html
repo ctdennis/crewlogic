@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.4.2 | 2026-04-26">
+  <meta name="crewlogic-version" content="v5.5.0 | 2026-04-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -906,7 +906,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.4.2 | 2026-04-26 -->
+<!-- CrewLogic v5.5.0 | 2026-04-26 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2958,6 +2958,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         </div>
       </div>
 
+      <!-- AI REJECTION DIALOG (no yard sign detected) -->
+      <div id="signsAIRejectOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:260;align-items:center;justify-content:center;padding:16px;">
+        <div style="background:var(--bg-card);border:2px solid #ef4444;border-radius:var(--radius);padding:24px;max-width:380px;width:100%;text-align:center;box-sizing:border-box;">
+          <div style="font-size:48px;margin-bottom:12px;">⚠️</div>
+          <div style="font-size:18px;font-weight:700;color:#ef4444;margin-bottom:8px;">No Yard Sign Detected</div>
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5;">The AI didn't see a yard sign in this photo. Please retake to make sure the sign is clearly visible.</div>
+          <div id="signsAIRejectReason" style="font-size:11px;color:var(--text-muted);margin-bottom:18px;font-style:italic;padding:8px;background:var(--bg-input);border-radius:var(--radius-sm);"></div>
+          <button onclick="retakeSignPhoto()" style="width:100%;padding:14px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#000;cursor:pointer;">📷 Retake Photo</button>
+        </div>
+      </div>
+
       <!-- SIGNS MANAGEMENT PANEL -->
       <div id="signsManagementOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#0f1923;z-index:200;overflow-y:auto;">
         <div style="padding:16px;max-width:480px;margin:0 auto;">
@@ -4526,7 +4537,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.4.2 | 2026-04-26 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.5.0 | 2026-04-26 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -13268,6 +13279,13 @@ Please review the estimate below. If you have any questions or would like to adj
       const photoHtml = sign.photo_path
         ? '<div id="signActionPhoto" style="width:100%;height:160px;background:var(--bg-input);border-radius:var(--radius-sm);background-size:cover;background-position:center;margin-bottom:12px;"></div>'
         : '';
+      // AI check banner — show if deferred or if owner is reviewing
+      let aiBanner = '';
+      if (sign.ai_check_passed === null || sign.ai_check_passed === undefined) {
+        aiBanner = '<div style="background:rgba(251,191,36,0.15);border:1px solid #fbbf24;border-radius:var(--radius-sm);padding:8px 10px;margin-bottom:10px;font-size:11px;color:#fbbf24;">⚠ AI verification deferred — please confirm a yard sign is visible in the photo before crediting.</div>';
+      } else if (sign.ai_check_passed === true) {
+        aiBanner = '<div style="background:rgba(0,238,118,0.1);border:1px solid var(--accent-green);border-radius:var(--radius-sm);padding:6px 10px;margin-bottom:10px;font-size:11px;color:var(--accent-green);">✓ AI verified yard sign visible.</div>';
+      }
       const isTerminal = sign.status === 'retrieved' || sign.status === 'gone';
       const actionsHtml = isTerminal
         ? '<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:12px;">This sign has been ' + sign.status + ' — no further actions.</div>'
@@ -13280,6 +13298,7 @@ Please review the estimate below. If you have any questions or would like to adj
         '<div style="font-size:14px;font-weight:700;margin-bottom:4px;">' + escapeHtml(sign.address || 'Sign') + '</div>' +
         '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;text-transform:uppercase;letter-spacing:1px;">' + sign.status + ' · placed ' + ageDays + ' day' + (ageDays !== 1 ? 's' : '') + ' ago</div>' +
         photoHtml +
+        aiBanner +
         actionsHtml;
       overlay.style.display = 'flex';
       // Lazy-load photo via signed URL
@@ -13503,13 +13522,47 @@ Please review the estimate below. If you have any questions or would like to adj
       document.getElementById('signsPhotoInput').click();
     }
 
+    // Calls the crewlogic-ai Edge Function to verify a yard sign is in the photo.
+    // Returns { detected: true|false|null, confidence, reasoning, raw }
+    // null = check deferred (network error, AI unreachable) — placement allowed but flagged for review
+    async function detectYardSign(analysisBase64) {
+      const url = 'https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1/crewlogic-ai';
+      const SUPABASE_ANON_KEY = 'sb_publishable_Jcy2e2s2x12kY0Az6jGzUw_Jn3ikNpt';
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+            'apikey': SUPABASE_ANON_KEY
+          },
+          body: JSON.stringify({ action: 'detectYardSign', photo: analysisBase64 })
+        });
+        if (!res.ok) {
+          return { detected: null, confidence: 'low', reasoning: 'AI service returned ' + res.status, raw: null };
+        }
+        const data = await res.json();
+        if (!data.success) {
+          return { detected: null, confidence: 'low', reasoning: data.error || 'AI service error', raw: data };
+        }
+        return {
+          detected: typeof data.detected === 'boolean' ? data.detected : null,
+          confidence: data.confidence || 'medium',
+          reasoning: data.reasoning || '',
+          raw: data
+        };
+      } catch(e) {
+        return { detected: null, confidence: 'low', reasoning: 'Network error: ' + (e.message || e), raw: null };
+      }
+    }
+
     async function handleSignPhoto(input) {
       const file = input.files && input.files[0];
       input.value = '';
       if (!file || !_signsCurrentSession) return;
       const placeBtn = document.getElementById('signsPlaceBtn');
       placeBtn.disabled = true;
-      placeBtn.textContent = '⏳ Uploading...';
+      placeBtn.textContent = '⏳ Checking photo...';
       try {
         // Get GPS — try EXIF first, fallback to browser geolocation
         let gps = null;
@@ -13517,9 +13570,34 @@ Please review the estimate below. If you have any questions or would like to adj
         if (!gps) gps = await getBrowserGps();
         if (!gps) throw new Error('No GPS — enable location services');
 
-        // Compress + upload
+        // Prep image
         const base64 = await ensureJpegBase64(file);
         const compressed = await compressChargePhoto(base64);
+
+        // ── AI YARD SIGN CHECK ──
+        // Use a smaller version for AI (faster, cheaper). Falls back to compressed if no separate fn.
+        let analysisImg = compressed;
+        try {
+          if (typeof compressForAnalysis === 'function') {
+            analysisImg = await compressForAnalysis(base64);
+          }
+        } catch(e) {}
+
+        placeBtn.textContent = '🔍 Verifying sign...';
+        const aiCheck = await detectYardSign(analysisImg);
+
+        // If AI clearly says NO (false), reject and prompt for retake
+        if (aiCheck.detected === false) {
+          placeBtn.disabled = false;
+          placeBtn.textContent = '📍 Place Sign';
+          showAIRejectionDialog(aiCheck.reasoning);
+          return;
+        }
+        // detected === true OR detected === null (deferred) → proceed
+
+        placeBtn.textContent = '⏳ Uploading...';
+
+        // Upload photo
         const blob = await (await fetch(compressed)).blob();
         const franchiseUUID = await getFranchiseUUID();
         const ts = Date.now();
@@ -13535,7 +13613,7 @@ Please review the estimate below. If you have any questions or would like to adj
           if (geoData.results && geoData.results[0]) address = geoData.results[0].formatted_address;
         } catch(e) {}
 
-        // Insert sign row
+        // Insert sign row with AI check verdict
         const created = await supabaseFetch('/rest/v1/yard_signs', {
           method: 'POST',
           headers: { 'Prefer': 'return=representation' },
@@ -13550,7 +13628,10 @@ Please review the estimate below. If you have any questions or would like to adj
             gps_source: gps.source || 'browser',
             photo_path: path,
             status: 'active',
-            placed_at: new Date().toISOString()
+            placed_at: new Date().toISOString(),
+            ai_check_passed: aiCheck.detected,            // true | null (deferred)
+            ai_check_response: { confidence: aiCheck.confidence, reasoning: aiCheck.reasoning, raw: aiCheck.raw },
+            ai_check_at: new Date().toISOString()
           })
         });
         const signRow = Array.isArray(created) ? created[0] : created;
@@ -13597,9 +13678,29 @@ Please review the estimate below. If you have any questions or would like to adj
       const c = document.getElementById('signsSessionRecent');
       const div = document.createElement('div');
       div.style.cssText = 'background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;margin-bottom:6px;font-size:12px;';
-      div.innerHTML = '<div style="color:var(--text-primary);">' + escapeHtml(sign.address || (parseFloat(sign.lat).toFixed(4) + ', ' + parseFloat(sign.lng).toFixed(4))) + '</div>' +
+      // Show AI flag if check was deferred (null) — owner can review later
+      const aiFlag = (sign.ai_check_passed === null || sign.ai_check_passed === undefined)
+        ? '<span style="display:inline-block;background:#fbbf24;color:#000;font-size:10px;padding:1px 6px;border-radius:99px;margin-left:6px;">AI deferred</span>'
+        : '';
+      div.innerHTML = '<div style="color:var(--text-primary);">' + escapeHtml(sign.address || (parseFloat(sign.lat).toFixed(4) + ', ' + parseFloat(sign.lng).toFixed(4))) + aiFlag + '</div>' +
         '<div style="color:var(--text-muted);font-size:11px;margin-top:2px;">Just now</div>';
       c.insertBefore(div, c.firstChild);
+    }
+
+    // Show "no yard sign detected" dialog. Tap retake → re-opens camera input.
+    function showAIRejectionDialog(reasoning) {
+      const reasonEl = document.getElementById('signsAIRejectReason');
+      if (reasonEl) {
+        reasonEl.textContent = reasoning ? '"' + reasoning + '"' : '';
+        reasonEl.style.display = reasoning ? 'block' : 'none';
+      }
+      document.getElementById('signsAIRejectOverlay').style.display = 'flex';
+    }
+
+    function retakeSignPhoto() {
+      document.getElementById('signsAIRejectOverlay').style.display = 'none';
+      // Re-trigger the photo capture
+      document.getElementById('signsPhotoInput').click();
     }
 
     async function removeLastSign() {
