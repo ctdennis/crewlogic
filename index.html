@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.6.3 | 2026-04-27">
+  <meta name="crewlogic-version" content="v5.7.0 | 2026-04-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -907,7 +907,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.6.3 | 2026-04-27 -->
+<!-- CrewLogic v5.7.0 | 2026-04-27 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1074,12 +1074,13 @@
         </div>
 
         <!-- Settings Tabs -->
-        <div id="settingsTabBar" style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0;">
+        <div id="settingsTabBar" style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0;flex-wrap:wrap;">
           <button class="settings-tab active" id="stab-franchise" onclick="showSettingsTab('franchise')">🏢 Franchise</button>
           <button class="settings-tab" id="stab-cost" onclick="showSettingsTab('cost')">💰 Cost</button>
           <button class="settings-tab" id="stab-proposal" onclick="showSettingsTab('proposal')">📄 Proposal</button>
-          <button class="settings-tab" id="stab-account" onclick="showSettingsTab('account')">⚙️ Account</button>
           <button class="settings-tab" id="stab-pricing" onclick="showSettingsTab('pricing')">★ Pricing</button>
+          <button class="settings-tab" id="stab-signs" onclick="showSettingsTab('signs')">🪧 Yard Signs</button>
+          <button class="settings-tab" id="stab-account" onclick="showSettingsTab('account')">⚙️ Account</button>
         </div>
 
         <!-- TAB: Franchise -->
@@ -1469,6 +1470,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <div class="settings-feedback" id="cplFeedback"></div>
           </div>
         </div><!-- end pricing tab -->
+
+        <!-- TAB: Yard Signs -->
+        <div id="stab-content-signs" style="display:none;">
+          <div class="settings-card fade-in fade-in-delay-2">
+            <div class="settings-card-title">Yard Sign Settings</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">Configure sign lifecycle, credit thresholds, and PromoVault integration.</div>
+            <div id="signsSettingsContent">Loading...</div>
+          </div>
+        </div><!-- end signs tab -->
 
       </div>
 
@@ -2840,11 +2850,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         <div id="signsOwnerView">
           <div class="estimate-list-header">
             <div class="section-title">🪧 Yard Signs</div>
-            <div style="display:flex;gap:6px;">
-              <button onclick="openSignsView('map')" id="signsViewMapBtn" class="signs-view-btn signs-view-btn-active">🗺 Map</button>
-              <button onclick="openSignsView('list')" id="signsViewListBtn" class="signs-view-btn">📋 List</button>
-              <button onclick="openSignsView('leaderboard')" id="signsViewLBBtn" class="signs-view-btn">🏆 Board</button>
-            </div>
+            <button class="calc-btn" style="margin:0;padding:8px 14px;background:var(--accent-green);color:#000;font-size:13px;font-weight:700;width:auto;" onclick="startSignsSession()">📍 Place Signs</button>
+          </div>
+
+          <!-- View toggle row -->
+          <div style="display:flex;gap:6px;margin-bottom:10px;justify-content:flex-end;">
+            <button onclick="openSignsView('map')" id="signsViewMapBtn" class="signs-view-btn signs-view-btn-active">🗺 Map</button>
+            <button onclick="openSignsView('list')" id="signsViewListBtn" class="signs-view-btn">📋 List</button>
+            <button onclick="openSignsView('leaderboard')" id="signsViewLBBtn" class="signs-view-btn">🏆 Board</button>
+            <button onclick="openSignsManagement()" class="signs-view-btn">⚙️</button>
           </div>
 
           <!-- Filters -->
@@ -2882,12 +2896,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           </div>
           <div id="signsListContainer" style="display:none;"></div>
           <div id="signsLeaderboardContainer" style="display:none;"></div>
-
-          <!-- Action buttons -->
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
-            <button class="calc-btn" style="margin-top:0;background:var(--bg-card);color:var(--accent-green);border:1px solid var(--accent-green);" onclick="openSignsManagement()">⚙️ Manage</button>
-            <button class="calc-btn" style="margin-top:0;background:var(--accent-green);color:#000;" onclick="startSignsSession()">📍 Place Signs</button>
-          </div>
         </div>
 
         <!-- CREW VIEW -->
@@ -2903,9 +2911,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       <!-- SIGNS PLACEMENT SESSION OVERLAY -->
       <div id="signsSessionOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#0f1923;z-index:200;overflow-y:auto;">
         <div style="padding:16px;max-width:480px;margin:0 auto;">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <div style="margin-bottom:16px;">
             <div style="font-size:16px;font-weight:700;color:var(--text-primary);" id="signsSessionTitle">Sign Placement Session</div>
-            <button onclick="endSignsSession()" style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:6px 12px;border-radius:var(--radius-sm);font-size:12px;cursor:pointer;">End Session</button>
           </div>
 
           <!-- Session info bar -->
@@ -2919,13 +2926,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <div style="font-size:12px;color:var(--text-muted);">signs placed this session</div>
           </div>
 
-          <!-- Place sign button -->
-          <button id="signsPlaceBtn" onclick="placeSign()" style="width:100%;padding:20px;background:var(--accent-green);border:none;border-radius:12px;font-size:18px;font-weight:700;color:#000;cursor:pointer;margin-bottom:12px;">📍 Place Sign</button>
+          <!-- Place another sign button -->
+          <button id="signsPlaceBtn" onclick="placeSign()" style="width:100%;padding:20px;background:var(--accent-green);border:none;border-radius:12px;font-size:18px;font-weight:700;color:#000;cursor:pointer;margin-bottom:12px;">📷 Place Another Sign</button>
           <button onclick="removeLastSign()" id="signsUndoBtn" style="width:100%;padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:12px;font-size:13px;color:var(--text-muted);cursor:pointer;display:none;">↩ Undo Last Sign</button>
           <button onclick="signsDownloadLastPhoto()" id="signsDownloadDiagBtn" style="width:100%;padding:10px;background:var(--bg-input);border:1px dashed var(--border);border-radius:12px;font-size:12px;color:var(--text-muted);cursor:pointer;display:none;margin-top:8px;">🔍 Save last captured photo (diagnostic)</button>
 
           <!-- Recent signs in session -->
           <div id="signsSessionRecent" style="margin-top:16px;"></div>
+
+          <!-- Save / Cancel actions at bottom -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:24px;padding-top:16px;border-top:1px solid var(--border);">
+            <button onclick="cancelSignsSession()" style="padding:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:#ef4444;cursor:pointer;font-weight:600;">✕ Cancel</button>
+            <button onclick="saveSignsSession()" style="padding:12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:13px;color:#000;cursor:pointer;font-weight:700;">✓ Save Session</button>
+          </div>
 
           <!-- Hidden file input for camera capture -->
           <input type="file" id="signsPhotoInput" accept="image/*" capture="environment" style="display:none;" onchange="handleSignPhoto(this)">
@@ -2947,7 +2960,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               <option value="">No campaign</option>
             </select>
           </div>
-          <button onclick="confirmStartSession()" id="signsStartConfirmBtn" style="width:100%;padding:14px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#000;cursor:pointer;opacity:0.4;" disabled>Start Session</button>
+          <button onclick="confirmStartSession()" id="signsStartConfirmBtn" style="width:100%;padding:14px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#000;cursor:pointer;opacity:0.4;" disabled>📷 Place First Sign</button>
           <div id="signsStartFeedback" style="font-size:12px;color:var(--text-muted);margin-top:8px;text-align:center;min-height:16px;"></div>
         </div>
       </div>
@@ -2982,7 +2995,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">
             <button onclick="openMgmtTab('crew')" id="mgmtTabCrew" class="signs-mgmt-tab signs-mgmt-tab-active">👥 Crew</button>
             <button onclick="openMgmtTab('campaigns')" id="mgmtTabCampaigns" class="signs-mgmt-tab">📋 Campaigns</button>
-            <button onclick="openMgmtTab('rewards')" id="mgmtTabRewards" class="signs-mgmt-tab">🎁 Rewards</button>
             <button onclick="openMgmtTab('history')" id="mgmtTabHistory" class="signs-mgmt-tab">📜 History</button>
           </div>
           <div id="mgmtTabContent"></div>
@@ -4539,7 +4551,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.6.3 | 2026-04-27 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.7.0 | 2026-04-27 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -11743,7 +11755,7 @@ RECYCLING & DONATION
 
     // ===== SETTINGS TABS =====
     function showSettingsTab(tab) {
-      ['franchise','cost','proposal','account','pricing'].forEach(t => {
+      ['franchise','cost','proposal','account','pricing','signs'].forEach(t => {
         const el = document.getElementById('stab-content-' + t);
         if (el) el.style.display = t === tab ? 'block' : 'none';
         const btn = document.getElementById('stab-' + t);
@@ -11753,6 +11765,8 @@ RECYCLING & DONATION
       if (tab === 'cost') renderAllFacilityLists();
       // Load customer pricing list when switching to pricing tab
       if (tab === 'pricing') loadCustomerPricingList();
+      // Render yard signs settings
+      if (tab === 'signs') renderSignsSettingsTab();
     }
 
     // ===== PROPOSAL SETTINGS =====
@@ -13147,8 +13161,13 @@ Please review the estimate below. If you have any questions or would like to adj
       // Init or reuse map
       if (!_signsMap) {
         _signsMap = new google.maps.Map(container, {
-          center, zoom: 11,
-          mapTypeControl: false, streetViewControl: false, fullscreenControl: true,
+          center,
+          zoom: 11,
+          mapTypeId: google.maps.MapTypeId.HYBRID,  // satellite + labels
+          mapTypeControl: true,
+          mapTypeControlOptions: { style: google.maps.MapTypeControlStyle.DROPDOWN_MENU },
+          streetViewControl: false,
+          fullscreenControl: true,
         });
       } else {
         _signsMap.setCenter(center);
@@ -13179,8 +13198,20 @@ Please review the estimate below. If you have any questions or would like to adj
         _signsMarkers.push(marker);
         bounds.extend(marker.getPosition());
       });
-      if (valid.length > 1) _signsMap.fitBounds(bounds);
-      else if (valid.length === 1) _signsMap.setZoom(14);
+      // Zoom strategy: fit bounds, then cap max zoom to keep ~10-mile radius visible
+      // Zoom 11 ≈ 10-mile radius, zoom 14 ≈ 1-mile radius. Cap at 13 so single signs don't roof-zoom.
+      const MAX_ZOOM = 13;
+      if (valid.length > 1) {
+        _signsMap.fitBounds(bounds);
+        // Listen for the auto-fit to settle, then enforce max zoom
+        google.maps.event.addListenerOnce(_signsMap, 'bounds_changed', () => {
+          if (_signsMap.getZoom() > MAX_ZOOM) _signsMap.setZoom(MAX_ZOOM);
+        });
+      } else if (valid.length === 1) {
+        _signsMap.setZoom(MAX_ZOOM);
+      } else {
+        _signsMap.setZoom(11);  // ~10-mile radius around the franchise center
+      }
       // Empty state
       if (valid.length === 0) {
         container.innerHTML = '<div style="padding:40px 20px;text-align:center;color:var(--text-muted);font-size:13px;">No signs match current filters.</div>';
@@ -13484,7 +13515,7 @@ Please review the estimate below. If you have any questions or would like to adj
         const session = Array.isArray(created) ? created[0] : created;
         _signsCurrentSession = session;
         _signsSessionSigns = [];
-        // Show session overlay
+        // Show session overlay (will be visible behind the camera capture)
         closeStartSessionOverlay();
         const crewNames = _signsStartCrewSelected.map(id => {
           const c = _signsCrewRoster.find(x => x.id === id);
@@ -13496,33 +13527,78 @@ Please review the estimate below. If you have any questions or would like to adj
         document.getElementById('signsSessionCount').textContent = '0';
         document.getElementById('signsSessionRecent').innerHTML = '';
         document.getElementById('signsUndoBtn').style.display = 'none';
+        document.getElementById('signsDownloadDiagBtn').style.display = 'none';
         document.getElementById('signsSessionOverlay').style.display = 'block';
         // Start watching GPS during the session — cached coords let us bypass slow getCurrentPosition
         startSessionGpsWatch();
+        // Immediately open the camera — no intermediate Place Sign tap needed
+        setTimeout(() => placeSign(), 100);
       } catch(e) {
         document.getElementById('signsStartFeedback').textContent = '⚠️ ' + (e.message || 'Failed to start session');
       }
     }
 
-    async function endSignsSession() {
+    // Save Session — end normally, keep all signs and credits.
+    async function saveSignsSession() {
       if (!_signsCurrentSession) {
         document.getElementById('signsSessionOverlay').style.display = 'none';
         stopSessionGpsWatch();
         return;
       }
-      if (!confirm('End this session?')) return;
       try {
         await supabaseFetch('/rest/v1/sign_sessions?id=eq.' + _signsCurrentSession.id, {
           method: 'PATCH',
           body: JSON.stringify({ status: 'completed', ended_at: new Date().toISOString(), signs_placed_count: _signsSessionSigns.length })
         });
-      } catch(e) { console.warn('End session error:', e); }
+      } catch(e) { console.warn('Save session error:', e); }
       _signsCurrentSession = null;
       _signsSessionSigns = [];
       document.getElementById('signsSessionOverlay').style.display = 'none';
       stopSessionGpsWatch();
-      // Refresh main view
       renderSignsView();
+    }
+
+    // Cancel Session — discard all signs placed in this session (deletes signs, credits, photos).
+    async function cancelSignsSession() {
+      if (!_signsCurrentSession) {
+        document.getElementById('signsSessionOverlay').style.display = 'none';
+        stopSessionGpsWatch();
+        return;
+      }
+      const count = _signsSessionSigns.length;
+      const msg = count === 0
+        ? 'Cancel this session?'
+        : 'Discard this session and the ' + count + ' sign' + (count !== 1 ? 's' : '') + ' placed?\n\nAll photos and credits from this session will be deleted. This cannot be undone.';
+      if (!confirm(msg)) return;
+      // Delete all signs from this session in reverse order (newest first)
+      const sessionId = _signsCurrentSession.id;
+      for (const sign of _signsSessionSigns.slice().reverse()) {
+        try {
+          await supabaseFetch('/rest/v1/sign_credits?sign_id=eq.' + sign.id, { method: 'DELETE' });
+          await supabaseFetch('/rest/v1/sign_status_events?sign_id=eq.' + sign.id, { method: 'DELETE' });
+          await supabaseFetch('/rest/v1/yard_signs?id=eq.' + sign.id, { method: 'DELETE' });
+          if (sign.photo_path) {
+            try { await supabaseClient.storage.from('estimate-photos').remove([sign.photo_path]); } catch(e) {}
+          }
+        } catch(e) { console.warn('Cancel: failed to clean up sign', sign.id, e); }
+      }
+      // Mark session as cancelled (preserves audit trail)
+      try {
+        await supabaseFetch('/rest/v1/sign_sessions?id=eq.' + sessionId, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'rejected', ended_at: new Date().toISOString(), signs_placed_count: 0 })
+        });
+      } catch(e) { console.warn('Cancel session error:', e); }
+      _signsCurrentSession = null;
+      _signsSessionSigns = [];
+      document.getElementById('signsSessionOverlay').style.display = 'none';
+      stopSessionGpsWatch();
+      renderSignsView();
+    }
+
+    // Legacy alias — endSignsSession is no longer reachable from the UI but may be referenced internally
+    async function endSignsSession() {
+      return saveSignsSession();
     }
 
     // ── PLACE SIGN ──────────────────────────────────────────────────────────
@@ -14107,7 +14183,7 @@ Please review the estimate below. If you have any questions or would like to adj
     }
 
     function openMgmtTab(tab) {
-      ['crew','campaigns','rewards','history'].forEach(t => {
+      ['crew','campaigns','history'].forEach(t => {
         const btn = document.getElementById('mgmtTab' + t.charAt(0).toUpperCase() + t.slice(1));
         if (!btn) return;
         btn.classList.remove('signs-mgmt-tab-active');
@@ -14117,7 +14193,6 @@ Please review the estimate below. If you have any questions or would like to adj
       const container = document.getElementById('mgmtTabContent');
       if (tab === 'crew') renderCrewMgmt(container);
       else if (tab === 'campaigns') renderCampaignsMgmt(container);
-      else if (tab === 'rewards') renderRewardsMgmt(container);
       else if (tab === 'history') renderHistoryMgmt(container);
     }
 
@@ -14281,6 +14356,13 @@ Please review the estimate below. If you have any questions or would like to adj
         fb.style.color = '#ef4444';
         fb.textContent = 'Error creating campaign.';
       }
+    }
+
+    // Renders the signs settings into the global Settings → Yard Signs tab.
+    function renderSignsSettingsTab() {
+      const container = document.getElementById('signsSettingsContent');
+      if (!container) return;
+      renderRewardsMgmt(container);
     }
 
     function renderRewardsMgmt(container) {
