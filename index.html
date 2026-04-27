@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.6.0 | 2026-04-27">
+  <meta name="crewlogic-version" content="v5.6.1 | 2026-04-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -907,7 +907,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.6.0 | 2026-04-27 -->
+<!-- CrewLogic v5.6.1 | 2026-04-27 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4538,7 +4538,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.6.0 | 2026-04-27 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.6.1 | 2026-04-27 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -13618,10 +13618,20 @@ Please review the estimate below. If you have any questions or would like to adj
         // ── GPS — try multiple sources in priority order ──
         placeBtn.textContent = '📍 Getting location...';
         let gps = null;
+        const tierResults = [];
 
         // 1. EXIF metadata from photo (most reliable — comes from device GPS at capture time)
-        gps = extractExifGpsFromBase64(base64);
-        if (gps) console.log('[Signs] GPS source: EXIF');
+        if (typeof piexif === 'undefined') {
+          tierResults.push('EXIF: piexif library not loaded');
+        } else {
+          gps = extractExifGpsFromBase64(base64);
+          if (gps) {
+            console.log('[Signs] GPS source: EXIF');
+            tierResults.push('EXIF: ✓');
+          } else {
+            tierResults.push('EXIF: no GPS in photo (check Settings → Camera → Location)');
+          }
+        }
 
         // 2. Cached location from watchPosition (set during session)
         if (!gps) {
@@ -13629,6 +13639,9 @@ Please review the estimate below. If you have any questions or would like to adj
           if (cached) {
             gps = cached;
             console.log('[Signs] GPS source: session watch cache (age', Date.now() - cached.timestamp, 'ms)');
+            tierResults.push('Watch: ✓ (' + Math.round((Date.now() - cached.timestamp)/1000) + 's old)');
+          } else {
+            tierResults.push('Watch: no cached position (' + (_signsGpsWatchId === null ? 'watch not started' : 'no callback fired yet') + ')');
           }
         }
 
@@ -13636,10 +13649,17 @@ Please review the estimate below. If you have any questions or would like to adj
         if (!gps) {
           console.log('[Signs] Falling back to getCurrentPosition');
           gps = await getBrowserGps();
-          if (gps) console.log('[Signs] GPS source: getCurrentPosition');
+          if (gps) {
+            console.log('[Signs] GPS source: getCurrentPosition');
+            tierResults.push('getCurrentPosition: ✓');
+          } else {
+            tierResults.push('getCurrentPosition: ' + (_signsLastGpsError || 'failed'));
+          }
         }
 
-        if (!gps) throw new Error('GPS unavailable. ' + (_signsLastGpsError ? '[' + _signsLastGpsError + ']' : '') + ' Try Settings → Camera → Location');
+        if (!gps) {
+          throw new Error('GPS unavailable. Diagnostics:\n• ' + tierResults.join('\n• ') + '\n\nMost likely fix: Settings → Privacy → Location Services → Camera → "While Using the App"');
+        }
         console.log('[Signs] Final GPS:', gps);
 
         // Compress for upload
