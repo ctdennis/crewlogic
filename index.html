@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.4.1 | 2026-04-26">
+  <meta name="crewlogic-version" content="v5.4.2 | 2026-04-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -906,7 +906,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.4.1 | 2026-04-26 -->
+<!-- CrewLogic v5.4.2 | 2026-04-26 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4526,7 +4526,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.4.1 | 2026-04-26 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.4.2 | 2026-04-26 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -13754,19 +13754,39 @@ Please review the estimate below. If you have any questions or would like to adj
           '</div>'
         ).join('');
         container.innerHTML =
-          '<div style="margin-bottom:16px;">' + (rows || '<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:8px;">No crew members yet.</div>') + '</div>' +
-          '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Add Crew Member</div>' +
-          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">' +
-            '<input type="text" class="form-input" id="crewFirstName" placeholder="First name" style="font-size:13px;">' +
-            '<input type="text" class="form-input" id="crewLastName" placeholder="Last name" style="font-size:13px;">' +
+          '<div id="crewListView">' +
+            '<div style="margin-bottom:12px;">' + (rows || '<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:8px;">No crew members yet.</div>') + '</div>' +
+            '<button onclick="showCrewAddForm()" style="width:100%;padding:12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;color:#000;cursor:pointer;">+ Add Crew Member</button>' +
           '</div>' +
-          '<input type="email" class="form-input" id="crewEmail" placeholder="Email" style="font-size:13px;margin-bottom:6px;">' +
-          '<input type="tel" class="form-input" id="crewPhone" placeholder="Phone (optional)" style="font-size:13px;margin-bottom:8px;">' +
-          '<button onclick="addCrewMember()" style="width:100%;padding:12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;color:#000;cursor:pointer;">+ Add Crew Member</button>' +
-          '<div id="crewMgmtFeedback" style="font-size:12px;margin-top:6px;min-height:16px;"></div>';
+          '<div id="crewAddForm" style="display:none;">' +
+            '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">New Crew Member</div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">' +
+              '<input type="text" class="form-input" id="crewFirstName" placeholder="First name" style="font-size:13px;">' +
+              '<input type="text" class="form-input" id="crewLastName" placeholder="Last name" style="font-size:13px;">' +
+            '</div>' +
+            '<input type="email" class="form-input" id="crewEmail" placeholder="Email" style="font-size:13px;margin-bottom:6px;">' +
+            '<input type="tel" class="form-input" id="crewPhone" placeholder="Phone (optional)" style="font-size:13px;margin-bottom:10px;">' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+              '<button onclick="cancelCrewAdd()" style="padding:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-muted);cursor:pointer;">Cancel</button>' +
+              '<button onclick="addCrewMember()" style="padding:12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;color:#000;cursor:pointer;">Save</button>' +
+            '</div>' +
+            '<div id="crewMgmtFeedback" style="font-size:12px;margin-top:8px;min-height:16px;text-align:center;"></div>' +
+          '</div>';
       } catch(e) {
         container.innerHTML = '<div style="color:#ef4444;font-size:13px;">Error loading crew.</div>';
       }
+    }
+
+    function showCrewAddForm() {
+      document.getElementById('crewListView').style.display = 'none';
+      document.getElementById('crewAddForm').style.display = 'block';
+      // Focus first field for fast entry
+      setTimeout(() => { const el = document.getElementById('crewFirstName'); if (el) el.focus(); }, 50);
+    }
+
+    function cancelCrewAdd() {
+      document.getElementById('crewAddForm').style.display = 'none';
+      document.getElementById('crewListView').style.display = 'block';
     }
 
     async function addCrewMember() {
@@ -13827,18 +13847,37 @@ Please review the estimate below. If you have any questions or would like to adj
           '</div>'
         ).join('');
         container.innerHTML =
-          '<div style="margin-bottom:16px;">' + (rows || '<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:8px;">No campaigns yet.</div>') + '</div>' +
-          '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Create Campaign</div>' +
-          '<input type="text" class="form-input" id="newCampaignName" placeholder="Campaign name (e.g. Spring 2026)" style="font-size:13px;margin-bottom:6px;">' +
-          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">' +
-            '<input type="date" class="form-input" id="newCampaignStart" placeholder="Start" style="font-size:13px;">' +
-            '<input type="date" class="form-input" id="newCampaignEnd" placeholder="End" style="font-size:13px;">' +
+          '<div id="campaignListView">' +
+            '<div style="margin-bottom:12px;">' + (rows || '<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:8px;">No campaigns yet.</div>') + '</div>' +
+            '<button onclick="showCampaignAddForm()" style="width:100%;padding:12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;color:#000;cursor:pointer;">+ Add Campaign</button>' +
           '</div>' +
-          '<button onclick="addCampaign()" style="width:100%;padding:12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;color:#000;cursor:pointer;">+ Create Campaign</button>' +
-          '<div id="campaignMgmtFeedback" style="font-size:12px;margin-top:6px;min-height:16px;"></div>';
+          '<div id="campaignAddForm" style="display:none;">' +
+            '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">New Campaign</div>' +
+            '<input type="text" class="form-input" id="newCampaignName" placeholder="Campaign name (e.g. Spring 2026)" style="font-size:13px;margin-bottom:6px;">' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;">' +
+              '<div><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px;">Start (optional)</label><input type="date" class="form-input" id="newCampaignStart" style="font-size:13px;width:100%;"></div>' +
+              '<div><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px;">End (optional)</label><input type="date" class="form-input" id="newCampaignEnd" style="font-size:13px;width:100%;"></div>' +
+            '</div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+              '<button onclick="cancelCampaignAdd()" style="padding:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-muted);cursor:pointer;">Cancel</button>' +
+              '<button onclick="addCampaign()" style="padding:12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;color:#000;cursor:pointer;">Save</button>' +
+            '</div>' +
+            '<div id="campaignMgmtFeedback" style="font-size:12px;margin-top:8px;min-height:16px;text-align:center;"></div>' +
+          '</div>';
       } catch(e) {
         container.innerHTML = '<div style="color:#ef4444;font-size:13px;">Error loading campaigns.</div>';
       }
+    }
+
+    function showCampaignAddForm() {
+      document.getElementById('campaignListView').style.display = 'none';
+      document.getElementById('campaignAddForm').style.display = 'block';
+      setTimeout(() => { const el = document.getElementById('newCampaignName'); if (el) el.focus(); }, 50);
+    }
+
+    function cancelCampaignAdd() {
+      document.getElementById('campaignAddForm').style.display = 'none';
+      document.getElementById('campaignListView').style.display = 'block';
     }
 
     async function addCampaign() {
