@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.5.4 | 2026-04-26">
+  <meta name="crewlogic-version" content="v5.6.0 | 2026-04-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -12,6 +12,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.min.js"></script>
   <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script>
@@ -906,7 +907,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.5.4 | 2026-04-26 -->
+<!-- CrewLogic v5.6.0 | 2026-04-27 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4537,7 +4538,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.5.4 | 2026-04-26 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.6.0 | 2026-04-27 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -13492,6 +13493,8 @@ Please review the estimate below. If you have any questions or would like to adj
         document.getElementById('signsSessionRecent').innerHTML = '';
         document.getElementById('signsUndoBtn').style.display = 'none';
         document.getElementById('signsSessionOverlay').style.display = 'block';
+        // Start watching GPS during the session — cached coords let us bypass slow getCurrentPosition
+        startSessionGpsWatch();
       } catch(e) {
         document.getElementById('signsStartFeedback').textContent = '⚠️ ' + (e.message || 'Failed to start session');
       }
@@ -13500,6 +13503,7 @@ Please review the estimate below. If you have any questions or would like to adj
     async function endSignsSession() {
       if (!_signsCurrentSession) {
         document.getElementById('signsSessionOverlay').style.display = 'none';
+        stopSessionGpsWatch();
         return;
       }
       if (!confirm('End this session?')) return;
@@ -13512,6 +13516,7 @@ Please review the estimate below. If you have any questions or would like to adj
       _signsCurrentSession = null;
       _signsSessionSigns = [];
       document.getElementById('signsSessionOverlay').style.display = 'none';
+      stopSessionGpsWatch();
       // Refresh main view
       renderSignsView();
     }
@@ -13605,53 +13610,53 @@ Please review the estimate below. If you have any questions or would like to adj
       try {
         console.log('[Signs] Photo received:', { type: file.type, size: file.size, name: file.name });
 
-        // Get GPS first (with explicit error path)
-        placeBtn.textContent = '📍 Getting location...';
-        let gps = null;
-        try { gps = await extractExifGps(file); } catch(e) { console.log('[Signs] EXIF GPS failed:', e); }
-        if (!gps) {
-          console.log('[Signs] Falling back to browser geolocation');
-          gps = await getBrowserGps();
-        }
-        if (!gps) throw new Error('GPS unavailable. ' + (_signsLastGpsError ? '[' + _signsLastGpsError + ']' : '') + ' iOS: Settings → Privacy → Location Services → Chrome → While Using');
-        console.log('[Signs] GPS obtained:', gps);
-
-        // Convert to JPEG base64 (handles HEIC via heic2any)
+        // Convert to JPEG base64 first (handles HEIC via heic2any)
         placeBtn.textContent = '🔄 Processing photo...';
         const base64 = await withTimeout(ensureJpegBase64(file), 30000, 'JPEG conversion');
         console.log('[Signs] Base64 ready, length:', base64.length);
 
-        // Compress
+        // ── GPS — try multiple sources in priority order ──
+        placeBtn.textContent = '📍 Getting location...';
+        let gps = null;
+
+        // 1. EXIF metadata from photo (most reliable — comes from device GPS at capture time)
+        gps = extractExifGpsFromBase64(base64);
+        if (gps) console.log('[Signs] GPS source: EXIF');
+
+        // 2. Cached location from watchPosition (set during session)
+        if (!gps) {
+          const cached = getCachedSessionGps();
+          if (cached) {
+            gps = cached;
+            console.log('[Signs] GPS source: session watch cache (age', Date.now() - cached.timestamp, 'ms)');
+          }
+        }
+
+        // 3. Fresh getCurrentPosition (last resort — known to hang on iOS Chrome)
+        if (!gps) {
+          console.log('[Signs] Falling back to getCurrentPosition');
+          gps = await getBrowserGps();
+          if (gps) console.log('[Signs] GPS source: getCurrentPosition');
+        }
+
+        if (!gps) throw new Error('GPS unavailable. ' + (_signsLastGpsError ? '[' + _signsLastGpsError + ']' : '') + ' Try Settings → Camera → Location');
+        console.log('[Signs] Final GPS:', gps);
+
+        // Compress for upload
         const compressed = await safeCompressPhoto(base64, 1920, 1440, 0.85, 'main compression');
         console.log('[Signs] Compressed for upload, length:', compressed.length);
 
-        // ── AI YARD SIGN CHECK ──
-        // Build a smaller version for the AI call
-        let analysisImg;
+        // Build smaller version for AI (will be sent in background)
+        let analysisImg = compressed;
         try {
           analysisImg = await safeCompressPhoto(base64, 800, 600, 0.7, 'analysis compression');
           console.log('[Signs] Analysis image ready, length:', analysisImg.length);
         } catch(e) {
           console.warn('[Signs] Analysis compression failed, using main compressed:', e);
-          analysisImg = compressed;
         }
-
-        placeBtn.textContent = '🔍 Verifying sign...';
-        const aiCheck = await detectYardSign(analysisImg);
-        console.log('[Signs] AI check result:', aiCheck);
-
-        // If AI clearly says NO (false), reject and prompt for retake
-        if (aiCheck.detected === false) {
-          placeBtn.disabled = false;
-          placeBtn.textContent = '📍 Place Sign';
-          showAIRejectionDialog(aiCheck.reasoning);
-          return;
-        }
-        // detected === true OR detected === null (deferred) → proceed
-
-        placeBtn.textContent = '⏳ Uploading...';
 
         // Upload photo
+        placeBtn.textContent = '⏳ Uploading...';
         const blob = await (await fetch(compressed)).blob();
         const franchiseUUID = await getFranchiseUUID();
         const ts = Date.now();
@@ -13666,9 +13671,10 @@ Please review the estimate below. If you have any questions or would like to adj
           const geo = await fetch('https://maps.googleapis.com/maps/api/geocode/json?latlng=' + gps.lat + ',' + gps.lng + '&key=' + SIGNS_MAPS_KEY);
           const geoData = await geo.json();
           if (geoData.results && geoData.results[0]) address = geoData.results[0].formatted_address;
-        } catch(e) {}
+          console.log('[Signs] Reverse geocoded:', address || '(empty)');
+        } catch(e) { console.warn('[Signs] Geocode failed:', e); }
 
-        // Insert sign row with AI check verdict
+        // Insert sign row immediately with AI check pending (null) — placement completes fast
         const created = await supabaseFetch('/rest/v1/yard_signs', {
           method: 'POST',
           headers: { 'Prefer': 'return=representation' },
@@ -13684,12 +13690,18 @@ Please review the estimate below. If you have any questions or would like to adj
             photo_path: path,
             status: 'active',
             placed_at: new Date().toISOString(),
-            ai_check_passed: aiCheck.detected,
-            ai_check_response: { confidence: aiCheck.confidence, reasoning: aiCheck.reasoning, raw: aiCheck.raw },
-            ai_check_at: new Date().toISOString()
+            ai_check_passed: null,                              // Pending — updated by background AI call
+            ai_check_response: { reasoning: 'pending' },
+            ai_check_at: null
           })
         });
         const signRow = Array.isArray(created) ? created[0] : created;
+
+        // Fire AI check in BACKGROUND — does not block placement.
+        // When it returns, it will UPDATE the sign row with the verdict.
+        // If it says "no sign detected", the sign is marked failed but placement isn't undone
+        // (owner can review and remove credit if needed).
+        runBackgroundAICheck(signRow.id, analysisImg).catch(e => console.warn('[Signs] Background AI check failed:', e));
 
         // Status event (placed)
         await supabaseFetch('/rest/v1/sign_status_events', {
@@ -13728,6 +13740,28 @@ Please review the estimate below. If you have any questions or would like to adj
         placeBtn.disabled = false;
         placeBtn.textContent = '📍 Place Sign';
       }
+    }
+
+    // Fire-and-forget AI check — runs in background, updates sign row when verdict arrives.
+    // Failed/timeout AI calls leave the row with ai_check_passed=null (deferred for owner review).
+    async function runBackgroundAICheck(signId, analysisImg) {
+      console.log('[Signs] Starting background AI check for sign:', signId);
+      const aiCheck = await detectYardSign(analysisImg);
+      console.log('[Signs] Background AI verdict:', aiCheck);
+      try {
+        await supabaseFetch('/rest/v1/yard_signs?id=eq.' + signId, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            ai_check_passed: aiCheck.detected,    // true | false | null
+            ai_check_response: {
+              confidence: aiCheck.confidence,
+              reasoning: aiCheck.reasoning,
+              raw: aiCheck.raw
+            },
+            ai_check_at: new Date().toISOString()
+          })
+        });
+      } catch(e) { console.warn('[Signs] Failed to update AI check on row:', e); }
     }
 
     function appendSessionThumb(sign) {
@@ -13782,17 +13816,22 @@ Please review the estimate below. If you have any questions or would like to adj
     }
 
     // ── EXIF / GPS helpers ──────────────────────────────────────────────────
-    async function extractExifGps(file) {
-      // Use existing piexif if loaded, otherwise skip
+    // Extract GPS from EXIF data of a JPEG base64 string.
+    // This works regardless of browser since EXIF lives in the photo file itself.
+    // Input: base64 data URL ("data:image/jpeg;base64,...")
+    // Returns: { lat, lng, source: 'exif' } or null if no GPS in EXIF.
+    function extractExifGpsFromBase64(jpegBase64) {
       try {
-        if (typeof piexif === 'undefined') return null;
-        const buf = await file.arrayBuffer();
-        const bytes = new Uint8Array(buf);
-        let bin = '';
-        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-        const exif = piexif.load(bin);
+        if (typeof piexif === 'undefined') {
+          console.warn('[Signs] piexif library not loaded, skipping EXIF GPS');
+          return null;
+        }
+        const exif = piexif.load(jpegBase64);
         const gps = exif.GPS;
-        if (!gps || !gps[piexif.GPSIFD.GPSLatitude] || !gps[piexif.GPSIFD.GPSLongitude]) return null;
+        if (!gps || !gps[piexif.GPSIFD.GPSLatitude] || !gps[piexif.GPSIFD.GPSLongitude]) {
+          console.log('[Signs] No GPS in EXIF metadata');
+          return null;
+        }
         const latRaw = gps[piexif.GPSIFD.GPSLatitude];
         const lngRaw = gps[piexif.GPSIFD.GPSLongitude];
         const latRef = gps[piexif.GPSIFD.GPSLatitudeRef] || 'N';
@@ -13801,8 +13840,79 @@ Please review the estimate below. If you have any questions or would like to adj
         let lat = dms2dec(latRaw), lng = dms2dec(lngRaw);
         if (latRef === 'S') lat = -lat;
         if (lngRef === 'W') lng = -lng;
+        if (!isFinite(lat) || !isFinite(lng)) {
+          console.warn('[Signs] EXIF GPS produced invalid coords:', lat, lng);
+          return null;
+        }
+        console.log('[Signs] EXIF GPS extracted:', lat, lng);
         return { lat, lng, source: 'exif' };
+      } catch(e) {
+        console.warn('[Signs] EXIF GPS extraction failed:', e);
+        return null;
+      }
+    }
+
+    // Legacy (file-based) version kept for backward compat — now delegates to base64 version
+    async function extractExifGps(file) {
+      try {
+        const reader = new FileReader();
+        const base64 = await new Promise((resolve, reject) => {
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        return extractExifGpsFromBase64(base64);
       } catch(e) { return null; }
+    }
+
+    // Continuous GPS watching during an active session.
+    // Caches the most recent location so each Place Sign uses fresh coords.
+    // Workaround for iOS Chrome where getCurrentPosition can hang but watchPosition fires.
+    let _signsGpsWatchId = null;
+    let _signsCachedGps = null;
+    function startSessionGpsWatch() {
+      if (!navigator.geolocation) return;
+      if (_signsGpsWatchId !== null) return;  // already watching
+      console.log('[Signs] Starting GPS watch');
+      try {
+        _signsGpsWatchId = navigator.geolocation.watchPosition(
+          pos => {
+            _signsCachedGps = {
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              source: 'watch',
+              accuracy: pos.coords.accuracy,
+              timestamp: Date.now()
+            };
+            console.log('[Signs] GPS watch update:', _signsCachedGps);
+          },
+          err => {
+            console.warn('[Signs] GPS watch error:', err);
+          },
+          { enableHighAccuracy: true, maximumAge: 5000, timeout: 60000 }
+        );
+      } catch(e) {
+        console.warn('[Signs] Failed to start GPS watch:', e);
+      }
+    }
+
+    function stopSessionGpsWatch() {
+      if (_signsGpsWatchId !== null) {
+        try { navigator.geolocation.clearWatch(_signsGpsWatchId); } catch(e) {}
+        _signsGpsWatchId = null;
+      }
+      _signsCachedGps = null;
+    }
+
+    function getCachedSessionGps() {
+      if (!_signsCachedGps) return null;
+      // Reject stale cache (>2 minutes old) — better to re-prompt than save wrong location
+      const ageMs = Date.now() - _signsCachedGps.timestamp;
+      if (ageMs > 120000) {
+        console.warn('[Signs] Cached GPS too stale:', ageMs, 'ms');
+        return null;
+      }
+      return _signsCachedGps;
     }
 
     let _signsLastGpsError = null;
