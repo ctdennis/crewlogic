@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.5.3 | 2026-04-26">
+  <meta name="crewlogic-version" content="v5.5.4 | 2026-04-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -906,7 +906,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.5.3 | 2026-04-26 -->
+<!-- CrewLogic v5.5.4 | 2026-04-26 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4537,7 +4537,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.5.3 | 2026-04-26 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.5.4 | 2026-04-26 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -13613,7 +13613,7 @@ Please review the estimate below. If you have any questions or would like to adj
           console.log('[Signs] Falling back to browser geolocation');
           gps = await getBrowserGps();
         }
-        if (!gps) throw new Error('No GPS — enable location services in iOS Settings → Safari → Location');
+        if (!gps) throw new Error('GPS unavailable. ' + (_signsLastGpsError ? '[' + _signsLastGpsError + ']' : '') + ' iOS: Settings → Privacy → Location Services → Chrome → While Using');
         console.log('[Signs] GPS obtained:', gps);
 
         // Convert to JPEG base64 (handles HEIC via heic2any)
@@ -13805,19 +13805,33 @@ Please review the estimate below. If you have any questions or would like to adj
       } catch(e) { return null; }
     }
 
+    let _signsLastGpsError = null;
     function getBrowserGps() {
+      _signsLastGpsError = null;
       // Belt-and-suspenders: wrap in our own timeout in case iOS geolocation hangs
       // without firing its own timeout callback (known iOS Chrome quirk).
       return Promise.race([
         new Promise(resolve => {
-          if (!navigator.geolocation) return resolve(null);
+          if (!navigator.geolocation) {
+            _signsLastGpsError = 'navigator.geolocation not available';
+            return resolve(null);
+          }
           navigator.geolocation.getCurrentPosition(
             pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, source: 'browser' }),
-            err => { console.warn('[Signs] geolocation error:', err); resolve(null); },
+            err => {
+              const codes = { 1: 'PERMISSION_DENIED', 2: 'POSITION_UNAVAILABLE', 3: 'TIMEOUT' };
+              _signsLastGpsError = (codes[err.code] || ('CODE_' + err.code)) + ': ' + (err.message || 'no message');
+              console.warn('[Signs] geolocation error:', err);
+              resolve(null);
+            },
             { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
           );
         }),
-        new Promise(resolve => setTimeout(() => { console.warn('[Signs] geolocation outer timeout'); resolve(null); }, 12000))
+        new Promise(resolve => setTimeout(() => {
+          _signsLastGpsError = 'OUTER_TIMEOUT: geolocation API did not respond within 12s';
+          console.warn('[Signs] geolocation outer timeout');
+          resolve(null);
+        }, 12000))
       ]);
     }
 
