@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.8.0 | 2026-04-27">
+  <meta name="crewlogic-version" content="v5.8.1 | 2026-04-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -907,7 +907,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.8.0 | 2026-04-27 -->
+<!-- CrewLogic v5.8.1 | 2026-04-27 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4551,7 +4551,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.8.0 | 2026-04-27 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.8.1 | 2026-04-27 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -14265,7 +14265,7 @@ Please review the estimate below. If you have any questions or would like to adj
 
     // Calls crewlogic-ai Edge Function action 'issueReward' to deliver a pending reward via PromoVault.
     // Edge Function reads the reward + crew + franchise config, calls PromoVault Quick Send,
-    // and updates the sign_rewards row with status/external_id/reward_link/delivered_at.
+    // and updates the sign_rewards row with status/promovault_reward_id/reward_link/issued_at.
     async function deliverRewardViaEdge(rewardId) {
       const url = 'https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1/crewlogic-ai';
       const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
@@ -14545,8 +14545,8 @@ Please review the estimate below. If you have any questions or would like to adj
         const franchiseUUID = await getFranchiseUUID();
         const rewards = await supabaseFetch(
           '/rest/v1/sign_rewards?franchise_id=eq.' + franchiseUUID +
-          '&select=id,crew_member_id,reward_amount_dollars,status,test_mode,external_id,reward_link,error_message,awarded_at,delivered_at' +
-          '&order=awarded_at.desc&limit=20'
+          '&select=id,crew_member_id,reward_amount_dollars,status,test_mode,promovault_reward_id,reward_link,error_message,created_at,issued_at' +
+          '&order=created_at.desc&limit=20'
         );
         if (!rewards || !rewards.length) {
           container.innerHTML = '<div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">No rewards issued yet.</div>';
@@ -14568,7 +14568,7 @@ Please review the estimate below. If you have any questions or would like to adj
         };
         container.innerHTML = rewards.map(r => {
           const name = crewById[r.crew_member_id] || '?';
-          const date = new Date(r.delivered_at || r.awarded_at).toLocaleDateString();
+          const date = new Date(r.issued_at || r.created_at).toLocaleDateString();
           const badge = statusBadge[r.status] || ('<span style="font-size:10px;color:var(--text-muted);">' + r.status + '</span>');
           const testFlag = r.test_mode ? '<span style="font-size:10px;color:var(--text-muted);margin-left:4px;">·  TEST</span>' : '';
           const linkBtn = r.reward_link && r.reward_link !== 'TEST_MODE_NO_LINK'
