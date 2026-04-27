@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.7.4 | 2026-04-27">
+  <meta name="crewlogic-version" content="v5.7.5 | 2026-04-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -907,7 +907,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.7.4 | 2026-04-27 -->
+<!-- CrewLogic v5.7.5 | 2026-04-27 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4551,7 +4551,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.7.4 | 2026-04-27 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.7.5 | 2026-04-27 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -13127,15 +13127,16 @@ Please review the estimate below. If you have any questions or would like to adj
 
     // ── Map view (interactive Google Maps) ──────────────────────────────────
     const SIGNS_MAPS_KEY = 'AIzaSyBdUa3Dc5pg9aIJaVH2wC6mhkthzYBI1g8';
+    const SIGNS_MAP_ID = 'd6b1d6191c3b2dd1f72fa3de';  // Required for AdvancedMarkerElement
     let _signsMapsLoading = null;
     function ensureGoogleMapsJs() {
-      if (window.google && window.google.maps) return Promise.resolve();
+      if (window.google && window.google.maps && window.google.maps.marker) return Promise.resolve();
       if (_signsMapsLoading) return _signsMapsLoading;
       _signsMapsLoading = new Promise((resolve, reject) => {
         const cb = '__signsGoogleMapsLoaded_' + Date.now();
         window[cb] = () => { delete window[cb]; resolve(); };
         const s = document.createElement('script');
-        s.src = 'https://maps.googleapis.com/maps/api/js?key=' + SIGNS_MAPS_KEY + '&callback=' + cb + '&loading=async';
+        s.src = 'https://maps.googleapis.com/maps/api/js?key=' + SIGNS_MAPS_KEY + '&libraries=marker&callback=' + cb + '&loading=async';
         s.async = true;
         s.onerror = () => { delete window[cb]; _signsMapsLoading = null; reject(new Error('Maps API failed to load')); };
         document.head.appendChild(s);
@@ -13163,7 +13164,8 @@ Please review the estimate below. If you have any questions or would like to adj
         _signsMap = new google.maps.Map(container, {
           center,
           zoom: 11,
-          mapTypeId: google.maps.MapTypeId.HYBRID,  // satellite + labels
+          mapId: SIGNS_MAP_ID,                       // Required for AdvancedMarkerElement
+          mapTypeId: google.maps.MapTypeId.HYBRID,   // satellite + labels
           mapTypeControl: true,
           mapTypeControlOptions: { style: google.maps.MapTypeControlStyle.DROPDOWN_MENU },
           streetViewControl: false,
@@ -13172,31 +13174,35 @@ Please review the estimate below. If you have any questions or would like to adj
       } else {
         _signsMap.setCenter(center);
       }
-      // Clear old markers
-      _signsMarkers.forEach(m => m.setMap(null));
+      // Clear old markers (AdvancedMarkerElement uses .map = null instead of setMap)
+      _signsMarkers.forEach(m => { m.map = null; });
       _signsMarkers = [];
       // Status → color map
       const statusColor = {
         active: '#00ee76', gray: '#fbbf24', hidden: '#f97316',
         retrieved: '#3b82f6', gone: '#ef4444'
       };
-      // Add new markers
+      // Add new markers — uses AdvancedMarkerElement with PinElement (drop-pin style)
+      const { AdvancedMarkerElement, PinElement } = google.maps.marker;
       const bounds = new google.maps.LatLngBounds();
       valid.forEach(sign => {
         const color = statusColor[sign.status] || '#aaaaaa';
-        const marker = new google.maps.Marker({
-          position: { lat: parseFloat(sign.lat), lng: parseFloat(sign.lng) },
+        const pin = new PinElement({
+          background: color,
+          borderColor: '#ffffff',
+          glyph: '',          // no letter/icon inside the pin
+          scale: 0.9,
+        });
+        const position = { lat: parseFloat(sign.lat), lng: parseFloat(sign.lng) };
+        const marker = new AdvancedMarkerElement({
+          position,
           map: _signsMap,
-          icon: {
-            path: google.maps.SymbolPath.CIRCLE,
-            fillColor: color, fillOpacity: 0.9,
-            strokeColor: '#fff', strokeWeight: 2, scale: 8,
-          },
+          content: pin.element,
           title: (sign.address || 'Sign') + ' · ' + signStatusLabel(sign.status),
         });
         marker.addListener('click', () => openSignAction(sign.id));
         _signsMarkers.push(marker);
-        bounds.extend(marker.getPosition());
+        bounds.extend(position);
       });
       // Zoom strategy: fit bounds, then cap max zoom to keep ~10-mile radius visible
       // Zoom 11 ≈ 10-mile radius, zoom 14 ≈ 1-mile radius. Cap at 13 so single signs don't roof-zoom.
