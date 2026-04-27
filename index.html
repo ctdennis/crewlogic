@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.7.3 | 2026-04-27">
+  <meta name="crewlogic-version" content="v5.7.4 | 2026-04-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -733,8 +733,8 @@
     }
     /* Sign status pin colors (for map markers + list dots) */
     .sign-pin-active { background: #00ee76; }
-    .sign-pin-gray { background: #888888; }
-    .sign-pin-hidden { background: #666666; }
+    .sign-pin-gray { background: #fbbf24; }
+    .sign-pin-hidden { background: #f97316; }
     .sign-pin-retrieved { background: #3b82f6; }
     .sign-pin-gone { background: #ef4444; }
 
@@ -907,7 +907,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.7.3 | 2026-04-27 -->
+<!-- CrewLogic v5.7.4 | 2026-04-27 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2864,9 +2864,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           <!-- Filters -->
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
             <select class="form-select" id="signsFilterStatus" onchange="renderSignsView()" style="flex:1;min-width:110px;font-size:12px;padding:6px 10px;height:auto;">
-              <option value="visible">Active + Gray</option>
+              <option value="visible">Active + Aged Out</option>
               <option value="active">Active only</option>
-              <option value="gray">Gray only</option>
+              <option value="gray">Aged Out only</option>
               <option value="hidden">Hidden</option>
               <option value="retrieved">Retrieved</option>
               <option value="gone">Gone</option>
@@ -2889,8 +2889,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           <div id="signsMapContainer" style="width:100%;height:420px;border-radius:var(--radius-sm);overflow:hidden;margin-bottom:8px;display:none;background:var(--bg-card);position:relative;"></div>
           <div id="signsMapLegend" style="display:none;font-size:11px;color:var(--text-muted);margin-bottom:12px;text-align:center;line-height:1.6;">
             <span style="color:#00ee76;">●</span> Active &nbsp;
-            <span style="color:#888;">●</span> Gray &nbsp;
-            <span style="color:#666;">●</span> Hidden &nbsp;
+            <span style="color:#fbbf24;">●</span> Aged Out &nbsp;
+            <span style="color:#f97316;">●</span> Hidden &nbsp;
             <span style="color:#3b82f6;">●</span> Retrieved &nbsp;
             <span style="color:#ef4444;">●</span> Gone
           </div>
@@ -4551,7 +4551,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.7.3 | 2026-04-27 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.7.4 | 2026-04-27 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -13177,7 +13177,7 @@ Please review the estimate below. If you have any questions or would like to adj
       _signsMarkers = [];
       // Status → color map
       const statusColor = {
-        active: '#00ee76', gray: '#888888', hidden: '#666666',
+        active: '#00ee76', gray: '#fbbf24', hidden: '#f97316',
         retrieved: '#3b82f6', gone: '#ef4444'
       };
       // Add new markers
@@ -13192,7 +13192,7 @@ Please review the estimate below. If you have any questions or would like to adj
             fillColor: color, fillOpacity: 0.9,
             strokeColor: '#fff', strokeWeight: 2, scale: 8,
           },
-          title: (sign.address || 'Sign') + ' · ' + sign.status,
+          title: (sign.address || 'Sign') + ' · ' + signStatusLabel(sign.status),
         });
         marker.addListener('click', () => openSignAction(sign.id));
         _signsMarkers.push(marker);
@@ -13240,7 +13240,7 @@ Please review the estimate below. If you have any questions or would like to adj
           '<div style="flex:1;min-width:0;">' +
             '<div style="font-size:13px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(s.address || (parseFloat(s.lat).toFixed(4) + ', ' + parseFloat(s.lng).toFixed(4))) + '</div>' +
             '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' +
-              status.toUpperCase() + ' · ' + ageDays + 'd ago · ' + escapeHtml(placedByNames) +
+              signStatusLabel(status).toUpperCase() + ' · ' + ageDays + 'd ago · ' + escapeHtml(placedByNames) +
               (campaignName ? ' · ' + escapeHtml(campaignName) : '') +
             '</div>' +
           '</div>' +
@@ -13305,6 +13305,18 @@ Please review the estimate below. If you have any questions or would like to adj
     }
 
     // ── Sign action sheet (refresh / retrieve / mark gone) ──────────────────
+    // Display label for status enum (gray → "Aged Out" rather than showing the technical name)
+    function signStatusLabel(status) {
+      const labels = {
+        active: 'Active',
+        gray: 'Aged Out',
+        hidden: 'Hidden',
+        retrieved: 'Retrieved',
+        gone: 'Gone'
+      };
+      return labels[status] || status;
+    }
+
     async function openSignAction(signId) {
       _signsActionTargetId = signId;
       const sign = _signsAllSigns.find(s => s.id === signId);
@@ -13318,13 +13330,13 @@ Please review the estimate below. If you have any questions or would like to adj
       // AI check banner — show if deferred or if owner is reviewing
       let aiBanner = '';
       if (sign.ai_check_passed === null || sign.ai_check_passed === undefined) {
-        aiBanner = '<div style="background:rgba(251,191,36,0.15);border:1px solid #fbbf24;border-radius:var(--radius-sm);padding:8px 10px;margin-bottom:10px;font-size:11px;color:#fbbf24;">⚠ AI verification deferred — please confirm a yard sign is visible in the photo before crediting.</div>';
+        aiBanner = '<div style="background:rgba(168,85,247,0.15);border:1px solid #a855f7;border-radius:var(--radius-sm);padding:8px 10px;margin-bottom:10px;font-size:11px;color:#c084fc;">⚠ AI verification deferred — please confirm a yard sign is visible in the photo before crediting.</div>';
       } else if (sign.ai_check_passed === true) {
         aiBanner = '<div style="background:rgba(0,238,118,0.1);border:1px solid var(--accent-green);border-radius:var(--radius-sm);padding:6px 10px;margin-bottom:10px;font-size:11px;color:var(--accent-green);">✓ AI verified yard sign visible.</div>';
       }
       const isTerminal = sign.status === 'retrieved' || sign.status === 'gone';
       const actionsHtml = isTerminal
-        ? '<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:12px;">This sign has been ' + sign.status + ' — no further actions.</div>'
+        ? '<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:12px;">This sign has been ' + signStatusLabel(sign.status).toLowerCase() + ' — no further actions.</div>'
         : '<div style="display:flex;flex-direction:column;gap:8px;">' +
           '<button onclick="refreshSign()" style="width:100%;padding:14px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#000;cursor:pointer;">🔄 Refresh — sign is still in the ground</button>' +
           '<button onclick="retrieveSign()" style="width:100%;padding:14px;background:#3b82f6;border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#fff;cursor:pointer;">📦 Retrieved — picked it up</button>' +
@@ -13332,7 +13344,7 @@ Please review the estimate below. If you have any questions or would like to adj
         '</div>';
       content.innerHTML =
         '<div style="font-size:14px;font-weight:700;margin-bottom:4px;">' + escapeHtml(sign.address || 'Sign') + '</div>' +
-        '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;text-transform:uppercase;letter-spacing:1px;">' + sign.status + ' · placed ' + ageDays + ' day' + (ageDays !== 1 ? 's' : '') + ' ago</div>' +
+        '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;text-transform:uppercase;letter-spacing:1px;">' + signStatusLabel(sign.status) + ' · placed ' + ageDays + ' day' + (ageDays !== 1 ? 's' : '') + ' ago</div>' +
         photoHtml +
         aiBanner +
         actionsHtml;
@@ -13949,7 +13961,7 @@ Please review the estimate below. If you have any questions or would like to adj
       div.style.cssText = 'background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;margin-bottom:6px;font-size:12px;';
       // Show AI flag if check was deferred (null) — owner can review later
       const aiFlag = (sign.ai_check_passed === null || sign.ai_check_passed === undefined)
-        ? '<span style="display:inline-block;background:#fbbf24;color:#000;font-size:10px;padding:1px 6px;border-radius:99px;margin-left:6px;">AI deferred</span>'
+        ? '<span style="display:inline-block;background:#a855f7;color:#fff;font-size:10px;padding:1px 6px;border-radius:99px;margin-left:6px;">AI deferred</span>'
         : '';
       div.innerHTML = '<div style="color:var(--text-primary);">' + escapeHtml(sign.address || (parseFloat(sign.lat).toFixed(4) + ', ' + parseFloat(sign.lng).toFixed(4))) + aiFlag + '</div>' +
         '<div style="color:var(--text-muted);font-size:11px;margin-top:2px;">Just now</div>';
@@ -14436,7 +14448,7 @@ Please review the estimate below. If you have any questions or would like to adj
         '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Sign Lifecycle</div>' +
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">' +
           '<div class="settings-input-group">' +
-            '<label class="settings-input-label">Days until gray</label>' +
+            '<label class="settings-input-label">Days until aged out</label>' +
             '<input type="number" class="form-input" id="signsCfgGrayDays" value="' + (cfg.graySignDays || 15) + '" min="1" inputmode="numeric">' +
           '</div>' +
           '<div class="settings-input-group">' +
