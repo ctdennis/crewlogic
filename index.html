@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.3 | 2026-04-28">
+  <meta name="crewlogic-version" content="v5.9.4 | 2026-04-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -918,7 +918,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.3 | 2026-04-28 -->
+<!-- CrewLogic v5.9.4 | 2026-04-28 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1009,21 +1009,13 @@
         </div>
       </div>
       <!-- Secondary toolbar (lives inside the sticky header so it sticks together) -->
-      <div id="secondaryToolbar" style="display:none;background:var(--bg-secondary);border-top:1px solid var(--border);padding:8px 16px;overflow-x:auto;">
+      <div id="secondaryToolbar" style="display:none;background:var(--bg-secondary);border-top:1px solid var(--border);padding:8px 16px;">
         <!-- Estimate Editor toolbar -->
         <div id="editorToolbar" style="display:none;gap:6px;align-items:center;flex-wrap:nowrap;">
-          <button class="est-add-btn" onclick="startPhotoCapture()">📷 Photo</button>
-          <button class="est-add-btn voice-room-btn" onclick="startRoomVoice()">🎤 Describe</button>
-          <button class="est-add-btn" onclick="showAddCharge()">✏️ Manual</button>
-          <div style="position:relative;display:inline-block;">
-            <button class="est-add-btn" onclick="toggleWizardMenu(event)" id="wizardMenuBtnHeader">⚡ More ▾</button>
-            <div id="wizardMenuHeader" style="display:none;position:absolute;top:calc(100% + 4px);left:0;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);z-index:100;min-width:160px;box-shadow:var(--shadow);">
-              <button onclick="closeWizardMenu();showShedWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🏚️ Shed</button>
-              <button onclick="closeWizardMenu();showStorageWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">📦 Storage Unit</button>
-              <button onclick="closeWizardMenu();showMattressWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🛏️ Mattress</button>
-              <button onclick="closeWizardMenu();showPalletWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;">🪵 Pallets</button>
-            </div>
-          </div>
+          <button class="est-add-btn" id="photoRoomBtn" onclick="startPhotoCapture()">📷 Photo</button>
+          <button class="est-add-btn voice-room-btn" id="voiceRoomBtn" onclick="startRoomVoice()">🎤 Describe</button>
+          <button class="est-add-btn" id="addChargeBtn" onclick="showAddCharge()">✏️ Manual</button>
+          <button class="est-add-btn" onclick="toggleWizardMenu(event)" id="wizardMenuBtnHeader">⚡ More ▾</button>
           <button class="est-add-btn" data-save-btn onclick="saveEstimateDraft()" style="background:transparent;color:var(--accent-green);border:1px solid var(--accent-green);">Save Draft</button>
         </div>
         <!-- Estimates List toolbar -->
@@ -1033,6 +1025,14 @@
           <button class="est-add-btn" onclick="newEstimateDoc()" style="background:var(--accent-green);color:#000;">+ New</button>
         </div>
       </div>
+    </div>
+
+    <!-- Wizard menu — outside the header so it can overflow correctly. JS positions it under the More button. -->
+    <div id="wizardMenuHeader" style="display:none;position:fixed;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);z-index:200;min-width:160px;box-shadow:var(--shadow);">
+      <button onclick="closeWizardMenu();showShedWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🏚️ Shed</button>
+      <button onclick="closeWizardMenu();showStorageWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">📦 Storage Unit</button>
+      <button onclick="closeWizardMenu();showMattressWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🛏️ Mattress</button>
+      <button onclick="closeWizardMenu();showPalletWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;">🪵 Pallets</button>
     </div>
 
     <div class="app-content">
@@ -4567,7 +4567,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.3 | 2026-04-28 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.4 | 2026-04-28 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6346,10 +6346,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
       if (!SpeechRecognition) {
-        status.style.display = 'block';
-        status.style.background = 'rgba(239,68,68,0.15)';
-        status.style.color = '#ef4444';
-        status.textContent = '⚠️ Voice not supported. Use Chrome on Android or Safari on iOS.';
+        if (status) {
+          status.style.display = 'block';
+          status.style.background = 'rgba(239,68,68,0.15)';
+          status.style.color = '#ef4444';
+          status.textContent = '⚠️ Voice not supported. Use Chrome on Android or Safari on iOS.';
+        } else {
+          alert('Voice not supported. Use Chrome on Android or Safari on iOS.');
+        }
         return;
       }
 
@@ -6364,19 +6368,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       roomVoiceRecognition.lang = 'en-US';
       roomVoiceTranscript = '';
 
-      btn.innerHTML = '⏹ Tap to Stop Recording';
-      btn.style.background = '#ef4444';
-      btn.style.color = '#fff';
+      if (btn) {
+        btn.innerHTML = '⏹ Tap to Stop Recording';
+        btn.style.background = '#ef4444';
+        btn.style.color = '#fff';
+      }
       allVoiceBtns.forEach(b => {
         b.innerHTML = '⏹ Tap to Stop Recording';
         b.style.background = '#ef4444';
         b.style.color = '#fff';
       });
 
-      status.style.display = 'block';
-      status.style.background = 'rgba(0,238,118,0.1)';
-      status.style.color = 'var(--text-primary)';
-      status.textContent = '🎤 Listening... describe the room and everything in it.';
+      if (status) {
+        status.style.display = 'block';
+        status.style.background = 'rgba(0,238,118,0.1)';
+        status.style.color = 'var(--text-primary)';
+        status.textContent = '🎤 Listening... describe the room and everything in it.';
+      }
 
       roomVoiceRecognition.onresult = (e) => {
         let interim = '';
@@ -6386,27 +6394,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           else interim += e.results[i][0].transcript;
         }
         roomVoiceTranscript += final;
-        status.textContent = '🎤 ' + (roomVoiceTranscript + interim || 'Listening...');
+        if (status) status.textContent = '🎤 ' + (roomVoiceTranscript + interim || 'Listening...');
       };
 
       roomVoiceRecognition.onerror = (e) => {
         roomVoiceRecognition = null;
         allVoiceBtns.forEach(b => { b.innerHTML = '🎤 Describe Room'; b.style.background = 'var(--accent-green)'; b.style.color = '#000'; b.disabled = false; });
-        status.style.background = 'rgba(239,68,68,0.15)';
-        status.style.color = '#ef4444';
-        status.textContent = '⚠️ Voice error: ' + e.error;
+        if (status) {
+          status.style.background = 'rgba(239,68,68,0.15)';
+          status.style.color = '#ef4444';
+          status.textContent = '⚠️ Voice error: ' + e.error;
+        }
       };
 
       roomVoiceRecognition.onend = () => {
         roomVoiceRecognition = null;
-        btn.innerHTML = '<span class="spinner-inline" style="display:inline-block;margin-right:6px;"></span> Analyzing room...';
+        if (btn) btn.innerHTML = '<span class="spinner-inline" style="display:inline-block;margin-right:6px;"></span> Analyzing room...';
         allVoiceBtns.forEach(b => { b.style.background = 'var(--accent-green)'; b.style.color = '#000'; b.disabled = true; });
         if (roomVoiceTranscript.trim()) {
-          status.textContent = '"' + roomVoiceTranscript.trim() + '"';
+          if (status) status.textContent = '"' + roomVoiceTranscript.trim() + '"';
           analyzeRoomTranscript(roomVoiceTranscript.trim());
         } else {
           allVoiceBtns.forEach(b => { b.innerHTML = '🎤 Describe Room'; b.style.background = 'var(--accent-green)'; b.style.color = '#000'; b.disabled = false; });
-          status.style.display = 'none';
+          if (status) status.style.display = 'none';
         }
       };
 
@@ -6490,7 +6500,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         status.textContent = '⚠️ Error: ' + (e.message || e);
       } finally {
         allVoiceBtns.forEach(b => { b.innerHTML = '🎤 Describe Room'; b.style.background = 'var(--accent-green)'; b.style.color = '#000'; b.disabled = false; });
-        btn.disabled = false;
+        if (btn) btn.disabled = false;
       }
     }
 
@@ -12705,7 +12715,23 @@ Please review the estimate below. If you have any questions or would like to adj
       e.stopPropagation();
       const menu = document.getElementById('wizardMenuHeader');
       if (!menu) return;
-      menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+      if (menu.style.display !== 'none' && menu.style.display !== '') {
+        menu.style.display = 'none';
+        return;
+      }
+      // Position fixed-position menu directly below the button
+      const btn = e.currentTarget;
+      const rect = btn.getBoundingClientRect();
+      menu.style.top = (rect.bottom + 4) + 'px';
+      // Anchor the menu to the right edge of the button so it doesn't overflow on right edge
+      const menuWidth = 160;
+      const viewportWidth = window.innerWidth;
+      let left = rect.left;
+      if (left + menuWidth > viewportWidth - 8) {
+        left = viewportWidth - menuWidth - 8;
+      }
+      menu.style.left = left + 'px';
+      menu.style.display = 'block';
     }
 
     function closeWizardMenu() {
