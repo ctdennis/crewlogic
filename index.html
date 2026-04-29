@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.12 | 2026-04-28">
+  <meta name="crewlogic-version" content="v5.9.14 | 2026-04-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -918,7 +918,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.12 | 2026-04-28 -->
+<!-- CrewLogic v5.9.14 | 2026-04-28 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3045,7 +3045,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // ===== CONSTANTS =====
     const GOOGLE_CLIENT_ID = '619520043744-fo8rl63g45ngtgvf8bfq8vglvaej5iib.apps.googleusercontent.com';
     const N8N_BASE = 'https://junkluggers.app.n8n.cloud/webhook';
+    const EDGE_BASE = 'https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1';
+    const EDGE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
     const SESSION_KEY = 'cl_session_v2';
+
+    // Helper for Edge Function calls — POST JSON, returns parsed JSON.
+    async function edgeFunctionCall(name, body) {
+      const res = await fetch(EDGE_BASE + '/' + name, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + EDGE_ANON_KEY,
+          'apikey': EDGE_ANON_KEY
+        },
+        body: JSON.stringify(body)
+      });
+      return res.json();
+    }
 
     // ===== STATE =====
     let currentUser = null;
@@ -3181,6 +3197,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                 }
               } catch(e) {}
             }
+            // Extract contact fields from costSettings to top-level currentUser
+            // (PDF generation and franchise tab read these top-level values).
+            if (currentUser.costSettings) {
+              const _cs = currentUser.costSettings;
+              if (_cs.phone) currentUser.phone = _cs.phone;
+              if (_cs.officeAddress) currentUser.officeAddress = _cs.officeAddress;
+              if (_cs.officeCity) currentUser.officeCity = _cs.officeCity;
+              if (_cs.officeState) currentUser.officeState = _cs.officeState;
+              if (_cs.officeZip) currentUser.officeZip = _cs.officeZip;
+              if (_cs.website) currentUser.website = _cs.website;
+              storage.set(SESSION_KEY, JSON.stringify(currentUser));
+            }
             showApp();
             return;
           }
@@ -3196,16 +3224,27 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const session = JSON.parse(saved);
           if (session && session.email) {
             currentUser = session;
-            // Refresh subscription tier from Supabase in background (may have changed since cache)
-            supabaseFetch('/rest/v1/profiles?select=role,franchises(subscription_tier)&email=eq.' + encodeURIComponent(session.email))
+            // Refresh costSettings + role + tier from Supabase in background (may have changed since cache)
+            supabaseFetch('/rest/v1/profiles?select=role,franchises(subscription_tier,cost_settings)&email=eq.' + encodeURIComponent(session.email))
               .then(rows => {
                 if (rows && rows[0]) {
                   if (rows[0].role) currentUser.role = rows[0].role;
                   if (rows[0].franchises?.subscription_tier) {
                     currentUser.subscriptionTier = rows[0].franchises.subscription_tier;
-                    storage.set(SESSION_KEY, JSON.stringify(currentUser));
-                    initSignsModule(); // re-run now that tier is loaded
                   }
+                  if (rows[0].franchises?.cost_settings) {
+                    currentUser.costSettings = rows[0].franchises.cost_settings;
+                    // Re-extract contact fields from latest cost_settings
+                    const _cs = currentUser.costSettings;
+                    if (_cs.phone) currentUser.phone = _cs.phone;
+                    if (_cs.officeAddress) currentUser.officeAddress = _cs.officeAddress;
+                    if (_cs.officeCity) currentUser.officeCity = _cs.officeCity;
+                    if (_cs.officeState) currentUser.officeState = _cs.officeState;
+                    if (_cs.officeZip) currentUser.officeZip = _cs.officeZip;
+                    if (_cs.website) currentUser.website = _cs.website;
+                  }
+                  storage.set(SESSION_KEY, JSON.stringify(currentUser));
+                  initSignsModule(); // re-run now that tier is loaded
                 }
               }).catch(() => {});
             showApp();
@@ -4590,12 +4629,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       feedbackEl.textContent = '';
 
       try {
-        const res = await apiFetch(N8N_BASE + '/crewlogic-settings', {
-          method: 'POST',
-          body: JSON.stringify({ vonigoUsername: username, vonigoPassword: password, franchiseID: currentUser.franchiseID, email: currentUser.email })
+        const data = await edgeFunctionCall('crewlogic-settings', {
+          action: 'saveVonigoCredentials',
+          vonigoUsername: username,
+          vonigoPassword: password,
+          franchiseID: currentUser.franchiseID,
+          email: currentUser.email
         });
-
-        const data = await res.json();
 
         if (data.success) {
           currentUser.vonigoConfigured = true;
@@ -4628,7 +4668,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.12 | 2026-04-28 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.14 | 2026-04-28 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5354,21 +5394,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       currentUser.costSettings.officeZip     = officeZipVal;
       currentUser.costSettings.website       = websiteVal;
       try {
-        const res = await apiFetch(N8N_BASE + '/crewlogic-settings', {
-          method: 'POST',
-          body: JSON.stringify({
-            email: currentUser.email,
-            franchiseID: currentUser.franchiseID,
-            phone: phoneVal,
-            officeAddress: officeAddressVal,
-            officeCity: officeCityVal,
-            officeState: officeStateVal,
-            officeZip: officeZipVal,
-            website: websiteVal,
-            costSettings: currentUser.costSettings
-          })
+        const data = await edgeFunctionCall('crewlogic-settings', {
+          action: 'saveFranchiseInfo',
+          email: currentUser.email,
+          franchiseID: currentUser.franchiseID,
+          phone: phoneVal,
+          officeAddress: officeAddressVal,
+          officeCity: officeCityVal,
+          officeState: officeStateVal,
+          officeZip: officeZipVal,
+          website: websiteVal,
+          costSettings: currentUser.costSettings
         });
-        const data = await res.json();
         if (data.success) {
           // Cache in session (top-level mirrors of costSettings values)
           currentUser.phone         = phoneVal;
@@ -12113,11 +12150,12 @@ Please review the estimate below. If you have any questions or would like to adj
         if (el) currentUser.costSettings['proposal' + f] = el.value.trim();
       });
       try {
-        const res = await apiFetch(N8N_BASE + '/crewlogic-settings', {
-          method: 'POST',
-          body: JSON.stringify({ email: currentUser.email, franchiseID: currentUser.franchiseID, costSettings: currentUser.costSettings })
+        const data = await edgeFunctionCall('crewlogic-settings', {
+          action: 'saveProposalSettings',
+          email: currentUser.email,
+          franchiseID: currentUser.franchiseID,
+          costSettings: currentUser.costSettings
         });
-        const data = await res.json();
         if (data.success) {
           storage.set(SESSION_KEY, JSON.stringify(currentUser));
           feedbackEl.textContent = '✓ Proposal settings saved';
@@ -12160,11 +12198,12 @@ Please review the estimate below. If you have any questions or would like to adj
       // when saving cost-tab fields. n8n stores cost_settings as a single JSONB column.
       const merged = Object.assign({}, currentUser.costSettings || {}, vals);
       try {
-        const res = await apiFetch(N8N_BASE + '/crewlogic-settings', {
-          method: 'POST',
-          body: JSON.stringify({ email: currentUser.email, franchiseID: currentUser.franchiseID, costSettings: merged })
+        const data = await edgeFunctionCall('crewlogic-settings', {
+          action: 'saveCostSettings',
+          email: currentUser.email,
+          franchiseID: currentUser.franchiseID,
+          costSettings: merged
         });
-        const data = await res.json();
         if (data.success) {
           currentUser.costSettings = merged;
           storage.set(SESSION_KEY, JSON.stringify(currentUser));
@@ -12791,20 +12830,16 @@ Please review the estimate below. If you have any questions or would like to adj
       btn.disabled = true;
 
       try {
-        const res = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
-          method: 'POST',
-          body: JSON.stringify({
-            action: 'calcDistances',
-            email: currentUser.email,
-            franchiseID: currentUser.franchiseID,
-            truckHome,
-            jobSite,
-            disposalSite,
-            recyclingSite: recyclingSite || null,
-            donationSite: donationSite || null
-          })
+        const data = await edgeFunctionCall('crewlogic-estimate', {
+          action: 'calcDistances',
+          email: currentUser.email,
+          franchiseID: currentUser.franchiseID,
+          truckHome,
+          jobSite,
+          disposalSite,
+          recyclingSite: recyclingSite || null,
+          donationSite: donationSite || null
         });
-        const data = await res.json();
         if (data.success && data.distances) {
           if (!currentEstimate.costAnalysis) currentEstimate.costAnalysis = {};
           currentEstimate.costAnalysis.distances = data.distances;
@@ -15015,17 +15050,14 @@ Please review the estimate below. If you have any questions or would like to adj
         fb.textContent = 'Saving...';
         fb.style.color = 'var(--text-muted)';
 
-        // Send the FULL costSettings object — n8n's JSONB merge will preserve all keys
-        // (Don't call saveCostSettings — that only sends cost-tab fields and would wipe signs)
-        const res = await apiFetch(N8N_BASE + '/crewlogic-settings', {
-          method: 'POST',
-          body: JSON.stringify({
-            email: currentUser.email,
-            franchiseID: currentUser.franchiseID,
-            costSettings: currentUser.costSettings  // full object including signs
-          })
+        // Send the FULL costSettings object — Edge Function merges into existing JSONB.
+        // (Don't call saveCostSettings — that only sends cost-tab fields and would wipe signs.)
+        const data = await edgeFunctionCall('crewlogic-settings', {
+          action: 'saveSignsConfig',
+          email: currentUser.email,
+          franchiseID: currentUser.franchiseID,
+          costSettings: currentUser.costSettings  // full object including signs
         });
-        const data = await res.json();
         if (!data.success) throw new Error(data.error || 'Save failed');
 
         storage.set(SESSION_KEY, JSON.stringify(currentUser));
