@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.14 | 2026-04-28">
+  <meta name="crewlogic-version" content="v5.9.15 | 2026-04-29">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -918,7 +918,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.14 | 2026-04-28 -->
+<!-- CrewLogic v5.9.15 | 2026-04-29 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4668,7 +4668,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.14 | 2026-04-28 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.15 | 2026-04-29 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -9565,6 +9565,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const cropCanvas = document.getElementById('cropSelectionCanvas');
 
       overlay.style.display = 'flex';
+      // Set crossOrigin BEFORE src — required for canvas export to work later.
+      // For data: URLs (base64) this has no effect; for cross-origin URLs (Supabase
+      // signed URLs) this triggers a proper CORS request so the canvas isn't tainted.
+      cropImg.crossOrigin = 'anonymous';
+
+      // If the CORS load fails (e.g. legacy Drive URLs without CORS headers),
+      // retry without crossOrigin — image will display but cropping will be disabled.
+      cropImg.onerror = () => {
+        console.warn('[crop] CORS load failed, retrying without crossOrigin');
+        cropImg.onerror = null;
+        cropImg.removeAttribute('crossorigin');
+        cropImg.src = src;
+      };
       cropImg.src = src;
       cropImg.onload = () => {
         cropState.imgNaturalW = cropImg.naturalWidth;
@@ -9638,36 +9651,60 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function cropTouchEnd(e) { cropMouseUp(e); }
 
     function applyCrop() {
-      const x = Math.min(cropState.startX, cropState.endX);
-      const y = Math.min(cropState.startY, cropState.endY);
-      const w = Math.abs(cropState.endX - cropState.startX);
-      const h = Math.abs(cropState.endY - cropState.startY);
+      try {
+        console.log('[applyCrop] start, cropState:', JSON.parse(JSON.stringify(cropState)));
+        const x = Math.min(cropState.startX, cropState.endX);
+        const y = Math.min(cropState.startY, cropState.endY);
+        const w = Math.abs(cropState.endX - cropState.startX);
+        const h = Math.abs(cropState.endY - cropState.startY);
 
-      if (w < 10 || h < 10) {
-        // No meaningful crop — use full image
-        saveCoverPhotoFromSrc(cropState.rawSrc);
+        if (w < 10 || h < 10) {
+          // No meaningful crop — use full image
+          console.log('[applyCrop] tiny selection, using full image');
+          saveCoverPhotoFromSrc(cropState.rawSrc);
+          closeCropOverlay();
+          return;
+        }
+
+        // Defensive: if displayW/H or imgNaturalW/H is 0, can't compute scale safely
+        if (!cropState.displayW || !cropState.displayH || !cropState.imgNaturalW || !cropState.imgNaturalH) {
+          console.warn('[applyCrop] missing dimensions — falling back to full image', cropState);
+          saveCoverPhotoFromSrc(cropState.rawSrc);
+          closeCropOverlay();
+          return;
+        }
+
+        // Scale from display coords to natural image coords
+        const scaleX = cropState.imgNaturalW / cropState.displayW;
+        const scaleY = cropState.imgNaturalH / cropState.displayH;
+        const sx = x * scaleX, sy = y * scaleY;
+        const sw = w * scaleX, sh = h * scaleY;
+        console.log('[applyCrop] scale:', scaleX, scaleY, 'source rect:', sx, sy, sw, sh);
+
+        const img = document.getElementById('cropImg');
+        if (!img) { console.error('[applyCrop] cropImg element not found'); return; }
+        const canvas = document.createElement('canvas');
+        const maxW = 1600, maxH = 1200;
+        let outW = sw, outH = sh;
+        if (outW > maxW) { outH = outH * maxW / outW; outW = maxW; }
+        if (outH > maxH) { outW = outW * maxH / outH; outH = maxH; }
+        canvas.width = Math.round(outW);
+        canvas.height = Math.round(outH);
+        canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+        const base64 = canvas.toDataURL('image/jpeg', 0.85);
+        console.log('[applyCrop] base64 length:', base64.length);
+        saveCoverPhotoBase64(base64);
         closeCropOverlay();
-        return;
+      } catch(e) {
+        console.error('[applyCrop] threw:', e);
+        alert('Crop failed: ' + (e.message || e) + '\n\nUsing full photo instead.');
+        try {
+          saveCoverPhotoFromSrc(cropState.rawSrc);
+        } catch(e2) {
+          console.error('[applyCrop] fallback also failed:', e2);
+        }
+        closeCropOverlay();
       }
-
-      // Scale from display coords to natural image coords
-      const scaleX = cropState.imgNaturalW / cropState.displayW;
-      const scaleY = cropState.imgNaturalH / cropState.displayH;
-      const sx = x * scaleX, sy = y * scaleY;
-      const sw = w * scaleX, sh = h * scaleY;
-
-      const img = document.getElementById('cropImg');
-      const canvas = document.createElement('canvas');
-      const maxW = 1600, maxH = 1200;
-      let outW = sw, outH = sh;
-      if (outW > maxW) { outH = outH * maxW / outW; outW = maxW; }
-      if (outH > maxH) { outW = outW * maxH / outH; outH = maxH; }
-      canvas.width = Math.round(outW);
-      canvas.height = Math.round(outH);
-      canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-      const base64 = canvas.toDataURL('image/jpeg', 0.85);
-      saveCoverPhotoBase64(base64);
-      closeCropOverlay();
     }
 
     function skipCrop() {
@@ -15587,7 +15624,7 @@ Please review the estimate below. If you have any questions or would like to adj
   <div id="cropOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.92);z-index:1000;flex-direction:column;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;">
     <div style="color:var(--text-muted);font-size:12px;margin-bottom:10px;">Drag to select crop area &nbsp;|&nbsp; Leave as-is to use full photo</div>
     <div style="position:relative;max-width:100%;max-height:65vh;display:flex;align-items:center;justify-content:center;">
-      <img id="cropImg" style="max-width:100%;max-height:65vh;display:block;user-select:none;-webkit-user-drag:none;" draggable="false" />
+      <img id="cropImg" crossorigin="anonymous" style="max-width:100%;max-height:65vh;display:block;user-select:none;-webkit-user-drag:none;" draggable="false" />
       <canvas id="cropSelectionCanvas" style="position:absolute;top:0;left:0;cursor:crosshair;"
         onmousedown="cropMouseDown(event)" onmousemove="cropMouseMove(event)" onmouseup="cropMouseUp(event)"
         ontouchstart="cropTouchStart(event)" ontouchmove="cropTouchMove(event)" ontouchend="cropTouchEnd(event)">
