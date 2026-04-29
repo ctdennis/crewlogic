@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.15 | 2026-04-29">
+  <meta name="crewlogic-version" content="v5.9.16 | 2026-04-29">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -918,7 +918,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.15 | 2026-04-29 -->
+<!-- CrewLogic v5.9.16 | 2026-04-29 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4668,7 +4668,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.15 | 2026-04-29 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.16 | 2026-04-29 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -10890,17 +10890,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               }
             }
           } else {
-            // Desktop fallback — download PDF + open pre-filled email
-            doc.save(filename);
+            // Desktop fallback — open mailto FIRST (handed off to OS, doesn't navigate the page),
+            // then trigger PDF download a moment later. The previous order (save first, mailto
+            // second) raced and the download was being lost to the mailto navigation in newer
+            // browser versions.
+            window.location.href = 'mailto:' + clientEmail + '?subject=' + subject + '&body=' + body;
             setTimeout(() => {
-              window.location.href = 'mailto:' + clientEmail + '?subject=' + subject + '&body=' + body;
-            }, 500);
+              try {
+                doc.save(filename);
+              } catch(e) {
+                console.error('PDF download failed:', e);
+                alert('Failed to download PDF. Try the "Download PDF" option instead.');
+              }
+            }, 300);
             // Show hint
             const modal = document.getElementById('pdfOptionsModal');
             if (modal) {
               const hint = document.createElement('div');
               hint.style.cssText = 'margin-top:12px;padding:10px;background:var(--bg-input);border-radius:var(--radius-sm);font-size:12px;color:var(--text-muted);text-align:center;';
-              hint.textContent = 'PDF downloaded — attach it to the email that just opened.';
+              hint.textContent = 'Email opened — PDF downloading. Drag it from Downloads to attach.';
               modal.querySelector('div').appendChild(hint);
               setTimeout(() => modal.style.display = 'none', 3000);
             }
@@ -11175,17 +11183,25 @@ RECYCLING & DONATION
               }
             }
           } else {
-            // Desktop fallback — download PDF + open pre-filled email
-            doc.save(filename);
+            // Desktop fallback — open mailto FIRST (handed off to OS, doesn't navigate the page),
+            // then trigger PDF download a moment later. The previous order (save first, mailto
+            // second) raced and the download was being lost to the mailto navigation in newer
+            // browser versions.
+            window.location.href = 'mailto:' + clientEmail + '?subject=' + subject + '&body=' + body;
             setTimeout(() => {
-              window.location.href = 'mailto:' + clientEmail + '?subject=' + subject + '&body=' + body;
-            }, 500);
+              try {
+                doc.save(filename);
+              } catch(e) {
+                console.error('PDF download failed:', e);
+                alert('Failed to download PDF. Try the "Download PDF" option instead.');
+              }
+            }, 300);
             // Show hint
             const modal = document.getElementById('pdfOptionsModal');
             if (modal) {
               const hint = document.createElement('div');
               hint.style.cssText = 'margin-top:12px;padding:10px;background:var(--bg-input);border-radius:var(--radius-sm);font-size:12px;color:var(--text-muted);text-align:center;';
-              hint.textContent = 'PDF downloaded — attach it to the email that just opened.';
+              hint.textContent = 'Email opened — PDF downloading. Drag it from Downloads to attach.';
               modal.querySelector('div').appendChild(hint);
               setTimeout(() => modal.style.display = 'none', 3000);
             }
