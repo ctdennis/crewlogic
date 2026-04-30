@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.21 | 2026-04-30">
+  <meta name="crewlogic-version" content="v5.9.22 | 2026-04-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -918,7 +918,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.21 | 2026-04-30 -->
+<!-- CrewLogic v5.9.22 | 2026-04-30 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4672,7 +4672,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.21 | 2026-04-30 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.22 | 2026-04-30 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5727,11 +5727,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceListName = '';
     let autoSaveTimer = null;
     let isDirty = false;
-    let _userSaved = false; // true once user has explicitly saved this estimate at least once.
-                            // Used to detect "lookup-and-bail" estimates that should be deleted
-                            // when user leaves without explicit save (e.g., auto-saved Street View
-                            // cover photo cleared isDirty without user actually committing).
     let pendingNavModule = null; // set when navigating away from dirty estimate
+
+    // Heuristic: did the user actually do anything meaningful with this estimate?
+    // Lookup auto-populates label/clientName/address/clientEmail/clientPhone (and may
+    // upload a Street View cover photo), but NEVER touches charges[] or notes. So if
+    // either is non-empty at exit time, the user contributed actual content.
+    function hasUserContent() {
+      if (!currentEstimate) return false;
+      if (Array.isArray(currentEstimate.charges) && currentEstimate.charges.length > 0) return true;
+      if (currentEstimate.notes && currentEstimate.notes.trim().length > 0) return true;
+      return false;
+    }
 
     // Local estimates cache
     function getLocalEstimates() {
@@ -5947,14 +5954,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       priceListID = null;
       priceListName = '';
       isDirty = true; // new estimate is unsaved until explicitly saved or discarded
-      _userSaved = false; // brand new — user has not explicitly saved yet
       chargeCollapsed.clear(); // fresh estimate, nothing collapsed
       openEstimateEditor();
     }
 
     async function openEstimate(estimateID) {
       isDirty = false; // reset before loading new estimate
-      _userSaved = true; // existing estimate from DB — by definition user-saved before
       _lookupSessionID++; // invalidate any in-flight lookups from previous estimate
       // Show loading state
       hideAll();
@@ -6272,19 +6277,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     function promptSaveBeforeLeaving() {
-      // Prompt if user has unsaved changes (isDirty) OR has never explicitly saved
-      // this estimate (e.g. just did a lookup which auto-saved Street View cover photo
-      // but user hasn't actually committed). The "Leave Without Saving" path will
-      // delete the estimate from DB if it was never user-saved.
-      if (isDirty || !_userSaved) {
+      const userHasContent = hasUserContent();
+      // Prompt if user has unsaved changes (isDirty) OR has done meaningful work.
+      // The "Leave Without Saving" path will hard-delete the estimate from DB if
+      // it has no user content (e.g. just a Street View cover from auto-save).
+      if (isDirty || userHasContent) {
         // Update modal text/buttons to reflect what "leave without saving" actually does
         const titleEl = document.querySelector('#savePromptModal [data-modal-title]');
         const descEl = document.querySelector('#savePromptModal [data-modal-desc]');
         const leaveBtnLabel = document.querySelector('#savePromptModal [data-leave-btn-label]');
         const leaveBtnSub = document.querySelector('#savePromptModal [data-leave-btn-sub]');
-        if (!_userSaved) {
-          if (titleEl) titleEl.textContent = 'Save this estimate?';
-          if (descEl) descEl.textContent = 'You haven\'t saved this estimate yet. Exiting without saving will discard it permanently.';
+        if (!userHasContent) {
+          if (titleEl) titleEl.textContent = 'Discard this estimate?';
+          if (descEl) descEl.textContent = 'You haven\'t added any items or notes. Exiting will discard this estimate.';
           if (leaveBtnLabel) leaveBtnLabel.textContent = '🗑 Discard Estimate';
           if (leaveBtnSub) leaveBtnSub.textContent = 'Permanently delete this draft';
         } else {
@@ -6314,11 +6319,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function leaveWithoutSaving() {
       document.getElementById('savePromptModal').style.display = 'none';
       isDirty = false;
-      // If estimate was never user-saved, hard-delete it (the only reason it's in the DB
+      // If estimate has no user content, hard-delete it (the only reason it's in the DB
       // is auto-save side effects like Street View cover upload). User intent is clear:
-      // they backed out of a brand-new estimate without committing, so we shouldn't leave
-      // it cluttering their list.
-      const shouldDiscard = !_userSaved && currentEstimate && currentEstimate.estimateID;
+      // they backed out of a brand-new estimate without contributing anything, so we
+      // shouldn't leave it cluttering their list.
+      const shouldDiscard = !hasUserContent() && currentEstimate && currentEstimate.estimateID;
       const idToDiscard = shouldDiscard ? currentEstimate.estimateID : null;
       if (pendingNavModule) {
         const mod = pendingNavModule;
@@ -8815,7 +8820,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const data = await res.json();
         if (data.success) {
           isDirty = false; // changes are now saved
-          _userSaved = true; // user has now explicitly saved at least once — exit will not auto-discard
           feedbackEl.textContent = '';
           feedbackEl.className = 'settings-feedback ok';
           setSaveButtonsState('saved');
