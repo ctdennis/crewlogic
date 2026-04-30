@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.19 | 2026-04-29">
+  <meta name="crewlogic-version" content="v5.9.20 | 2026-04-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -918,7 +918,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.19 | 2026-04-29 -->
+<!-- CrewLogic v5.9.20 | 2026-04-30 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1011,12 +1011,16 @@
       <!-- Secondary toolbar (lives inside the sticky header so it sticks together) -->
       <div id="secondaryToolbar" style="display:none;background:var(--bg-secondary);border-top:1px solid var(--border);padding:8px 16px;">
         <!-- Estimate Editor toolbar -->
-        <div id="editorToolbar" style="display:none;gap:6px;align-items:center;flex-wrap:nowrap;">
-          <button class="est-add-btn" id="photoRoomBtn" onclick="startPhotoCapture()">📷 Photo</button>
-          <button class="est-add-btn voice-room-btn" id="voiceRoomBtn" onclick="startRoomVoice()">🎤 Describe</button>
-          <button class="est-add-btn" id="addChargeBtn" onclick="showAddCharge()">✏️ Manual</button>
-          <button class="est-add-btn" onclick="toggleWizardMenu(event)" id="wizardMenuBtnHeader">⚡ More ▾</button>
-          <button class="est-add-btn" data-save-btn onclick="saveEstimateDraft()" style="background:transparent;color:var(--accent-green);border:1px solid var(--accent-green);">Save Draft</button>
+        <div id="editorToolbar" style="display:none;flex-direction:column;gap:4px;align-items:stretch;">
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:nowrap;">
+            <button class="est-add-btn" id="photoRoomBtn" onclick="startPhotoCapture()">📷 Photo</button>
+            <button class="est-add-btn voice-room-btn" id="voiceRoomBtn" onclick="startRoomVoice()">🎤 Describe</button>
+            <button class="est-add-btn" id="addChargeBtn" onclick="showAddCharge()">✏️ Manual</button>
+            <button class="est-add-btn" onclick="toggleWizardMenu(event)" id="wizardMenuBtnHeader">⚡ More ▾</button>
+            <button class="est-add-btn" data-save-btn onclick="saveEstimateDraft()" style="background:transparent;color:var(--accent-green);border:1px solid var(--accent-green);">Save Draft</button>
+          </div>
+          <!-- Slim hint shown only when there are no charges yet -->
+          <div id="editorToolbarHint" style="display:none;font-size:10px;color:var(--text-muted);text-align:center;padding:0 0 2px;">↑ Tap a button above to add your first item</div>
         </div>
         <!-- Estimates List toolbar -->
         <div id="listToolbar" style="display:none;gap:6px;align-items:center;flex-wrap:nowrap;">
@@ -4668,7 +4672,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.19 | 2026-04-29 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.20 | 2026-04-30 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -7678,8 +7682,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (bottomBtns) bottomBtns.style.display = charges.length === 0 ? 'none' : 'flex';
       // Update Analyze All button visibility based on current state
       updateAnalyzeAllVisibility();
+      // Show the slim "↑ Tap a button above..." toolbar hint only when no charges yet
+      const toolbarHint = document.getElementById('editorToolbarHint');
+      if (toolbarHint) toolbarHint.style.display = charges.length === 0 ? 'block' : 'none';
       if (charges.length === 0) {
-        container.innerHTML = '<div style="font-size:13px;color:var(--text-muted);padding:16px 0;text-align:center;line-height:2;">📷 Tap Photo to capture a room<br>🎤 Tap Describe to add by voice<br>⚡ Tap More ▾ for specialty items</div>';
+        container.innerHTML = '';
         return;
       }
 
