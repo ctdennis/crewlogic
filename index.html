@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.20 | 2026-04-30">
+  <meta name="crewlogic-version" content="v5.9.21 | 2026-04-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -918,7 +918,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.20 | 2026-04-30 -->
+<!-- CrewLogic v5.9.21 | 2026-04-30 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -2190,15 +2190,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       <!-- SAVE PROMPT MODAL -->
       <div id="savePromptModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:200;align-items:flex-end;justify-content:center;">
         <div style="background:var(--bg-secondary);border-radius:var(--radius) var(--radius) 0 0;padding:20px;width:100%;max-width:480px;">
-          <div style="font-size:16px;font-weight:700;margin-bottom:6px;color:var(--text-primary);">Save before leaving?</div>
-          <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Any unsaved changes will be lost.</div>
+          <div data-modal-title style="font-size:16px;font-weight:700;margin-bottom:6px;color:var(--text-primary);">Save before leaving?</div>
+          <div data-modal-desc style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Any unsaved changes will be lost.</div>
           <button class="vol-option-btn" onclick="saveAndLeave()">
             💾 Save Draft &amp; Exit
             <div class="vol-option-sub">Save changes then return to estimates</div>
           </button>
           <button class="vol-option-btn" onclick="leaveWithoutSaving()">
-            ✕ Exit Without Saving
-            <div class="vol-option-sub">Discard any unsaved changes</div>
+            <span data-leave-btn-label>✕ Exit Without Saving</span>
+            <div data-leave-btn-sub class="vol-option-sub">Discard any unsaved changes</div>
           </button>
           <button class="calc-btn" style="background:var(--bg-input);color:var(--text-secondary);margin-top:4px;" onclick="document.getElementById('savePromptModal').style.display='none'">
             <span class="btn-text">Cancel</span>
@@ -4672,7 +4672,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.20 | 2026-04-30 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.21 | 2026-04-30 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5727,7 +5727,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceListName = '';
     let autoSaveTimer = null;
     let isDirty = false;
-    let pendingNavModule = null; // set when navigating away from dirty estimate // true when estimate has unsaved changes
+    let _userSaved = false; // true once user has explicitly saved this estimate at least once.
+                            // Used to detect "lookup-and-bail" estimates that should be deleted
+                            // when user leaves without explicit save (e.g., auto-saved Street View
+                            // cover photo cleared isDirty without user actually committing).
+    let pendingNavModule = null; // set when navigating away from dirty estimate
 
     // Local estimates cache
     function getLocalEstimates() {
@@ -5943,12 +5947,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       priceListID = null;
       priceListName = '';
       isDirty = true; // new estimate is unsaved until explicitly saved or discarded
+      _userSaved = false; // brand new — user has not explicitly saved yet
       chargeCollapsed.clear(); // fresh estimate, nothing collapsed
       openEstimateEditor();
     }
 
     async function openEstimate(estimateID) {
       isDirty = false; // reset before loading new estimate
+      _userSaved = true; // existing estimate from DB — by definition user-saved before
       _lookupSessionID++; // invalidate any in-flight lookups from previous estimate
       // Show loading state
       hideAll();
@@ -6266,7 +6272,27 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     function promptSaveBeforeLeaving() {
-      if (isDirty) {
+      // Prompt if user has unsaved changes (isDirty) OR has never explicitly saved
+      // this estimate (e.g. just did a lookup which auto-saved Street View cover photo
+      // but user hasn't actually committed). The "Leave Without Saving" path will
+      // delete the estimate from DB if it was never user-saved.
+      if (isDirty || !_userSaved) {
+        // Update modal text/buttons to reflect what "leave without saving" actually does
+        const titleEl = document.querySelector('#savePromptModal [data-modal-title]');
+        const descEl = document.querySelector('#savePromptModal [data-modal-desc]');
+        const leaveBtnLabel = document.querySelector('#savePromptModal [data-leave-btn-label]');
+        const leaveBtnSub = document.querySelector('#savePromptModal [data-leave-btn-sub]');
+        if (!_userSaved) {
+          if (titleEl) titleEl.textContent = 'Save this estimate?';
+          if (descEl) descEl.textContent = 'You haven\'t saved this estimate yet. Exiting without saving will discard it permanently.';
+          if (leaveBtnLabel) leaveBtnLabel.textContent = '🗑 Discard Estimate';
+          if (leaveBtnSub) leaveBtnSub.textContent = 'Permanently delete this draft';
+        } else {
+          if (titleEl) titleEl.textContent = 'Save before leaving?';
+          if (descEl) descEl.textContent = 'Any unsaved changes will be lost.';
+          if (leaveBtnLabel) leaveBtnLabel.textContent = '✕ Exit Without Saving';
+          if (leaveBtnSub) leaveBtnSub.textContent = 'Discard any unsaved changes';
+        }
         document.getElementById('savePromptModal').style.display = 'flex';
       } else {
         backToEstimatesList();
@@ -6288,6 +6314,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function leaveWithoutSaving() {
       document.getElementById('savePromptModal').style.display = 'none';
       isDirty = false;
+      // If estimate was never user-saved, hard-delete it (the only reason it's in the DB
+      // is auto-save side effects like Street View cover upload). User intent is clear:
+      // they backed out of a brand-new estimate without committing, so we shouldn't leave
+      // it cluttering their list.
+      const shouldDiscard = !_userSaved && currentEstimate && currentEstimate.estimateID;
+      const idToDiscard = shouldDiscard ? currentEstimate.estimateID : null;
       if (pendingNavModule) {
         const mod = pendingNavModule;
         pendingNavModule = null;
@@ -6295,6 +6327,39 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       } else {
         backToEstimatesList();
       }
+      // Fire-and-forget cleanup — don't block navigation on it
+      if (idToDiscard) {
+        discardUnsavedEstimate(idToDiscard).catch(e => console.warn('Discard cleanup failed:', e));
+      }
+    }
+
+    // Hard-delete an unsaved draft + clean up its photo folder.
+    // Called from leaveWithoutSaving when user backs out of a never-explicitly-saved estimate.
+    async function discardUnsavedEstimate(estimateID) {
+      // Remove from local cache first (immediate UI consistency)
+      try {
+        const all = getLocalEstimates();
+        setLocalEstimates(all.filter(e => String(e.estimateID) !== String(estimateID)));
+      } catch(e) {}
+      // Hard-delete the DB row (no archive — this estimate was never explicitly saved)
+      try {
+        await supabaseFetch('/rest/v1/estimates?estimate_id=eq.' + estimateID, { method: 'DELETE' });
+      } catch(e) { console.warn('discard: DB delete failed', e); }
+      // Clean up any photos uploaded to Storage during the brief lookup session
+      // (typically just a Street View cover photo, sometimes nothing)
+      try {
+        const folder = currentUser.franchiseID + '/' + estimateID;
+        const { data: files } = await supabaseClient.storage.from('estimate-photos').list(folder);
+        if (files && files.length > 0) {
+          const paths = files.map(f => folder + '/' + f.name);
+          await supabaseClient.storage.from('estimate-photos').remove(paths);
+        }
+      } catch(e) { console.warn('discard: storage cleanup failed', e); }
+      // Clean up any queued photos in IndexedDB
+      try {
+        const queued = await idbGetByEstimate(String(estimateID));
+        for (const r of queued) await idbDelete(r.photoID);
+      } catch(e) {}
     }
 
     function backToEstimatesList() {
@@ -8750,6 +8815,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const data = await res.json();
         if (data.success) {
           isDirty = false; // changes are now saved
+          _userSaved = true; // user has now explicitly saved at least once — exit will not auto-discard
           feedbackEl.textContent = '';
           feedbackEl.className = 'settings-feedback ok';
           setSaveButtonsState('saved');
