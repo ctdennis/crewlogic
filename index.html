@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.25 | 2026-04-30">
+  <meta name="crewlogic-version" content="v5.9.26 | 2026-04-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -919,7 +919,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.25 | 2026-04-30 -->
+<!-- CrewLogic v5.9.26 | 2026-04-30 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1167,6 +1167,32 @@
               </button>
               <div class="settings-feedback" id="settingsFeedback"></div>
             </div>
+          </div>
+
+          <!-- Branding -->
+          <div class="settings-card fade-in fade-in-delay-2" id="brandingCard">
+            <div class="settings-card-title">Branding</div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Brand Color</label>
+              <div style="display:flex;gap:10px;align-items:center;">
+                <input type="color" id="settingsBrandColor" value="#00EE76"
+                  style="width:48px;height:40px;border:1px solid var(--border);border-radius:var(--radius-sm);background:transparent;cursor:pointer;padding:2px;"
+                  oninput="onBrandColorInput()">
+                <input type="text" id="settingsBrandColorHex" class="form-input" maxlength="7" placeholder="#00EE76"
+                  style="flex:0 0 120px;text-transform:uppercase;font-family:monospace;"
+                  oninput="onBrandColorHexInput()">
+                <div id="settingsBrandColorPantone" style="font-size:11px;color:var(--text-muted);flex:1;">Pantone (approx): —</div>
+              </div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">
+                Used for buttons, links, and highlights throughout the app and your customer-facing PDFs.
+                Pantone match is approximate — for exact print colors use the Pantone Connect app.
+              </div>
+            </div>
+            <button class="btn btn-primary" onclick="saveBrandingSettings()">
+              <span class="spinner"></span>
+              <span class="btn-text">Save branding</span>
+            </button>
+            <div class="settings-feedback" id="brandingFeedback"></div>
           </div>
 
           <!-- Franchise Info -->
@@ -4320,6 +4346,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.getElementById('paywallScreen').style.display = 'none';
       document.getElementById('appShell').classList.add('active');
 
+      // Apply this franchise's brand color to the app theme (falls back to default green)
+      const brandHex = (currentUser.costSettings && currentUser.costSettings.brandColor) || DEFAULT_BRAND_COLOR;
+      applyBrandColor(brandHex);
+
       const hour = new Date().getHours();
       const firstName = currentUser.name ? currentUser.name.split(' ')[0] : 'there';
       const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
@@ -4673,7 +4703,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.25 | 2026-04-30 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.26 | 2026-04-30 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5443,6 +5473,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (currentUser.website) document.getElementById('settingsWebsite').value = currentUser.website;
       // Vonigo username pre-filled from session (form is hidden when configured)
       if (currentUser.vonigoUsername) document.getElementById('settingsVonigoUser').value = currentUser.vonigoUsername;
+
+      // Brand color — falls back to default green if unset
+      const brandHex = (currentUser.costSettings && currentUser.costSettings.brandColor) || DEFAULT_BRAND_COLOR;
+      const colorEl = document.getElementById('settingsBrandColor');
+      const hexEl = document.getElementById('settingsBrandColorHex');
+      const pantoneEl = document.getElementById('settingsBrandColorPantone');
+      if (colorEl) colorEl.value = brandHex;
+      if (hexEl) hexEl.value = brandHex.toUpperCase();
+      if (pantoneEl) {
+        const match = nearestPantone(brandHex);
+        pantoneEl.textContent = 'Pantone (approx): ' + (match ? match.name : '—');
+      }
 
       populateCostSettingsFields();
     }
@@ -12386,6 +12428,147 @@ Please review the estimate below. If you have any questions or would like to adj
         feedbackEl.className = 'settings-feedback error';
       }
       btn.classList.remove('loading');
+    }
+
+    // ===== BRANDING =====
+    // Default brand color (Junkluggers green) — used when franchise has no custom color set
+    const DEFAULT_BRAND_COLOR = '#00EE76';
+
+    // Curated Pantone-like names for approximate matching. Not licensed Pantone codes —
+    // these are common color names that map to a hex sample for a "looks closest to" hint.
+    // Real Pantone matching requires their licensed software (e.g. Pantone Connect).
+    const PANTONE_PALETTE = [
+      { name: '802 C',     hex: '#44D62C', rgb: [68, 214, 44] },
+      { name: '354 C',     hex: '#00B140', rgb: [0, 177, 64] },
+      { name: '348 C',     hex: '#00843D', rgb: [0, 132, 61] },
+      { name: '2925 C',    hex: '#009CDE', rgb: [0, 156, 222] },
+      { name: '286 C',     hex: '#0033A0', rgb: [0, 51, 160] },
+      { name: '186 C',     hex: '#C8102E', rgb: [200, 16, 46] },
+      { name: '485 C',     hex: '#DA291C', rgb: [218, 41, 28] },
+      { name: '021 C',     hex: '#FE5000', rgb: [254, 80, 0] },
+      { name: '116 C',     hex: '#FFCD00', rgb: [255, 205, 0] },
+      { name: '266 C',     hex: '#5F249F', rgb: [95, 36, 159] },
+      { name: '7424 C',    hex: '#E0457B', rgb: [224, 69, 123] },
+      { name: 'Black 6 C', hex: '#101820', rgb: [16, 24, 32] },
+      { name: 'Cool Gray 11 C', hex: '#53565A', rgb: [83, 86, 90] },
+      { name: 'Cool Gray 6 C',  hex: '#A7A8AA', rgb: [167, 168, 170] },
+      { name: 'White',     hex: '#FFFFFF', rgb: [255, 255, 255] }
+    ];
+
+    // RGB color distance — simple Euclidean distance in RGB space.
+    // Not perceptually accurate (LAB/Delta-E would be) but fine for "approximate" hint.
+    function nearestPantone(hex) {
+      const rgb = hexToRgb(hex);
+      if (!rgb) return null;
+      let best = null;
+      let bestDist = Infinity;
+      for (const p of PANTONE_PALETTE) {
+        const dr = rgb[0] - p.rgb[0], dg = rgb[1] - p.rgb[1], db = rgb[2] - p.rgb[2];
+        const d = dr*dr + dg*dg + db*db;
+        if (d < bestDist) { bestDist = d; best = p; }
+      }
+      return best;
+    }
+
+    function hexToRgb(hex) {
+      hex = String(hex || '').trim().replace('#', '');
+      if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+      if (!/^[0-9a-fA-F]{6}$/.test(hex)) return null;
+      return [
+        parseInt(hex.slice(0, 2), 16),
+        parseInt(hex.slice(2, 4), 16),
+        parseInt(hex.slice(4, 6), 16)
+      ];
+    }
+
+    function rgbToHex(r, g, b) {
+      return '#' + [r, g, b].map(n => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0')).join('').toUpperCase();
+    }
+
+    // Derive a slightly darker variant for hover/active states
+    function darkenHex(hex, amount = 0.15) {
+      const rgb = hexToRgb(hex);
+      if (!rgb) return hex;
+      return rgbToHex(rgb[0] * (1 - amount), rgb[1] * (1 - amount), rgb[2] * (1 - amount));
+    }
+
+    // Apply a brand color to the app — overrides --accent-green CSS variable.
+    // Called on login/load and whenever the user changes the picker.
+    function applyBrandColor(hex) {
+      const valid = hexToRgb(hex);
+      if (!valid) return; // ignore invalid input
+      const root = document.documentElement;
+      root.style.setProperty('--accent-green', hex);
+      root.style.setProperty('--accent-green-dim', darkenHex(hex, 0.12));
+    }
+
+    // Sync color picker → text field → Pantone label
+    function onBrandColorInput() {
+      const colorEl = document.getElementById('settingsBrandColor');
+      const hexEl = document.getElementById('settingsBrandColorHex');
+      const pantoneEl = document.getElementById('settingsBrandColorPantone');
+      const hex = colorEl.value.toUpperCase();
+      hexEl.value = hex;
+      const match = nearestPantone(hex);
+      if (pantoneEl) pantoneEl.textContent = 'Pantone (approx): ' + (match ? match.name : '—');
+      applyBrandColor(hex); // live preview
+    }
+
+    // Sync text field → color picker → Pantone label
+    function onBrandColorHexInput() {
+      const colorEl = document.getElementById('settingsBrandColor');
+      const hexEl = document.getElementById('settingsBrandColorHex');
+      const pantoneEl = document.getElementById('settingsBrandColorPantone');
+      let hex = hexEl.value.trim().toUpperCase();
+      if (hex && !hex.startsWith('#')) hex = '#' + hex;
+      if (!hexToRgb(hex)) {
+        if (pantoneEl) pantoneEl.textContent = 'Pantone (approx): —';
+        return;
+      }
+      colorEl.value = hex;
+      const match = nearestPantone(hex);
+      if (pantoneEl) pantoneEl.textContent = 'Pantone (approx): ' + (match ? match.name : '—');
+      applyBrandColor(hex); // live preview
+    }
+
+    async function saveBrandingSettings() {
+      const btn = document.querySelector('#brandingCard .btn');
+      const feedbackEl = document.getElementById('brandingFeedback');
+      const hexEl = document.getElementById('settingsBrandColorHex');
+      let hex = hexEl.value.trim().toUpperCase();
+      if (hex && !hex.startsWith('#')) hex = '#' + hex;
+      if (!hexToRgb(hex)) {
+        feedbackEl.textContent = 'Invalid color — use format #RRGGBB';
+        feedbackEl.className = 'settings-feedback error';
+        return;
+      }
+      if (btn) btn.classList.add('loading');
+      feedbackEl.textContent = '';
+
+      if (!currentUser.costSettings) currentUser.costSettings = {};
+      currentUser.costSettings.brandColor = hex;
+
+      try {
+        const data = await edgeFunctionCall('crewlogic-settings', {
+          action: 'saveCostSettings',
+          email: currentUser.email,
+          franchiseID: currentUser.franchiseID,
+          costSettings: currentUser.costSettings
+        });
+        if (data.success) {
+          storage.set(SESSION_KEY, JSON.stringify(currentUser));
+          feedbackEl.textContent = '✓ Brand color saved';
+          feedbackEl.className = 'settings-feedback ok';
+          applyBrandColor(hex); // ensure applied (live preview already did, but safety net)
+        } else {
+          feedbackEl.textContent = data.error || 'Failed to save.';
+          feedbackEl.className = 'settings-feedback error';
+        }
+      } catch(e) {
+        feedbackEl.textContent = 'Connection error.';
+        feedbackEl.className = 'settings-feedback error';
+      }
+      if (btn) btn.classList.remove('loading');
     }
 
     // ===== COST SETTINGS =====
