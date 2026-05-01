@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.24 | 2026-04-30">
+  <meta name="crewlogic-version" content="v5.9.25 | 2026-04-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -919,7 +919,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.24 | 2026-04-30 -->
+<!-- CrewLogic v5.9.25 | 2026-04-30 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4673,7 +4673,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.24 | 2026-04-30 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.25 | 2026-04-30 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -10725,14 +10725,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       };
       addDetailHeader();
 
-      // Detail table columns - right-align vol numbers
+      // Detail table columns - rebalanced to give Description much more room.
+      // Page is 960pt landscape, ~912pt usable. Allocations:
+      //   Area: 28-138 (110pt) — fits "First Floor", "Basement", etc.
+      //   Room: 138-228 (90pt) — fits "Bedroom", "Kitchen", etc.
+      //   Description: 228-688 (460pt) — main content, was the bottleneck
+      //   Not Included: 688-788 (100pt) — wraps if longer, OK
+      //   Size: 788-848 (60pt right-aligned)
+      //   Trucks: 848-908 (60pt right-aligned)
+      //   CY: 908-W-margin right-aligned
       const dc = {
         area: margin + 4,
-        room: 190,
-        desc: 310,
-        excluded: 610,
-        frac: 740,
-        vol: 820,
+        room: 138,
+        desc: 228,
+        excluded: 688,
+        frac: 788,
+        vol: 868,
         cy: W - margin - 8
       };
 
@@ -10768,9 +10776,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       rooms.forEach(room => {
         const descWidth = dc.excluded - dc.desc - 8;
+        // Body uses 9pt font (header stays at 8pt). 9pt → ~12pt line height.
+        doc.setFontSize(9);
         const descLines = doc.splitTextToSize(room.description || '', descWidth);
         const exclLines = doc.splitTextToSize(room.notIncluded || '', dc.frac - dc.excluded - 8);
-        const rh = Math.max(20, Math.max(descLines.length, exclLines.length) * 11 + 8);
+        const rh = Math.max(22, Math.max(descLines.length, exclLines.length) * 12 + 8);
 
         if (y + rh > H - 44) {
           doc.addPage([960, 540], 'landscape');
@@ -10787,24 +10797,24 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
         doc.setTextColor(...dark);
         doc.setFont('helvetica', 'normal');
-        doc.setFontSize(8);
-        doc.text(room.area || '', dc.area, y + 12, { maxWidth: dc.room - dc.area - 6 });
+        doc.setFontSize(9);
+        doc.text(room.area || '', dc.area, y + 13, { maxWidth: dc.room - dc.area - 6 });
         doc.setTextColor(...dark);
-        doc.text(room.room || '', dc.room, y + 12, { maxWidth: dc.desc - dc.room - 6 });
+        doc.text(room.room || '', dc.room, y + 13, { maxWidth: dc.desc - dc.room - 6 });
         doc.setTextColor(...dark);
-        doc.text(descLines, dc.desc, y + 12);
+        doc.text(descLines, dc.desc, y + 13);
         doc.setTextColor(...gray);
-        doc.text(exclLines, dc.excluded, y + 12);
+        doc.text(exclLines, dc.excluded, y + 13);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...dark);
         const fracLabel = room.truckLabel || (parseFloat(room.truckVolume) > 0 ? String(room.truckVolume) : 'Incl.');
-        doc.text(fracLabel, dc.frac, y + 12, { align: 'right' });
+        doc.text(fracLabel, dc.frac, y + 13, { align: 'right' });
         doc.setTextColor(...green);
         const tv = parseFloat(room.truckVolume) || 0;
-        doc.text(tv > 0 ? tv.toFixed(3) : '-', dc.vol, y + 12, { align: 'right' });
+        doc.text(tv > 0 ? tv.toFixed(3) : '-', dc.vol, y + 13, { align: 'right' });
         if (tv > 0) {
           doc.setTextColor(...gray);
-          doc.text((tv * 16).toFixed(1), dc.cy, y + 12, { align: 'right' });
+          doc.text((tv * 16).toFixed(1), dc.cy, y + 13, { align: 'right' });
           doc.setTextColor(...dark);
         }
 
