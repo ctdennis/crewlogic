@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.27 | 2026-04-30">
+  <meta name="crewlogic-version" content="v5.9.28 | 2026-05-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -919,7 +919,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.27 | 2026-04-30 -->
+<!-- CrewLogic v5.9.28 | 2026-05-01 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1044,6 +1044,9 @@
 
       <!-- HOME -->
       <div id="homeScreen">
+        <div id="homeBrandLogoWrap" style="display:none;text-align:center;margin:0 0 12px;">
+          <img id="homeBrandLogo" alt="" style="max-width:240px;max-height:80px;object-fit:contain;" />
+        </div>
         <div class="home-greeting fade-in" id="homeGreeting">Hey!</div>
         <div class="home-date fade-in fade-in-delay-1" id="homeDate"></div>
 
@@ -1188,6 +1191,28 @@
                 Pantone match is approximate — for exact print colors use the Pantone Connect app.
               </div>
             </div>
+
+            <div class="settings-input-group">
+              <label class="settings-input-label">Company Logo</label>
+              <div id="brandLogoPreviewWrap" style="display:flex;gap:12px;align-items:center;margin-bottom:8px;">
+                <div id="brandLogoPreview" style="width:120px;height:60px;border:1px dashed var(--border);border-radius:var(--radius-sm);background:var(--surface-2);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text-muted);text-align:center;overflow:hidden;">
+                  No logo uploaded
+                </div>
+                <div style="flex:1;">
+                  <input type="file" id="brandLogoFileInput" accept="image/png,image/jpeg" style="display:none;" onchange="onBrandLogoSelected(event)">
+                  <button class="btn" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);" onclick="document.getElementById('brandLogoFileInput').click()">
+                    <span class="btn-text">Choose file…</span>
+                  </button>
+                  <button class="btn" id="brandLogoRemoveBtn" style="background:transparent;color:var(--text-muted);border:1px solid var(--border);margin-left:6px;display:none;" onclick="removeBrandLogo()">
+                    <span class="btn-text">Remove</span>
+                  </button>
+                </div>
+              </div>
+              <div style="font-size:11px;color:var(--text-muted);">
+                PNG with transparency preferred. Auto-resized to fit. Appears on your PDFs and home screen.
+              </div>
+            </div>
+
             <button class="btn btn-primary" onclick="saveBrandingSettings()">
               <span class="spinner"></span>
               <span class="btn-text">Save branding</span>
@@ -4349,6 +4374,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Apply this franchise's brand color to the app theme (falls back to default green)
       const brandHex = (currentUser.costSettings && currentUser.costSettings.brandColor) || DEFAULT_BRAND_COLOR;
       applyBrandColor(brandHex);
+      // Render the franchise's logo on the home screen (or hide if not set)
+      renderHomeBrandLogo();
 
       const hour = new Date().getHours();
       const firstName = currentUser.name ? currentUser.name.split(' ')[0] : 'there';
@@ -4703,7 +4730,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.27 | 2026-04-30 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.28 | 2026-05-01 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5485,6 +5512,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const match = nearestPantone(brandHex);
         pantoneEl.textContent = 'Pantone (approx): ' + (match ? match.name : '—');
       }
+      // Brand logo preview (async — fetches signed URL)
+      renderBrandLogoPreview();
 
       populateCostSettingsFields();
     }
@@ -10291,7 +10320,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const logoX = rx + 10 + (logoW - logoFitW) / 2;
       const logoY = logoAreaY + (logoAreaH - logoFitH) / 2;
       try {
-        const logoImg = await loadImageFromUrl('/assets/logo1.png');
+        // Use franchise's brand logo if uploaded, otherwise fall back to default Junkluggers logo
+        const brandLogoUrl = await getBrandLogoUrl();
+        const logoImg = brandLogoUrl
+          ? await loadImageFromUrl(brandLogoUrl)
+          : await loadImageFromUrl('/assets/logo1.png');
+        // jsPDF accepts image/bitmap directly; format hint helps
         doc.addImage(logoImg, 'PNG', logoX, logoY, logoFitW, logoFitH);
       } catch(e) {
         // silent fallback — text logo already shown on left
@@ -10307,10 +10341,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       doc.rect(0, 0, W, 52, 'F');
       doc.setFillColor(...green);
       doc.rect(0, 52, W, 4, 'F');
-      doc.setTextColor(...green);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(18);
-      doc.text('JUNKLUGGERS', margin, 32);
+      // Try brand logo first (44pt high band, 220pt max width). If no logo set or
+      // load fails, fall back to "JUNKLUGGERS" text in the brand color.
+      const _logoOK_proposal = await drawPdfBrandLogo(doc, margin, 4, 220, 44);
+      if (!_logoOK_proposal) {
+        doc.setTextColor(...green);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(18);
+        doc.text('JUNKLUGGERS', margin, 32);
+      }
       doc.setTextColor(...white);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
@@ -10748,15 +10787,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       // ===== PAGE 3: DETAIL =====
       doc.addPage([960, 540], 'landscape');
-      const addDetailHeader = () => {
+      const addDetailHeader = async () => {
         doc.setFillColor(...dark);
         doc.rect(0, 0, W, 52, 'F');
         doc.setFillColor(...green);
         doc.rect(0, 52, W, 4, 'F');
-        doc.setTextColor(...green);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(18);
-        doc.text('JUNKLUGGERS', margin, 32);
+        const _logoOK = await drawPdfBrandLogo(doc, margin, 4, 220, 44);
+        if (!_logoOK) {
+          doc.setTextColor(...green);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(18);
+          doc.text('JUNKLUGGERS', margin, 32);
+        }
         doc.setTextColor(...white);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
@@ -10768,7 +10810,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         doc.setFontSize(9);
         doc.text(clientName + '  —  ' + dateStr, W - margin, 40, { align: 'right' });
       };
-      addDetailHeader();
+      await addDetailHeader();
 
       // Detail table columns - rebalanced to give Description much more room.
       // Page is 960pt landscape, ~912pt usable. Allocations:
@@ -10819,7 +10861,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       });
       rowIdx = 0;
 
-      rooms.forEach(room => {
+      for (const room of rooms) {
         const descWidth = dc.excluded - dc.desc - 8;
         // Body uses 9pt font (header stays at 8pt). 9pt → ~12pt line height.
         doc.setFontSize(9);
@@ -10829,7 +10871,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
         if (y + rh > H - 44) {
           doc.addPage([960, 540], 'landscape');
-          addDetailHeader();
+          await addDetailHeader();
           y = 72;
           y = addDetailTableHeader(y);
           rowIdx = 0;
@@ -10865,7 +10907,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
         y += rh;
         rowIdx++;
-      });
+      }
 
       // Total row
       doc.setFillColor(...green);
@@ -10933,16 +10975,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         };
 
         // Add page header (reusable)
-        const addPhotoPageHeader = () => {
+        const addPhotoPageHeader = async () => {
           doc.addPage([PW, PH], 'landscape');
           doc.setFillColor(...dark);
           doc.rect(0, 0, PW, headerH, 'F');
           doc.setFillColor(...green);
           doc.rect(0, headerH, PW, 4, 'F');
-          doc.setTextColor(...green);
-          doc.setFont('helvetica', 'bold');
-          doc.setFontSize(18);
-          doc.text('JUNKLUGGERS', pmarg, 32);
+          const _logoOK = await drawPdfBrandLogo(doc, pmarg, 4, 220, 44);
+          if (!_logoOK) {
+            doc.setTextColor(...green);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(18);
+            doc.text('JUNKLUGGERS', pmarg, 32);
+          }
           doc.setTextColor(...white);
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(9);
@@ -10974,7 +11019,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         }));
 
         // Now lay out pages
-        addPhotoPageHeader();
+        await addPhotoPageHeader();
         let py = headerH + 4 + rowGap;
 
         const captionH = 16; // height reserved below each photo for room name
@@ -11017,7 +11062,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             // Check if label + row fits
             const labelH = firstRow ? subH + labelPad : 0;
             if (py + labelH + totalRowH > PH - pmarg) {
-              addPhotoPageHeader();
+              await addPhotoPageHeader();
               py = headerH + 4 + rowGap;
               drawAreaLabel(group.area, !firstRow);
               py += subH + labelPad;
@@ -11156,10 +11201,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           doc.rect(0, 0, W, 80, 'F');
           doc.setFillColor(...green);
           doc.rect(0, 80, W, 3, 'F');
-          doc.setTextColor(...green);
-          doc.setFont('helvetica', 'bold');
-          doc.setFontSize(22);
-          doc.text('JUNKLUGGERS', margin, 42);
+          const _logoOK_about = await drawPdfBrandLogo(doc, margin, 8, 280, 60);
+          if (!_logoOK_about) {
+            doc.setTextColor(...green);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(22);
+            doc.text('JUNKLUGGERS', margin, 42);
+          }
           doc.setTextColor(...white);
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(9);
@@ -11289,10 +11337,13 @@ RECYCLING & DONATION
         doc.rect(0, 0, W, 80, 'F');
         doc.setFillColor(...green);
         doc.rect(0, 80, W, 3, 'F');
-        doc.setTextColor(...green);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(22);
-        doc.text('JUNKLUGGERS', margin, 42);
+        const _logoOK_terms = await drawPdfBrandLogo(doc, margin, 8, 280, 60);
+        if (!_logoOK_terms) {
+          doc.setTextColor(...green);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(22);
+          doc.text('JUNKLUGGERS', margin, 42);
+        }
         doc.setTextColor(...white);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
@@ -11485,6 +11536,37 @@ RECYCLING & DONATION
           });
         setTimeout(() => reject(new Error('Timeout')), 12000);
       });
+    }
+
+    // Render a logo into the dark header bar at the top of a PDF page.
+    // Used by all PDF header drawers — they call this before falling back to text.
+    // - doc: jsPDF instance
+    // - x, y: top-left corner of the logo area (within the dark header bar)
+    // - maxW, maxH: max dimensions (will preserve aspect ratio within these bounds)
+    // Returns true if a logo was rendered, false if we should fall back to text.
+    async function drawPdfBrandLogo(doc, x, y, maxW, maxH) {
+      const logoData = await getBrandLogoBase64();
+      if (!logoData) return false;
+      try {
+        // Compute fitted dimensions preserving aspect ratio.
+        // We need image natural dimensions — use a temp Image to read them.
+        const dims = await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+          img.onerror = () => reject(new Error('Could not load logo for sizing'));
+          img.src = logoData.base64;
+        });
+        const scale = Math.min(maxW / dims.w, maxH / dims.h);
+        const fittedW = Math.round(dims.w * scale);
+        const fittedH = Math.round(dims.h * scale);
+        // Vertically center within the maxH band
+        const yOffset = Math.round((maxH - fittedH) / 2);
+        doc.addImage(logoData.base64, logoData.format, x, y + yOffset, fittedW, fittedH);
+        return true;
+      } catch(e) {
+        console.warn('PDF logo render failed, falling back to text:', e);
+        return false;
+      }
     }
 
 
@@ -12560,9 +12642,15 @@ Please review the estimate below. If you have any questions or would like to adj
         });
         if (data.success) {
           storage.set(SESSION_KEY, JSON.stringify(currentUser));
-          feedbackEl.textContent = '✓ Brand color saved';
+          feedbackEl.textContent = '✓ Branding saved';
           feedbackEl.className = 'settings-feedback ok';
           applyBrandColor(hex); // ensure applied (live preview already did, but safety net)
+          // Invalidate logo URL cache and re-render the home screen logo
+          _cachedLogoUrl = null;
+          _cachedLogoUrlForPath = null;
+          _cachedLogoBase64 = null;
+          _cachedLogoBase64ForPath = null;
+          renderHomeBrandLogo();
         } else {
           feedbackEl.textContent = data.error || 'Failed to save.';
           feedbackEl.className = 'settings-feedback error';
@@ -12572,6 +12660,195 @@ Please review the estimate below. If you have any questions or would like to adj
         feedbackEl.className = 'settings-feedback error';
       }
       if (btn) btn.classList.remove('loading');
+    }
+
+    // ===== BRANDING: LOGO =====
+    // Upload flow: user picks file → client-side resize via canvas → upload to Supabase
+    // Storage at franchise-logos/{franchiseID}/logo.{ext} → save path to cost_settings.logoPath.
+    // On render, we resolve the path to a signed URL (same pattern as estimate photos).
+
+    const BRAND_LOGO_MAX_W = 600;
+    const BRAND_LOGO_MAX_H = 300;
+
+    async function onBrandLogoSelected(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const feedbackEl = document.getElementById('brandingFeedback');
+      feedbackEl.textContent = 'Resizing logo…';
+      feedbackEl.className = 'settings-feedback';
+
+      try {
+        // Resize the image via canvas → produce a Blob
+        const resizedBlob = await resizeLogoFile(file);
+
+        // Upload to Supabase Storage. Use a stable filename so re-uploads overwrite cleanly.
+        // Extension reflects the source file's MIME type.
+        const ext = file.type === 'image/png' ? 'png' : 'jpg';
+        const path = 'franchise-logos/' + currentUser.franchiseID + '/logo.' + ext;
+        feedbackEl.textContent = 'Uploading…';
+
+        const { error: uploadErr } = await supabaseClient.storage
+          .from('estimate-photos')
+          .upload(path, resizedBlob, {
+            contentType: file.type,
+            upsert: true,           // overwrite if it exists
+            cacheControl: '3600'
+          });
+        if (uploadErr) throw uploadErr;
+
+        // Save the path to the franchise's settings
+        if (!currentUser.costSettings) currentUser.costSettings = {};
+        currentUser.costSettings.logoPath = path;
+
+        // Update preview immediately using the resized blob (no need to wait for signed URL)
+        const previewUrl = URL.createObjectURL(resizedBlob);
+        document.getElementById('brandLogoPreview').innerHTML =
+          '<img src="' + previewUrl + '" style="max-width:100%;max-height:100%;object-fit:contain;" alt="Logo preview" />';
+        document.getElementById('brandLogoRemoveBtn').style.display = '';
+
+        feedbackEl.textContent = 'Logo ready — click Save branding to apply.';
+        feedbackEl.className = 'settings-feedback ok';
+      } catch (e) {
+        console.error('Logo upload failed:', e);
+        feedbackEl.textContent = 'Upload failed: ' + (e.message || e);
+        feedbackEl.className = 'settings-feedback error';
+      }
+      // Allow re-selecting the same file later
+      event.target.value = '';
+    }
+
+    // Resize an image File to fit within BRAND_LOGO_MAX_W × BRAND_LOGO_MAX_H,
+    // preserving aspect ratio. Returns a Blob in the same format as the source.
+    function resizeLogoFile(file) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const srcW = img.naturalWidth, srcH = img.naturalHeight;
+          if (!srcW || !srcH) { reject(new Error('Invalid image dimensions')); return; }
+          // Compute scale to fit max bounds
+          const scale = Math.min(1, BRAND_LOGO_MAX_W / srcW, BRAND_LOGO_MAX_H / srcH);
+          const dstW = Math.round(srcW * scale);
+          const dstH = Math.round(srcH * scale);
+          const canvas = document.createElement('canvas');
+          canvas.width = dstW;
+          canvas.height = dstH;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, dstW, dstH);
+          // Preserve PNG transparency; otherwise re-encode as JPEG
+          const outType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+          const quality = outType === 'image/jpeg' ? 0.92 : undefined;
+          canvas.toBlob(blob => {
+            if (!blob) { reject(new Error('Resize failed')); return; }
+            resolve(blob);
+          }, outType, quality);
+        };
+        img.onerror = () => reject(new Error('Could not load image — file may be corrupted'));
+        img.src = URL.createObjectURL(file);
+      });
+    }
+
+    function removeBrandLogo() {
+      if (!confirm('Remove the company logo? This cannot be undone (you can re-upload at any time).')) return;
+      const feedbackEl = document.getElementById('brandingFeedback');
+      // Strip from local state — actual storage delete + DB update happens on Save
+      const oldPath = currentUser.costSettings && currentUser.costSettings.logoPath;
+      if (currentUser.costSettings) delete currentUser.costSettings.logoPath;
+      // Reset preview UI
+      document.getElementById('brandLogoPreview').innerHTML = 'No logo uploaded';
+      document.getElementById('brandLogoRemoveBtn').style.display = 'none';
+      // Async: best-effort storage cleanup. Failures are non-fatal — sweep job
+      // could later catch any leftover files.
+      if (oldPath) {
+        supabaseClient.storage.from('estimate-photos').remove([oldPath]).catch(e => {
+          console.warn('Logo storage cleanup failed (non-fatal):', e);
+        });
+      }
+      feedbackEl.textContent = 'Logo cleared — click Save branding to apply.';
+      feedbackEl.className = 'settings-feedback ok';
+    }
+
+    // Resolve the franchise's logo path → signed URL (cached in a module-scoped var
+    // to avoid repeated signed-URL fetches every time we render the home screen).
+    let _cachedLogoUrl = null;
+    let _cachedLogoUrlForPath = null;
+    async function getBrandLogoUrl() {
+      const path = currentUser && currentUser.costSettings && currentUser.costSettings.logoPath;
+      if (!path) { _cachedLogoUrl = null; _cachedLogoUrlForPath = null; return null; }
+      if (_cachedLogoUrlForPath === path && _cachedLogoUrl) return _cachedLogoUrl;
+      try {
+        const { data, error } = await supabaseClient.storage
+          .from('estimate-photos')
+          .createSignedUrl(path, 60 * 60 * 24); // 24h
+        if (error) throw error;
+        _cachedLogoUrl = data.signedUrl;
+        _cachedLogoUrlForPath = path;
+        return _cachedLogoUrl;
+      } catch (e) {
+        console.warn('Failed to sign brand logo URL:', e);
+        return null;
+      }
+    }
+
+    // Render the home screen logo (or hide if none)
+    async function renderHomeBrandLogo() {
+      const wrap = document.getElementById('homeBrandLogoWrap');
+      const img = document.getElementById('homeBrandLogo');
+      if (!wrap || !img) return;
+      const url = await getBrandLogoUrl();
+      if (url) {
+        img.src = url;
+        wrap.style.display = 'block';
+      } else {
+        wrap.style.display = 'none';
+      }
+    }
+
+    // Populate the settings preview when entering the Branding card
+    async function renderBrandLogoPreview() {
+      const previewEl = document.getElementById('brandLogoPreview');
+      const removeBtn = document.getElementById('brandLogoRemoveBtn');
+      if (!previewEl) return;
+      const url = await getBrandLogoUrl();
+      if (url) {
+        previewEl.innerHTML = '<img src="' + url + '" style="max-width:100%;max-height:100%;object-fit:contain;" alt="Logo preview" />';
+        if (removeBtn) removeBtn.style.display = '';
+      } else {
+        previewEl.innerHTML = 'No logo uploaded';
+        if (removeBtn) removeBtn.style.display = 'none';
+      }
+    }
+
+    // Fetch the brand logo as a base64 data URL for use in PDF generation.
+    // jsPDF wants base64 (or image element); we cache to avoid re-fetching across pages.
+    let _cachedLogoBase64 = null;
+    let _cachedLogoBase64ForPath = null;
+    let _cachedLogoMime = null;
+    async function getBrandLogoBase64() {
+      const path = currentUser && currentUser.costSettings && currentUser.costSettings.logoPath;
+      if (!path) return null;
+      if (_cachedLogoBase64ForPath === path && _cachedLogoBase64) {
+        return { base64: _cachedLogoBase64, format: _cachedLogoMime };
+      }
+      try {
+        const url = await getBrandLogoUrl();
+        if (!url) return null;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('Logo fetch HTTP ' + res.status);
+        const blob = await res.blob();
+        const base64 = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result);
+          r.onerror = () => reject(new Error('Logo base64 conversion failed'));
+          r.readAsDataURL(blob);
+        });
+        _cachedLogoBase64 = base64;
+        _cachedLogoBase64ForPath = path;
+        _cachedLogoMime = blob.type === 'image/png' ? 'PNG' : 'JPEG';
+        return { base64, format: _cachedLogoMime };
+      } catch (e) {
+        console.warn('Failed to fetch brand logo as base64:', e);
+        return null;
+      }
     }
 
     // ===== COST SETTINGS =====
