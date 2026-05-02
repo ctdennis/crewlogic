@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.28 | 2026-05-01">
+  <meta name="crewlogic-version" content="v5.9.29 | 2026-05-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -919,7 +919,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.28 | 2026-05-01 -->
+<!-- CrewLogic v5.9.29 | 2026-05-01 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4730,7 +4730,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.28 | 2026-05-01 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.29 | 2026-05-01 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -8321,15 +8321,33 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return { total: totalTrucks * fullRate, fullRate, lines: null };
     }
 
+    // Round a partial volume value to the nearest available pricing tier.
+    // Tiers: 0, Minimum (1/16 = 0.0625), 1/8, 1/4, 3/8, 1/2, 5/8, 3/4, 7/8.
+    // Used for split pricing — we want a partial below 1/8 to map to Minimum
+    // rather than rounding up to 1/8 (which would overcharge).
+    function roundToNearestVolumeTier(val) {
+      if (val <= 0) return 0;
+      const tiers = [0, 0.0625, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875];
+      let best = tiers[0];
+      let bestDist = Math.abs(val - best);
+      for (let i = 1; i < tiers.length; i++) {
+        const d = Math.abs(val - tiers[i]);
+        if (d < bestDist) { bestDist = d; best = tiers[i]; }
+      }
+      return best;
+    }
+
     function calcVolumePriceSplit(totalTrucks) {
       const fullItem = findVolumeItem(1.0);
       const fullRate = fullItem ? parseFloat(fullItem.value) : 0;
       const wholeTrucks = Math.floor(totalTrucks);
       const partial = Math.round((totalTrucks - wholeTrucks) * 1000) / 1000;
-      const roundedPartial = roundToNearestEighth(partial);
+      // Round to nearest available tier (includes Minimum at 0.0625, not just eighths).
+      // This prevents tiny partials like 0.063 from rounding up to 1/8.
+      const roundedPartial = roundToNearestVolumeTier(partial);
       const partialItem = roundedPartial > 0 ? findVolumeItem(roundedPartial) : null;
       const partialRate = partialItem ? parseFloat(partialItem.value) : 0;
-      const fractionLabels = {0.125:'1/8',0.25:'1/4',0.375:'3/8',0.5:'1/2',0.625:'5/8',0.75:'3/4',0.875:'7/8',1.0:'Full'};
+      const fractionLabels = {0.0625:'Minimum', 0.125:'1/8',0.25:'1/4',0.375:'3/8',0.5:'1/2',0.625:'5/8',0.75:'3/4',0.875:'7/8',1.0:'Full'};
       const fracLabel = fractionLabels[roundedPartial] || String(roundedPartial);
       const total = (wholeTrucks * fullRate) + (roundedPartial > 0 ? partialRate : 0);
       const lines = [];
