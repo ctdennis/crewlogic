@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.29 | 2026-05-01">
+  <meta name="crewlogic-version" content="v5.9.31 | 2026-05-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -251,6 +251,52 @@
       font-size: 13px;
       color: var(--text-muted);
       margin-bottom: 28px;
+    }
+
+    /* Top header row: greeting+date on the left, brand logo on the right */
+    .home-header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+    .home-header-row .home-greeting,
+    .home-header-row .home-date {
+      margin-bottom: 0;
+    }
+    .home-header-text {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .home-header-text .home-date {
+      margin-top: 4px;
+    }
+    .home-header-logo {
+      flex: 0 0 auto;
+      max-width: 200px;
+      max-height: 110px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .home-header-logo img {
+      max-width: 100%;
+      max-height: 110px;
+      object-fit: contain;
+    }
+    /* On narrow screens, stack vertically — logo on top, text below */
+    @media (max-width: 500px) {
+      .home-header-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+      }
+      .home-header-logo {
+        max-width: 100%;
+        max-height: 96px;
+        align-self: center;
+      }
     }
 
     .module-grid {
@@ -919,7 +965,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.29 | 2026-05-01 -->
+<!-- CrewLogic v5.9.31 | 2026-05-02 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1005,7 +1051,10 @@
           <button class="header-back" id="backBtn" onclick="goHome()">←</button>
           <div class="header-title" id="headerTitle">CrewLogic</div>
         </div>
-        <div style="display:flex;align-items:center;gap:10px;">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div id="headerBrandLogoWrap" style="display:none;flex:0 0 auto;">
+            <img id="headerBrandLogo" alt="" style="max-height:36px;max-width:120px;object-fit:contain;display:block;" />
+          </div>
           <div class="header-user" id="headerUser" onclick="openModule('settings')">⚙ Settings</div>
         </div>
       </div>
@@ -1044,9 +1093,6 @@
 
       <!-- HOME -->
       <div id="homeScreen">
-        <div id="homeBrandLogoWrap" style="display:none;text-align:center;margin:0 0 12px;">
-          <img id="homeBrandLogo" alt="" style="max-width:240px;max-height:80px;object-fit:contain;" />
-        </div>
         <div class="home-greeting fade-in" id="homeGreeting">Hey!</div>
         <div class="home-date fade-in fade-in-delay-1" id="homeDate"></div>
 
@@ -4730,7 +4776,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.29 | 2026-05-01 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.31 | 2026-05-02 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -12807,10 +12853,11 @@ Please review the estimate below. If you have any questions or would like to adj
       }
     }
 
-    // Render the home screen logo (or hide if none)
+    // Render the brand logo in the global app header (or hide if none).
+    // Visible on every screen since the header is always shown.
     async function renderHomeBrandLogo() {
-      const wrap = document.getElementById('homeBrandLogoWrap');
-      const img = document.getElementById('homeBrandLogo');
+      const wrap = document.getElementById('headerBrandLogoWrap');
+      const img = document.getElementById('headerBrandLogo');
       if (!wrap || !img) return;
       const url = await getBrandLogoUrl();
       if (url) {
