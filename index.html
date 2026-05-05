@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.32 | 2026-05-03">
+  <meta name="crewlogic-version" content="v5.9.33 | 2026-05-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -965,7 +965,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.32 | 2026-05-03 -->
+<!-- CrewLogic v5.9.33 | 2026-05-04 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4780,7 +4780,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.32 | 2026-05-03 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.33 | 2026-05-04 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -10008,18 +10008,37 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     function saveCoverPhotoFromSrc(src) {
       const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        // Keep within Sheets 50K char limit — 480x320 @ 0.68 ≈ 35-40K chars
-        const maxW = 1600, maxH = 1200;
-        let w = img.width, h = img.height;
-        if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
-        if (h > maxH) { w = Math.round(w * maxH / h); h = maxH; }
-        canvas.width = w; canvas.height = h;
-        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-        saveCoverPhotoBase64(canvas.toDataURL('image/jpeg', 0.85));
+      // Set crossOrigin BEFORE src — required so the canvas isn't tainted on cross-origin
+      // sources (e.g. Supabase signed URLs). For data: URLs (base64) this has no effect.
+      img.crossOrigin = 'anonymous';
+      const tryLoad = (withCors) => {
+        if (!withCors) img.removeAttribute('crossorigin');
+        img.src = src;
       };
-      img.src = src;
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          // Keep within Sheets 50K char limit — 480x320 @ 0.68 ≈ 35-40K chars
+          const maxW = 1600, maxH = 1200;
+          let w = img.width, h = img.height;
+          if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
+          if (h > maxH) { w = Math.round(w * maxH / h); h = maxH; }
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          saveCoverPhotoBase64(canvas.toDataURL('image/jpeg', 0.85));
+        } catch(e) {
+          console.error('Cover photo canvas export failed:', e);
+        }
+      };
+      img.onerror = () => {
+        // CORS load failed (e.g. legacy Drive URL without CORS headers) —
+        // retry without crossOrigin. Image will display but canvas export
+        // won't work; we silently use the original src as the cover photo URL.
+        console.warn('[coverPhoto] CORS load failed, retrying without crossOrigin');
+        img.onerror = null;
+        tryLoad(false);
+      };
+      tryLoad(true);
     }
 
     async function saveCoverPhotoBase64(base64) {
