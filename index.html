@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.33 | 2026-05-04">
+  <meta name="crewlogic-version" content="v5.9.34 | 2026-05-05">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -965,7 +965,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.33 | 2026-05-04 -->
+<!-- CrewLogic v5.9.34 | 2026-05-05 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4780,7 +4780,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.33 | 2026-05-04 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.34 | 2026-05-05 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -12432,31 +12432,34 @@ RECYCLING & DONATION
         if (!sel) return;
         const facilities = getFacilities(type);
         const ca = (currentEstimate && currentEstimate.costAnalysis) || {};
-        const currentAddr = ca[type + 'Site'] || '';
+        const currentAddr = (ca[type + 'Site'] || '').trim();
 
         // Use default facility address if no current address saved
         const defaultFacility = facilities.find(f => f.isDefault);
-        const effectiveAddr = currentAddr || (defaultFacility ? defaultFacility.address : '');
+        const effectiveAddr = currentAddr || (defaultFacility ? (defaultFacility.address || '').trim() : '');
+
+        // Helper: compare two addresses tolerantly. We trim and case-fold so that small
+        // whitespace/casing drift between when the address was saved and when the
+        // facility list was edited doesn't break the dropdown match.
+        const addrMatch = (a, b) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
 
         let options = '<option value="">— Select ' + type + ' site —</option>';
         facilities.forEach((f, i) => {
           if (!f.name && !f.address) return;
           const label = (f.isDefault ? '★ ' : '') + (f.name || f.address);
-          const selected = f.address === effectiveAddr ? ' selected' : '';
-          options += '<option value="' + f.address.replace(/"/g,'&quot;') + '"' + selected + '>' + label + '</option>';
+          const selected = addrMatch(f.address, effectiveAddr) ? ' selected' : '';
+          options += '<option value="' + (f.address || '').replace(/"/g,'&quot;') + '"' + selected + '>' + label + '</option>';
         });
-        options += '<option value="__other__"' + (effectiveAddr && !facilities.some(f => f.address === effectiveAddr) ? ' selected' : '') + '>Other (enter address)</option>';
+        const matchesAnyFacility = facilities.some(f => addrMatch(f.address, effectiveAddr));
+        options += '<option value="__other__"' + (effectiveAddr && !matchesAnyFacility ? ' selected' : '') + '>Other (enter address)</option>';
         sel.innerHTML = options;
-
-        // Sync effective address to hidden text input
-        const currentAddr2 = effectiveAddr;
 
         // Show/hide text input based on current selection
         const textEl = document.getElementById('ca' + type.charAt(0).toUpperCase() + type.slice(1) + 'Site');
-        const isOther = sel.value === '__other__' || (currentAddr2 && !facilities.some(f => f.address === currentAddr2) && facilities.length > 0);
+        const isOther = sel.value === '__other__' || (effectiveAddr && !matchesAnyFacility && facilities.length > 0);
         if (textEl) {
           textEl.style.display = isOther ? 'block' : 'none';
-          if (isOther && currentAddr2) textEl.value = currentAddr2;
+          if (isOther && effectiveAddr) textEl.value = effectiveAddr;
           if (!isOther && sel.value) {
             textEl.value = sel.value;
           }
