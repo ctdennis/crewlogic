@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.35 | 2026-05-07">
+  <meta name="crewlogic-version" content="v5.9.36 | 2026-05-07">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -965,7 +965,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.35 | 2026-05-07 -->
+<!-- CrewLogic v5.9.36 | 2026-05-07 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1272,36 +1272,41 @@
 
           <!-- Franchise Info -->
           <div class="settings-card fade-in fade-in-delay-3" id="franchiseInfoCard">
-            <div class="settings-card-title">Franchise Info</div>
+            <div class="settings-card-title">Company Info</div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Company / Franchise Name</label>
+              <input type="text" class="form-input" id="settingsFranchiseName" placeholder="The Junkluggers of Akron-Canton" autocomplete="organization">
+              <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Appears on PDFs and customer-facing proposals.</div>
+            </div>
             <div class="settings-input-group">
               <label class="settings-input-label">Office Phone</label>
-              <input type="tel" class="form-input" id="settingsPhone" placeholder="(774) 281-2800" autocomplete="off">
+              <input type="tel" class="form-input" id="settingsPhone" placeholder="(555) 123-4567" autocomplete="off">
             </div>
             <div class="settings-input-group">
               <label class="settings-input-label">Office Address</label>
-              <input type="text" class="form-input" id="settingsOfficeAddress" placeholder="PO Box 871" autocomplete="off">
+              <input type="text" class="form-input" id="settingsOfficeAddress" placeholder="123 Main Street" autocomplete="off">
             </div>
             <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:12px;">
               <div class="settings-input-group" style="flex:1;margin-bottom:0;">
                 <label class="settings-input-label">City</label>
-                <input type="text" class="form-input" id="settingsOfficeCity" placeholder="Lakeville" autocomplete="off">
+                <input type="text" class="form-input" id="settingsOfficeCity" placeholder="City" autocomplete="off">
               </div>
               <div class="settings-input-group" style="width:52px;margin-bottom:0;">
                 <label class="settings-input-label">State</label>
-                <input type="text" class="form-input" id="settingsOfficeState" placeholder="MA" maxlength="2" autocomplete="off" style="text-align:center;">
+                <input type="text" class="form-input" id="settingsOfficeState" placeholder="ST" maxlength="2" autocomplete="off" style="text-align:center;">
               </div>
               <div class="settings-input-group" style="width:72px;margin-bottom:0;">
                 <label class="settings-input-label">Zip</label>
-                <input type="text" class="form-input" id="settingsOfficeZip" placeholder="02347" maxlength="5" inputmode="numeric" autocomplete="off" style="text-align:center;">
+                <input type="text" class="form-input" id="settingsOfficeZip" placeholder="00000" maxlength="5" inputmode="numeric" autocomplete="off" style="text-align:center;">
               </div>
             </div>
             <div class="settings-input-group">
               <label class="settings-input-label">Website URL</label>
-              <input type="url" class="form-input" id="settingsWebsite" placeholder="https://www.junkluggers.com/..." autocomplete="off">
+              <input type="url" class="form-input" id="settingsWebsite" placeholder="https://www.yourcompany.com" autocomplete="off">
             </div>
             <button class="settings-save-btn" id="franchiseSaveBtn" onclick="saveFranchiseInfo()">
               <div class="spinner"></div>
-              <span class="btn-text">Save franchise info</span>
+              <span class="btn-text">Save company info</span>
             </button>
             <div class="settings-feedback" id="franchiseFeedback"></div>
           </div>
@@ -4780,7 +4785,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.35 | 2026-05-07 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.36 | 2026-05-07 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5491,6 +5496,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       btn.classList.add('loading');
       feedbackEl.textContent = '';
       // Read franchise field values
+      const franchiseNameVal = document.getElementById('settingsFranchiseName').value.trim();
       const phoneVal         = document.getElementById('settingsPhone').value.trim();
       const officeAddressVal = document.getElementById('settingsOfficeAddress').value.trim();
       const officeCityVal    = document.getElementById('settingsOfficeCity').value.trim();
@@ -5510,6 +5516,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           action: 'saveFranchiseInfo',
           email: currentUser.email,
           franchiseID: currentUser.franchiseID,
+          franchiseName: franchiseNameVal,
           phone: phoneVal,
           officeAddress: officeAddressVal,
           officeCity: officeCityVal,
@@ -5520,6 +5527,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         });
         if (data.success) {
           // Cache in session (top-level mirrors of costSettings values)
+          currentUser.franchiseName = franchiseNameVal;
           currentUser.phone         = phoneVal;
           currentUser.officeAddress = officeAddressVal;
           currentUser.officeCity    = officeCityVal;
@@ -5527,7 +5535,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           currentUser.officeZip     = officeZipVal;
           currentUser.website       = websiteVal;
           storage.set(SESSION_KEY, JSON.stringify(currentUser));
-          feedbackEl.textContent = '✓ Franchise info saved';
+          feedbackEl.textContent = '✓ Company info saved';
           feedbackEl.className = 'settings-feedback ok';
         } else {
           feedbackEl.textContent = data.error || 'Failed to save.';
@@ -5542,6 +5550,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     function populateFranchiseFields() {
       if (!currentUser) return;
+      if (currentUser.franchiseName) document.getElementById('settingsFranchiseName').value = currentUser.franchiseName;
       if (currentUser.phone) document.getElementById('settingsPhone').value = currentUser.phone;
       if (currentUser.officeAddress) document.getElementById('settingsOfficeAddress').value = currentUser.officeAddress;
       if (currentUser.officeCity) document.getElementById('settingsOfficeCity').value = currentUser.officeCity;
