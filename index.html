@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.36 | 2026-05-07">
+  <meta name="crewlogic-version" content="v5.9.38 | 2026-05-07">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -36,7 +36,8 @@
       if (btn) { btn.style.opacity = '0.6'; btn.style.pointerEvents = 'none'; }
       if (statusEl) { statusEl.textContent = 'Redirecting to Google...'; statusEl.style.color = '#94a3b8'; }
       const GOOGLE_CLIENT_ID = '619520043744-fo8rl63g45ngtgvf8bfq8vglvaej5iib.apps.googleusercontent.com';
-      const OAUTH_REDIRECT = 'https://junkluggers.app.n8n.cloud/webhook/crewlogic-oauth-callback';
+      // OAuth callback is now a Supabase Edge Function (was n8n)
+      const OAUTH_REDIRECT = 'https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1/crewlogic-oauth-callback';
       const APP_URL = 'https://crewlogic.pages.dev';
       const params = new URLSearchParams({
         client_id: GOOGLE_CLIENT_ID,
@@ -965,7 +966,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.36 | 2026-05-07 -->
+<!-- CrewLogic v5.9.38 | 2026-05-07 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3237,9 +3238,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // ===== GOOGLE SIGN-IN — OAuth2 popup flow (no GIS/cookies needed) =====
-    const OAUTH_REDIRECT = 'https://junkluggers.app.n8n.cloud/webhook/crewlogic-oauth-callback';
+    // OAuth callback is now a Supabase Edge Function (was previously n8n webhook).
+    // The callback handles code exchange, profile lookup/provisioning, and redirects
+    // back to this app with either ?session=... or ?auth_error=...
+    const OAUTH_REDIRECT = EDGE_BASE + '/crewlogic-oauth-callback';
 
     async function initAuth() {
+      // Check for OAuth callback errors first — friendly message rather than white screen
+      const _authError = new URLSearchParams(window.location.search).get('auth_error');
+      if (_authError) {
+        showAuthErrorScreen(_authError);
+        return;
+      }
+
       // Check for invite token first
       const hasInvite = await checkInviteToken();
       if (hasInvite) return;
@@ -4250,6 +4261,73 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // Check for invite token on app load
+    // Show a friendly error screen when the OAuth callback redirects back with
+    // ?auth_error=… We get here when:
+    //   - User signed in but has no profile and no invite token (no_account)
+    //   - Invite link is invalid/expired/already used
+    //   - Provisioning failed for some other reason
+    // Goal: don't white-screen the user. Tell them what went wrong and how to recover.
+    function showAuthErrorScreen(errorCode) {
+      const params = new URLSearchParams(window.location.search);
+      const email = params.get('email') || '';
+
+      let title, message;
+      switch (errorCode) {
+        case 'no_account':
+          title = 'Account not set up yet';
+          message = 'There\'s no CrewLogic account associated with ' +
+            (email ? email + '. ' : 'this email. ') +
+            'Please ask your business administrator to send you an invite link.';
+          break;
+        case 'invite_invalid':
+          title = 'Invite link not recognized';
+          message = 'This invite link is invalid. Please ask your business administrator to send a new one.';
+          break;
+        case 'invite_expired':
+          title = 'Invite link expired';
+          message = 'This invite link has expired. Please ask your business administrator to send a new one.';
+          break;
+        case 'invite_already_used':
+          title = 'Invite already used';
+          message = 'This invite link has already been used. If this is unexpected, please contact your business administrator.';
+          break;
+        case 'invite_lookup_failed':
+        case 'profile_create_failed':
+        default:
+          title = 'Something went wrong';
+          message = 'We couldn\'t finish signing you in. Please try again, or contact your business administrator if the problem continues.';
+          break;
+      }
+
+      // Hide login screen (it might already be displayed by the markup) and show our error screen
+      const loginScreen = document.getElementById('loginScreen');
+      if (loginScreen) loginScreen.style.display = 'none';
+
+      // Build error screen on the fly so we don't have to add HTML markup elsewhere
+      let errScreen = document.getElementById('authErrorScreen');
+      if (!errScreen) {
+        errScreen = document.createElement('div');
+        errScreen.id = 'authErrorScreen';
+        errScreen.style.cssText = 'min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;';
+        document.body.appendChild(errScreen);
+      }
+      errScreen.innerHTML =
+        '<div style="font-size:48px;margin-bottom:16px;">🚫</div>' +
+        '<div style="font-size:22px;font-weight:700;margin-bottom:12px;color:var(--text-primary);">' + title + '</div>' +
+        '<div style="font-size:14px;color:var(--text-secondary);max-width:420px;line-height:1.6;margin-bottom:24px;">' + message + '</div>' +
+        '<button onclick="retryAuthAfterError()" style="padding:10px 24px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;cursor:pointer;">Try a different account</button>';
+      errScreen.style.display = 'flex';
+    }
+
+    function retryAuthAfterError() {
+      // Strip the auth_error param and reload to start fresh.
+      // The reload sends the user back to the login screen.
+      const url = new URL(window.location.href);
+      url.searchParams.delete('auth_error');
+      url.searchParams.delete('email');
+      window.location.replace(url.toString());
+    }
+
     async function checkInviteToken() {
       const params = new URLSearchParams(window.location.search);
       const token = params.get('invite');
@@ -4785,7 +4863,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.36 | 2026-05-07 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.38 | 2026-05-07 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
