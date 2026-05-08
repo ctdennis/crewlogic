@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.38 | 2026-05-07">
+  <meta name="crewlogic-version" content="v5.9.40 | 2026-05-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -966,7 +966,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.38 | 2026-05-07 -->
+<!-- CrewLogic v5.9.40 | 2026-05-08 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4863,7 +4863,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.38 | 2026-05-07 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.40 | 2026-05-08 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6699,6 +6699,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         }).forEach(b => {
           b.items.forEach(item => items.push({...item, blockName: b.name, priceBlockID: b.priceBlockID}));
         });
+        // Also include non-truckload items from Volume Charges (Heavy Dense Material,
+        // Cubic Yard, Overage Surcharge, etc.). Vonigo categorizes these under Volume
+        // Charges, but they're conceptually surcharges — they're add-ons to a truckload,
+        // not a replacement for one. Filter: items in Volume Charges whose name does
+        // NOT contain "Truckload" (which excludes the 1/8, 1/4, ..., Full tiers).
+        const volBlock = priceBlocks.find(b => b.name.toLowerCase().includes('volume'));
+        if (volBlock) {
+          volBlock.items.forEach(item => {
+            const itemName = item.name || '';
+            if (!itemName.toLowerCase().includes('truckload')) {
+              items.push({...item, blockName: volBlock.name, priceBlockID: volBlock.priceBlockID});
+            }
+          });
+        }
       } else if (type === 'labor') {
         // Only the "Additional Labor" block (not surcharge blocks)
         const block = priceBlocks.find(b => b.name.toLowerCase() === 'additional labor');
@@ -6872,7 +6886,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                   unitPrice: matched.value,
                   area: charge.area || '',
                   description: charge.description || '',
-                  taxID: matched.taxID || 146
+                  taxID: matched.taxID || 146,
+                  isAllowDecimals: chargeAllowsDecimals(matched)
                 });
               }
               addedCount++;
@@ -7246,7 +7261,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                   qty: s.qty || 1,
                   unitPrice: matched.value,
                   area: charge.area || '',
-                  taxID: matched.taxID || 146
+                  taxID: matched.taxID || 146,
+                  isAllowDecimals: chargeAllowsDecimals(matched)
                 });
               }
             }
@@ -7405,7 +7421,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                   qty: s.qty || 1,
                   unitPrice: matched.value,
                   area: charge.area || '',
-                  taxID: matched.taxID || 146
+                  taxID: matched.taxID || 146,
+                  isAllowDecimals: chargeAllowsDecimals(matched)
                 });
               }
             }
@@ -7883,17 +7900,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const price = parseFloat(document.getElementById('priced-price').value) || 0;
         const area = document.getElementById('priced-area') ? document.getElementById('priced-area').value : '';
         const desc = document.getElementById('priced-desc') ? document.getElementById('priced-desc').value.trim() : '';
+        // Look up the source priceItem to capture unitOfMeasure for the decimal-allowed decision
+        const itemID = parseInt(opt.value);
+        const blockID = parseInt(opt.dataset.blockid);
+        const srcBlock = priceBlocks.find(b => b.priceBlockID === blockID);
+        const srcItem = srcBlock && (srcBlock.items || []).find(i => i.priceItemID === itemID);
         currentEstimate.charges.push({
           type: currentChargeType,
-          priceItemID: parseInt(opt.value),
+          priceItemID: itemID,
           name: opt.dataset.name,
           blockName: opt.dataset.block,
-          priceBlockID: parseInt(opt.dataset.blockid),
+          priceBlockID: blockID,
           qty,
           unitPrice: price,
           area,
           description: desc,
-          taxID: 146
+          taxID: 146,
+          isAllowDecimals: chargeAllowsDecimals(srcItem)
         });
       }
 
@@ -8164,7 +8187,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const isDiscount = charge.type === 'discount';
           const areaOptions = '<option value="">— No area —</option>' +
             (availableAreas || []).map(a => '<option value="' + a + '"' + (charge.area === a ? ' selected' : '') + '>' + a + '</option>').join('');
-          const isWholeNum = charge.type === 'singleitem' || charge.type === 'surcharge';
+          // Determine whether this charge's qty input should accept decimals.
+          // - If the charge has an explicit isAllowDecimals flag (set when added),
+          //   respect it.
+          // - Otherwise (legacy charges saved before this field existed), fall
+          //   back to the original type-based rule so existing estimates render
+          //   identically: surcharge/singleitem are whole, others (labor, etc.)
+          //   permit decimals.
+          let isWholeNum;
+          if (typeof charge.isAllowDecimals === 'boolean') {
+            isWholeNum = !charge.isAllowDecimals;
+          } else {
+            isWholeNum = charge.type === 'singleitem' || charge.type === 'surcharge';
+          }
           const totalColor = isDiscount ? 'var(--accent-green)' : isNeg ? '#ef4444' : 'var(--accent-green)';
           const totalFmt = (isNeg ? '-' : '') + '$' + Math.abs(lineTotal).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 
@@ -9275,13 +9310,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             const vipBlurb = 'VIP Rate - Reg. ' + fmtSubmit(basePrice) + ', Discount -' + fmtSubmit(discAmt / (parseFloat(c.qty)||1)) + ', Your Price ' + fmtSubmit(netPrice);
             desc = desc ? vipBlurb + ' | ' + desc : vipBlurb;
           }
+          // Defensive: if this charge has been marked whole-number-only but somehow
+          // carries a fractional qty (legacy data, AI-aggregation drift), round to
+          // nearest integer before sending to Vonigo. Items with isAllowDecimals=true
+          // or undefined (legacy) pass through unchanged.
+          let submitQty = parseFloat(c.qty) || 0;
+          if (c.isAllowDecimals === false && submitQty % 1 !== 0) {
+            submitQty = Math.round(submitQty);
+          }
           return {
             priceItemID: String(c.priceItemID),
             taxID: String(c.taxID || 146),
             Fields: [
               { fieldID: 9290, fieldValue: c.name },
               { fieldID: 9289, fieldValue: desc },
-              { fieldID: 9288, fieldValue: String(c.qty) },
+              { fieldID: 9288, fieldValue: String(submitQty) },
               { fieldID: 9287, fieldValue: String(netPrice.toFixed(2)) }
             ]
           };
@@ -12353,7 +12396,8 @@ RECYCLING & DONATION
                     qty: charge.qty || 1,
                     unitPrice: matched.value,
                     area: charge.area || '',
-                    taxID: matched.taxID || 146
+                    taxID: matched.taxID || 146,
+                    isAllowDecimals: chargeAllowsDecimals(matched)
                   });
                 }
               }
@@ -14071,7 +14115,8 @@ Please review the estimate below. If you have any questions or would like to adj
           qty: totalPieces, unitPrice: recycleItem.value,
           area: 'Bedroom',
           description: 'Mattress/box spring recycling — ' + desc,
-          taxID: recycleItem.taxID || 146
+          taxID: recycleItem.taxID || 146,
+          isAllowDecimals: chargeAllowsDecimals(recycleItem)
         });
       } else {
         currentEstimate.charges.push({
@@ -14102,6 +14147,20 @@ Please review the estimate below. If you have any questions or would like to adj
         }
       }
       return null;
+    }
+
+    // Decide whether a price book item should permit fractional quantities.
+    // We use Vonigo's `unitOfMeasure` field as the determinant rather than their
+    // `isAllowDecimals` flag, because that flag is set permissively on most items
+    // (e.g. Mattresses are isAllowDecimals=true, which doesn't make practical sense).
+    // unitOfMeasure is more reliable: physical units that are inherently divisible
+    // (hours, cubic yards, volume, flights, pounds) allow decimals; counted units
+    // (each, count, None) do not.
+    const DECIMAL_ALLOWED_UNITS = new Set(['cubic yards', 'volume', 'hour', 'flight', 'pound']);
+    function chargeAllowsDecimals(item) {
+      if (!item) return false;
+      const uom = (item.unitOfMeasure || '').toLowerCase().trim();
+      return DECIMAL_ALLOWED_UNITS.has(uom);
     }
 
     // Convert decimal trucks to nearest 1/8 fraction label
