@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.40 | 2026-05-08">
+  <meta name="crewlogic-version" content="v5.9.41 | 2026-05-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -966,7 +966,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.40 | 2026-05-08 -->
+<!-- CrewLogic v5.9.41 | 2026-05-08 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1818,8 +1818,26 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
           <hr class="form-divider">
 
+          <!-- SPECIAL TERMS — per-estimate customer-facing addendum that appears
+               on the PDF after the boilerplate Terms & Conditions. Empty = no
+               render on PDF. 500-char cap. Collapsed by default when empty.
+               Header is clickable to expand/collapse like the Notes pattern. -->
+          <div class="form-group" style="margin-bottom:8px;">
+            <div class="form-label" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;" onclick="toggleSpecialTerms()">
+              <span>Special Terms <span style="color:var(--text-muted);font-weight:400;font-size:11px;">— shown on customer PDF</span></span>
+              <span id="specialTermsToggleIcon" style="font-size:11px;color:var(--text-muted);">▼ expand</span>
+            </div>
+            <div id="specialTermsContainer" style="display:none;">
+              <textarea class="form-input" id="estSpecialTerms" rows="3" maxlength="500" placeholder="e.g. 25% deposit due at booking. Final balance due upon completion. Pricing valid for 30 days." style="resize:none;margin-top:4px;" oninput="updateSpecialTermsCount();autoSaveDraft()"></textarea>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;font-size:11px;color:var(--text-muted);">
+                <span>Appears on the PDF after standard Terms.</span>
+                <span id="specialTermsCount">0 / 500</span>
+              </div>
+            </div>
+            <div id="specialTermsPreview" style="font-size:12px;color:var(--text-muted);font-style:italic;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+          </div>
 
-          <!-- COST ANALYSIS PANEL -->
+          <hr class="form-divider">
           <div style="margin-top:16px;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;">
             <button onclick="toggleCostAnalysis()" style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--bg-card);border:none;cursor:pointer;color:var(--text-primary);">
               <span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);">📊 Cost Analysis</span>
@@ -4797,6 +4815,41 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
     }
 
+    // Special Terms — per-estimate customer-facing addendum.
+    // Same UX pattern as Notes: collapsed by default, click header to expand,
+    // preview line shows when collapsed. Difference: Notes is internal-only;
+    // Special Terms renders on the customer PDF.
+    function toggleSpecialTerms() {
+      const container = document.getElementById('specialTermsContainer');
+      const icon = document.getElementById('specialTermsToggleIcon');
+      const preview = document.getElementById('specialTermsPreview');
+      const isOpen = container.style.display !== 'none';
+      container.style.display = isOpen ? 'none' : 'block';
+      icon.textContent = isOpen ? '▼ expand' : '▲ collapse';
+      preview.style.display = isOpen ? 'block' : 'none';
+    }
+
+    function updateSpecialTermsPreview() {
+      const val = document.getElementById('estSpecialTerms').value;
+      const preview = document.getElementById('specialTermsPreview');
+      const container = document.getElementById('specialTermsContainer');
+      if (preview) preview.textContent = val || '';
+      // Auto-expand on load if content exists
+      if (val && container && container.style.display === 'none') {
+        toggleSpecialTerms();
+      }
+      updateSpecialTermsCount();
+    }
+
+    function updateSpecialTermsCount() {
+      const ta = document.getElementById('estSpecialTerms');
+      const counter = document.getElementById('specialTermsCount');
+      if (!ta || !counter) return;
+      const len = (ta.value || '').length;
+      counter.textContent = len + ' / 500';
+      counter.style.color = len >= 480 ? 'var(--accent-red)' : 'var(--text-muted)';
+    }
+
     function toggleVonigoForm(e) {
       if (e) e.preventDefault();
       const form = document.getElementById('vonigoForm');
@@ -4863,7 +4916,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.40 | 2026-05-08 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.41 | 2026-05-08 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -5946,6 +5999,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!currentEstimate) return false;
       if (Array.isArray(currentEstimate.charges) && currentEstimate.charges.length > 0) return true;
       if (currentEstimate.notes && currentEstimate.notes.trim().length > 0) return true;
+      if (currentEstimate.specialTerms && currentEstimate.specialTerms.trim().length > 0) return true;
       return false;
     }
 
@@ -6316,6 +6370,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (document.getElementById('estClientPhone')) document.getElementById('estClientPhone').value = currentEstimate.clientPhone || '';
       document.getElementById('estNotes').value = currentEstimate.notes || '';
       updateNotesPreview();
+      // Special Terms — per-estimate addendum that renders on customer PDF
+      const stEl = document.getElementById('estSpecialTerms');
+      if (stEl) {
+        stEl.value = currentEstimate.specialTerms || '';
+        updateSpecialTermsPreview();
+      }
       _suppressAutoSave = false; // re-enable autoSaveDraft after population
       // Show pending photo badge if any photos are queued
       updatePendingPhotoBadge();
@@ -9019,6 +9079,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       currentEstimate.clientPhone = (document.getElementById('estClientPhone') ? document.getElementById('estClientPhone').value.trim() : '') || currentEstimate.clientPhone || '';
       currentEstimate.address = document.getElementById('estAddress').value.trim();
       currentEstimate.notes = document.getElementById('estNotes').value.trim();
+      // Save special terms (per-estimate customer-facing addendum)
+      const stSaveEl = document.getElementById('estSpecialTerms');
+      if (stSaveEl) {
+        currentEstimate.specialTerms = stSaveEl.value.trim();
+      }
       currentEstimate.updatedAt = new Date().toISOString();
       isDirty = true; // mark unsaved changes on any mutation
       saveLocalEstimate(currentEstimate);
@@ -11627,6 +11692,62 @@ RECYCLING & DONATION
             if (useCol2) ty2 += wrapped.length * 13 + 2; else ty1 += wrapped.length * 13 + 2;
           }
         });
+
+        // Special Terms — per-estimate addendum that follows the boilerplate
+        // Terms & Conditions. Rendered in a single-column band spanning the
+        // full content width, visually distinct from the two-column boilerplate.
+        const specialTerms = (currentEstimate.specialTerms || '').trim();
+        if (specialTerms) {
+          // Start below the lower of the two columns, with a divider above.
+          const fullW = W - 2 * margin;
+          let stY = Math.max(ty1, ty2) + 18;
+          // Estimate space needed; if not enough room, start a fresh page.
+          const estimatedHeight = 30 + Math.ceil(specialTerms.length / 90) * 13;
+          if (stY + estimatedHeight > H - margin) {
+            doc.addPage([W, H], 'landscape');
+            doc.setFillColor(...dark);
+            doc.rect(0, 0, W, H, 'F');
+            doc.setFillColor(15, 25, 35);
+            doc.rect(0, 0, W, 80, 'F');
+            doc.setFillColor(...green);
+            doc.rect(0, 80, W, 3, 'F');
+            const _logoOK_st = await drawPdfBrandLogo(doc, margin, 8, 280, 60);
+            if (!_logoOK_st) {
+              doc.setTextColor(...green);
+              doc.setFont('helvetica', 'bold');
+              doc.setFontSize(22);
+              doc.text('JUNKLUGGERS', margin, 42);
+            }
+            doc.setTextColor(...white);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.text(franchiseName, margin, 58);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(14);
+            doc.text('TERMS & CONDITIONS (cont.)', W - margin, 35, { align: 'right' });
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.text(dateStr, W - margin, 50, { align: 'right' });
+            stY = 100;
+          } else {
+            // Divider line between boilerplate Terms and Special Terms
+            doc.setDrawColor(...green);
+            doc.setLineWidth(0.5);
+            doc.line(margin, stY - 10, W - margin, stY - 10);
+          }
+          // Subhead
+          doc.setTextColor(...green);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(10);
+          doc.text('Additional Terms', margin, stY);
+          stY += 14;
+          // Body — wrapped to full width
+          doc.setTextColor(...white);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9);
+          const stLines = doc.splitTextToSize(specialTerms, fullW);
+          doc.text(stLines, margin, stY);
+        }
 
         // Output merged doc
         if (mode === 'base64') {
