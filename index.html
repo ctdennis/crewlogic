@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.47 | 2026-05-12">
+  <meta name="crewlogic-version" content="v5.9.48 | 2026-05-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -966,7 +966,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.47 | 2026-05-12 -->
+<!-- CrewLogic v5.9.48 | 2026-05-12 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1075,6 +1075,13 @@
           <button class="est-add-btn" id="estimatesFilterBtn" onclick="toggleEstimatesFilter()" style="background:transparent;color:var(--text-muted);border:1px solid var(--border);">Show all</button>
           <button class="est-add-btn" id="estimatesDeletedBtn" onclick="toggleDeletedEstimates()" style="background:transparent;color:var(--text-muted);border:1px solid var(--border);">🗑 Deleted</button>
           <button class="est-add-btn" onclick="newEstimateDoc()" style="background:var(--accent-green);color:#000;">+ New</button>
+          <!-- Search filter for the estimate list. Filters by client name or
+               address (case-insensitive substring). Client-side only since the
+               full list is already loaded. -->
+          <div style="position:relative;flex:1;min-width:120px;margin-left:6px;">
+            <input type="text" id="estimatesSearchInput" placeholder="🔍 Search name or address" oninput="filterEstimatesList()" style="width:100%;background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 28px 6px 10px;font-size:12px;font-family:inherit;outline:none;">
+            <button id="estimatesSearchClear" onclick="clearEstimatesSearch()" style="display:none;position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);font-size:14px;cursor:pointer;padding:2px 6px;line-height:1;">×</button>
+          </div>
         </div>
       </div>
     </div>
@@ -4910,7 +4917,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.47 | 2026-05-12 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.48 | 2026-05-12 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6110,10 +6117,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const nonDeleted = estimates.filter(e => e.status !== 'deleted');
       // Filter by active/all
       const showAll = window._showAllEstimates || false;
-      const filtered = showAll ? nonDeleted : nonDeleted.filter(e => e.status !== 'won' && e.status !== 'lost');
+      let filtered = showAll ? nonDeleted : nonDeleted.filter(e => e.status !== 'won' && e.status !== 'lost');
+
+      // Apply search filter (name OR address, case-insensitive substring)
+      const searchQuery = (window._estimatesSearchQuery || '').trim().toLowerCase();
+      if (searchQuery) {
+        filtered = filtered.filter(e => {
+          const n = String(e.clientName || '').toLowerCase();
+          const a = String(e.address || '').toLowerCase();
+          const l = String(e.label || '').toLowerCase();
+          return n.includes(searchQuery) || a.includes(searchQuery) || l.includes(searchQuery);
+        });
+      }
 
       if (!filtered || filtered.length === 0) {
-        listEl.innerHTML = '<div class="estimates-empty">' + (showAll ? 'No estimates yet.' : 'No active estimates.') + '<br>' + (showAll ? 'Tap + New to create one.' : 'Tap "Active only" to show won/lost.') + '</div>';
+        if (searchQuery) {
+          listEl.innerHTML = '<div class="estimates-empty">No estimates match &quot;' + searchQuery.replace(/[<>&"]/g, '') + '&quot;.<br>Try a different search or clear the filter.</div>';
+        } else {
+          listEl.innerHTML = '<div class="estimates-empty">' + (showAll ? 'No estimates yet.' : 'No active estimates.') + '<br>' + (showAll ? 'Tap + New to create one.' : 'Tap "Active only" to show won/lost.') + '</div>';
+        }
         return;
       }
       let html = '';
@@ -9657,6 +9679,33 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // ===== CLONE & DELETE =====
+
+    // Search filter for the estimates list. Debounced to avoid re-rendering
+    // on every keystroke when the list is large. Filters by clientName,
+    // address, or label (case-insensitive substring).
+    let _estimatesSearchDebounce = null;
+    function filterEstimatesList() {
+      const input = document.getElementById('estimatesSearchInput');
+      const clearBtn = document.getElementById('estimatesSearchClear');
+      if (!input) return;
+      const val = input.value || '';
+      window._estimatesSearchQuery = val;
+      if (clearBtn) clearBtn.style.display = val ? 'block' : 'none';
+      if (_estimatesSearchDebounce) clearTimeout(_estimatesSearchDebounce);
+      _estimatesSearchDebounce = setTimeout(() => {
+        renderEstimatesList(window._cachedEstimates || []);
+      }, 150);
+    }
+
+    function clearEstimatesSearch() {
+      const input = document.getElementById('estimatesSearchInput');
+      const clearBtn = document.getElementById('estimatesSearchClear');
+      if (input) input.value = '';
+      if (clearBtn) clearBtn.style.display = 'none';
+      window._estimatesSearchQuery = '';
+      renderEstimatesList(window._cachedEstimates || []);
+    }
+
     function toggleEstimatesFilter() {
       window._showAllEstimates = !window._showAllEstimates;
       window._showDeletedEstimates = false;
