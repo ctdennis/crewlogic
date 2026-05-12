@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.46 | 2026-05-12">
+  <meta name="crewlogic-version" content="v5.9.47 | 2026-05-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -966,7 +966,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.46 | 2026-05-12 -->
+<!-- CrewLogic v5.9.47 | 2026-05-12 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4910,7 +4910,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.46 | 2026-05-12 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.47 | 2026-05-12 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -9457,9 +9457,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         feedbackEl.className = 'settings-feedback loading';
         let itemsList = '';
         let customerSituation = currentEstimate.notes || '';
-        let jobTypeOptionID = 12172; // default: Multiple Items
-        let dwellingTypeOptionID = 10447; // default: Private Home
-        let parkingOptionID = 11228; // default: Driveway
+        let jobTypeOptionID = 12172;     // default: Multiple Items (fieldID 10765)
+        let dwellingTypeOptionID = 11227; // default: Private Home (fieldID 10726)
+        let parkingOptionID = 10450;      // default: Driveway (fieldID 10258)
 
         // STREET VIEW CLASSIFICATION (preferred path)
         // The cover photo (usually a Google Street View image) shows the
@@ -9506,10 +9506,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         }
 
         // Resolve dwellingType: street-view > per-charge inference > default
+        // Vonigo fieldID 10726 = "Dwelling Type". Option IDs confirmed via
+        // /api/v1/system/objects/ metadata for objectTypeID 31 (Quote).
         const dwellingMap = {
-          'private_home': 10447, 'condominium': 10449, 'apartment': 10450,
-          'storage_unit': 10451, 'office': 10452, 'retail_location': 10453,
-          'assisted_living': 10454
+          'private_home':    11227,
+          'apartment':       11228,
+          'condominium':     11229,
+          'assisted_living': 19072,
+          'storage_unit':    11230,
+          'office':          11231,
+          'retail_location': 11232
         };
         let resolvedDwelling = svClassification && svClassification.dwellingType;
         if (!resolvedDwelling) {
@@ -9517,17 +9523,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             .map(c => c._dwellingType).filter(Boolean)[0] || null;
         }
         if (resolvedDwelling) {
-          dwellingTypeOptionID = dwellingMap[resolvedDwelling] || 10447;
+          dwellingTypeOptionID = dwellingMap[resolvedDwelling] || 11227;
+        } else {
+          dwellingTypeOptionID = 11227; // default: Private Home
         }
 
         // Resolve parkingType: street-view > per-charge inference > derived from dwelling
+        // Vonigo fieldID 10258 = "Parking". Option IDs confirmed via metadata.
         const parkingMap = {
-          'street_parking':   11227,
-          'driveway':         11228,
-          'parking_lot':      11229,
-          'front_curb':       11230,
-          'service_entrance': 11231,
-          'behind_building':  19072
+          'street_parking':   10447,
+          'driveway':         10450,
+          'parking_lot':      10449,
+          'behind_building':  10454,
+          'front_curb':       10451,
+          'service_entrance': 10452,
+          'other':            10453
         };
         let resolvedParking = svClassification && svClassification.parkingType;
         if (!resolvedParking) {
@@ -9535,10 +9545,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             .map(c => c._parkingType).filter(Boolean)[0] || null;
         }
         if (resolvedParking) {
-          parkingOptionID = parkingMap[resolvedParking] || parkingOptionID;
+          parkingOptionID = parkingMap[resolvedParking] || 10450;
         } else {
           // Final fallback: derive from dwelling (homes → driveway, else → parking lot)
-          parkingOptionID = (dwellingTypeOptionID === 10447) ? 11228 : 11229;
+          parkingOptionID = (dwellingTypeOptionID === 11227) ? 10450 : 10449;
         }
         try {
           console.log('[JobSummary] Starting AI call for', (currentEstimate.charges || []).length, 'charges');
