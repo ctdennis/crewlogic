@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.43 | 2026-05-08">
+  <meta name="crewlogic-version" content="v5.9.45 | 2026-05-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -966,7 +966,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.43 | 2026-05-08 -->
+<!-- CrewLogic v5.9.45 | 2026-05-12 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4910,7 +4910,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.43 | 2026-05-08 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.45 | 2026-05-12 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -7324,8 +7324,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           });
           // Clear old separate photo analysis box
           charge.photoAnalysis = null;
-          // Store dwelling type inferred from photos
-          if (data.dwellingType) charge._dwellingType = data.dwellingType;
+          // Store dwelling type and parking type inferred from photos.
+          // The AI places these fields on the volume charge object per the
+          // system prompt, so we read from the first volume charge (vol)
+          // not the response root. Fall back to data.* for legacy responses.
+          const inferredDwelling = (vol && vol.dwellingType) || data.dwellingType;
+          const inferredParking  = (vol && vol.parkingType)  || data.parkingType;
+          if (inferredDwelling) charge._dwellingType = inferredDwelling;
+          if (inferredParking)  charge._parkingType  = inferredParking;
         }
       } catch(e) {
         console.error('Analyze error:', e.message);
@@ -9451,19 +9457,85 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         let dwellingTypeOptionID = 10447; // default: Private Home
         let parkingOptionID = 11228; // default: Driveway
 
-        // Override dwelling type from photo analysis if available
-        const analyzedDwelling = (currentEstimate.charges || [])
-          .map(c => c._dwellingType).filter(Boolean)[0];
-        if (analyzedDwelling) {
-          const dwellingMap = {
-            'private_home': 10447, 'condominium': 10449, 'apartment': 10450,
-            'storage_unit': 10451, 'office': 10452, 'retail_location': 10453,
-            'assisted_living': 10454
-          };
-          dwellingTypeOptionID = dwellingMap[analyzedDwelling] || 10447;
+        // STREET VIEW CLASSIFICATION (preferred path)
+        // The cover photo (usually a Google Street View image) shows the
+        // exterior architectural context, which is FAR more reliable for
+        // classifying dwelling and parking than interior/item photos. We
+        // run this classification once per submit and cache the result on
+        // the estimate so subsequent re-submits don't re-pay the latency.
+        let svClassification = currentEstimate._streetViewClassification || null;
+        if (!svClassification && currentEstimate.coverPhoto) {
+          try {
+            feedbackEl.textContent = 'Analyzing property type...';
+            const coverResolved = await resolvePhotoRef(currentEstimate.coverPhoto);
+            if (coverResolved) {
+              const SUPABASE_ANON_KEY_INLINE = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
+              const cpRes = await fetch('https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1/crewlogic-ai', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer ' + SUPABASE_ANON_KEY_INLINE,
+                  'apikey': SUPABASE_ANON_KEY_INLINE
+                },
+                body: JSON.stringify({
+                  action: 'classifyProperty',
+                  photo: coverResolved
+                })
+              });
+              if (cpRes.ok) {
+                const cpData = await cpRes.json();
+                if (cpData.success) {
+                  svClassification = {
+                    dwellingType: cpData.dwellingType || null,
+                    parkingType:  cpData.parkingType  || null,
+                    reasoning:    cpData.reasoning    || ''
+                  };
+                  // Cache on the estimate so we don't re-classify on re-submit
+                  currentEstimate._streetViewClassification = svClassification;
+                  console.log('[ClassifyProperty]', svClassification);
+                }
+              }
+            }
+          } catch(e) {
+            console.warn('[ClassifyProperty] failed, falling back to per-charge inference:', e);
+          }
         }
-        // Derive parking from dwelling type — homes get driveway, everything else parking lot
-        parkingOptionID = (dwellingTypeOptionID === 10447) ? 11228 : 11229;
+
+        // Resolve dwellingType: street-view > per-charge inference > default
+        const dwellingMap = {
+          'private_home': 10447, 'condominium': 10449, 'apartment': 10450,
+          'storage_unit': 10451, 'office': 10452, 'retail_location': 10453,
+          'assisted_living': 10454
+        };
+        let resolvedDwelling = svClassification && svClassification.dwellingType;
+        if (!resolvedDwelling) {
+          resolvedDwelling = (currentEstimate.charges || [])
+            .map(c => c._dwellingType).filter(Boolean)[0] || null;
+        }
+        if (resolvedDwelling) {
+          dwellingTypeOptionID = dwellingMap[resolvedDwelling] || 10447;
+        }
+
+        // Resolve parkingType: street-view > per-charge inference > derived from dwelling
+        const parkingMap = {
+          'street_parking':   11227,
+          'driveway':         11228,
+          'parking_lot':      11229,
+          'front_curb':       11230,
+          'service_entrance': 11231,
+          'behind_building':  19072
+        };
+        let resolvedParking = svClassification && svClassification.parkingType;
+        if (!resolvedParking) {
+          resolvedParking = (currentEstimate.charges || [])
+            .map(c => c._parkingType).filter(Boolean)[0] || null;
+        }
+        if (resolvedParking) {
+          parkingOptionID = parkingMap[resolvedParking] || parkingOptionID;
+        } else {
+          // Final fallback: derive from dwelling (homes → driveway, else → parking lot)
+          parkingOptionID = (dwellingTypeOptionID === 10447) ? 11228 : 11229;
+        }
         try {
           console.log('[JobSummary] Starting AI call for', (currentEstimate.charges || []).length, 'charges');
           const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
