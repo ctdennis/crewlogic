@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.51 | 2026-05-13">
+  <meta name="crewlogic-version" content="v5.9.52 | 2026-05-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -966,7 +966,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.51 | 2026-05-13 -->
+<!-- CrewLogic v5.9.52 | 2026-05-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4931,7 +4931,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.51 | 2026-05-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.52 | 2026-05-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -9048,12 +9048,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const escRoute = String(wo.route || '').replace(/[<>&"']/g, '');
         const escTime = String(wo.timeLabel || '').replace(/[<>&"']/g, '');
         const escStatus = String(wo.status || '').replace(/[<>&"']/g, '');
+        // Items list — truncate at ~140 chars, allow wrap to 2 lines via CSS.
+        // We use line-clamp so wrap is hard-capped no matter how long the text.
+        let itemsRaw = String(wo.items || '').replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+        if (itemsRaw.length > 140) itemsRaw = itemsRaw.slice(0, 137) + '…';
+        const escItems = itemsRaw.replace(/[<>&"']/g, '');
         html += '<div onclick="pickScheduleRow(\'' + safeJobID + '\')" style="padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px;cursor:pointer;opacity:' + rowOpacity + ';">';
         html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">';
         html += '<div style="font-size:13px;font-weight:700;color:var(--text-primary);">' + escTime + ' · ' + escClient + '</div>';
         html += '<div style="font-size:10px;font-weight:700;color:' + statusColor + ';text-transform:uppercase;letter-spacing:0.5px;">' + escStatus + '</div>';
         html += '</div>';
         html += '<div style="font-size:11px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escAddress + '</div>';
+        // Items list line — wraps to max 2 lines via -webkit-line-clamp.
+        if (escItems) {
+          html += '<div style="font-size:11px;color:var(--text-secondary);margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.35;">' + escItems + '</div>';
+        }
         html += '<div style="display:flex;align-items:center;gap:8px;margin-top:4px;">';
         html += '<span style="font-size:10px;color:var(--text-muted);font-family:monospace;">Job #' + safeJobID + '</span>';
         if (escRoute) html += '<span style="font-size:10px;color:var(--text-muted);">· ' + escRoute + '</span>';
