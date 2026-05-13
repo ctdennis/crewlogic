@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.52 | 2026-05-13">
+  <meta name="crewlogic-version" content="v5.9.53 | 2026-05-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -966,7 +966,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.52 | 2026-05-13 -->
+<!-- CrewLogic v5.9.53 | 2026-05-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3212,6 +3212,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return res.json();
     }
 
+    // Calls the crewlogic-price-lookup Edge Function. Returns a Response-like
+    // object with .json() so existing call sites that did `await
+    // apiFetch(...).then(r => r.json())` work as drop-in replacements.
+    //
+    // payload should include franchiseID and one of: zoneID (preferred when
+    // known — instant + precise) or zipCode (fallback for manual entry).
+    async function priceLookup(payload) {
+      const res = await fetch(EDGE_BASE + '/crewlogic-price-lookup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + EDGE_ANON_KEY,
+          'apikey': EDGE_ANON_KEY
+        },
+        body: JSON.stringify(payload)
+      });
+      return res; // caller awaits .json() — matches old apiFetch contract
+    }
+
     // ===== STATE =====
     let currentUser = null;
     let currentScreen = 'home';
@@ -3700,10 +3719,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const priceLabel = document.getElementById('volumeDiscountPriceLabel');
         if (priceLabel) priceLabel.textContent = 'Loading standard prices...';
         try {
-          const res = await apiFetch(N8N_BASE + '/crewlogic-price-lookup', {
-            method: 'POST',
-            body: JSON.stringify({ zipCode: zip, franchiseID: currentUser.franchiseID, email: currentUser.email })
-          });
+          const res = await priceLookup({ zipCode: zip, franchiseID: currentUser.franchiseID, email: currentUser.email });
           const data = await res.json();
           if (data.success && data.blocks) {
             window._cplStandardPrices = buildPriceMap(data.blocks);
@@ -4133,10 +4149,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Load price blocks if we have a zip — needed for per-item display
         if (cpl.zip) {
           try {
-            const priceRes = await apiFetch(N8N_BASE + '/crewlogic-price-lookup', {
-              method: 'POST',
-              body: JSON.stringify({ zipCode: cpl.zip, franchiseID: currentUser.franchiseID, email: currentUser.email })
-            });
+            const priceRes = await priceLookup({ zipCode: cpl.zip, franchiseID: currentUser.franchiseID, email: currentUser.email });
             const priceData = await priceRes.json();
             if (priceData.success && priceData.blocks) {
               window._cplStandardPrices = buildPriceMap(priceData.blocks);
@@ -4931,7 +4944,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.52 | 2026-05-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.53 | 2026-05-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -4960,10 +4973,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       resultsEl.innerHTML = '<div class="price-loading"><span class="spinner-inline"></span>Looking up ' + zip + '...</div>';
 
       try {
-        const res = await apiFetch(N8N_BASE + '/crewlogic-price-lookup', {
-          method: 'POST',
-          body: JSON.stringify({ zipCode: zip, franchiseID: currentUser.franchiseID, email: currentUser.email })
-        });
+        const res = await priceLookup({ zipCode: zip, franchiseID: currentUser.franchiseID, email: currentUser.email });
 
         const data = await res.json();
 
@@ -6356,10 +6366,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const statusEl = document.getElementById('zipLookupStatus');
       if (statusEl) { statusEl.textContent = 'Reloading prices...'; statusEl.className = 'zip-status loading'; }
       try {
-        const priceRes = await apiFetch(N8N_BASE + '/crewlogic-price-lookup', {
-          method: 'POST',
-          body: JSON.stringify({ zipCode: zip, franchiseID: currentUser.franchiseID, email: currentUser.email })
-        });
+        const priceRes = await priceLookup({ zipCode: zip, franchiseID: currentUser.franchiseID, email: currentUser.email });
         const priceData = await priceRes.json();
         if (priceData.success && priceData.blocks && priceData.blocks.length > 0) {
           priceBlocks = priceData.blocks;
@@ -6441,10 +6448,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           // Load price blocks for item name matching
           const zipForBlocks = currentEstimate.zip || currentEstimate.customerPriceList?.zip;
           if (!window._cplPriceBlocks && zipForBlocks) {
-            apiFetch(N8N_BASE + '/crewlogic-price-lookup', {
-              method: 'POST',
-              body: JSON.stringify({ zipCode: zipForBlocks, franchiseID: currentUser.franchiseID, email: currentUser.email })
-            }).then(r => r.json()).then(data => {
+            priceLookup({ zipCode: zipForBlocks, franchiseID: currentUser.franchiseID, email: currentUser.email }).then(r => r.json()).then(data => {
               if (data.success && data.blocks) {
                 window._cplPriceBlocks = data.blocks;
                 window._cplStandardPrices = buildPriceMap(data.blocks);
@@ -9154,10 +9158,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             statusEl.className = 'zip-status loading';
 
             try {
-              const priceRes = await apiFetch(N8N_BASE + '/crewlogic-price-lookup', {
-                method: 'POST',
-                body: JSON.stringify({ zipCode: zip, franchiseID: currentUser.franchiseID, email: currentUser.email })
-              });
+              const priceRes = await priceLookup({ zipCode: zip, franchiseID: currentUser.franchiseID, email: currentUser.email });
               const priceData = await priceRes.json();
               if (priceData.success) {
                 const oldPriceListID = currentEstimate.priceListID;
