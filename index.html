@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.55 | 2026-05-13">
+  <meta name="crewlogic-version" content="v5.9.56 | 2026-05-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -966,7 +966,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.55 | 2026-05-13 -->
+<!-- CrewLogic v5.9.56 | 2026-05-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4944,7 +4944,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.55 | 2026-05-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.56 | 2026-05-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6649,7 +6649,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
     }
 
-    function leaveWithoutSaving() {
+    async function leaveWithoutSaving() {
       document.getElementById('savePromptModal').style.display = 'none';
       isDirty = false;
       // If estimate has no user content, hard-delete it (the only reason it's in the DB
@@ -6659,12 +6659,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const shouldDiscard = !hasUserContent() && currentEstimate && currentEstimate.estimateID;
       const idToDiscard = shouldDiscard ? currentEstimate.estimateID : null;
       // Strip from local cache SYNCHRONOUSLY before navigating, so the list re-renders
-      // without the discarded estimate. (DB / Storage cleanup stays fire-and-forget.)
+      // without the discarded estimate.
       if (idToDiscard) {
         try {
           const all = getLocalEstimates();
           setLocalEstimates(all.filter(e => String(e.estimateID) !== String(idToDiscard)));
         } catch(e) { console.warn('discard: local cache strip failed', e); }
+        // Await the DB delete so the subsequent list refresh doesn't re-fetch
+        // the still-present row and put it back in the cache. Storage cleanup
+        // stays fire-and-forget after navigation (the slow part — list+delete
+        // across photo folders).
+        try {
+          await supabaseFetch('/rest/v1/estimates?estimate_id=eq.' + idToDiscard, { method: 'DELETE' });
+        } catch(e) { console.warn('discard: DB delete failed', e); }
       }
       if (pendingNavModule) {
         const mod = pendingNavModule;
@@ -6673,10 +6680,31 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       } else {
         backToEstimatesList();
       }
-      // Fire-and-forget cleanup of DB row + Storage — don't block navigation on it
+      // Fire-and-forget cleanup of Storage + IndexedDB — don't block navigation on it
       if (idToDiscard) {
-        discardUnsavedEstimate(idToDiscard).catch(e => console.warn('Discard cleanup failed:', e));
+        discardUnsavedStorageCleanup(idToDiscard).catch(e => console.warn('Discard storage cleanup failed:', e));
       }
+    }
+
+    // Hard-delete an unsaved draft's storage objects + IndexedDB photo queue.
+    // The DB row delete is now handled synchronously in leaveWithoutSaving() to
+    // avoid a race with the list refresh. This function is fire-and-forget for
+    // the slower Storage/IDB cleanup.
+    async function discardUnsavedStorageCleanup(estimateID) {
+      // Clean up any photos uploaded to Storage during the brief lookup session
+      try {
+        const folder = currentUser.franchiseID + '/' + estimateID;
+        const { data: files } = await supabaseClient.storage.from('estimate-photos').list(folder);
+        if (files && files.length > 0) {
+          const paths = files.map(f => folder + '/' + f.name);
+          await supabaseClient.storage.from('estimate-photos').remove(paths);
+        }
+      } catch(e) { console.warn('discard: storage cleanup failed', e); }
+      // Clean up any queued photos in IndexedDB
+      try {
+        const queued = await idbGetByEstimate(String(estimateID));
+        for (const r of queued) await idbDelete(r.photoID);
+      } catch(e) {}
     }
 
     // Hard-delete an unsaved draft + clean up its photo folder.
