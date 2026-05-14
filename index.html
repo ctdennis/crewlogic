@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.56 | 2026-05-13">
+  <meta name="crewlogic-version" content="v5.9.58 | 2026-05-14">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -494,6 +494,64 @@
     .price-lookup-section { display: none; }
     .price-lookup-section.active { display: block; }
 
+    /* ===== JOB PLAN ===== */
+    .job-plan-section { display: none; }
+    .job-plan-section.active { display: block; }
+
+    .jp-day-tab {
+      padding: 8px 14px; background: var(--bg-card); color: var(--text-secondary);
+      border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer;
+      font-size: 13px; font-weight: 600; transition: all 0.15s;
+      font-family: inherit;
+    }
+    .jp-day-tab.active {
+      background: var(--accent-green); color: var(--bg-primary);
+      border-color: var(--accent-green);
+    }
+    .jp-day-tab:not(.active):hover { background: var(--bg-input); color: var(--text-primary); }
+
+    .jp-route-card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius-md); padding: 16px; margin-bottom: 14px;
+    }
+    .jp-route-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 10px; gap: 8px;
+    }
+    .jp-route-title { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+    .jp-route-count { font-size: 12px; color: var(--text-muted); }
+    .jp-route-plan {
+      width: 100%; min-height: 180px; resize: vertical;
+      background: var(--bg-input); color: var(--text-primary);
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      padding: 10px 12px; font-family: 'Space Mono', monospace; font-size: 12px;
+      line-height: 1.55; box-sizing: border-box;
+    }
+    .jp-route-plan:focus { outline: 2px solid var(--accent-green); outline-offset: -1px; }
+    .jp-route-plan.edited { border-color: var(--accent-yellow); }
+    .jp-edited-flag {
+      font-size: 10px; font-weight: 700; color: var(--accent-yellow);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      padding: 2px 6px; background: rgba(251,191,36,0.1); border-radius: 3px;
+    }
+
+    .jp-actions {
+      display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap;
+    }
+    .jp-action-btn {
+      padding: 10px 14px; background: var(--bg-input); color: var(--text-primary);
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s;
+      font-family: inherit;
+    }
+    .jp-action-btn:hover { background: var(--bg-card); border-color: var(--accent-green); }
+    .jp-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .jp-action-btn.primary {
+      background: var(--accent-green); color: var(--bg-primary); border-color: var(--accent-green);
+    }
+    .jp-action-btn.primary:hover { filter: brightness(1.1); }
+
+
     .zip-lookup-row { display: flex; gap: 10px; margin-bottom: 20px; }
     .zip-lookup-row .form-input {
       width: 140px; font-family: 'Space Mono', monospace; font-size: 18px;
@@ -966,7 +1024,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.56 | 2026-05-13 -->
+<!-- CrewLogic v5.9.58 | 2026-05-14 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1139,11 +1197,12 @@
             <div class="module-desc">Track sign placements & crew rewards</div>
           </div>
 
-          <div class="module-card fade-in fade-in-delay-4" onclick="openModule('settings')">
-            <div class="module-icon">⚙️</div>
-            <div class="module-name">Settings</div>
-            <div class="module-desc">Account & Vonigo credentials</div>
+          <div class="module-card fade-in fade-in-delay-4" id="jobPlanCard" onclick="openModule('jobPlan')">
+            <div class="module-icon">📋</div>
+            <div class="module-name">Job Plan</div>
+            <div class="module-desc">AI-generated morning brief for the crew</div>
           </div>
+
         </div>
       </div>
 
@@ -1163,6 +1222,28 @@
 
         <div id="priceLookupError" style="display:none;" class="price-error"></div>
         <div id="priceLookupResults"></div>
+      </div>
+
+      <!-- JOB PLAN -->
+      <div class="job-plan-section" id="jobPlanScreen">
+        <div class="section-title fade-in">Job Plan</div>
+        <div class="section-desc fade-in fade-in-delay-1">AI-generated morning brief for the crew — pulls tomorrow's jobs, item locations, and confidential notes to produce a per-route plan.</div>
+
+        <div class="fade-in fade-in-delay-2" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:16px;margin-bottom:16px;">
+          <div id="jobPlanDayTabs" style="display:flex;gap:6px;">
+            <button class="jp-day-tab" data-offset="0" onclick="selectJobPlanDay(0)">Today</button>
+            <button class="jp-day-tab active" data-offset="1" onclick="selectJobPlanDay(1)">Tomorrow</button>
+            <button class="jp-day-tab" data-offset="2" onclick="selectJobPlanDay(2)">Day After</button>
+          </div>
+          <button class="btn btn-primary" id="jobPlanGenerateBtn" onclick="generateJobPlan()" style="margin-left:auto;">
+            <span class="spinner"></span>
+            <span class="btn-text">⚡ Generate Plan</span>
+          </button>
+        </div>
+
+        <div id="jobPlanStatus" style="font-size:12px;color:var(--text-muted);margin-bottom:12px;"></div>
+        <div id="jobPlanError" style="display:none;color:#ff7676;background:rgba(255,118,118,0.1);border:1px solid rgba(255,118,118,0.3);padding:10px 14px;border-radius:var(--radius-sm);margin-bottom:12px;font-size:13px;"></div>
+        <div id="jobPlanResults"></div>
       </div>
 
       <!-- SETTINGS -->
@@ -3339,13 +3420,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             if (wasInvite) {
               // Load franchise info from Supabase for the new team member
               const profileData = await supabaseFetch(
-                '/rest/v1/profiles?select=role,franchise_id,franchises(external_id,franchise_name,cost_settings,subscription_tier)&email=eq.' + encodeURIComponent(session.email)
+                '/rest/v1/profiles?select=role,franchise_id,franchises(id,external_id,franchise_name,cost_settings,subscription_tier,tenant_id)&email=eq.' + encodeURIComponent(session.email)
               );
               if (profileData && profileData[0]) {
                 const p = profileData[0];
                 currentUser.role = p.role || 'estimator';
                 if (p.franchises) {
                   currentUser.franchiseID = p.franchises.external_id;
+                  currentUser.franchiseInternalID = p.franchises.id;
+                  currentUser.tenantID = p.franchises.tenant_id || '946a4535-aa61-45b6-a6fb-9190ff546d41';
                   currentUser.franchiseName = p.franchises.franchise_name;
                   currentUser.costSettings = p.franchises.cost_settings || {};
                   currentUser.subscriptionTier = p.franchises.subscription_tier || 'free';
@@ -3403,10 +3486,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           if (session && session.email) {
             currentUser = session;
             // Refresh costSettings + role + tier from Supabase in background (may have changed since cache)
-            supabaseFetch('/rest/v1/profiles?select=role,franchises(subscription_tier,cost_settings)&email=eq.' + encodeURIComponent(session.email))
+            supabaseFetch('/rest/v1/profiles?select=role,franchises(id,external_id,franchise_name,subscription_tier,cost_settings,tenant_id)&email=eq.' + encodeURIComponent(session.email))
               .then(rows => {
                 if (rows && rows[0]) {
                   if (rows[0].role) currentUser.role = rows[0].role;
+                  if (rows[0].franchises) {
+                    if (rows[0].franchises.id) currentUser.franchiseInternalID = rows[0].franchises.id;
+                    if (rows[0].franchises.external_id) currentUser.franchiseID = rows[0].franchises.external_id;
+                    if (rows[0].franchises.franchise_name) currentUser.franchiseName = rows[0].franchises.franchise_name;
+                    if (rows[0].franchises.tenant_id) currentUser.tenantID = rows[0].franchises.tenant_id;
+                  }
                   if (rows[0].franchises?.subscription_tier) {
                     currentUser.subscriptionTier = rows[0].franchises.subscription_tier;
                   }
@@ -4615,7 +4704,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       'routerScreen', 'routeResultScreen',
       'storageScreen', 'storageResultsScreen',
       'mattressScreen', 'mattressResultsScreen',
-      'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen'
+      'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'jobPlanScreen'
     ];
 
     function hideAll() {
@@ -4727,6 +4816,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         storage:     { screen: 'storageScreen',     title: 'Storage Unit',      type: 'estimator-section' },
         mattress:    { screen: 'mattressScreen',    title: 'Mattress Calc',     type: 'estimator-section' },
         priceLookup: { screen: 'priceLookupScreen', title: 'Price Lookup',      type: 'price-lookup-section' },
+        jobPlan:     { screen: 'jobPlanScreen',     title: 'Job Plan',          type: 'job-plan-section' },
         settings:    { screen: 'settingsScreen',    title: 'Settings',          type: 'settings-section' },
         estimates:   { screen: 'estimatesScreen',   title: 'Estimates',         type: 'estimates-section' }
       };
@@ -4758,6 +4848,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           document.getElementById('priceLookupBtn').disabled = false;
         }
       }
+      if (module === 'jobPlan') { initJobPlan(); }
     }
 
     // ===== SETTINGS =====
@@ -4940,11 +5031,294 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       btn.classList.remove('loading');
     }
 
+    // ===== JOB PLAN =====
+    let jobPlanState = {
+      dayOffset: 1,        // default: Tomorrow
+      currentPlan: null,   // last loaded/generated plan
+      editedRoutes: {},    // routeName -> edited text
+      isDirty: false,      // has user made edits since last save
+    };
+
+    function selectJobPlanDay(offset) {
+      if (jobPlanState.isDirty) {
+        if (!confirm('You have unsaved edits to the current plan. Switch days anyway?')) return;
+      }
+      jobPlanState.dayOffset = offset;
+      jobPlanState.editedRoutes = {};
+      jobPlanState.isDirty = false;
+      document.querySelectorAll('.jp-day-tab').forEach(b => {
+        b.classList.toggle('active', String(b.dataset.offset) === String(offset));
+      });
+      loadSavedJobPlan();
+    }
+
+    async function initJobPlan() {
+      // Default Tomorrow selected
+      jobPlanState.dayOffset = 1;
+      jobPlanState.editedRoutes = {};
+      jobPlanState.isDirty = false;
+      document.querySelectorAll('.jp-day-tab').forEach(b => {
+        b.classList.toggle('active', String(b.dataset.offset) === '1');
+      });
+      document.getElementById('jobPlanError').style.display = 'none';
+      await loadSavedJobPlan();
+    }
+
+    // Pull saved plan from Supabase for the selected date. Renders it if found,
+    // otherwise shows an empty state with the Generate button as the call-to-action.
+    async function loadSavedJobPlan() {
+      const resultsEl = document.getElementById('jobPlanResults');
+      const statusEl = document.getElementById('jobPlanStatus');
+      resultsEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline"></span> Loading saved plan…</div>';
+      statusEl.textContent = '';
+
+      const planDate = getEasternDateOffset(jobPlanState.dayOffset);
+      try {
+        const rows = await supabaseFetch(
+          '/rest/v1/job_plans?select=*&franchise_id=eq.' + encodeURIComponent(currentUser.franchiseInternalID || '') +
+          '&plan_date=eq.' + planDate +
+          '&order=generated_at.desc&limit=1'
+        );
+        if (rows && rows.length > 0) {
+          jobPlanState.currentPlan = rows[0];
+          renderJobPlan(rows[0]);
+          const lastEditedAt = rows[0].last_edited_at;
+          const generatedAt = rows[0].generated_at;
+          const ts = lastEditedAt && lastEditedAt > generatedAt ? lastEditedAt : generatedAt;
+          statusEl.textContent = (lastEditedAt && lastEditedAt > generatedAt ? 'Last edited: ' : 'Generated: ') + formatJobPlanTimestamp(ts);
+        } else {
+          jobPlanState.currentPlan = null;
+          const dayLabel = ['Today', 'Tomorrow', 'Day After Tomorrow'][jobPlanState.dayOffset] || planDate;
+          resultsEl.innerHTML = '<div style="text-align:center;padding:32px;color:var(--text-muted);font-size:14px;">No plan yet for <strong style="color:var(--text-primary);">' + dayLabel + '</strong>.<br><span style="font-size:12px;">Hit Generate Plan to create one (~10 sec).</span></div>';
+        }
+      } catch (e) {
+        resultsEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Couldn\'t load saved plan: ' + (e.message || e) + '</div>';
+      }
+    }
+
+    async function generateJobPlan() {
+      if (jobPlanState.isDirty) {
+        if (!confirm('Generating a new plan will discard your current edits. Continue?')) return;
+      }
+      const btn = document.getElementById('jobPlanGenerateBtn');
+      const resultsEl = document.getElementById('jobPlanResults');
+      const errorEl = document.getElementById('jobPlanError');
+      const statusEl = document.getElementById('jobPlanStatus');
+      btn.classList.add('loading');
+      errorEl.style.display = 'none';
+      statusEl.textContent = '';
+      resultsEl.innerHTML = '<div style="text-align:center;padding:32px;color:var(--text-muted);font-size:14px;"><span class="spinner-inline"></span> Generating plan for ' + (['Today','Tomorrow','Day After Tomorrow'][jobPlanState.dayOffset] || '') + '…<br><span style="font-size:11px;">Pulling jobs, item locations, and notes — ~10 seconds.</span></div>';
+
+      try {
+        const res = await fetch(EDGE_BASE + '/crewlogic-job-plan', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + EDGE_ANON_KEY,
+            'apikey': EDGE_ANON_KEY,
+          },
+          body: JSON.stringify({
+            franchiseID: currentUser.franchiseID,
+            dayOffset: jobPlanState.dayOffset,
+          }),
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Plan generation failed');
+
+        // Persist to Supabase (overwrite any prior plan for this date)
+        const planRecord = {
+          tenant_id: currentUser.tenantID || '946a4535-aa61-45b6-a6fb-9190ff546d41',
+          franchise_id: currentUser.franchiseInternalID,
+          plan_date: data.date,
+          routes: data.routes,
+          total_jobs: data.totalJobs,
+          ai_model: (data.meta && data.meta.model) || null,
+          ai_metadata: data.meta || null,
+          generated_at: new Date().toISOString(),
+          last_edited_at: null,
+        };
+        // Use UPSERT — one plan per franchise+date
+        await supabaseFetch('/rest/v1/job_plans?on_conflict=tenant_id,franchise_id,plan_date', {
+          method: 'POST',
+          headers: { 'Prefer': 'resolution=merge-duplicates,return=representation' },
+          body: JSON.stringify(planRecord),
+        });
+
+        jobPlanState.currentPlan = planRecord;
+        jobPlanState.editedRoutes = {};
+        jobPlanState.isDirty = false;
+        renderJobPlan(planRecord);
+        statusEl.textContent = 'Generated just now';
+      } catch (e) {
+        errorEl.textContent = 'Generate failed: ' + (e.message || e);
+        errorEl.style.display = 'block';
+        resultsEl.innerHTML = '';
+      }
+      btn.classList.remove('loading');
+    }
+
+    function renderJobPlan(plan) {
+      const resultsEl = document.getElementById('jobPlanResults');
+      const routes = plan.routes || [];
+      if (routes.length === 0) {
+        resultsEl.innerHTML = '<div style="text-align:center;padding:32px;color:var(--text-muted);font-size:14px;">No jobs scheduled for this date.</div>';
+        return;
+      }
+      let html = '';
+      routes.forEach((r, idx) => {
+        const safeName = String(r.routeName || '').replace(/[<>&"']/g, '');
+        const stopCount = r.stopCount || 0;
+        const planText = (jobPlanState.editedRoutes[r.routeName] !== undefined ? jobPlanState.editedRoutes[r.routeName] : r.plan) || '';
+        const edited = r.edited || (jobPlanState.editedRoutes[r.routeName] !== undefined && jobPlanState.editedRoutes[r.routeName] !== r.plan);
+        html += '<div class="jp-route-card">';
+        html += '<div class="jp-route-header">';
+        html += '<div><span class="jp-route-title">' + safeName + '</span> <span class="jp-route-count">— ' + stopCount + ' stop' + (stopCount === 1 ? '' : 's') + '</span></div>';
+        html += '<div>' + (edited ? '<span class="jp-edited-flag">Edited</span>' : '') + '</div>';
+        html += '</div>';
+        html += '<textarea class="jp-route-plan' + (edited ? ' edited' : '') + '" data-route="' + safeName + '" oninput="onJobPlanRouteEdit(this)">' + planText.replace(/</g, '&lt;') + '</textarea>';
+        html += '</div>';
+      });
+      html += '<div class="jp-actions">';
+      html += '<button class="jp-action-btn primary" onclick="copyJobPlan()">📋 Copy All</button>';
+      html += '<button class="jp-action-btn" id="jobPlanSaveBtn" onclick="saveJobPlanEdits()" disabled>💾 Save Edits</button>';
+      html += '<button class="jp-action-btn" onclick="generateJobPlan()">🔄 Regenerate</button>';
+      html += '</div>';
+      resultsEl.innerHTML = html;
+      updateJobPlanSaveBtn();
+    }
+
+    function onJobPlanRouteEdit(textarea) {
+      const routeName = textarea.dataset.route;
+      jobPlanState.editedRoutes[routeName] = textarea.value;
+      // Compare to original to flag edited
+      const orig = (jobPlanState.currentPlan && jobPlanState.currentPlan.routes || []).find(r => r.routeName === routeName);
+      const isEdited = orig && textarea.value !== orig.plan;
+      textarea.classList.toggle('edited', !!isEdited);
+      const flagEl = textarea.closest('.jp-route-card').querySelector('.jp-edited-flag');
+      const headerEl = textarea.closest('.jp-route-card').querySelector('.jp-route-header > div:last-child');
+      if (isEdited && !flagEl) {
+        headerEl.innerHTML = '<span class="jp-edited-flag">Edited</span>';
+      } else if (!isEdited && flagEl) {
+        headerEl.innerHTML = '';
+      }
+      // Check overall dirtiness
+      jobPlanState.isDirty = Object.keys(jobPlanState.editedRoutes).some(k => {
+        const o = (jobPlanState.currentPlan && jobPlanState.currentPlan.routes || []).find(r => r.routeName === k);
+        return o && jobPlanState.editedRoutes[k] !== o.plan;
+      });
+      updateJobPlanSaveBtn();
+    }
+
+    function updateJobPlanSaveBtn() {
+      const btn = document.getElementById('jobPlanSaveBtn');
+      if (btn) btn.disabled = !jobPlanState.isDirty;
+    }
+
+    async function saveJobPlanEdits() {
+      if (!jobPlanState.currentPlan || !jobPlanState.isDirty) return;
+      const btn = document.getElementById('jobPlanSaveBtn');
+      const statusEl = document.getElementById('jobPlanStatus');
+      btn.disabled = true;
+      btn.textContent = '⏳ Saving…';
+
+      // Merge edited routes into the routes array; mark route.edited = true where changed
+      const newRoutes = (jobPlanState.currentPlan.routes || []).map(r => {
+        if (jobPlanState.editedRoutes[r.routeName] !== undefined && jobPlanState.editedRoutes[r.routeName] !== r.plan) {
+          return { ...r, plan: jobPlanState.editedRoutes[r.routeName], edited: true };
+        }
+        return r;
+      });
+
+      const update = {
+        routes: newRoutes,
+        last_edited_at: new Date().toISOString(),
+      };
+
+      try {
+        await supabaseFetch(
+          '/rest/v1/job_plans?franchise_id=eq.' + encodeURIComponent(currentUser.franchiseInternalID) +
+          '&plan_date=eq.' + jobPlanState.currentPlan.plan_date,
+          {
+            method: 'PATCH',
+            headers: { 'Prefer': 'return=minimal' },
+            body: JSON.stringify(update),
+          }
+        );
+        jobPlanState.currentPlan.routes = newRoutes;
+        jobPlanState.currentPlan.last_edited_at = update.last_edited_at;
+        jobPlanState.editedRoutes = {};
+        jobPlanState.isDirty = false;
+        statusEl.textContent = 'Last edited: ' + formatJobPlanTimestamp(update.last_edited_at);
+        btn.textContent = '✓ Saved';
+        setTimeout(() => { btn.textContent = '💾 Save Edits'; updateJobPlanSaveBtn(); }, 1500);
+        // Re-render to clear edited flags
+        renderJobPlan(jobPlanState.currentPlan);
+      } catch (e) {
+        btn.textContent = '💾 Save Edits';
+        btn.disabled = false;
+        alert('Save failed: ' + (e.message || e));
+      }
+    }
+
+    function copyJobPlan() {
+      const plan = jobPlanState.currentPlan;
+      if (!plan) return;
+      const dayLabel = ['Today', 'Tomorrow', 'Day After Tomorrow'][jobPlanState.dayOffset] || plan.plan_date;
+      let text = 'JOB PLAN — ' + dayLabel + ' (' + plan.plan_date + ')\n';
+      text += plan.total_jobs + ' stop' + (plan.total_jobs === 1 ? '' : 's') + ' across ' + (plan.routes || []).length + ' route' + ((plan.routes || []).length === 1 ? '' : 's') + '\n';
+      text += '═══════════════════════════════════════════\n\n';
+      (plan.routes || []).forEach((r, i) => {
+        const txt = (jobPlanState.editedRoutes[r.routeName] !== undefined ? jobPlanState.editedRoutes[r.routeName] : r.plan) || '';
+        text += txt.trim() + '\n\n';
+        if (i < (plan.routes || []).length - 1) text += '───────────────────────────────────────────\n\n';
+      });
+      // Try clipboard API first; fallback to a temp textarea
+      const finalText = text.trim();
+      const finish = (success) => {
+        const btn = document.querySelector('.jp-action-btn.primary');
+        if (btn) {
+          const orig = btn.textContent;
+          btn.textContent = success ? '✓ Copied' : '✗ Copy Failed';
+          setTimeout(() => { btn.textContent = orig; }, 1500);
+        }
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(finalText).then(() => finish(true), () => finish(false));
+      } else {
+        const t = document.createElement('textarea');
+        t.value = finalText;
+        document.body.appendChild(t);
+        t.select();
+        try { document.execCommand('copy'); finish(true); } catch (e) { finish(false); }
+        document.body.removeChild(t);
+      }
+    }
+
+    // Helper: get YYYY-MM-DD for the Eastern day that is now + dayOffset
+    function getEasternDateOffset(dayOffset) {
+      const nowET = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+      nowET.setDate(nowET.getDate() + dayOffset);
+      const y = nowET.getFullYear();
+      const m = String(nowET.getMonth() + 1).padStart(2, '0');
+      const d = String(nowET.getDate()).padStart(2, '0');
+      return y + '-' + m + '-' + d;
+    }
+
+    function formatJobPlanTimestamp(iso) {
+      if (!iso) return '';
+      try {
+        return new Date(iso).toLocaleString('en-US', {
+          timeZone: 'America/New_York', month: 'short', day: 'numeric',
+          hour: 'numeric', minute: '2-digit',
+        });
+      } catch (e) { return iso; }
+    }
+
     // ===== PRICE LOOKUP =====
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.56 | 2026-05-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.58 | 2026-05-14 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
