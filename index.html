@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.53 | 2026-05-13">
+  <meta name="crewlogic-version" content="v5.9.54 | 2026-05-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -966,7 +966,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.53 | 2026-05-13 -->
+<!-- CrewLogic v5.9.54 | 2026-05-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4944,7 +4944,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.53 | 2026-05-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.54 | 2026-05-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6646,6 +6646,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // shouldn't leave it cluttering their list.
       const shouldDiscard = !hasUserContent() && currentEstimate && currentEstimate.estimateID;
       const idToDiscard = shouldDiscard ? currentEstimate.estimateID : null;
+      // Strip from local cache SYNCHRONOUSLY before navigating, so the list re-renders
+      // without the discarded estimate. (DB / Storage cleanup stays fire-and-forget.)
+      if (idToDiscard) {
+        try {
+          const all = getLocalEstimates();
+          setLocalEstimates(all.filter(e => String(e.estimateID) !== String(idToDiscard)));
+        } catch(e) { console.warn('discard: local cache strip failed', e); }
+      }
       if (pendingNavModule) {
         const mod = pendingNavModule;
         pendingNavModule = null;
@@ -6653,7 +6661,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       } else {
         backToEstimatesList();
       }
-      // Fire-and-forget cleanup — don't block navigation on it
+      // Fire-and-forget cleanup of DB row + Storage — don't block navigation on it
       if (idToDiscard) {
         discardUnsavedEstimate(idToDiscard).catch(e => console.warn('Discard cleanup failed:', e));
       }
