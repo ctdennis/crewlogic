@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.58 | 2026-05-14">
+  <meta name="crewlogic-version" content="v5.9.59 | 2026-05-14">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1024,7 +1024,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.58 | 2026-05-14 -->
+<!-- CrewLogic v5.9.59 | 2026-05-14 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -5061,7 +5061,35 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         b.classList.toggle('active', String(b.dataset.offset) === '1');
       });
       document.getElementById('jobPlanError').style.display = 'none';
+      // Ensure we have the franchise internal UUID — needed for tools/job_plans queries.
+      // If the session was cached before franchiseInternalID was added, fetch it now.
+      try {
+        await ensureJobPlanContext();
+      } catch (e) {
+        console.error('Job Plan: failed to load franchise context', e);
+        const errEl = document.getElementById('jobPlanError');
+        errEl.textContent = 'Could not load your franchise context: ' + (e.message || e) + '. Try signing out and back in.';
+        errEl.style.display = 'block';
+        document.getElementById('jobPlanResults').innerHTML = '';
+        return;
+      }
       await loadSavedJobPlan();
+    }
+
+    // Make sure currentUser.franchiseInternalID and tenantID are populated.
+    // For users whose session was cached before these fields existed, we
+    // fetch them on demand and patch the session.
+    async function ensureJobPlanContext() {
+      if (currentUser.franchiseInternalID && currentUser.tenantID) return;
+      const rows = await supabaseFetch(
+        '/rest/v1/profiles?select=franchises(id,tenant_id)&email=eq.' + encodeURIComponent(currentUser.email)
+      );
+      if (!rows || !rows[0] || !rows[0].franchises) {
+        throw new Error('Profile has no linked franchise');
+      }
+      currentUser.franchiseInternalID = rows[0].franchises.id;
+      currentUser.tenantID = rows[0].franchises.tenant_id || '946a4535-aa61-45b6-a6fb-9190ff546d41';
+      try { storage.set(SESSION_KEY, JSON.stringify(currentUser)); } catch(e) {}
     }
 
     // Pull saved plan from Supabase for the selected date. Renders it if found,
@@ -5069,13 +5097,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function loadSavedJobPlan() {
       const resultsEl = document.getElementById('jobPlanResults');
       const statusEl = document.getElementById('jobPlanStatus');
+      const errorEl = document.getElementById('jobPlanError');
       resultsEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline"></span> Loading saved plan…</div>';
       statusEl.textContent = '';
+      errorEl.style.display = 'none';
+
+      if (!currentUser.franchiseInternalID) {
+        // Shouldn't happen after ensureJobPlanContext but defensive:
+        const dayLabel = ['Today', 'Tomorrow', 'Day After Tomorrow'][jobPlanState.dayOffset] || '';
+        resultsEl.innerHTML = '<div style="text-align:center;padding:32px;color:var(--text-muted);font-size:14px;">No plan yet for <strong style="color:var(--text-primary);">' + dayLabel + '</strong>.<br><span style="font-size:12px;">Hit Generate Plan to create one (~10 sec).</span></div>';
+        return;
+      }
 
       const planDate = getEasternDateOffset(jobPlanState.dayOffset);
       try {
         const rows = await supabaseFetch(
-          '/rest/v1/job_plans?select=*&franchise_id=eq.' + encodeURIComponent(currentUser.franchiseInternalID || '') +
+          '/rest/v1/job_plans?select=*&franchise_id=eq.' + encodeURIComponent(currentUser.franchiseInternalID) +
           '&plan_date=eq.' + planDate +
           '&order=generated_at.desc&limit=1'
         );
@@ -5092,7 +5129,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           resultsEl.innerHTML = '<div style="text-align:center;padding:32px;color:var(--text-muted);font-size:14px;">No plan yet for <strong style="color:var(--text-primary);">' + dayLabel + '</strong>.<br><span style="font-size:12px;">Hit Generate Plan to create one (~10 sec).</span></div>';
         }
       } catch (e) {
-        resultsEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">Couldn\'t load saved plan: ' + (e.message || e) + '</div>';
+        console.error('Job Plan: load saved plan failed', e);
+        errorEl.textContent = 'Couldn\'t load saved plan: ' + (e.message || e);
+        errorEl.style.display = 'block';
+        resultsEl.innerHTML = '';
       }
     }
 
@@ -5318,7 +5358,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.58 | 2026-05-14 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.59 | 2026-05-14 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
