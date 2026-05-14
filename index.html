@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.54 | 2026-05-13">
+  <meta name="crewlogic-version" content="v5.9.55 | 2026-05-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -966,7 +966,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.54 | 2026-05-13 -->
+<!-- CrewLogic v5.9.55 | 2026-05-13 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -4944,7 +4944,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.54 | 2026-05-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.55 | 2026-05-13 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6494,6 +6494,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const coverImg = document.getElementById('coverPhotoImg');
       coverImg.src = '';
       coverImg.removeAttribute('data-photo-path');
+      resetCoverPhotoPreviewStyling();
       if (currentEstimate.coverPhoto) {
         const coverRaw = currentEstimate.coverPhoto;
         if (coverRaw.startsWith('data:') || coverRaw.startsWith('http')) {
@@ -6505,6 +6506,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         }
         document.getElementById('coverPhotoPreview').style.display = 'block';
         document.getElementById('coverPhotoBtn').style.display = 'none';
+      } else if (currentEstimate._useLogoAsCover) {
+        // Logo fallback was applied earlier (Street View had no imagery)
+        getBrandLogoUrl().then(logoUrl => {
+          if (logoUrl) renderLogoCoverPreview(logoUrl);
+          else {
+            // Logo was removed since we set the flag — fall back to placeholder
+            currentEstimate._useLogoAsCover = false;
+            document.getElementById('coverPhotoPreview').style.display = 'none';
+            document.getElementById('coverPhotoBtn').style.display = 'flex';
+          }
+        });
       } else {
         document.getElementById('coverPhotoPreview').style.display = 'none';
         document.getElementById('coverPhotoBtn').style.display = 'flex';
@@ -10280,12 +10292,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const res = await fetch(url);
         if (!res.ok) {
           if (btn) { btn.textContent = '🏠 No Street View'; btn.disabled = false; }
+          await applyLogoCoverFallback();
           return;
         }
         const blob = await res.blob();
         // Check if it's a real photo (not the grey "no imagery" placeholder ~4KB)
         if (blob.size < 5000) {
           if (btn) { btn.textContent = '🏠 No Street View'; btn.disabled = false; }
+          await applyLogoCoverFallback();
           return;
         }
         const reader = new FileReader();
@@ -10304,7 +10318,49 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         reader.readAsDataURL(blob);
       } catch(e) {
         if (btn) { btn.textContent = '🏠 Street View'; btn.disabled = false; }
+        await applyLogoCoverFallback();
       }
+    }
+
+    // When Street View has no imagery for an address, fall back to showing the
+    // company logo centered on the black cover photo slot. This is a flag-based
+    // fallback (no Storage upload) — the PDF generation also reads this flag
+    // and draws the logo into the photo slot.
+    async function applyLogoCoverFallback() {
+      if (!currentEstimate || currentEstimate.coverPhoto) return; // don't override real photos
+      try {
+        const logoUrl = await getBrandLogoUrl();
+        if (!logoUrl) return; // no logo configured — leave it black
+        currentEstimate._useLogoAsCover = true;
+        renderLogoCoverPreview(logoUrl);
+        saveEstimateDraft();
+      } catch (e) {
+        console.warn('Logo cover fallback failed:', e);
+      }
+    }
+
+    // Render the logo into the cover photo preview slot. Uses object-fit:contain
+    // on a black background so the logo's natural aspect is preserved with
+    // letterbox/pillarbox padding — matches what the PDF will draw.
+    function renderLogoCoverPreview(logoUrl) {
+      const img = document.getElementById('coverPhotoImg');
+      const wrap = document.getElementById('coverPhotoPreview');
+      const btn = document.getElementById('coverPhotoBtn');
+      if (!img || !wrap || !btn) return;
+      img.src = logoUrl;
+      img.style.objectFit = 'contain';
+      img.style.background = '#000';
+      wrap.style.display = 'block';
+      btn.style.display = 'none';
+    }
+
+    // Reset cover photo preview styling to its default (used when switching
+    // away from the logo fallback to a real photo or back to the placeholder).
+    function resetCoverPhotoPreviewStyling() {
+      const img = document.getElementById('coverPhotoImg');
+      if (!img) return;
+      img.style.objectFit = '';
+      img.style.background = '';
     }
 
     function cropCurrentCoverPhoto() {
@@ -10316,6 +10372,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     async function setCoverPhotoFromBase64(base64) {
+      // Clear logo fallback if it was active — real photo takes precedence
+      if (currentEstimate && currentEstimate._useLogoAsCover) {
+        currentEstimate._useLogoAsCover = false;
+        resetCoverPhotoPreviewStyling();
+      }
       // Compress and show preview immediately — don't store base64 in estimate
       const compressed = await compressChargePhoto(base64); // reuse charge photo compression (1920x1440)
       document.getElementById('coverPhotoImg').src = compressed;
@@ -10797,6 +10858,39 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           doc.setFillColor(0, 0, 0);
           doc.rect(lx, photoY, photoW, photoH, 'F');
           doc.addImage(coverPhotoData, 'JPEG', lx + (photoW - drawW) / 2, photoY + (photoH - drawH) / 2, drawW, drawH);
+        }
+      } else if (est._useLogoAsCover && photoH > 60) {
+        // Logo fallback — Street View had no imagery so we render the company
+        // logo centered on a black background, letterboxed to preserve aspect.
+        let logoData = null;
+        try {
+          const logoUrl = await getBrandLogoUrl();
+          if (logoUrl) logoData = await loadImageAsBase64(logoUrl);
+        } catch (e) {
+          console.warn('Logo fetch failed for PDF:', e);
+        }
+        if (logoData) {
+          const [imgW, imgH] = await new Promise(res => {
+            const tmp = new Image();
+            tmp.onload = () => res([tmp.naturalWidth || 480, tmp.naturalHeight || 300]);
+            tmp.onerror = () => res([480, 300]);
+            tmp.src = logoData;
+          });
+          const scale = Math.min(photoW / imgW, photoH / imgH);
+          const drawW = imgW * scale;
+          const drawH = imgH * scale;
+          doc.setFillColor(0, 0, 0);
+          doc.rect(lx, photoY, photoW, photoH, 'F');
+          // jsPDF needs the format hint — PNG-safe path since logos often have transparency
+          doc.addImage(logoData, 'PNG', lx + (photoW - drawW) / 2, photoY + (photoH - drawH) / 2, drawW, drawH);
+        } else {
+          // Logo missing — fall through to placeholder
+          doc.setFillColor(0, 0, 0);
+          doc.rect(lx, photoY, photoW, photoH, 'F');
+          doc.setDrawColor(30, 55, 70);
+          doc.setLineWidth(0.5);
+          for (let gx = lx; gx < lx + photoW; gx += 40) doc.line(gx, photoY, gx, photoY + photoH);
+          for (let gy = photoY; gy < photoY + photoH; gy += 40) doc.line(lx, gy, lx + photoW, gy);
         }
       } else if (!est.coverPhoto) {
         doc.setFillColor(0, 0, 0);
