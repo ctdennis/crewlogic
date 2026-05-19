@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.62 | 2026-05-15">
+  <meta name="crewlogic-version" content="v5.9.65 | 2026-05-17">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1024,7 +1024,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.62 | 2026-05-15 -->
+<!-- CrewLogic v5.9.65 | 2026-05-17 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1646,6 +1646,28 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <!-- Team member list -->
             <div id="teamMembersList" style="font-size:13px;color:var(--text-muted);">Loading...</div>
             <div class="settings-feedback" id="teamFeedback"></div>
+          </div>
+
+          <!-- Guest Tester Invite — super-admin only -->
+          <div class="settings-card fade-in fade-in-delay-2" id="guestInviteCard" style="display:none;">
+            <div class="settings-card-title" style="display:flex;align-items:center;justify-content:space-between;">
+              <span>Guest Tester Invite</span>
+              <button onclick="generateGuestInviteLink()" style="padding:5px 12px;background:var(--accent-yellow,#f59e0b);color:#000;border:none;border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;">+ Generate</button>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.5;">
+              Creates an invite link for an external franchisee tester. They sign up as owner of a new tenant. Their franchise auto-discovers when they enter Vonigo credentials in Settings. Link expires in 14 days.
+            </div>
+
+            <!-- Guest invite link panel -->
+            <div id="guestInviteLinkPanel" style="display:none;padding:10px;background:var(--bg-input);border-radius:var(--radius-sm);border:1px solid var(--border);">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Send this link to the guest tester — expires in 14 days</div>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <input id="guestInviteLinkInput" type="text" readonly style="flex:1;font-size:11px;padding:6px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-secondary);font-family:monospace;">
+                <button onclick="copyGuestInviteLink()" id="copyGuestInviteBtn" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;color:var(--text-primary);cursor:pointer;white-space:nowrap;">Copy</button>
+                <button onclick="shareGuestInviteLink()" id="shareGuestInviteBtn" style="display:none;padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;color:var(--text-primary);cursor:pointer;">Share</button>
+              </div>
+              <div id="guestInviteLinkFeedback" style="font-size:11px;margin-top:4px;"></div>
+            </div>
           </div>
 
           <!-- Account -->
@@ -4338,6 +4360,75 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       });
     }
 
+    // ===== GUEST TESTER INVITES (super-admin only) =====
+    // Creates an invite with franchise_id=NULL and role=owner. The invitee
+    // signs up as the future owner of a new franchise/tenant. Their actual
+    // franchise gets created and attached when they enter Vonigo credentials
+    // in Settings (see crewlogic-settings saveVonigoCredentials handler).
+    async function generateGuestInviteLink() {
+      const feedback = document.getElementById('guestInviteLinkFeedback');
+      const panel = document.getElementById('guestInviteLinkPanel');
+      feedback.textContent = 'Generating...';
+      feedback.style.color = 'var(--text-muted)';
+      panel.style.display = 'block';
+
+      // Look up the inviter's profile UUID
+      const profiles = await supabaseFetch('/rest/v1/profiles?select=id&email=eq.' + encodeURIComponent(currentUser.email));
+      const inviterID = profiles && profiles[0] ? profiles[0].id : null;
+      if (!inviterID) {
+        feedback.textContent = 'Error: could not find your profile';
+        feedback.style.color = 'var(--accent-red, #ef4444)';
+        return;
+      }
+
+      // Create the guest invite — NO franchise_id, role=owner, 14-day expiry
+      const expiresAt = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
+      const invite = await supabaseFetch('/rest/v1/invites', {
+        method: 'POST',
+        body: JSON.stringify({
+          franchise_id: null,
+          email: '',
+          role: 'owner',
+          invited_by: inviterID,
+          expires_at: expiresAt
+        })
+      });
+
+      if (!invite || !invite[0] || !invite[0].token) {
+        feedback.textContent = 'Error generating invite';
+        feedback.style.color = 'var(--accent-red, #ef4444)';
+        return;
+      }
+
+      const link = window.location.origin + window.location.pathname + '?invite=' + invite[0].token;
+      document.getElementById('guestInviteLinkInput').value = link;
+      feedback.textContent = '✓ Valid for 14 days. Share with the guest tester.';
+      feedback.style.color = 'var(--accent-green)';
+
+      if (navigator.share) {
+        document.getElementById('shareGuestInviteBtn').style.display = 'block';
+      }
+    }
+
+    function copyGuestInviteLink() {
+      const input = document.getElementById('guestInviteLinkInput');
+      navigator.clipboard.writeText(input.value).then(() => {
+        const btn = document.getElementById('copyGuestInviteBtn');
+        const orig = btn.textContent;
+        btn.textContent = '✓';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      });
+    }
+
+    function shareGuestInviteLink() {
+      const link = document.getElementById('guestInviteLinkInput').value;
+      navigator.share({
+        title: 'CrewLogic — guest tester invite',
+        text: "You've been invited to test CrewLogic. Tap to sign in. After signing in, go to Settings and enter your Vonigo credentials to link your franchise.",
+        url: link
+      });
+    }
+
     async function loadTeamMembers() {
       const listEl = document.getElementById('teamMembersList');
       if (!listEl) return;
@@ -4505,7 +4596,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Store token for use after Google sign-in
       storage.set('pending_invite_token', token);
       storage.set('pending_invite_id', invite.id);
-      storage.set('pending_invite_franchise_id', invite.franchise_id);
+      // Guest invites have no franchise_id — store empty string so localStorage
+      // doesn't coerce null to the string "null" (which would later look like
+      // a valid franchise UUID).
+      storage.set('pending_invite_franchise_id', invite.franchise_id || '');
       storage.set('pending_invite_role', invite.role);
 
       return true;
@@ -4525,7 +4619,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function processPendingInvite(userEmail, userName) {
       const token = storage.get('pending_invite_token');
       const inviteId = storage.get('pending_invite_id');
-      const franchiseId = storage.get('pending_invite_franchise_id');
+      // Guest invites store empty string for franchise_id; convert back to null.
+      const rawFranchiseId = storage.get('pending_invite_franchise_id');
+      const franchiseId = (rawFranchiseId && rawFranchiseId !== 'null' && rawFranchiseId !== '') ? rawFranchiseId : null;
       const role = storage.get('pending_invite_role') || 'estimator';
       if (!token || !inviteId) return false;
 
@@ -4534,6 +4630,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       storage.remove('pending_invite_name');
 
       // Create profile for new team member
+      // For guest invites, franchise_id is null — the franchise gets created
+      // and linked when they enter Vonigo credentials in Settings.
       await supabaseFetch('/rest/v1/profiles', {
         method: 'POST',
         body: JSON.stringify({
@@ -4563,6 +4661,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     function applyRoleRestrictions() {
       const role = currentUser.role || 'estimator';
+      const isSuperAdmin = currentUser.email === 'charles.dennis@junkluggers.com';
+
+      // Guest invite card — super-admin only, regardless of role
+      const guestCard = document.getElementById('guestInviteCard');
+      if (guestCard) guestCard.style.display = isSuperAdmin ? 'block' : 'none';
+
       if (role === 'owner') {
         // Show team card
         const teamCard = document.getElementById('teamMembersCard');
@@ -5000,7 +5104,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           action: 'saveVonigoCredentials',
           vonigoUsername: username,
           vonigoPassword: password,
-          franchiseID: currentUser.franchiseID,
+          franchiseID: currentUser.franchiseID || '',
           email: currentUser.email
         });
 
@@ -5009,7 +5113,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           if (data.franchiseID) currentUser.franchiseID = String(data.franchiseID);
           if (data.franchiseName) currentUser.franchiseName = data.franchiseName;
           storage.set(SESSION_KEY, JSON.stringify(currentUser));
-          feedbackEl.textContent = '✓ Credentials saved — franchise ' + (data.franchiseName || data.franchiseID || '');
+
+          // Compose feedback message based on what happened in the Edge Function
+          let msg = '✓ Credentials saved — franchise ' + (data.franchiseName || data.franchiseID || '');
+          if (data.franchiseCreated) {
+            msg = '✓ Franchise linked: ' + data.franchiseName + ' (#' + data.franchiseID + ').';
+            if (data.toolsSeeded > 0) {
+              msg += ' Seeded ' + data.toolsSeeded + ' default tools.';
+            }
+            msg += ' Reloading to refresh your access...';
+          }
+          feedbackEl.textContent = msg;
           feedbackEl.className = 'settings-feedback ok';
           document.getElementById('settingsVonigoPass').value = '';
           document.getElementById('vonigoForm').style.display = 'none';
@@ -5017,6 +5131,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           document.getElementById('vonigoChangeLink').textContent = 'Change';
           updatePriceLookupCardState();
           populateSettings(); // refresh badge
+
+          // If a new franchise was created (guest tester first-time setup),
+          // reload to pick up the new franchise context, tools, settings, etc.
+          if (data.franchiseCreated) {
+            setTimeout(() => { window.location.reload(); }, 2000);
+          }
         } else {
           feedbackEl.textContent = data.error || 'Failed to save. Check credentials and try again.';
           feedbackEl.className = 'settings-feedback error';
@@ -5355,7 +5475,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.62 | 2026-05-15 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.65 | 2026-05-17 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6234,6 +6354,50 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return 'photo_' + estimateID + '_' + chargeIdx + '_' + timestamp;
     }
 
+    // Generate a stable photoID for a photo captured BEFORE a charge exists
+    // (photo-room flow — AI creates the charge afterwards from the photos).
+    // The photo gets reassigned to its real chargeIdx after analysis completes.
+    function makeUnassignedPhotoID(estimateID, timestamp, suffix) {
+      return 'photo_' + estimateID + '_unassigned_' + timestamp + '_' + suffix;
+    }
+
+    // Reassign an unassigned photo's chargeIdx after the charge is created.
+    // Returns the updated record.
+    async function idbReassignChargeIdx(photoID, newChargeIdx) {
+      const record = await idbGet(photoID);
+      if (!record) return null;
+      const updated = { ...record, chargeIdx: newChargeIdx };
+      await idbPut(updated);
+      return updated;
+    }
+
+    // Captures a photo to IndexedDB for the photo room flow (no charge yet exists).
+    // Returns the photoID so the caller can track it and reassign to a charge later.
+    async function queueUnassignedPhotoForRoom(base64, hiRes, suffix) {
+      const estimateID = currentEstimate.estimateID;
+      const timestamp  = Date.now();
+      const photoID    = makeUnassignedPhotoID(estimateID, timestamp, suffix);
+
+      const record = {
+        photoID,
+        estimateID,
+        chargeIdx: -1, // unassigned — will be reassigned when AI creates the charge
+        label: 'room_' + suffix,
+        base64: hiRes || base64, // store the higher-res version (1920x1440) for upload
+        status: 'pending',
+        supabasePath: null,
+        createdAt: new Date().toISOString()
+      };
+
+      // Write to IndexedDB FIRST — durable before any upload attempt
+      await idbPut(record);
+
+      // Fire background upload — non-blocking, retries on failure
+      _uploadPhotoFromQueue(photoID);
+
+      return photoID;
+    }
+
     // Called immediately when user captures a photo.
     // Writes to IndexedDB first (safe), then fires background upload.
     async function queuePhotoCapture(chargeIdx, base64) {
@@ -6418,6 +6582,26 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     window.addEventListener('online', () => {
       console.log('Network restored — draining photo queue');
       drainPhotoQueue();
+    });
+
+    // Periodic drain — retries any photo stuck in pending state every 30s.
+    // Belt-and-suspenders against transient Supabase Storage errors that
+    // wouldn't trigger an "online" event. Drain is idempotent (the _draining
+    // flag prevents overlapping runs).
+    setInterval(() => {
+      drainPhotoQueue().catch(() => {});
+    }, 30000);
+
+    // Guard against tab close while photos are uploading. Photos in IDB will
+    // survive the close, but the in-memory base64 used by the photo room panel
+    // won't — better to warn the user. Also catches the case where the user
+    // navigates away from an estimate before background uploads finish.
+    window.addEventListener('beforeunload', (e) => {
+      if (_pendingUploads > 0) {
+        e.preventDefault();
+        e.returnValue = 'Photos are still uploading. Closing now may delay sync. Are you sure?';
+        return e.returnValue;
+      }
     });
     let _lookupSessionID = 0; // incremented on each estimate open — stale lookups can check this
     let priceBlocks = [];
@@ -8223,7 +8407,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       overlay.appendChild(spinner);
       document.body.appendChild(overlay);
       try {
-        let src = await resolvePhotoUrl(url);
+        let src = await resolvePhotoRef(url);
         // Convert legacy Drive export URLs to lh3 proxy for full-size viewing
         if (src && (src.includes('drive.google.com/uc') || src.includes('drive.google.com/file'))) {
           const m = src.match(/[?&]id=([^&]+)/) || src.match(/\/d\/([a-zA-Z0-9_-]+)/);
@@ -8267,7 +8451,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       img.style.cssText = 'max-width:95vw;max-height:90vh;object-fit:contain;border-radius:8px;';
       overlay.appendChild(img);
       document.body.appendChild(overlay);
-      const src = await resolvePhotoUrl(rawUrl);
+      const src = await resolvePhotoRef(rawUrl);
       if (src) img.src = src;
     }
 
@@ -9776,14 +9960,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               delete p.priceBook;
               delete p.row_number;
               delete p.costAnalysis;
-              // Strip base64 photos from charges — only keep Supabase paths and Drive URLs
-              // Base64 is temporary until upload completes; don't persist it to Supabase
+              // Strip base64 photos from charges — only keep Supabase paths and Drive URLs.
+              // Base64 is temporary until upload completes; don't persist it to Supabase.
+              // CRITICAL: if base64 gets stripped here AND the upload never completes,
+              // the photo is lost forever on next reload. Log loudly when this happens
+              // so we can detect silent upload failures.
               if (p.charges) {
-                p.charges = p.charges.map(c => {
+                p.charges = p.charges.map((c, idx) => {
                   if (!c.photos) return c;
-                  // Keep Supabase paths and IDB photoID placeholders; strip raw base64
                   const safePics = c.photos.filter(ph => ph && !ph.startsWith('data:'));
-                  return safePics.length === c.photos.length ? c : Object.assign({}, c, { photos: safePics });
+                  if (safePics.length !== c.photos.length) {
+                    const stripped = c.photos.length - safePics.length;
+                    console.warn(
+                      '[saveEstimate] Stripped ' + stripped + ' base64 photo(s) from charge[' + idx +
+                      '] (' + (c.area || '?') + '/' + (c.room || '?') + ') - upload may still be in flight. ' +
+                      'If upload fails before next save, these photos will be LOST.'
+                    );
+                    return Object.assign({}, c, { photos: safePics });
+                  }
+                  return c;
                 });
               }
               // collapseState stays in payload for cross-device sync
@@ -13014,9 +13209,14 @@ RECYCLING & DONATION
     function closePhotoPanel() {
       document.getElementById('photoRoomPanel').style.display = 'none';
 
-      // If photos were taken but not analyzed, save them as a blank charge row
+      // If photos were taken but not analyzed, save them as a blank charge row.
+      // Use photoIDs (IndexedDB references) as the durable links — NEVER base64.
+      // The drain queue is already uploading them in the background.
       if (photoRoomPending.length > 0) {
-        const photos = photoRoomPending.map(p => p.driveUrl || p.base64);
+        const newChargeIdx = currentEstimate.charges.length;
+        // Each pending entry has photoID from IDB capture. Use those as the
+        // stable references — they survive upload failure, tab close, etc.
+        const photoRefs = photoRoomPending.map(p => p.driveUrl || p.photoID).filter(Boolean);
         currentEstimate.charges.push({
           type: 'volume',
           room: '',
@@ -13026,7 +13226,15 @@ RECYCLING & DONATION
           truckLabel: '',
           truckQty: 1,
           truckVolume: 0,
-          photos: photos
+          photos: photoRefs
+        });
+        // Reassign each unassigned IDB record to the new chargeIdx.
+        // This lets mergeQueuedPhotosIntoEstimate() find them on reload.
+        photoRoomPending.forEach(p => {
+          if (p.photoID) {
+            idbReassignChargeIdx(p.photoID, newChargeIdx).catch(e =>
+              console.warn('[closePhotoPanel] reassign chargeIdx failed:', e));
+          }
         });
         renderCharges();
         updateTotals();
@@ -13036,8 +13244,8 @@ RECYCLING & DONATION
         const voiceStatus = document.getElementById('roomVoiceStatus');
         voiceStatus.style.display = 'block';
         voiceStatus.style.background = 'rgba(0,238,118,0.1)';
-        voiceStatus.innerHTML = '<span style="color:var(--accent-green);font-weight:600;">📷 ' + photos.length + ' photo' +
-          (photos.length !== 1 ? 's' : '') + ' saved</span> — add room name, area and volume, or tap 🤖 Analyze later.';
+        voiceStatus.innerHTML = '<span style="color:var(--accent-green);font-weight:600;">📷 ' + photoRefs.length + ' photo' +
+          (photoRefs.length !== 1 ? 's' : '') + ' saved</span> — add room name, area and volume, or tap 🤖 Analyze later.';
         setTimeout(() => { voiceStatus.style.display = 'none'; }, 6000);
       }
 
@@ -13074,9 +13282,32 @@ RECYCLING & DONATION
         const compressed = await compressChargePhoto(base64);
         const analysisImg = await compressForAnalysis(base64);
         const idx = photoRoomPending.length;
-        photoRoomPending.push({ base64: analysisImg, hiRes: compressed, driveUrl: null });
+        const suffix = String(idx);
+
+        // CRITICAL: write photo to IndexedDB BEFORE pushing to pending array.
+        // This is the durability anchor — if any subsequent step fails (tab
+        // close, network drop, app crash) the photo survives in IDB and the
+        // drain queue will retry upload until it succeeds.
+        let photoID = null;
+        try {
+          photoID = await queueUnassignedPhotoForRoom(analysisImg, compressed, suffix);
+        } catch(e) {
+          console.error('[handlePhotoRoomCapture] IDB write failed - aborting capture:', e);
+          statusEl.textContent = '⚠️ Failed to save photo locally — please retry.';
+          continue;
+        }
+
+        photoRoomPending.push({
+          base64: analysisImg,    // displayed in thumb
+          hiRes: compressed,      // sent to Supabase (kept in memory only for analyze pass)
+          driveUrl: null,         // populated when upload completes
+          photoID                 // IDB record key — survives across sessions
+        });
         renderPhotoRoomThumbs();
-        uploadPhotoRoomToDrive(idx, compressed);
+        // Background upload is already queued by queueUnassignedPhotoForRoom().
+        // We watch IDB status changes via the existing drain/poll mechanism
+        // and update photoRoomPending[idx].driveUrl when upload completes.
+        _watchPhotoForCompletion(idx, photoID);
       }
 
       const count = photoRoomPending.length;
@@ -13093,6 +13324,36 @@ RECYCLING & DONATION
         analyzeBtn3.style.opacity = '0.5';
         analyzeBtn3.textContent = '⏳ Uploading 0/' + photoRoomPending.length + '...';
       }
+    }
+
+    // Poll IDB for a specific photo's upload completion, then update the
+    // photoRoomPending entry so the UI shows it as uploaded.
+    async function _watchPhotoForCompletion(idx, photoID) {
+      const POLL_MS = 1500;
+      const MAX_POLLS = 200; // 5 minutes — handle slow networks
+      let polls = 0;
+      const loop = async () => {
+        polls++;
+        const rec = await idbGet(photoID).catch(() => null);
+        // Pending array may have shifted if user removed a photo — find by photoID
+        const pendingIdx = photoRoomPending.findIndex(p => p && p.photoID === photoID);
+        if (pendingIdx === -1) return; // photo was removed — stop polling
+        if (rec && rec.status === 'uploaded' && rec.supabasePath) {
+          photoRoomPending[pendingIdx].driveUrl = rec.supabasePath;
+          photoRoomPending[pendingIdx].uploadFailed = false;
+          renderPhotoRoomThumbs();
+          return;
+        }
+        if (polls >= MAX_POLLS) {
+          // Upload truly stuck — mark as failed for the UI, but the photo is
+          // STILL safe in IDB and the drain queue will keep retrying.
+          photoRoomPending[pendingIdx].uploadFailed = true;
+          renderPhotoRoomThumbs();
+          return;
+        }
+        setTimeout(loop, POLL_MS);
+      };
+      setTimeout(loop, POLL_MS);
     }
 
     function _renderOverlayThumbs(photos) {
@@ -13185,15 +13446,18 @@ RECYCLING & DONATION
       }
       container.innerHTML = photoRoomPending.map((p, i) =>
         '<div style="position:relative;width:64px;height:64px;flex-shrink:0;">' +
-          '<img src="' + p.base64 + '" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border);display:block;">' +
-          (p.driveUrl
-            ? '<div title="Uploaded" style="position:absolute;bottom:2px;right:2px;width:10px;height:10px;background:#00EE76;border-radius:50%;border:1px solid #000;"></div>'
-            : '<div title="Uploading..." style="position:absolute;bottom:2px;right:2px;width:10px;height:10px;background:#fbbf24;border-radius:50%;border:1px solid #000;"></div>') +
+          '<img src="' + p.base64 + '" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid ' + (p.uploadFailed ? '#ef4444' : 'var(--border)') + ';display:block;">' +
+          (p.uploadFailed
+            ? '<div title="Upload failed — retake photo" style="position:absolute;bottom:2px;right:2px;width:10px;height:10px;background:#ef4444;border-radius:50%;border:1px solid #000;"></div>'
+            : p.driveUrl
+              ? '<div title="Uploaded" style="position:absolute;bottom:2px;right:2px;width:10px;height:10px;background:#00EE76;border-radius:50%;border:1px solid #000;"></div>'
+              : '<div title="Uploading..." style="position:absolute;bottom:2px;right:2px;width:10px;height:10px;background:#fbbf24;border-radius:50%;border:1px solid #000;"></div>') +
           '<button onclick="removePhotoRoomPhoto(' + i + ')" style="position:absolute;top:-4px;right:-4px;width:18px;height:18px;background:#ef4444;border:none;border-radius:50%;color:#fff;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;">✕</button>' +
         '</div>'
       ).join('') +
       '<div style="font-size:10px;color:var(--text-muted);margin-top:4px;width:100%;">' +
-        (photoRoomPending.every(p => p.driveUrl) ? '✓ All uploaded' :
+        (photoRoomPending.some(p => p.uploadFailed) ? '<span style="color:#ff7676;">⚠️ Some uploads failed — retake those photos</span>' :
+         photoRoomPending.every(p => p.driveUrl) ? '✓ All uploaded' :
          '🟡 Uploading...') +
       '</div>';
       // Update analyze button based on upload state
@@ -13242,6 +13506,7 @@ RECYCLING & DONATION
         // Update pending array if panel is still open
         if (photoRoomPending[idx]) {
           photoRoomPending[idx].driveUrl = path;
+          photoRoomPending[idx].uploadFailed = false;
           renderPhotoRoomThumbs();
         }
         // Also replace base64 with Supabase path in any charge rows that have it
@@ -13259,7 +13524,21 @@ RECYCLING & DONATION
           autoSaveDraft();
         }
       } catch(e) {
-        console.warn('Photo room upload failed:', e);
+        console.error('[uploadPhotoRoomToDrive] FAILED for idx=' + idx + ':', e);
+        // Mark in pending so UI can show error indicator
+        if (photoRoomPending[idx]) {
+          photoRoomPending[idx].uploadFailed = true;
+          photoRoomPending[idx].uploadError = (e && e.message) || String(e);
+          renderPhotoRoomThumbs();
+        }
+        // Visible feedback so the user knows the photo is at risk
+        const voiceStatus = document.getElementById('roomVoiceStatus');
+        if (voiceStatus) {
+          voiceStatus.style.display = 'block';
+          voiceStatus.style.background = 'rgba(239,68,68,0.15)';
+          voiceStatus.innerHTML = '<span style="color:#ff7676;font-weight:600;">⚠️ Photo upload failed</span> — please retry by re-taking the photo or check your connection.';
+          setTimeout(() => { voiceStatus.style.display = 'none'; }, 8000);
+        }
       } finally {
         _pendingUploads = Math.max(0, _pendingUploads - 1);
         // Always save when all uploads complete — Supabase paths must replace base64 in payload
@@ -13309,17 +13588,22 @@ RECYCLING & DONATION
         if (data.success) {
           const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
           let addedCount = 0;
-          const currentPhotos = photoRoomPending.map(p => p.driveUrl || p.base64);
+          // Build durable photo references: prefer Supabase path if already uploaded,
+          // otherwise photoID (IDB reference). NEVER base64 — that's not durable.
+          const currentPhotos = photoRoomPending.map(p => p.driveUrl || p.photoID).filter(Boolean);
+          // Snapshot photoIDs separately for reassignment after the charge is created
+          const photoIDsForReassign = photoRoomPending.map(p => p.photoID).filter(Boolean);
 
           charges.forEach(charge => {
             if (charge.type === 'volume') {
               // Check if closePhotoPanel already created a blank row with these photos
-              // If so, update it in place rather than adding a duplicate
+              // If so, update it in place rather than adding a duplicate.
+              // Match by ANY shared photo reference (photoID or path) since either may be present.
               const existingIdx = currentEstimate.charges.findIndex(ec =>
                 ec.type === 'volume' &&
                 !ec.truckLabel &&
                 ec.photos && ec.photos.length > 0 &&
-                ec.photos[0] === currentPhotos[0]
+                ec.photos.some(p => currentPhotos.includes(p))
               );
 
               if (existingIdx !== -1) {
@@ -13332,8 +13616,14 @@ RECYCLING & DONATION
                 ec.truckLabel  = charge.truckLabel || '';
                 ec.truckQty    = charge.truckQty || 1;
                 ec.truckVolume = charge.truckVolume || 0;
+                // Reassign IDB records to point at this charge index
+                photoIDsForReassign.forEach(pid => {
+                  idbReassignChargeIdx(pid, existingIdx).catch(e =>
+                    console.warn('[analyzeRoomPhotos] reassign chargeIdx failed:', e));
+                });
               } else {
-                // No existing row — push new one
+                // No existing row — push new one with photoID references
+                const newChargeIdx = currentEstimate.charges.length;
                 currentEstimate.charges.push({
                   type: 'volume',
                   room: charge.room || '',
@@ -13344,6 +13634,11 @@ RECYCLING & DONATION
                   truckQty: charge.truckQty || 1,
                   truckVolume: charge.truckVolume || 0,
                   photos: currentPhotos
+                });
+                // Reassign IDB records to point at this new charge index
+                photoIDsForReassign.forEach(pid => {
+                  idbReassignChargeIdx(pid, newChargeIdx).catch(e =>
+                    console.warn('[analyzeRoomPhotos] reassign chargeIdx failed:', e));
                 });
               }
               addedCount++;
