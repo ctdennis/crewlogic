@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.65 | 2026-05-17">
+  <meta name="crewlogic-version" content="v5.9.66 | 2026-05-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1024,7 +1024,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.65 | 2026-05-17 -->
+<!-- CrewLogic v5.9.66 | 2026-05-20 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -1267,6 +1267,7 @@
           <button class="settings-tab" id="stab-proposal" onclick="showSettingsTab('proposal')">📄 Proposal</button>
           <button class="settings-tab" id="stab-pricing" onclick="showSettingsTab('pricing')">★ Pricing</button>
           <button class="settings-tab" id="stab-signs" onclick="showSettingsTab('signs')">🪧 Yard Signs</button>
+          <button class="settings-tab" id="stab-tools" onclick="showSettingsTab('tools')">🛠 Tools</button>
           <button class="settings-tab" id="stab-account" onclick="showSettingsTab('account')">⚙️ Account</button>
         </div>
 
@@ -1741,6 +1742,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <div id="signsSettingsContent">Loading...</div>
           </div>
         </div><!-- end signs tab -->
+
+        <!-- TAB: Tools -->
+        <div id="stab-content-tools" style="display:none;">
+          <div class="settings-card fade-in fade-in-delay-2">
+            <div class="settings-card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+              <span>Tools Inventory</span>
+              <button onclick="showToolEditor(null)" style="padding:6px 14px;background:var(--accent-green);color:var(--bg-primary);border:none;border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;">+ Add Tool</button>
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">
+              The Job Plan AI uses this list to recommend which tools to load for each route. Tools marked "on truck" are always available — specialty tools get called out per stop when needed.
+            </div>
+            <div id="toolsSummary" style="font-size:11px;color:var(--text-muted);margin-bottom:14px;"></div>
+            <div id="toolEditorPanel" style="display:none;margin-bottom:16px;"></div>
+            <div id="toolsList">Loading…</div>
+          </div>
+        </div><!-- end tools tab -->
 
       </div>
 
@@ -5475,7 +5492,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.65 | 2026-05-17 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.66 | 2026-05-20 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -13892,7 +13909,7 @@ RECYCLING & DONATION
 
     // ===== SETTINGS TABS =====
     function showSettingsTab(tab) {
-      ['franchise','cost','proposal','account','pricing','signs'].forEach(t => {
+      ['franchise','cost','proposal','account','pricing','signs','tools'].forEach(t => {
         const el = document.getElementById('stab-content-' + t);
         if (el) el.style.display = t === tab ? 'block' : 'none';
         const btn = document.getElementById('stab-' + t);
@@ -13904,6 +13921,8 @@ RECYCLING & DONATION
       if (tab === 'pricing') loadCustomerPricingList();
       // Render yard signs settings
       if (tab === 'signs') renderSignsSettingsTab();
+      // Render tools inventory
+      if (tab === 'tools') renderToolsTab();
     }
 
     // ===== PROPOSAL SETTINGS =====
@@ -17083,6 +17102,222 @@ Please review the estimate below. If you have any questions or would like to adj
     }
 
     // Renders the signs settings into the global Settings → Yard Signs tab.
+    // ===== TOOLS SETTINGS TAB =====
+    const TOOL_CATEGORIES = ['Hand Tool', 'Power Tool', 'PPE', 'Safety Equipment', 'Vehicle Accessory', 'Other'];
+    let _toolsCache = null;       // last fetch of the franchise's tools
+    let _toolEditing = null;       // the tool currently being edited (null = adding new)
+
+    async function renderToolsTab() {
+      const summaryEl = document.getElementById('toolsSummary');
+      const listEl = document.getElementById('toolsList');
+      if (!summaryEl || !listEl) return;
+      // Hide any open editor
+      document.getElementById('toolEditorPanel').style.display = 'none';
+      _toolEditing = null;
+
+      listEl.innerHTML = 'Loading…';
+      summaryEl.textContent = '';
+
+      const franchiseUUID = currentUser.franchiseInternalID;
+      if (!franchiseUUID) {
+        listEl.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:14px;">No franchise linked yet. Set up Vonigo credentials first.</div>';
+        return;
+      }
+
+      try {
+        const rows = await supabaseFetch(
+          '/rest/v1/tools?franchise_id=eq.' + franchiseUUID +
+          '&order=is_on_truck.desc,name.asc'
+        );
+        _toolsCache = rows || [];
+      } catch (e) {
+        listEl.innerHTML = '<div style="color:#ff7676;font-size:12px;padding:14px;">Couldn\'t load tools: ' + (e.message || e) + '</div>';
+        return;
+      }
+
+      const active = _toolsCache.filter(t => t.is_active);
+      const inactive = _toolsCache.filter(t => !t.is_active);
+      const onTruck = active.filter(t => t.is_on_truck);
+      const specialty = active.filter(t => !t.is_on_truck);
+
+      summaryEl.textContent =
+        active.length + ' active' +
+        ' — ' + onTruck.length + ' always on truck, ' +
+        specialty.length + ' specialty' +
+        (inactive.length ? ' (' + inactive.length + ' inactive)' : '');
+
+      const renderRow = (t) => {
+        const safeName = String(t.name || '').replace(/[<>&"']/g, ch =>
+          ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'})[ch]);
+        const safeUseCase = String(t.use_case || '').replace(/[<>&"']/g, ch =>
+          ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'})[ch]);
+        const opacity = t.is_active ? '1' : '0.5';
+        return (
+          '<div style="display:flex;align-items:flex-start;gap:8px;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px;opacity:' + opacity + ';">' +
+            '<div style="flex:1;min-width:0;">' +
+              '<div style="font-size:13px;font-weight:600;color:var(--text-primary);">' + safeName +
+                (t.category ? ' <span style="font-size:10px;color:var(--text-muted);font-weight:400;">· ' + t.category + '</span>' : '') +
+                (!t.is_active ? ' <span style="font-size:10px;color:var(--accent-yellow);">(inactive)</span>' : '') +
+              '</div>' +
+              (safeUseCase ? '<div style="font-size:11px;color:var(--text-muted);margin-top:3px;line-height:1.4;">' + safeUseCase + '</div>' : '') +
+            '</div>' +
+            '<div style="display:flex;gap:4px;flex-shrink:0;">' +
+              '<button onclick="showToolEditor(\'' + t.id + '\')" title="Edit" style="padding:5px 9px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;font-size:11px;color:var(--text-secondary);cursor:pointer;">Edit</button>' +
+              '<button onclick="deleteTool(\'' + t.id + '\')" title="Delete" style="padding:5px 9px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;font-size:11px;color:#ff7676;cursor:pointer;">✕</button>' +
+            '</div>' +
+          '</div>'
+        );
+      };
+
+      let html = '';
+      if (onTruck.length > 0) {
+        html += '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin:14px 0 6px;">Always on truck</div>';
+        html += onTruck.map(renderRow).join('');
+      }
+      if (specialty.length > 0) {
+        html += '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin:14px 0 6px;">Specialty — load as needed</div>';
+        html += specialty.map(renderRow).join('');
+      }
+      if (inactive.length > 0) {
+        html += '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin:14px 0 6px;">Inactive</div>';
+        html += inactive.map(renderRow).join('');
+      }
+      if (active.length === 0 && inactive.length === 0) {
+        html = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">No tools yet. Tap <strong>+ Add Tool</strong> to add your first one.</div>';
+      }
+
+      listEl.innerHTML = html;
+    }
+
+    function showToolEditor(toolID) {
+      // toolID = null means "add new"; otherwise find the tool to edit
+      _toolEditing = toolID ? (_toolsCache || []).find(t => t.id === toolID) : null;
+      const isEdit = !!_toolEditing;
+      const t = _toolEditing || {
+        name: '', category: 'Hand Tool', description: '', use_case: '',
+        is_on_truck: false, is_active: true
+      };
+      const panel = document.getElementById('toolEditorPanel');
+      const escAttr = (s) => String(s || '').replace(/[<>&"']/g, ch =>
+        ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'})[ch]);
+
+      panel.style.display = 'block';
+      panel.innerHTML =
+        '<div style="background:var(--bg-card);border:1px solid var(--accent-green);border-radius:var(--radius-sm);padding:14px;">' +
+          '<div style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--accent-green);">' +
+            (isEdit ? 'Edit tool' : 'Add new tool') +
+          '</div>' +
+          '<div class="settings-input-group" style="margin-bottom:10px;">' +
+            '<label class="settings-input-label">Name *</label>' +
+            '<input type="text" class="form-input" id="toolEditName" value="' + escAttr(t.name) + '" placeholder="e.g. Sledge Hammer">' +
+          '</div>' +
+          '<div class="settings-input-group" style="margin-bottom:10px;">' +
+            '<label class="settings-input-label">Category</label>' +
+            '<select class="form-input" id="toolEditCategory">' +
+              TOOL_CATEGORIES.map(c => '<option value="' + c + '"' + (c === t.category ? ' selected' : '') + '>' + c + '</option>').join('') +
+            '</select>' +
+          '</div>' +
+          '<div class="settings-input-group" style="margin-bottom:10px;">' +
+            '<label class="settings-input-label">Description <span style="color:var(--text-muted);font-weight:400;">(short, what it is)</span></label>' +
+            '<input type="text" class="form-input" id="toolEditDescription" value="' + escAttr(t.description) + '" placeholder="e.g. Long-handle 10lb sledge">' +
+          '</div>' +
+          '<div class="settings-input-group" style="margin-bottom:10px;">' +
+            '<label class="settings-input-label">Use case <span style="color:var(--text-muted);font-weight:400;">(when AI should recommend it)</span></label>' +
+            '<textarea class="form-input" id="toolEditUseCase" placeholder="e.g. Demolition of small structures, breaking up concrete, knocking down basement walls. There is only ONE." style="min-height:60px;font-family:inherit;">' + escAttr(t.use_case) + '</textarea>' +
+          '</div>' +
+          '<div style="display:flex;gap:14px;margin-bottom:14px;flex-wrap:wrap;">' +
+            '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">' +
+              '<input type="checkbox" id="toolEditOnTruck"' + (t.is_on_truck ? ' checked' : '') + '> Always on truck' +
+            '</label>' +
+            '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">' +
+              '<input type="checkbox" id="toolEditActive"' + (t.is_active !== false ? ' checked' : '') + '> Active' +
+            '</label>' +
+          '</div>' +
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+            '<button onclick="saveTool()" style="padding:8px 16px;background:var(--accent-green);color:var(--bg-primary);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;">' +
+              (isEdit ? '💾 Save' : '+ Add') +
+            '</button>' +
+            '<button onclick="cancelToolEdit()" style="padding:8px 16px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;cursor:pointer;">Cancel</button>' +
+          '</div>' +
+          '<div id="toolEditFeedback" style="font-size:12px;margin-top:8px;"></div>' +
+        '</div>';
+      // Focus the name field for quick entry
+      setTimeout(() => { document.getElementById('toolEditName').focus(); }, 50);
+      // Scroll panel into view
+      panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function cancelToolEdit() {
+      document.getElementById('toolEditorPanel').style.display = 'none';
+      _toolEditing = null;
+    }
+
+    async function saveTool() {
+      const name = document.getElementById('toolEditName').value.trim();
+      const category = document.getElementById('toolEditCategory').value;
+      const description = document.getElementById('toolEditDescription').value.trim();
+      const useCase = document.getElementById('toolEditUseCase').value.trim();
+      const isOnTruck = document.getElementById('toolEditOnTruck').checked;
+      const isActive = document.getElementById('toolEditActive').checked;
+      const feedback = document.getElementById('toolEditFeedback');
+
+      if (!name) {
+        feedback.textContent = 'Name is required';
+        feedback.style.color = '#ff7676';
+        return;
+      }
+
+      feedback.textContent = 'Saving…';
+      feedback.style.color = 'var(--text-muted)';
+
+      const payload = {
+        name, category, description, use_case: useCase,
+        is_on_truck: isOnTruck, is_active: isActive
+      };
+
+      try {
+        if (_toolEditing) {
+          // PATCH existing
+          await supabaseFetch('/rest/v1/tools?id=eq.' + _toolEditing.id, {
+            method: 'PATCH',
+            headers: { 'Prefer': 'return=minimal' },
+            body: JSON.stringify(payload)
+          });
+        } else {
+          // POST new — needs tenant_id and franchise_id
+          payload.tenant_id = currentUser.tenantID || '946a4535-aa61-45b6-a6fb-9190ff546d41';
+          payload.franchise_id = currentUser.franchiseInternalID;
+          await supabaseFetch('/rest/v1/tools', {
+            method: 'POST',
+            headers: { 'Prefer': 'return=minimal' },
+            body: JSON.stringify(payload)
+          });
+        }
+        document.getElementById('toolEditorPanel').style.display = 'none';
+        _toolEditing = null;
+        await renderToolsTab();
+      } catch (e) {
+        feedback.textContent = 'Save failed: ' + (e.message || e);
+        feedback.style.color = '#ff7676';
+      }
+    }
+
+    async function deleteTool(toolID) {
+      const tool = (_toolsCache || []).find(t => t.id === toolID);
+      const label = tool ? tool.name : 'this tool';
+      if (!confirm('Delete "' + label + '"? This cannot be undone. (Tip: you can mark a tool Inactive instead, which hides it from the AI but keeps the row.)')) return;
+
+      try {
+        await supabaseFetch('/rest/v1/tools?id=eq.' + toolID, {
+          method: 'DELETE',
+          headers: { 'Prefer': 'return=minimal' }
+        });
+        await renderToolsTab();
+      } catch (e) {
+        alert('Delete failed: ' + (e.message || e));
+      }
+    }
+
     function renderSignsSettingsTab() {
       const container = document.getElementById('signsSettingsContent');
       if (!container) return;
