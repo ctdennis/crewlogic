@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.66 | 2026-05-20">
+  <meta name="crewlogic-version" content="v5.9.67 | 2026-05-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1024,7 +1024,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.66 | 2026-05-20 -->
+<!-- CrewLogic v5.9.67 | 2026-05-20 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -3673,7 +3673,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           ...(opts.headers || {})
         }
       });
-      return res.json();
+      // Tolerate empty bodies (e.g. 204 No Content from Prefer: return=minimal,
+      // or DELETE responses). Without this, res.json() throws on empty body.
+      const text = await res.text();
+      if (!text) {
+        // For non-2xx empty responses, still surface an error
+        if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + res.statusText);
+        return null;
+      }
+      try {
+        return JSON.parse(text);
+      } catch (e) {
+        // Body was non-empty but not JSON (rare — usually only error pages)
+        if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + text.slice(0, 200));
+        return text;
+      }
     }
 
 
@@ -5492,7 +5506,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.66 | 2026-05-20 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.67 | 2026-05-20 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
