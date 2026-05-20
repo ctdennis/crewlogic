@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.67 | 2026-05-20">
+  <meta name="crewlogic-version" content="v5.9.68 | 2026-05-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1024,7 +1024,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.67 | 2026-05-20 -->
+<!-- CrewLogic v5.9.68 | 2026-05-20 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -5506,7 +5506,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.67 | 2026-05-20 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.68 | 2026-05-20 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -17281,6 +17281,26 @@ Please review the estimate below. If you have any questions or would like to adj
         return;
       }
 
+      // Pre-flight duplicate check — case-insensitive, scoped to this franchise,
+      // active rows only (matches the DB unique index). Skip if editing the
+      // tool whose name didn't change.
+      if (isActive) {
+        const editingID = _toolEditing ? _toolEditing.id : null;
+        const lowered = name.toLowerCase();
+        const dup = (_toolsCache || []).find(t =>
+          t.is_active && t.id !== editingID && (t.name || '').toLowerCase() === lowered
+        );
+        if (dup) {
+          feedback.innerHTML =
+            'A tool named <strong>' + escapeHtml(dup.name) + '</strong> already exists. ' +
+            'Use a different name, or ' +
+            '<a href="#" onclick="cancelToolEdit();showToolEditor(\'' + dup.id + '\');return false;" ' +
+            'style="color:var(--accent-green);">edit the existing one</a>.';
+          feedback.style.color = '#ff7676';
+          return;
+        }
+      }
+
       feedback.textContent = 'Saving…';
       feedback.style.color = 'var(--text-muted)';
 
@@ -17311,9 +17331,22 @@ Please review the estimate below. If you have any questions or would like to adj
         _toolEditing = null;
         await renderToolsTab();
       } catch (e) {
-        feedback.textContent = 'Save failed: ' + (e.message || e);
+        // Surface duplicate-name violations cleanly if the DB unique index catches one
+        // that slipped past the pre-flight check (race condition between users).
+        const msg = String(e.message || e);
+        if (msg.indexOf('tools_unique_name_per_franchise') !== -1 || msg.indexOf('23505') !== -1) {
+          feedback.textContent = 'A tool with this name already exists. Refresh and try again.';
+        } else {
+          feedback.textContent = 'Save failed: ' + msg;
+        }
         feedback.style.color = '#ff7676';
       }
+    }
+
+    // Small helper so the duplicate error can inline an HTML link safely
+    function escapeHtml(s) {
+      return String(s || '').replace(/[<>&"']/g, ch =>
+        ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'})[ch]);
     }
 
     async function deleteTool(toolID) {
