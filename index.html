@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.73 | 2026-05-21">
+  <meta name="crewlogic-version" content="v5.9.75 | 2026-05-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1024,7 +1024,7 @@
   </style>
 </head>
 <body>
-<!-- CrewLogic v5.9.73 | 2026-05-21 -->
+<!-- CrewLogic v5.9.75 | 2026-05-21 -->
 
   <!-- ===== LOGIN SCREEN ===== -->
   <div class="login-screen" id="loginScreen">
@@ -5507,7 +5507,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let priceBlockStates = {};
     let lastPriceData = null;
 
-    console.log('%c CrewLogic v5.9.73 | 2026-05-21 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
+    console.log('%c CrewLogic v5.9.75 | 2026-05-21 ', 'background:#00EE76;color:#000;font-weight:bold;border-radius:3px;padding:2px 6px;');
 
     document.addEventListener('DOMContentLoaded', function() {
       const zipInput = document.getElementById('priceZipInput');
@@ -6381,6 +6381,38 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       });
     }
 
+    // Recovers records stuck in 'uploading' state — usually from a previous
+    // session where the upload completed (supabasePath was written) but the
+    // status flip to 'uploaded' didn't happen, or where the tab was closed
+    // mid-upload. We salvage what we can:
+    //   - supabasePath present → upload finished, just flip status
+    //   - supabasePath missing → upload didn't complete, revert to pending
+    //     so the drain queue retries it
+    async function recoverOrphanedUploadingPhotos() {
+      const db = await openPhotoDB();
+      const all = await new Promise((resolve, reject) => {
+        const tx = db.transaction(PHOTO_STORE, 'readonly');
+        const req = tx.objectStore(PHOTO_STORE).index('by_status').getAll('uploading');
+        req.onsuccess = e => resolve(e.target.result || []);
+        req.onerror   = e => reject(e.target.error);
+      });
+      if (!all.length) return 0;
+      console.log('[orphan recovery] found ' + all.length + ' stuck uploading records');
+      let salvaged = 0;
+      let retried = 0;
+      for (const record of all) {
+        if (record.supabasePath) {
+          await idbPut({ ...record, status: 'uploaded', base64: null });
+          salvaged++;
+        } else {
+          await idbPut({ ...record, status: 'pending' });
+          retried++;
+        }
+      }
+      console.log('[orphan recovery] salvaged ' + salvaged + ', re-queued ' + retried);
+      return salvaged + retried;
+    }
+
     // Generate a stable photoID for a given estimate + charge + position
     function makePhotoID(estimateID, chargeIdx, timestamp) {
       return 'photo_' + estimateID + '_' + chargeIdx + '_' + timestamp;
@@ -6502,6 +6534,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (_pendingUploads === 0 && isDirty) {
           saveEstimateDraft();
         }
+        // Refresh the badge so it reflects the latest IDB state — otherwise
+        // the last completed upload leaves a stale count visible until the
+        // next page navigation or new capture.
+        updatePendingPhotoBadge();
       }
     }
 
@@ -6511,8 +6547,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (_draining) return;
       _draining = true;
       try {
+        // Salvage any records stuck in 'uploading' from a prior session — these
+        // either need a status flip (if supabasePath is present) or a revert to
+        // 'pending' so we retry the upload.
+        await recoverOrphanedUploadingPhotos().catch(() => {});
+
         const pending = await idbGetAllPending();
-        if (!pending.length) return;
+        if (!pending.length) {
+          // Even with nothing to upload, the badge may be showing a stale count
+          // (from orphan recovery flipping records from 'uploading' to 'uploaded'),
+          // so refresh it.
+          updatePendingPhotoBadge();
+          return;
+        }
         console.log('Photo queue: draining ' + pending.length + ' pending photos');
         for (const record of pending) {
           await _uploadPhotoFromQueue(record.photoID);
@@ -8492,7 +8539,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // (current screen, estimate ID, app version, browser) so we can triage
     // issues from any vantage point. Optional screenshot attachment stored
     // in Supabase Storage. No auth required to submit.
-    const _FEEDBACK_APP_VERSION = '5.9.73';
+    const _FEEDBACK_APP_VERSION = '5.9.75';
     let _feedbackScreenshotFile = null;
 
     function openFeedbackModal() {
@@ -12589,13 +12636,39 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         });
         await Promise.all(allPhotoUrls.map(async url => {
           try {
-            const resolvedUrl = await resolvePhotoUrl(url);
-            const fetchUrl = resolvedUrl ? toDriveImgUrl(resolvedUrl) : toDriveImgUrl(url);
+            // resolvePhotoRef handles all reference types: data URIs, http URLs,
+            // photoIDs (looked up in IDB → base64 or supabasePath), and Storage paths.
+            const resolvedUrl = await resolvePhotoRef(url);
+            if (!resolvedUrl) {
+              console.warn('Photo not resolvable:', url);
+              return;
+            }
+            const fetchUrl = toDriveImgUrl(resolvedUrl);
             photoCache[url] = await loadImageFromUrl(fetchUrl);
           } catch(e) {
             console.warn('Photo load failed:', url, e);
           }
         }));
+
+        // Filter out unresolvable photo refs from roomGroups so the PDF doesn't
+        // render placeholder slots for them. A ref is unresolvable when:
+        //   - It's a photoID with no matching IDB record (record was cleaned up)
+        //   - It's a Storage path that returned 4xx (file was hard-deleted)
+        //   - It's an http URL that failed to load
+        // Rooms with all-unresolvable photos drop out of the photo section.
+        let droppedRefs = 0;
+        roomGroups.forEach(group => {
+          const before = group.photos.length;
+          group.photos = group.photos.filter(p => photoCache[p.url]);
+          droppedRefs += (before - group.photos.length);
+        });
+        // Remove any rooms that have nothing left to show
+        for (let i = roomGroups.length - 1; i >= 0; i--) {
+          if (!roomGroups[i].photos.length) roomGroups.splice(i, 1);
+        }
+        if (droppedRefs > 0) {
+          console.log('[PDF] dropped ' + droppedRefs + ' unresolvable photo refs from the layout');
+        }
 
         // Now lay out pages
         await addPhotoPageHeader();
