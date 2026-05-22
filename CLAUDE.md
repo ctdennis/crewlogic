@@ -49,8 +49,7 @@ Source lives in `supabase/functions/<name>/index.ts` (see "Supabase CLI" below).
 - `crewlogic-job-plan` — job plan generation/persistence.
 - `crewlogic-todays-workorders` — fetches today's work orders (Vonigo).
 - `crewlogic-price-lookup` — pricing lookups.
-
-There is **no** `crewlogic-estimate` Edge Function. Estimate submission happens via the n8n webhook (`N8N_BASE`) plus `crewlogic-ai` action calls.
+- `crewlogic-estimate` — estimate save (`save` upserts to the `estimates` table) and `calcDistances` (Google Maps Distance Matrix lookup for cost-analysis routing). Replaces the n8n `save` + `calcDistances` webhook equivalents. Note: `delete` and `searchClients` actions still live in n8n (they require Vonigo OAuth).
 
 ### Auth & multi-tenancy
 Google OAuth uses `hd=junkluggers.com` for direct sign-ins. Today all owner accounts in production happen to have `@junkluggers.com` Google addresses. The invite-link flow exists and bypasses the `hd=` restriction (intended for inviting estimators with non-junkluggers email accounts), but currently no non-junkluggers.com accounts have actually used it. Adding email/password and magic-link auth for non-Google estimators is on the roadmap.
