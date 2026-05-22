@@ -1,0 +1,91 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+CrewLogicAI is a single-page web app for The Junkluggers franchise crews/owners: AI-assisted junk-removal estimating, pricing, job planning, route/truck-load math, and a "yard signs" tracking/rewards game. **The entire application lives in one file: `index.html` (~18.4k lines).** There is no build step, no package manager, no test suite, and no framework — it is vanilla HTML/CSS/JS with CDN-loaded libraries.
+
+## Architecture
+
+`index.html` is structured as three sequential blocks:
+- **Lines ~1–53** — pre-init `<script>`: `initAuth()` wiring and the Google OAuth redirect (`triggerGoogleSignIn`).
+- **Lines ~54–1024** — `<style>`: all CSS, driven by CSS custom properties (`--bg-input`, `--text-muted`, `--radius-sm`, etc.) defined on `:root`.
+- **Lines ~1026–3313** — `<body>`: every screen as a sibling element (`#loginScreen`, `#homeScreen`, `#estimatorScreen`, `#estimateEditorScreen`, `#estimatesScreen`, `#settingsScreen`, `#priceLookupScreen`, `#jobPlanScreen`, `#signsScreen`, etc.), plus modals.
+- **Lines ~3314–18343** — the main `<script>`: all application logic.
+
+### Navigation
+There is no router. Screens are sibling DOM nodes; `hideAll()` (~line 4847) iterates the `allScreens` array and hides every screen (toggling `.active` for `*-section` elements, `style.display='none'` for others), then a `show*`/`render*` function reveals the target. When adding a screen, register its ID in the `allScreens` array or it won't hide correctly on navigation.
+
+### Naming conventions
+- `show*` functions reveal/populate a screen or modal (`showApp`, `showLogin`, `showSettingsTab`, `showPDFOptions`).
+- `render*` functions rebuild the innerHTML of a list/section (`renderEstimatesList`, `renderJobPlan`, `renderCharges`, `renderSignsView`).
+- `calc*`/`calculate*` are the pricing/volume/route math engines (`calculateEstimate`, `calcVolumePrice`, `calculateMattress`, `calcPallets`, `calculateDistances`).
+
+## Backend (Supabase)
+
+The app is fully client-side; all state lives in Supabase. Constants are defined near line 3607:
+- `SUPABASE_URL = https://ozfkpxyachigfpcmvekz.supabase.co`
+- `SUPABASE_ANON_KEY` — publishable anon key, hardcoded (this is expected for the anon flow).
+
+**Data access goes through two helpers — use them, don't call `fetch` to Supabase directly:**
+- `supabaseFetch(path, opts)` (~line 3666) — wraps PostgREST `/rest/v1/...` calls; injects `apikey` + auth headers and `Prefer: return=representation`; tolerates empty bodies (204/DELETE).
+- `edgeFunctionCall(name, body)` (~line 3323) — invokes Edge Functions at `/functions/v1/...`.
+- `supabaseClient` (the supabase-js UMD client) is used **only** for Storage signed URLs. Photos go to the `estimate-photos` bucket via `uploadPhotoToSupabase()`; display URLs come from `resolvePhotoUrl()`, which caches signed URLs for 12h and handles legacy Google Drive URLs.
+
+### Tables (PostgREST)
+`profiles`, `franchises`, `estimates`, `customer_price_lists`, `invites`, `crew_members`, `tools`, `job_plans`, `campaigns`, `feedback`, and the yard-signs set (`yard_signs`, `sign_credits`, `sign_status_events`, `sign_rewards`, `sign_sessions`).
+
+Tenancy & Vonigo tables:
+- `tenants` — parent of `franchises`; **`tenants.id` is the multi-tenant boundary.** Junkluggers tenant UUID: `946a4535-aa61-45b6-a6fb-9190ff546d41`.
+- `vonigo_credentials` — links franchises to encrypted Vonigo credentials via Supabase Vault.
+- `vonigo_credential_audit` — audit log for Vonigo credential access/changes.
+
+### Edge Functions
+- `crewlogic-ai` — AI estimate analysis (`action: 'analyzeEstimate'` with transcript/areas/photos); also handles estimate-submission AI actions.
+- `crewlogic-settings` — franchise/cost/proposal settings reads & writes.
+- `crewlogic-oauth-callback` — Google OAuth code exchange + profile provisioning; redirects back with `?session=...` or `?auth_error=...`.
+- `crewlogic-job-plan` — job plan generation/persistence.
+- `crewlogic-todays-workorders` — fetches today's work orders (Vonigo).
+- `crewlogic-price-lookup` — pricing lookups.
+
+There is **no** `crewlogic-estimate` Edge Function. Estimate submission happens via the n8n webhook (`N8N_BASE`) plus `crewlogic-ai` action calls.
+
+### Auth & multi-tenancy
+Google OAuth uses `hd=junkluggers.com` for direct sign-ins. Today all owner accounts in production happen to have `@junkluggers.com` Google addresses. The invite-link flow exists and bypasses the `hd=` restriction (intended for inviting estimators with non-junkluggers email accounts), but currently no non-junkluggers.com accounts have actually used it. Adding email/password and magic-link auth for non-Google estimators is on the roadmap.
+
+After callback, `currentUser` holds `role` (`'owner'` | `'crew'`), `franchiseID` (external), `franchiseInternalID`, `tenantID`, `franchiseName`. **Most queries are scoped by `currentUser.franchiseID` / tenant — preserve this scoping when writing new queries.** Access is gated in `showApp` by subscription `status` (`active`/`trialing`/`tester`/`pro`/`enterprise`); otherwise `#paywallScreen` shows.
+
+### Legacy n8n
+`N8N_BASE` (n8n.cloud webhook) and `apiFetch` still appear in some paths but are being migrated to Supabase Edge Functions. Prefer Edge Functions for new work.
+
+## CDN dependencies (loaded in `<head>`)
+`jspdf` (PDF generation), `pdf-lib` (PDF manipulation), `heic2any` (iPhone HEIC → JPEG), `piexifjs` (EXIF), `@supabase/supabase-js`. Plus Google Maps Street View (`STREET_VIEW_KEY`).
+
+## Development workflow
+
+- **Run locally:** open `index.html` directly in a browser, or serve the folder (`python3 -m http.server`). No build.
+- **Versioning:** bump the version in two places on each release — the `<meta name="crewlogic-version">` tag (line 5) and `_FEEDBACK_APP_VERSION` (~line 8542). Current: `5.9.75`.
+- **Deploy:** Current workflow: `index.html` is downloaded from a Claude.ai chat session to `~/Downloads`, manually copied into `~/Documents/GitHub/crewlogic`, then committed to `main` via GitHub Desktop. Cloudflare Pages auto-deploys from `main` to `crewlogicai.com` (custom domain on the Cloudflare Pages project). The `crewlogic.pages.dev` URL still resolves as a transition fallback. Migrating this workflow to use Claude Code directly is in progress.
+
+## Edge Function source code
+
+The source code for the Edge Functions listed above is **not in this repo today**. It lives in past Claude.ai chat outputs and gets manually pasted into the Supabase dashboard to deploy. Bringing this source into the repo so Claude Code can manage it directly is on the roadmap.
+
+## Environments
+
+Currently single-environment (production only). Dev/prod separation is planned but not yet implemented.
+
+## SQL migrations
+
+SQL is currently run ad-hoc via the Supabase SQL Editor in the dashboard, copied from Claude.ai chats. There is no `migrations/` folder yet. Establishing one is part of the planned dev/prod separation work.
+
+## Branding
+
+The rebrand from "CrewLogic" to "CrewLogicAI" happened recently. The brand name **CrewLogicAI** applies to: the app header, browser title, the login/invite/paywall screens, and the domain. Some user-facing strings still say "CrewLogic" **intentionally** — PDF filenames, invite copy, and the sign-out confirmation (per the rebrand decision noted in past chat sessions). Don't "fix" those to CrewLogicAI without checking.
+
+## Editing notes
+
+- Because everything is in one file, use line-anchored or uniquely-scoped edits; the same UI patterns (inline `onclick`, `style.display` toggles) repeat hundreds of times.
+- UI is inline-style heavy and uses the CSS variables above — match existing variables rather than hardcoding colors.
+- The app is mobile-first / PWA-style (`apple-mobile-web-app-capable`, fixed viewport, no user scaling).
