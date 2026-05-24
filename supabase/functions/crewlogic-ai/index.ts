@@ -1,4 +1,4 @@
-// Supabase Edge Function: crewlogic-ai (v3.8)
+// Supabase Edge Function: crewlogic-ai (v3.9)
 // Generic AI/utility router for CrewLogic backend calls
 // Deploy: supabase functions deploy crewlogic-ai
 //
@@ -10,6 +10,13 @@
 //   reverseGeocode     — lat/lng → formatted address (Google Geocoding)
 //   issueReward        — deliver a sign_rewards row via PromoVault Quick Send
 //
+// v3.9: analyzeEstimate now fetches photo URLs server-side and forwards them
+//       to Anthropic as base64, instead of passing the URL for Anthropic to
+//       fetch (which failed intermittently on expired/unreachable Supabase
+//       signed URLs). Also: better error logging — Anthropic failures log
+//       status + request-id to function logs (concise message to client),
+//       per-photo fetch errors are collected, and each request carries a
+//       short reqId returned to the client for support correlation.
 // v3.8: generateJobSummary now accepts franchiseInternalID and queries the
 //       franchise's specialty tools to feed into the prompt. AI references
 //       tools BY NAME in customerSituation (e.g., "bring Big Red for the
@@ -64,6 +71,18 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+// Base64-encode raw bytes in chunks. Encoding a large image in one
+// String.fromCharCode(...bytes) call overflows the call stack, so we walk
+// the buffer in 32KB slices.
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // SHARED HELPER — calls Anthropic API
 // ════════════════════════════════════════════════════════════════════════════
@@ -72,11 +91,13 @@ async function callAnthropic({
   userContent,
   maxTokens = 500,
   model = MODEL,
+  label = 'request',
 }: {
   system: string;
   userContent: unknown;
   maxTokens?: number;
   model?: string;
+  label?: string;
 }): Promise<Record<string, unknown>> {
   if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not configured');
 
@@ -96,7 +117,11 @@ async function callAnthropic({
   });
 
   if (!res.ok) {
-    throw new Error(`Anthropic ${res.status}: ${await res.text()}`);
+    const bodyText = await res.text();
+    const anthropicReqId = res.headers.get('request-id') || 'n/a';
+    // Full detail to the function logs; concise message to the client.
+    console.error(`[${label}] Anthropic ${res.status} (request-id: ${anthropicReqId}): ${bodyText}`);
+    throw new Error(`AI request failed (Anthropic ${res.status})`);
   }
 
   const result = await res.json() as Record<string, unknown>;
@@ -222,35 +247,53 @@ async function handleAnalyzeEstimate(payload: Record<string, unknown>): Promise<
 
   if (photos.length > 0) {
     const imageContents: unknown[] = [];
+    const photoErrors: string[] = [];
 
     for (const photo of photos) {
       try {
         if (photo.startsWith('data:image')) {
           const base64 = photo.replace(/^data:image\/\w+;base64,/, '');
           if (base64.length > 100) {
+            const mt = photo.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
             imageContents.push({
               type: 'image',
-              source: { type: 'base64', media_type: 'image/jpeg', data: base64 }
+              source: { type: 'base64', media_type: mt, data: base64 }
             });
+          } else {
+            photoErrors.push('data-url too small');
           }
         } else {
-          // Supabase signed URL or lh3 Drive URL
+          // Resolve legacy Google Drive refs, then fetch the image OURSELVES and
+          // forward it as base64. Previously we passed the URL to Anthropic and
+          // let it fetch — fragile when a Supabase signed URL is expired or
+          // momentarily unreachable from Anthropic's network. Fetching here (in
+          // Supabase's own network) and sending bytes is far more reliable.
           const m = photo.match(/[?&]id=([^&]+)/);
           const imageUrl = m
             ? `https://lh3.googleusercontent.com/d/${m[1]}=s1600`
             : photo;
+          const imgRes = await fetch(imageUrl);
+          if (!imgRes.ok) {
+            console.warn(`[analyzeEstimate] image fetch ${imgRes.status}: ${imageUrl.slice(0, 120)}`);
+            photoErrors.push(`fetch ${imgRes.status}`);
+            continue;
+          }
+          const ct = imgRes.headers.get('content-type') || '';
+          const mediaType = ct.startsWith('image/') ? ct.split(';')[0].trim() : 'image/jpeg';
+          const bytes = new Uint8Array(await imgRes.arrayBuffer());
           imageContents.push({
             type: 'image',
-            source: { type: 'url', url: imageUrl }
+            source: { type: 'base64', media_type: mediaType, data: uint8ToBase64(bytes) }
           });
         }
       } catch (e) {
-        console.warn('Photo processing failed:', e);
+        console.warn('[analyzeEstimate] photo processing failed:', e);
+        photoErrors.push((e as Error).message || 'unknown error');
       }
     }
 
     if (imageContents.length === 0) {
-      throw new Error('All photos failed to load');
+      throw new Error(`All photos failed to load${photoErrors.length ? ': ' + photoErrors.join('; ') : ''}`);
     }
 
     const multiNote = imageContents.length > 1
@@ -272,6 +315,7 @@ async function handleAnalyzeEstimate(payload: Record<string, unknown>): Promise<
     system: buildEstimateSystemPrompt(areas),
     userContent,
     maxTokens: 800,
+    label: 'analyzeEstimate',
   });
 
   const content = result.content as Array<{ type: string; text: string }> | undefined;
@@ -946,13 +990,16 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  const reqId = crypto.randomUUID().slice(0, 8);
+  let action: string | undefined;
+
   try {
     if (!ANTHROPIC_API_KEY) {
       throw new Error('ANTHROPIC_API_KEY not configured');
     }
 
     const body = await req.json() as Record<string, unknown>;
-    const action = body.action as string;
+    action = body.action as string;
 
     if (!action) {
       return new Response(
@@ -978,9 +1025,9 @@ serve(async (req) => {
 
   } catch (error) {
     const err = error as Error;
-    console.error('crewlogic-ai error:', err);
+    console.error(`[crewlogic-ai][${reqId}] action=${action ?? '?'} error:`, err?.stack || err?.message || err);
     return new Response(
-      JSON.stringify({ success: false, error: err.message || String(error) }),
+      JSON.stringify({ success: false, error: err.message || String(error), reqId }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
