@@ -334,3 +334,115 @@ addendum I can fold into CL-BRD-002.
 - For edge functions: **diff repo source vs the deployed version before `supabase functions deploy`**, and test against the deployed URL (transcript/base64/URL-style cases as applicable) before committing.
 - Run the `security-review` skill on any change touching auth, RLS, or new tables.
 - Bump edge-function internal version headers and the `index.html` version (`<meta>` + `_FEEDBACK_APP_VERSION`) per CLAUDE.md when shipping user-visible changes.
+
+---
+
+## 14. Low-impact build sequence (recommended execution order)
+
+This section re-sequences §9/§12 around an **additive-first** axis: build the standalone stack as
+*new* objects that the live Vonigo/Junkluggers path never touches, prove it in isolation, and defer
+the few unavoidable shared-surface changes to the end behind a flag. It supersedes §9 phasing as the
+**preferred order of operations**; the §12 prompts still apply, with the variations noted here.
+
+### 14.1 Shared vs. net-new surfaces
+
+| Surface | Shared with prod? | Mitigation |
+|---|---|---|
+| New tables (`price_lists`, `price_blocks`, `price_items`, `service_zones`, `customers`) | No — net-new | Adding tables cannot affect existing queries |
+| `tenants.crm_provider` column | Touches existing table | Add with **`DEFAULT 'vonigo'`** so every existing tenant reads as Vonigo; only new standalone tenants are set `'none'` |
+| Native pricing edge function | No — net-new | Stand up a **separate** function (e.g. `crewlogic-pricing`); do **not** branch inside `crewlogic-price-lookup` |
+| `crewlogic-oauth-callback` (provisioning) | Shared | Defer to Stage C; until then create test/pilot tenants by hand |
+| `index.html` (live app) | Shared | Defer to Stage B; gate every new line behind `crmProvider === 'none'` (dead code for current users) |
+
+> **Key design change vs. §12:** the native lookup is a **new function**, not a branch in
+> `crewlogic-price-lookup`. This keeps the deployed Vonigo function byte-for-byte untouched. The
+> branch-inside approach in P1.2 is replaced by S-A.3 below.
+
+### 14.2 Stage A — Backend only, zero production impact
+
+No `index.html` edits; no changes to existing edge functions or in-use tables. Fully reversible
+(drop the new tables + delete the new function). **Exit criteria:** a test tenant can create/edit a
+price book and look it up by zip via API, returning the shape the frontend expects — production
+untouched.
+
+**S-A.1 — New tables + RLS**
+```
+Plan first. Create the native price-book + customers schema from CL-BRD-002 §6 as PURELY ADDITIVE
+objects: price_lists, price_blocks, price_items, service_zones, customers. Provide SQL migrations
+with RLS scoped by franchise_id matching the pattern from discovery D0. Do NOT alter any existing
+table or query. I will run the SQL in the Supabase SQL editor. Output the migration as a numbered
+file I can also keep under a future migrations/ folder.
+```
+
+**S-A.2 — Provider column (safe default)**
+```
+Plan first. Add tenants.crm_provider text not null default 'vonigo'. Because the default is
+'vonigo', every existing tenant (incl. Junkluggers) keeps current behavior with no backfill needed;
+only new standalone tenants will be set to 'none'. Give me the one-line migration. Do not change any
+code that reads tenants yet.
+```
+
+**S-A.3 — New native pricing edge function (replaces P1.2 branch approach)**
+```
+Plan first. Create a NEW edge function crewlogic-pricing (do not modify crewlogic-price-lookup).
+It handles, for crm_provider='none' franchises:
+  - CRUD for price_lists / price_blocks / price_items / service_zones (via service role + RLS-safe
+    franchise scoping),
+  - a lookup action { franchiseID, zipCode } that resolves service_zones → price_list → blocks and
+    returns the EXACT JSON shape crewlogic-price-lookup returns (captured in discovery D0:
+    { blocks: [{ name, sequence, items: [{ priceItemID, name, value, unitOfMeasure, sequence,
+    isActive, isAllowDecimals }] }] }).
+Include the idempotent default-price-book seed (volume tiers Minimum→Full with fraction_value, plus
+standard surcharges, prices 0). Deploy as a new function (zero risk to existing ones). Do not touch
+index.html.
+```
+
+**S-A.4 — Test tenant + end-to-end API validation**
+```
+Read/created-data only — no app changes. Create a TEST tenant (crm_provider='none') + franchise +
+owner profile + seeded price book + one mapped zip, via SQL/API. Then validate crewlogic-pricing
+end to end with curl: create/edit an item, then run the lookup for that franchise+zip and assert the
+returned JSON matches the documented price-lookup shape field-for-field. Report the curl commands and
+results. Confirm production (Junkluggers) is untouched by re-running a normal crewlogic-price-lookup
+call and showing it is unchanged.
+```
+
+### 14.3 Stage B — Minimal gated frontend
+
+Now the unavoidable `index.html` work, defensively. Every addition is dead code for current users
+(`crmProvider === 'vonigo'`).
+
+**S-B.1 — Route price lookup by provider (gated)**
+```
+Plan first. In index.html, make priceLookup() call the new crewlogic-pricing function ONLY when
+currentUser.crmProvider === 'none'; the existing Vonigo call path stays byte-for-byte unchanged for
+everyone else. Since the response shapes are identical (verified in Stage A), no downstream consumer
+(findVolumeItem / matchSurchargeItem / calcVolumePrice*) changes. Smoke-test that a vonigo user's
+lookup is unaffected.
+```
+
+**S-B.2 — Gated pricing editor (was P1.3 + D1)**
+```
+Plan first. Run discovery D1 (Settings screen structure) if not already done. Build the Pricing
+editor under Settings, the ENTIRE thing wrapped so it only renders/initializes when
+currentUser.crmProvider === 'none'. Register the screen in allScreens; use show*/render* naming and
+existing CSS variables. CRUD price lists/blocks/items + a zip→price-list map, all via crewlogic-pricing
+(or supabaseFetch). Confirm a vonigo user sees zero change anywhere in Settings.
+```
+
+### 14.4 Stage C — Provisioning & access (last, most coupled)
+
+Touches shared surfaces (`crewlogic-oauth-callback`, paywall). Do only after Stages A–B are proven.
+Until then, onboard pilot companies by hand-creating their tenant (the Stage A path).
+
+- **S-C.1** = P2.1 self-serve provisioning (now low-risk: the native stack it provisions into is proven).
+- **S-C.2** = P2.4 billing/paywall + de-hardcode super-admin and `#90` gates.
+- **S-C.3** = P2.2 native customers UI + P2.3 Finalize & Send proposal.
+
+### 14.5 Why this order is safe
+
+- Stage A is 100% reversible and invisible to production — you can stop after it with nothing to undo.
+- The riskiest, shared-surface work (Stage C) sits on top of a proven foundation, so pricing logic
+  and auth/provisioning are never being debugged simultaneously.
+- A working standalone pricing flow is demoable via API (or a throwaway test page) **before** any
+  production frontend edit.
