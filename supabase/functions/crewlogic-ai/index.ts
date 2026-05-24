@@ -114,7 +114,7 @@ async function callAnthropic({
 // Voice transcript + optional photos → charge array
 // ════════════════════════════════════════════════════════════════════════════
 function buildEstimateSystemPrompt(areas: string[]): string {
-  return `You are helping a junk removal estimator. A full truck holds 480 cubic feet (8x12x5 ft interior).
+  return `You are helping a junk removal estimator. A full truck holds 480 cubic feet (8x12x5 ft interior), which is about 17.8 cubic yards.
 Volume fractions: Included (0), Minimum (0.0625), 1/8 (0.125), 1/4 (0.25), 3/8 (0.375), 1/2 (0.5), 5/8 (0.625), 3/4 (0.75), 7/8 (0.875), Full (1.0).
 truckLabel is the fraction size of ONE truck. truckQty is how many of that fraction size. truckVolume = truckLabel value x truckQty.
 For loads over 1 truck, ALWAYS use truckLabel "Full" and set truckQty to the total number of trucks as a decimal rounded to nearest 0.125. NEVER split into multiple charge rows.
@@ -130,9 +130,32 @@ CUSTOMER-FACING LANGUAGE — descriptions appear on customer estimates, so use n
 
 DIMENSIONAL CALCULATIONS - when explicit measurements are given, always calculate precisely:
 - Rectangular space: (L ft x W ft x H ft x fill%) / 480 = truck fraction
-- Individual item: (L ft x W ft x H ft x 0.6 packing factor) / 480 = truck fraction
+- Individual furniture/appliance: (L ft x W ft x H ft) / 480 = truck fraction. Use the FULL bounding-box volume. Do NOT apply a packing-reduction factor to standalone furniture — bulky rigid items (sofas, recliners, dressers, mattresses, appliances) do not nest and the crew cannot reclaim the empty space around them.
+- Pile/group of small loose items (bags, boxes, toys, clothing) that genuinely compress: you may apply a 0.6 packing factor to the enclosing volume.
 - Fill defaults: empty=5%, quarter=25%, half=50%, three-quarters=75%, packed=100%
 - Convert inches to feet before calculating
+
+ESTIMATING FURNITURE FROM PHOTOS (no measurements given):
+When you cannot measure but can see furniture, anchor each visible item to these typical volumes, then SUM them. These reflect full bounding-box volume (the same basis the estimator's manual calculator uses):
+  Item                            Truck %   Cubic ft   Cubic yd
+  Sofa / 3-seat couch             ~14%      ~65        ~2.4
+  Loveseat / 2-seat               ~9%       ~45        ~1.7
+  Sectional sofa                  27-38%    130-180    ~5-7
+  Recliner / armchair             ~7%       ~35        ~1.3
+  Dresser / chest of drawers      ~6%       ~28        ~1.0
+  Mattress + box (queen/king)     ~10%      ~50        ~1.9   (also add Mattress/Box Spring surcharge)
+  Dining table                    ~9%       ~45        ~1.7
+  Dining chair (each)             ~1.5%     ~7         ~0.3
+  Desk                            ~6%       ~31        ~1.1
+  Bookcase / armoire / wardrobe   ~8%       ~40        ~1.5
+  Refrigerator / large appliance  ~10%      ~48        ~1.8
+  Washer or dryer (each)          ~3.5%     ~17        ~0.6
+  Patio / outdoor set             ~19%      ~90        ~3.3
+When furniture is involved, estimate slightly HIGH rather than low — an under-filled truck means a costly return trip.
+
+CONFIDENCE & ROUNDING:
+- If items are partially hidden, stacked, or the photo angle obscures depth, assume MORE volume than the visible face suggests and set confidence to "low" or "medium".
+- For furniture-heavy loads, round the final truckVolume UP to the nearest standard fraction when between two values.
 
 DWELLING TYPE INFERENCE — IMPORTANT:
 When you see photos, you may add a "dwellingType" field to the FIRST charge object in your response array if (and ONLY if) the photo shows strong visual evidence of the property type. The valid values are:
