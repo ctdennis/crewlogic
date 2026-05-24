@@ -85,7 +85,7 @@ Confirmed by code sweep (2026-05-24). Line numbers approximate.
 **Auth / tenancy / gating (Junkluggers-specific)**
 - OAuth `hd: 'junkluggers.com'` — `index.html:47` and `~3588-3591`; login copy `~1035`.
 - Super-admin hardcode `charles.dennis@junkluggers.com` — `~4696`.
-- Tenant UUID `946a4535-aa61-45b6-a6fb-9190ff546d41` — `index.html` `~3471, 3751, 4335, 4469, 5243, 5322`; and in every Vonigo edge function.
+- Tenant UUID `946a4535-aa61-45b6-a6fb-9190ff546d41` — **12 total (D0-verified):** `index.html` `3471, 3751, 4335, 4469, 5243, 5322, 17615`; edge functions `crewlogic-price-lookup:50`, `crewlogic-todays-workorders:42`, `crewlogic-job-plan:44`, `crewlogic-settings:155 (REFERENCE_TENANT_ID)`, `crewlogic-settings:349 (JUNKLUGGERS_TENANT_ID)`.
 - Paywall gating — `showApp()` `~4762`; statuses `active/trialing/tester/pro/enterprise`.
 - Feature gate to franchise `#90` (route optimizer) — `~4806, 4968`.
 - `N8N_BASE` — `index.html:3317`.
@@ -103,9 +103,13 @@ Confirmed by code sweep (2026-05-24). Line numbers approximate.
   ```
 - Frontend reads `currentUser.crmProvider` to toggle UI affordances (e.g. "Submit to Vonigo"
   vs "Finalize & Send"; show/hide the Vonigo credentials card; show the native pricing editor).
-- **Invariant:** the JSON shape returned by `crewlogic-price-lookup` (`{ blocks: [{ name, sequence,
-  items: [{ priceItemID, name, value, unitOfMeasure, sequence, isActive, isAllowDecimals }] }] }`)
-  is identical across providers, so `findVolumeItem`/`matchSurchargeItem`/`calcVolumePrice*` are untouched.
+- **Invariant (D0-verified shape):** the JSON shape returned by `crewlogic-price-lookup` is
+  `{ success, zipCode, zoneID, priceListID, priceListName, zoneName, blocks: [{ priceBlockID, name,
+  sequence, items: [{ priceItemID, name, value, unitOfMeasure, sequence }] }] }`. Item objects carry
+  **only** those 5 fields — `isActive` is a server-side filter (not returned) and `isAllowDecimals`
+  is **not** in the response (decimal behavior is derived frontend-side from `unitOfMeasure`; see §6).
+  This shape is identical across providers, so `findVolumeItem`/`matchSurchargeItem`/`calcVolumePrice*`
+  are untouched. See `D0-findings.md §2`.
 
 ## 6. Data model additions (new Supabase tables)
 
@@ -115,8 +119,11 @@ price_blocks  (id uuid pk, price_list_id uuid fk, name text, sequence int,
                block_type text)  -- 'volume' | 'surcharge' | 'labor' | 'single_item'
 price_items   (id uuid pk, price_block_id uuid fk, name text, value numeric,
                unit_of_measure text, sequence int, is_active bool default true,
-               is_allow_decimals bool default false,
                fraction_value numeric null)  -- e.g. 0.5 for "1/2 Truckload"; null for surcharges
+               -- NOTE (D0): no is_allow_decimals column needed for parity. The frontend derives
+               -- decimals from unit_of_measure ∈ {cubic yards, volume, hour, flight, pound}
+               -- (index.html DECIMAL_ALLOWED_UNITS). Seed volume tiers with a decimal-allowed unit
+               -- (e.g. 'volume') and per-piece surcharges with a non-decimal unit (e.g. 'ea').
 service_zones (id uuid pk, franchise_id uuid, zip_code text, price_list_id uuid fk)
 customers     (id uuid pk, franchise_id uuid, name text, address text, zip text,
                email text, phone text, external_id text null, created_at timestamptz)
@@ -244,8 +251,10 @@ No frontend yet.
 ```
 Plan first. Add a provider branch to crewlogic-price-lookup. For crm_provider='none', given
 { franchiseID, zipCode }, resolve service_zones → price_list → blocks and return the EXACT same
-JSON shape the Vonigo path returns (verified in discovery D0 — block.name, sequence, items[] with
-priceItemID, name, value, unitOfMeasure, sequence, isActive, isAllowDecimals). The Vonigo path must
+JSON shape the Vonigo path returns (D0-verified — block: { priceBlockID, name, sequence, items[] },
+items: { priceItemID, name, value, unitOfMeasure, sequence } ONLY; no isActive/isAllowDecimals in the
+response — see D0-findings §2). NOTE: §14 supersedes this with a NEW function (S-A.3); prefer that.
+The Vonigo path must
 remain byte-for-byte unchanged. Before deploying: diff repo source vs deployed function. After
 deploying: test BOTH a native franchise (returns seeded blocks) and confirm the response shape
 matches what findVolumeItem()/matchSurchargeItem() expect. Return results; commit only after tests pass.
@@ -389,12 +398,16 @@ It handles, for crm_provider='none' franchises:
   - CRUD for price_lists / price_blocks / price_items / service_zones (via service role + RLS-safe
     franchise scoping),
   - a lookup action { franchiseID, zipCode } that resolves service_zones → price_list → blocks and
-    returns the EXACT JSON shape crewlogic-price-lookup returns (captured in discovery D0:
-    { blocks: [{ name, sequence, items: [{ priceItemID, name, value, unitOfMeasure, sequence,
-    isActive, isAllowDecimals }] }] }).
-Include the idempotent default-price-book seed (volume tiers Minimum→Full with fraction_value, plus
-standard surcharges, prices 0). Deploy as a new function (zero risk to existing ones). Do not touch
-index.html.
+    returns the EXACT JSON shape crewlogic-price-lookup returns (D0-verified, see D0-findings §2):
+    { success, zipCode, zoneID, priceListID, priceListName, zoneName,
+      blocks: [{ priceBlockID, name, sequence,
+                 items: [{ priceItemID, name, value, unitOfMeasure, sequence }] }] }.
+    Item objects carry ONLY those 5 fields — do NOT add isActive/isAllowDecimals to the response.
+Include the idempotent default-price-book seed (volume tiers Minimum→Full with fraction_value and a
+decimal-allowed unit_of_measure such as 'volume'; standard surcharges with a non-decimal unit such as
+'ea'; prices 0). Decimal behavior is driven entirely by unit_of_measure (DECIMAL_ALLOWED_UNITS =
+{cubic yards, volume, hour, flight, pound}), so set units deliberately. Deploy as a new function
+(zero risk to existing ones). Do not touch index.html.
 ```
 
 **S-A.4 — Test tenant + end-to-end API validation**
