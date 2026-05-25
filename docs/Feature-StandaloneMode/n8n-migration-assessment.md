@@ -57,7 +57,7 @@ All four confirmed not called by the app, **disabled in n8n**, and local copies 
 
 ## Migration status (live)
 - [x] `crewlogic-job-lookup` → edge function ✅ **DONE 2026-05-25** — deployed, parity-validated vs live n8n (real job 842018), frontend repointed (v5.9.78). The n8n `crewlogic-job-lookup` workflow can now be disabled.
-- [ ] `crewlogic-jobs` → edge function *(source is a Google Sheet — decide Sheets vs Supabase)*
+- [x] `crewlogic-jobs` → **ELIMINATED 2026-05-25** — was a #90-only Route Optimizer prototype reading a manual Google Sheet. Repointed `loadUpcomingJobs()` to the existing `crewlogic-todays-workorders` (Vonigo direct, dayOffset 0; v5.9.79). No new function. The n8n `crewlogic-jobs` workflow + its Google Sheet can be retired.
 - [ ] `crewlogic-estimate` searchClients + delete → add to existing edge function
 - [ ] `crewlogic-submit-quote` → edge function *(multi-step + Vonigo document upload)*
 - [ ] `crewlogic-route` / `crewlogic-trucks` → migrate (carry Motive key) or retire (#90-only)
