@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.83 | 2026-05-25">
+  <meta name="crewlogic-version" content="v5.9.84 | 2026-05-25">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3809,16 +3809,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const resultsEl = document.getElementById('clientSearchResults');
       resultsEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">Searching...</div>';
       try {
-        const res = await apiFetch(N8N_BASE + '/crewlogic-estimate', {
-          method: 'POST',
-          body: JSON.stringify({
-            action: 'searchClients',
-            email: currentUser.email,
-            franchiseID: currentUser.franchiseID,
-            searchPar: q
-          })
+        const data = await edgeFunctionCall('crewlogic-estimate', {
+          action: 'searchClients',
+          email: currentUser.email,
+          franchiseID: currentUser.franchiseID,
+          searchPar: q
         });
-        const data = await res.json();
         if (!data.success || !data.clients.length) {
           resultsEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">No clients found.</div>';
           return;

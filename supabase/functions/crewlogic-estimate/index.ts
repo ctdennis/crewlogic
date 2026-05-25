@@ -1,10 +1,11 @@
-// Supabase Edge Function: crewlogic-estimate (v1.2)
-// Estimate CRUD operations - replaces n8n crewlogic-estimate webhook (save + calcDistances).
+// Supabase Edge Function: crewlogic-estimate (v1.3)
+// Estimate CRUD operations - replaces n8n crewlogic-estimate webhook (save + calcDistances + searchClients).
 // Deploy: supabase functions deploy crewlogic-estimate
 //
 // Actions:
 //   save           - upsert estimate to Supabase estimates table
 //   calcDistances  - Google Maps Distance Matrix lookup for cost analysis routing
+//   searchClients  - Vonigo client search (MD5 /security/login/ auth — no OAuth)
 //
 // SECRETS REQUIRED (auto-populated):
 //   SUPABASE_URL
@@ -16,12 +17,16 @@
 //       expects (flat keys: homeMiles, homeMinutes, disposalMiles, disposalMinutes,
 //       recyclingMiles/Minutes, donationMiles/Minutes). v1.1 returned a nested object
 //       with different keys, so the frontend couldn't read any of the values.
+// v1.3: Added searchClients — migrated from n8n. Authenticates to Vonigo with the
+//       same MD5 /security/login/ flow the other edge functions use (the prior
+//       "requires Vonigo OAuth" note was incorrect — there is no OAuth). Vonigo
+//       creds come from the vonigo_credentials Vault via get_vonigo_credential.
 //
-// Other actions still in n8n (require Vonigo OAuth):
-//   - delete (Vonigo cleanup)
-//   - searchClients (Vonigo search)
+// Other actions still in n8n:
+//   - delete (Vonigo quote cleanup)
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -31,6 +36,11 @@ const CORS_HEADERS = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+
+const VONIGO_BASE = "https://junkluggers.vonigo.com/api/v1";
+const TENANT_ID = "946a4535-aa61-45b6-a6fb-9190ff546d41"; // Junkluggers
+const F_CLIENT_ADDRESS = 129; // Vonigo Client field: address
+const F_CLIENT_CONTACT = 130; // Vonigo Client field: primary contact
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Supabase REST helpers (use service role to bypass RLS)
@@ -285,6 +295,103 @@ async function handleCalcDistances(body: Record<string, unknown>): Promise<Respo
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Vonigo auth — resolve franchise + creds, MD5 /security/login/ → securityToken.
+// Same flow as crewlogic-todays-workorders / crewlogic-job-lookup (no OAuth).
+// ─────────────────────────────────────────────────────────────────────────────
+async function vonigoLogin(franchiseExternalId: string): Promise<string> {
+  // Use the supabase-js client for the franchise lookup + credential RPC — same
+  // proven path as crewlogic-job-lookup. (The vonigo_md5 value lives in Vault and
+  // is only reachable via get_vonigo_credential, NOT a direct table select.)
+  const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+
+  const { data: franchiseRow, error: frErr } = await supabase
+    .from("franchises")
+    .select("id")
+    .eq("external_id", franchiseExternalId)
+    .eq("tenant_id", TENANT_ID)
+    .single();
+  if (frErr || !franchiseRow) {
+    throw new Error("Franchise not found: " + franchiseExternalId);
+  }
+
+  let creds: { vonigo_username: string; vonigo_md5: string } | null = null;
+  const { data: credRows, error: credErr } = await supabase
+    .rpc("get_vonigo_credential", { franchise_id_param: franchiseRow.id });
+  if (!credErr && credRows && credRows.length > 0) {
+    creds = credRows[0];
+  } else {
+    for (const paramName of ["p_franchise_id", "franchise_id", "franchiseid", "fid"]) {
+      const args: Record<string, string> = {};
+      args[paramName] = franchiseRow.id;
+      const r = await supabase.rpc("get_vonigo_credential", args);
+      if (!r.error && r.data && r.data.length > 0) { creds = r.data[0]; break; }
+    }
+  }
+  if (!creds) throw new Error("Vonigo credentials not found for franchise " + franchiseExternalId);
+
+  const authUrl = new URL(VONIGO_BASE + "/security/login/");
+  authUrl.searchParams.set("company", "Vonigo");
+  authUrl.searchParams.set("userName", creds.vonigo_username);
+  authUrl.searchParams.set("password", creds.vonigo_md5);
+  const authData = await (await fetch(authUrl.toString())).json();
+  if (authData.errNo !== 0 || !authData.securityToken) {
+    throw new Error("Vonigo auth failed: " + (authData.errMsg || "no token"));
+  }
+  return authData.securityToken as string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HANDLER: searchClients
+// Vonigo client search by name/term. Mirrors the n8n searchClients action.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleSearchClients(body: Record<string, unknown>): Promise<Response> {
+  const franchiseExternalId = String(body.franchiseID || "");
+  const searchPar = String(body.searchPar || "").trim();
+  if (!franchiseExternalId) return jsonResponse({ success: false, error: "franchiseID required" }, 400);
+  if (!searchPar) return jsonResponse({ success: false, error: "searchPar required" }, 400);
+
+  const securityToken = await vonigoLogin(franchiseExternalId);
+
+  const res = await fetch(VONIGO_BASE + "/data/Clients/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      securityToken,
+      method: "0",
+      pageNo: "1",
+      pageSize: "20",
+      sortMode: "1",
+      sortDirection: "0",
+      isCompleteObject: "true",
+      searchPar,
+    }),
+  });
+  const data = await res.json();
+
+  // Match the n8n behavior: any non-result (errNo, empty) is just "no clients".
+  if (data.errNo !== 0) {
+    console.warn(`[searchClients] Vonigo errNo ${data.errNo}: ${data.errMsg || ""} (searchPar "${searchPar}")`);
+    return jsonResponse({ success: true, clients: [] });
+  }
+
+  const clients = ((data.Clients || []) as Array<Record<string, unknown>>).map((c) => {
+    const fields = (c.Fields || []) as Array<{ fieldID: number | string; fieldValue: string | null }>;
+    const address = fields.find((f) => String(f.fieldID) === String(F_CLIENT_ADDRESS))?.fieldValue || "";
+    const contact = fields.find((f) => String(f.fieldID) === String(F_CLIENT_CONTACT))?.fieldValue || "";
+    const zipMatch = address.match(/\b(\d{5})\b/);
+    return {
+      clientID: c.objectID,
+      name: c.name,
+      address,
+      contact,
+      zip: zipMatch ? zipMatch[1] : "",
+    };
+  });
+
+  return jsonResponse({ success: true, clients });
+}
+
 function jsonResponse(data: unknown, status: number = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -295,6 +402,7 @@ function jsonResponse(data: unknown, status: number = 200): Response {
 const ACTION_HANDLERS: Record<string, (body: Record<string, unknown>) => Promise<Response>> = {
   save: handleSave,
   calcDistances: handleCalcDistances,
+  searchClients: handleSearchClients,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
