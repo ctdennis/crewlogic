@@ -56,7 +56,7 @@ All four confirmed not called by the app, **disabled in n8n**, and local copies 
 - **Estimates** (Slack-triggered) — not called by the app. Disabled + removed.
 
 ## Migration status (live)
-- [ ] `crewlogic-job-lookup` → edge function *(first target — Vonigo read)*
+- [x] `crewlogic-job-lookup` → edge function ✅ **DONE 2026-05-25** — deployed, parity-validated vs live n8n (real job 842018), frontend repointed (v5.9.78). The n8n `crewlogic-job-lookup` workflow can now be disabled.
 - [ ] `crewlogic-jobs` → edge function *(source is a Google Sheet — decide Sheets vs Supabase)*
 - [ ] `crewlogic-estimate` searchClients + delete → add to existing edge function
 - [ ] `crewlogic-submit-quote` → edge function *(multi-step + Vonigo document upload)*
