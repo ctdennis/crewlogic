@@ -62,6 +62,12 @@ All four confirmed not called by the app, **disabled in n8n**, and local copies 
   - [x] **searchClients** — crewlogic-estimate v1.3, MD5 Vonigo auth (no OAuth). Parity vs n8n (searchPar=Diaz: identical 11 clients). Frontend repointed (v5.9.84). UI-tested ✓.
   - [x] **delete** — crewlogic-estimate v1.4, `POST /data/Quotes/ {method:4, objectID}`. Bogus-ID tests safely rejected (no real deletion). NOTE: n8n masked all delete results as success:true; the edge fn returns the real Vonigo result (frontend ignores it — best-effort — so no functional change). Frontend repointed (v5.9.85). **Real-quote delete still to be confirmed by deleting a throwaway submitted estimate.**
   - ✅ The n8n `CrewLogic Estimates` workflow is now fully unused (save/searchClients/delete all migrated) → can be DISABLED.
-- [ ] `crewlogic-submit-quote` → edge function *(multi-step + Vonigo document upload)*
-- [ ] `crewlogic-route` / `crewlogic-trucks` → migrate (carry Motive key) or retire (#90-only)
-- Cron automations (`Signs - Daily Lifecycle`, `Soft-Delete Photo Sweep`) → later (pg_cron / scheduled fn)
+- [x] `crewlogic-submit-quote` → **DONE 2026-05-25** — migrated as crewlogic-estimate `submitQuote` action (v1.5). Vonigo create (method 3, frontend-built Charges) → photo upload (`/data/documents/`) → field edit (method 2, option IDs). pdfBase64 ignored (n8n never uploaded it). Plumbing validated (bogus IDs → Vonigo rejected, no junk quote). Frontend repointed (v5.9.86). **Real-submission verification pending (creates a real quote — test with a throwaway estimate).**
+- [x] `crewlogic-trucks` → **DONE 2026-05-25** — new `crewlogic-trucks` edge fn (Motive `/v1/vehicle_locations`, `MOTIVE_API_KEY` secret set from the n8n value). Validated: 3 live trucks. Frontend `getTruckLocations` repointed (v5.9.87).
+- [~] `crewlogic-route` → **LEFT ON n8n by decision 2026-05-25** — 70-node engine (10+ scenarios, AI/Slack agent, 3 Google Sheets); a full port is disproportionate for a #90 tester. Revisit if the Route Optimizer becomes a real feature. The n8n `Route Optimization` workflow STAYS (serves `crewlogic-route`; its `crewlogic-trucks` webhook is now unused).
+- Cron automations (`Signs - Daily Lifecycle`, `Soft-Delete Photo Sweep`) → still active; later (pg_cron / scheduled fn).
+
+### n8n footprint after migration
+- **Disable (fully migrated):** `crewlogic-job-lookup`, `crewlogic-jobs` (+ Google Sheet), `CrewLogic Estimates`, `CrewLogic Submit Quote` (after submit-quote verified).
+- **Keep:** `Route Optimization` (route engine + Slack/AI), `Signs - Daily Lifecycle`, `Soft-Delete Photo Sweep`.
+- **Result:** every app data path runs on Supabase except the route-optimization engine (#90 tester).
