@@ -135,13 +135,17 @@ Deno.serve(async (req: Request) => {
       }),
     })).json();
 
-    if (woData.errNo !== 0) {
-      console.error(`[job-lookup][${reqId}] WorkOrders query failed: ${woData.errMsg || 'errNo ' + woData.errNo}`);
-      return jsonResponse({ success: false, error: 'Vonigo WorkOrders query failed', reqId }, 502);
-    }
-
+    // Match the n8n behavior: any non-result — Vonigo validation error (e.g. an
+    // invalid/nonexistent job number → errNo -600), an error code, or an empty
+    // list — is surfaced to the user as a friendly "Job not found". Genuine
+    // Vonigo errNo values are logged server-side for diagnosis.
     const workOrder: VonigoWorkOrder | undefined = (woData.WorkOrders || [])[0];
-    if (!workOrder) return jsonResponse({ success: false, error: 'Job not found', reqId }, 200);
+    if (!workOrder) {
+      if (woData.errNo !== 0) {
+        console.warn(`[job-lookup][${reqId}] Vonigo errNo ${woData.errNo}: ${woData.errMsg || ''} (jobID ${jobID}) — treating as not found`);
+      }
+      return jsonResponse({ success: false, error: 'Job not found', reqId }, 200);
+    }
 
     const relations = workOrder.Relations || [];
     const fields = workOrder.Fields || [];
