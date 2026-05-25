@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.78 | 2026-05-25">
+  <meta name="crewlogic-version" content="v5.9.79 | 2026-05-25">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -5708,28 +5708,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function loadUpcomingJobs() {
       const select = document.getElementById('routeJobSelect');
       try {
-        const res = await apiFetch(N8N_BASE + '/crewlogic-jobs');
-        const data = await res.json();
-        const jobs = data.jobs || [];
+        // Today's jobs straight from Vonigo (reuses the crewlogic-todays-workorders
+        // edge function). Replaces the legacy n8n crewlogic-jobs webhook, which
+        // pulled from a manually-maintained Google Sheet.
+        const data = await edgeFunctionCall('crewlogic-todays-workorders', { franchiseID: currentUser.franchiseID, dayOffset: 0 });
+        const jobs = data.workOrders || [];
         select.innerHTML = '';
         // Always add storage location as first option
         select.innerHTML += '<option value="storage">🏪 Storage — 2 County Rd, East Freetown MA 02717</option>';
         if (jobs.length > 0) {
-          select.innerHTML += '<option value="" disabled>─── Scheduled jobs ───</option>';
-          jobs.forEach(job => {
-            let shortDate = '';
-            try {
-              const parts = job.date.match(/(\d{2})\/(\d{2})\/\d{4}\s+(\d{1,2}:\d{2}:\d{2}\s*[AP]M)/i);
-              if (parts) shortDate = parseInt(parts[1]) + '/' + parseInt(parts[2]) + ' ' + parts[3].replace(':00 ', ' ');
-              else shortDate = job.date;
-            } catch(e) { shortDate = job.date; }
-            select.innerHTML += '<option value="' + job.jobId + '">' + job.jobId + ' — ' + job.customer + ' — ' + job.city + ' — ' + shortDate + ' — ' + job.route + '</option>';
+          select.innerHTML += '<option value="" disabled>─── Today\'s jobs ───</option>';
+          jobs.forEach(wo => {
+            const addr = (wo.address || '').replace(/\n/g, ', ');
+            const cityMatch = addr.match(/([^,]+),\s*[A-Z]{2}\s+\d{5}/);
+            const city = cityMatch ? cityMatch[1].trim() : '';
+            const when = wo.timeLabel || '';
+            const label = [wo.jobID, wo.clientName, city, when, wo.route].filter(Boolean).join(' — ');
+            select.innerHTML += '<option value="' + wo.jobID + '">' + label + '</option>';
           });
         }
         select.innerHTML += '<option value="manual">Enter job ID manually...</option>';
-        document.getElementById('routeJobHint').textContent = 'Upcoming jobs from schedule';
+        document.getElementById('routeJobHint').textContent = "Today's jobs from Vonigo";
       } catch(e) {
-        select.innerHTML = '<option value="817779">🏪 Storage — 2 County Rd, East Freetown MA 02717</option><option value="" disabled>─── Scheduled jobs ───</option><option value="">Could not load jobs</option><option value="manual">Enter job ID manually...</option>';
+        select.innerHTML = '<option value="storage">🏪 Storage — 2 County Rd, East Freetown MA 02717</option><option value="" disabled>─── Today\'s jobs ───</option><option value="">Could not load jobs</option><option value="manual">Enter job ID manually...</option>';
       }
     }
 
@@ -8539,7 +8540,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // (current screen, estimate ID, app version, browser) so we can triage
     // issues from any vantage point. Optional screenshot attachment stored
     // in Supabase Storage. No auth required to submit.
-    const _FEEDBACK_APP_VERSION = '5.9.78';
+    const _FEEDBACK_APP_VERSION = '5.9.79';
     let _feedbackScreenshotFile = null;
 
     function openFeedbackModal() {
