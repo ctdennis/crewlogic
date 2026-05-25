@@ -170,6 +170,11 @@ customers     (id uuid pk, franchise_id uuid, name text, address text, zip text,
 - **One-file frontend.** Repeated UI patterns; line-anchored edits required. The shape-preserving design keeps the blast radius small.
 - **Pricing snapshot correctness.** Native edits must not retroactively change historical estimates (the per-estimate `price_book` snapshot already protects this — verify it's populated on the native path too).
 - **RLS gaps** on new tables could leak cross-tenant data — must be reviewed (security-review skill).
+- 🔒 **Pre-existing permissive RLS (D0-confirmed).** The existing tables (`profiles`, `franchises`,
+  `tenants`, `estimates`, `customer_price_lists`) have RLS enabled but **fully permissive policies**
+  (`USING (true)`, role `public`); isolation is enforced only in app code today. This is a serious
+  cross-tenant leak risk once multiple unrelated companies share the database. **Remediation track
+  SEC-1** (below) must close this before any non-Junkluggers tenant is onboarded.
 
 ## 11. Open decisions
 
@@ -378,9 +383,12 @@ untouched.
 ```
 Plan first. Create the native price-book + customers schema from CL-BRD-002 §6 as PURELY ADDITIVE
 objects: price_lists, price_blocks, price_items, service_zones, customers. Provide SQL migrations
-with RLS scoped by franchise_id matching the pattern from discovery D0. Do NOT alter any existing
-table or query. I will run the SQL in the Supabase SQL editor. Output the migration as a numbered
-file I can also keep under a future migrations/ folder.
+with PROPERLY SCOPED RLS. IMPORTANT: do NOT copy the existing tables' RLS pattern — D0 found those
+policies are fully permissive (USING (true), role public, no franchise/tenant scoping; see
+D0-findings §3). Instead write policies that restrict each row to the caller's franchise, e.g. via a
+join: franchise_id IN (select franchise_id from profiles where auth_user_id = auth.uid()). Do NOT
+alter any existing table or query. I will run the SQL in the Supabase SQL editor. Output the
+migration as a numbered file I can also keep under a future migrations/ folder.
 ```
 
 **S-A.2 — Provider column (safe default)**
@@ -448,6 +456,16 @@ existing CSS variables. CRUD price lists/blocks/items + a zip→price-list map, 
 Touches shared surfaces (`crewlogic-oauth-callback`, paywall). Do only after Stages A–B are proven.
 Until then, onboard pilot companies by hand-creating their tenant (the Stage A path).
 
+- 🔒 **S-C.0 (SEC-1, HARD GATE) — tighten existing RLS before ANY non-Junkluggers tenant exists.**
+  ```
+  Plan first; treat as a security change (run the security-review skill; do a regression pass).
+  D0 found profiles/franchises/tenants/estimates/customer_price_lists have RLS enabled but fully
+  permissive policies (USING (true), role public). Replace them with franchise/tenant-scoped
+  policies (caller's franchise via profiles.auth_user_id = auth.uid()), WITHOUT breaking existing
+  app queries (the app currently relies on permissive reads — audit every supabaseFetch path first
+  and adjust, ideally in a dev environment). Edge functions use the service role and are unaffected.
+  No second tenant may be onboarded until this is live and verified.
+  ```
 - **S-C.1** = P2.1 self-serve provisioning (now low-risk: the native stack it provisions into is proven).
 - **S-C.2** = P2.4 billing/paywall + de-hardcode super-admin and `#90` gates.
 - **S-C.3** = P2.2 native customers UI + P2.3 Finalize & Send proposal.
