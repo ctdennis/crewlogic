@@ -48,9 +48,17 @@ Anthropic key, Google Maps key, Google Sheets creds.
    (`CrewLogic Signs - Daily Lifecycle`, `CrewLogic Soft-Delete Photo Sweep`) can later move to
    Supabase scheduled functions / pg_cron.
 
-## Workflows flagged NOT called by the app (turn off in n8n, then delete local copies)
-- **CrewLogic Auth** (`crewlogic-auth`) — superseded by the Supabase oauth-callback edge function.
-- **WebLogic oAuth** (`crewlogic-oauth-callback`) — the app's Google redirect points at the Supabase
-  function, not this n8n webhook. Dead.
-- **Create Image & Video Via Slack Prompt** (`slack-video-request`) — not CrewLogic (different project).
-- **Estimates** (Slack-triggered) — not called by the app; confirm it isn't a Slack automation in use.
+## Workflows flagged NOT called by the app — DISABLED 2026-05-25 ✅
+All four confirmed not called by the app, **disabled in n8n**, and local copies removed from the repo folder:
+- **CrewLogic Auth** (`crewlogic-auth`) — superseded by the Supabase oauth-callback edge function. Disabled + removed.
+- **WebLogic oAuth** (`crewlogic-oauth-callback`) — app's Google redirect points at the Supabase function, not this n8n webhook. Disabled + removed.
+- **Create Image & Video Via Slack Prompt** (`slack-video-request`) — not CrewLogic; **kept ACTIVE in n8n for a different project**, removed from this repo folder only.
+- **Estimates** (Slack-triggered) — not called by the app. Disabled + removed.
+
+## Migration status (live)
+- [ ] `crewlogic-job-lookup` → edge function *(first target — Vonigo read)*
+- [ ] `crewlogic-jobs` → edge function *(source is a Google Sheet — decide Sheets vs Supabase)*
+- [ ] `crewlogic-estimate` searchClients + delete → add to existing edge function
+- [ ] `crewlogic-submit-quote` → edge function *(multi-step + Vonigo document upload)*
+- [ ] `crewlogic-route` / `crewlogic-trucks` → migrate (carry Motive key) or retire (#90-only)
+- Cron automations (`Signs - Daily Lifecycle`, `Soft-Delete Photo Sweep`) → later (pg_cron / scheduled fn)
