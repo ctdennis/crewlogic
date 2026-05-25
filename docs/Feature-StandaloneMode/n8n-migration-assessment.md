@@ -65,9 +65,11 @@ All four confirmed not called by the app, **disabled in n8n**, and local copies 
 - [x] `crewlogic-submit-quote` → **DONE 2026-05-25** — migrated as crewlogic-estimate `submitQuote` action (v1.5). Vonigo create (method 3, frontend-built Charges) → photo upload (`/data/documents/`) → field edit (method 2, option IDs). pdfBase64 ignored (n8n never uploaded it). Plumbing validated (bogus IDs → Vonigo rejected, no junk quote). Frontend repointed (v5.9.86). **Real-submission verification pending (creates a real quote — test with a throwaway estimate).**
 - [x] `crewlogic-trucks` → **DONE 2026-05-25** — new `crewlogic-trucks` edge fn (Motive `/v1/vehicle_locations`, `MOTIVE_API_KEY` secret set from the n8n value). Validated: 3 live trucks. Frontend `getTruckLocations` repointed (v5.9.87).
 - [~] `crewlogic-route` → **LEFT ON n8n by decision 2026-05-25** — 70-node engine (10+ scenarios, AI/Slack agent, 3 Google Sheets); a full port is disproportionate for a #90 tester. Revisit if the Route Optimizer becomes a real feature. The n8n `Route Optimization` workflow STAYS (serves `crewlogic-route`; its `crewlogic-trucks` webhook is now unused).
-- Cron automations (`Signs - Daily Lifecycle`, `Soft-Delete Photo Sweep`) → still active; later (pg_cron / scheduled fn).
+- [x] Cron automations → **DONE 2026-05-25** — both migrated to Supabase edge functions + pg_cron (via pg_net):
+  - `Soft-Delete Photo Sweep` → `crewlogic-photo-sweep` (pg_cron 06:30 UTC). SQL: `sweep_find_expired_photos` / `sweep_prune_expired_photos`. Validated (0 expired now; logic confirmed).
+  - `Signs - Daily Lifecycle` → `crewlogic-signs-lifecycle` (pg_cron 22:00 UTC). SQL: `signs_daily_lifecycle`. Validated (0 due now; plumbing confirmed). Slack summary is optional (set `SLACK_SIGNS_WEBHOOK` edge secret to enable).
 
 ### n8n footprint after migration
-- **Disable (fully migrated):** `crewlogic-job-lookup`, `crewlogic-jobs` (+ Google Sheet), `CrewLogic Estimates`, `CrewLogic Submit Quote` (after submit-quote verified).
-- **Keep:** `Route Optimization` (route engine + Slack/AI), `Signs - Daily Lifecycle`, `Soft-Delete Photo Sweep`.
-- **Result:** every app data path runs on Supabase except the route-optimization engine (#90 tester).
+- **Disable now (fully migrated):** `crewlogic-job-lookup`, `crewlogic-jobs` (+ Google Sheet), `CrewLogic Estimates`, `CrewLogic Submit Quote`, **`Signs - Daily Lifecycle`, `Soft-Delete Photo Sweep`** (the Supabase pg_cron jobs now run these — disable the n8n ones to avoid double-running).
+- **Keep:** `Route Optimization` only (the route engine + Slack/AI interface; #90 tester, parked by decision).
+- **Result:** **everything is on Supabase except the route-optimization engine.** n8n is down to one workflow.
