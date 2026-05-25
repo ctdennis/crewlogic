@@ -459,9 +459,10 @@ Until then, onboard pilot companies by hand-creating their tenant (the Stage A p
 - 🔒 **S-C.0 (SEC-1, HARD GATE) — tighten existing RLS before ANY non-Junkluggers tenant exists.**
   See `SEC-1-supabaseFetch-audit.md` for the full 80-call inventory. **Key constraint:** `supabaseFetch`
   sends only the anon key (no per-user JWT), so `auth.uid()` is null on every browser→PostgREST call —
-  an `auth.uid()`-based policy would break all 80 calls. SEC-1 therefore STARTS with an
-  auth-architecture decision (A: adopt Supabase Auth / B: edge-function gateway / C: custom signed JWT;
-  recommend A), then:
+  an `auth.uid()`-based policy would break all 80 calls. **DECIDED (2026-05-25): Option A — adopt
+  Supabase Auth** (gotrue is already wired in: the callback already mints `session.supabaseToken`
+  and `profiles.auth_user_id` already links; main net-new piece is token refresh — see
+  `SEC-1-supabaseFetch-audit.md §6`). Then:
   ```
   Plan first; treat as a security change (security-review skill + regression pass over all 80 call
   sites, ideally in a dev environment).

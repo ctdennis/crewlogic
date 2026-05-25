@@ -91,3 +91,44 @@ Totals: **GET 44 · POST 20 · PATCH 13 · DELETE 3 = 80.**
 4. Fix the 10 UNSCOPED calls (§3.2) to carry/enforce franchise scope.
 5. Regression pass on all 80 call sites (ideally in a dev environment); `security-review` skill.
 6. **Hard gate:** no second (non-Junkluggers) tenant may exist until 1–5 are live and verified.
+
+---
+
+## 6. DECISION (2026-05-25): adopt Option A — Supabase Auth
+
+Chosen: **Option A.** No strong reason for B or C — gotrue is already in use, so A is both the
+correct fit and the lowest-lift. B (edge-function gateway) would be a needless 80-call refactor;
+C (custom JWT) would reinvent what gotrue already provides.
+
+### Why A is largely pre-built (verified 2026-05-25)
+- `crewlogic-oauth-callback` already signs into Supabase Auth via the id_token grant
+  (`/auth/v1/token?grant_type=id_token`, line 152) → `auth.users` exists per user.
+- It already mints a Supabase JWT and ships it to the frontend as `session.supabaseToken`
+  (line 313).
+- `profiles.auth_user_id` already links profiles → `auth.users` — exactly what `auth.uid()` RLS needs.
+- Confirmed gaps: `supabaseToken` is **never referenced in `index.html`** (delivered but unused —
+  `supabaseFetch` uses the anon key); and the callback captures **no refresh_token / expiry**
+  (the Supabase access token would expire ~1h with no renewal path).
+
+### Option A work breakdown (refines §5 steps 1–2)
+1. **Harden the Supabase sign-in.** Today `signIntoSupabase` is non-fatal (line 167) — on failure
+   the user has no JWT. Once RLS is scoped, a null JWT = locked out. Make the token reliably present
+   (fail the login, or a defined fallback) before tightening RLS.
+2. **Capture refresh_token + expiry** in the callback session (gotrue returns them; currently
+   dropped — only `access_token` is plumbed).
+3. **Frontend session management:** store `supabaseToken` + refresh_token; refresh before expiry
+   (manual refresh call, or via the supabase-js client's `setSession`); persist across reloads
+   (the app already restores its session object from storage).
+4. **`supabaseFetch`:** send `Authorization: Bearer <supabaseToken>` (keep `apikey` = anon).
+   One-function change; response shapes unchanged, so no consumer code changes.
+5. Then proceed to scoped RLS (§5 step 3), the 10 unscoped fixes (§5 step 4), and the regression
+   pass (§5 step 5).
+
+### Related cleanup to fold in
+- The D0 `subscriptionStatus` vs `subscriptionTier` mismatch: the callback DOES set
+  `subscriptionStatus` on the session (line 309), but the in-app profile-reload paths set
+  `subscriptionTier`. Align these while touching session handling here.
+
+### Sequencing
+Do this in a **dev environment**, not production — it changes the live auth/session path and
+requires a regression pass over all 80 data calls.
