@@ -1,5 +1,5 @@
-// Supabase Edge Function: crewlogic-estimate (v1.4)
-// Estimate CRUD operations - fully replaces the n8n crewlogic-estimate webhook.
+// Supabase Edge Function: crewlogic-estimate (v1.5)
+// Estimate operations - replaces the n8n crewlogic-estimate AND crewlogic-submit-quote webhooks.
 // Deploy: supabase functions deploy crewlogic-estimate
 //
 // Actions:
@@ -7,6 +7,7 @@
 //   calcDistances  - Google Maps Distance Matrix lookup for cost analysis routing
 //   searchClients  - Vonigo client search (MD5 /security/login/ auth — no OAuth)
 //   delete         - delete a submitted quote from Vonigo (POST /data/Quotes/ method 4)
+//   submitQuote    - create a Vonigo quote from an estimate (create + photo upload + field edit)
 //
 // SECRETS REQUIRED (auto-populated):
 //   SUPABASE_URL
@@ -25,8 +26,13 @@
 // v1.4: Added delete — migrated from n8n (same MD5 auth). Deletes the submitted
 //       Vonigo quote by objectID (method 4). The CrewLogic-side soft-delete
 //       (estimates.status='deleted') is done client-side; this action only handles
-//       the Vonigo quote removal. crewlogic-estimate now fully replaces the n8n
-//       webhook — no actions remain in n8n for this endpoint.
+//       the Vonigo quote removal.
+// v1.5: Added submitQuote — migrated from the n8n crewlogic-submit-quote webhook.
+//       Creates a Vonigo quote (method 3) with the frontend-built Charges + Fields,
+//       uploads each photo (fetch signed URL → base64 → /data/documents/), then
+//       edits the quote (method 2) to set dwelling/parking/jobType option IDs.
+//       Charges + option IDs are computed by the frontend and passed through.
+//       (The frontend's pdfBase64 is intentionally ignored — n8n never uploaded it.)
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -44,6 +50,34 @@ const VONIGO_BASE = "https://junkluggers.vonigo.com/api/v1";
 const TENANT_ID = "946a4535-aa61-45b6-a6fb-9190ff546d41"; // Junkluggers
 const F_CLIENT_ADDRESS = 129; // Vonigo Client field: address
 const F_CLIENT_CONTACT = 130; // Vonigo Client field: primary contact
+
+// Base64-encode bytes in 32KB chunks (avoids call-stack overflow on large images).
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+// Vonigo itemLocations multi-checkbox string (fieldID 11215), derived from the
+// estimate's areas. Mirrors the n8n encoding exactly.
+function buildItemLocations(areas: unknown): string {
+  const lows = (Array.isArray(areas) ? areas : []).map((a) => String(a || "").toLowerCase());
+  const has = (s: string) => lows.some((a) => a.includes(s));
+  const loc = [
+    { id: 18910, label: "Basement", checked: has("basement") },
+    { id: 18911, label: "1st Floor", checked: has("1st") || has("first") },
+    { id: 18912, label: "2nd Floor", checked: has("2nd") || has("second") },
+    { id: 18913, label: "3rd Floor", checked: has("3rd") || has("third") },
+    { id: 18914, label: "Attic", checked: has("attic") },
+    { id: 18915, label: "Outside/Garage", checked: has("outside") || has("garage") || has("curb") || has("driveway") },
+  ];
+  return loc
+    .map((l, i) => l.id + "!~!" + l.label + "!`!" + (l.checked ? 1 : 0) + "!!" + (i < loc.length - 1 ? "~~!!" : "!~~~!!!"))
+    .join("");
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Supabase REST helpers (use service role to bypass RLS)
@@ -426,6 +460,106 @@ async function handleDelete(body: Record<string, unknown>): Promise<Response> {
   return jsonResponse({ success: true, deleted: true, vonigoQuoteID });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// HANDLER: submitQuote
+// Creates a Vonigo quote from an estimate and uploads its photos. Mirrors the n8n
+// crewlogic-submit-quote workflow: create (method 3) → upload photos → edit (method 2).
+// Charges + option IDs are pre-built by the frontend and passed through. The
+// frontend's pdfBase64 is intentionally ignored (n8n never uploaded it).
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleSubmitQuote(body: Record<string, unknown>): Promise<Response> {
+  const franchiseExternalId = String(body.franchiseID || "");
+  const clientID = body.clientID;
+  const contactID = body.contactID;
+  const locationID = body.locationID;
+  if (!franchiseExternalId) return jsonResponse({ success: false, error: "franchiseID required" }, 400);
+  if (!clientID || !contactID || !locationID) {
+    return jsonResponse({ success: false, error: "clientID, contactID and locationID required" }, 400);
+  }
+
+  const securityToken = await vonigoLogin(franchiseExternalId);
+  const itemLocations = buildItemLocations(body.areas);
+  const notesCreate = String(body.customerSituation || body.notes || "").replace(/•/g, "-").replace(/—/g, "-");
+
+  // 1) Create the quote (method 3). Charges are pre-built by the frontend.
+  const createBody: Record<string, unknown> = {
+    securityToken,
+    method: "3",
+    clientID,
+    contactID,
+    locationID,
+    serviceTypeID: "11",
+    Fields: [
+      { fieldID: 914, fieldValue: notesCreate },
+      { fieldID: 10336, fieldValue: body.itemsList || "" },
+      { fieldID: 11215, fieldValue: itemLocations },
+    ],
+    Charges: body.charges,
+  };
+  if (body.jobID) createBody.jobID = body.jobID;
+
+  const createData = await (await fetch(VONIGO_BASE + "/data/Quotes/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(createBody),
+  })).json();
+  if (createData.errNo !== 0 || !createData.Quote) {
+    console.error(`[submitQuote] create failed errNo ${createData.errNo}: ${createData.errMsg || ""}`);
+    return jsonResponse({ success: false, error: createData.errMsg || `Vonigo create failed (errNo ${createData.errNo})` }, 502);
+  }
+  const quoteID = createData.Quote.objectID;
+
+  // 2) Upload photos (best-effort — the quote already exists; a photo failure
+  //    shouldn't fail the whole submission). Fetch each signed URL → base64 → Vonigo.
+  const photos = (Array.isArray(body.photos) ? body.photos : []) as Array<{ signedUrl?: string; room?: string }>;
+  let photosUploaded = 0;
+  for (let i = 0; i < photos.length; i++) {
+    const p = photos[i];
+    if (!p || !p.signedUrl) continue;
+    try {
+      const imgRes = await fetch(p.signedUrl);
+      if (!imgRes.ok) { console.warn(`[submitQuote] photo ${i + 1} fetch ${imgRes.status}`); continue; }
+      const base64 = uint8ToBase64(new Uint8Array(await imgRes.arrayBuffer()));
+      const fileName = (p.room || "Room").replace(/[^a-z0-9]/gi, "_") + "_" + (i + 1) + ".jpg";
+      const upData = await (await fetch(VONIGO_BASE + "/data/documents/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ securityToken, quoteID, method: "3", fileName, file64BitBase: base64 }),
+      })).json();
+      if (upData.errNo === 0) photosUploaded++;
+      else console.warn(`[submitQuote] photo ${i + 1} upload errNo ${upData.errNo}: ${upData.errMsg || ""}`);
+    } catch (e) {
+      console.warn(`[submitQuote] photo ${i + 1} error: ${(e as Error).message}`);
+    }
+  }
+
+  // 3) Edit quote fields (method 2) — set option-ID fields + sanitized notes.
+  const notesEdit = String(body.customerSituation || body.notes || "")
+    .replace(/•/g, "").replace(/—/g, "-").replace(/[^\x00-\x7F]/g, "");
+  const editData = await (await fetch(VONIGO_BASE + "/data/Quotes/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      securityToken,
+      method: "2",
+      objectID: quoteID,
+      Fields: [
+        { fieldID: 914, fieldValue: notesEdit },
+        { fieldID: 10726, optionID: body.dwellingTypeOptionID || 11227 },
+        { fieldID: 10258, optionID: body.parkingOptionID || 10450 },
+        { fieldID: 10765, optionID: body.jobTypeOptionID || 12172 },
+        { fieldID: 11215, fieldValue: itemLocations },
+      ],
+    }),
+  })).json();
+  if (editData.errNo !== 0) {
+    // Non-fatal: the quote exists; field edit failure just means option IDs didn't set.
+    console.warn(`[submitQuote] edit fields errNo ${editData.errNo}: ${editData.errMsg || ""} (quote ${quoteID} created OK)`);
+  }
+
+  return jsonResponse({ success: true, quoteID, photosUploaded });
+}
+
 function jsonResponse(data: unknown, status: number = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -438,6 +572,7 @@ const ACTION_HANDLERS: Record<string, (body: Record<string, unknown>) => Promise
   calcDistances: handleCalcDistances,
   searchClients: handleSearchClients,
   delete: handleDelete,
+  submitQuote: handleSubmitQuote,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

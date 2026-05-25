@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.85 | 2026-05-25">
+  <meta name="crewlogic-version" content="v5.9.86 | 2026-05-25">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10715,9 +10715,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Submit to Vonigo
         feedbackEl.textContent = 'Submitting to Vonigo...';
         feedbackEl.className = 'settings-feedback loading';
-        const res = await apiFetch(N8N_BASE + '/crewlogic-submit-quote', {
-          method: 'POST',
-          body: JSON.stringify({
+        const data = await edgeFunctionCall('crewlogic-estimate', {
+            action: 'submitQuote',
             clientID: currentEstimate.clientID,
             contactID: currentEstimate.contactID,
             locationID: currentEstimate.locationID,
@@ -10731,7 +10730,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             parkingOptionID,
             charges,
             // Distinct areas pulled from the original charges list — needed for
-            // n8n's location-checkbox logic since the reformatted `charges` above
+            // the location-checkbox logic since the reformatted `charges` above
             // is Vonigo line items (priceItemID/Fields) without the original area.
             areas: Array.from(new Set(
               (currentEstimate.charges || [])
@@ -10744,9 +10743,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             photos: uploadPhotos ? photos : [],
             pdfBase64: pdfBase64 || null,
             pdfFilename
-          })
         });
-        const data = await res.json();
         if (data.success) {
           currentEstimate.vonigoQuoteID = data.quoteID;
           currentEstimate.status = 'submitted';
