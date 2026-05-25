@@ -76,7 +76,7 @@ Common commands (run from repo root):
 ## Development workflow
 
 - **Run locally:** open `index.html` directly in a browser, or serve the folder (`python3 -m http.server`). No build.
-- **Versioning:** bump the version in two places on each release — the `<meta name="crewlogic-version">` tag (line 5) and `_FEEDBACK_APP_VERSION` (~line 8542). Current: `5.9.75`.
+- **Versioning:** **single source of truth** — bump the `<meta name="crewlogic-version">` tag (line 5) on each release. Everything else derives from it at runtime: the console startup banner and `_FEEDBACK_APP_VERSION` both read the meta tag (`document.querySelector('meta[name="crewlogic-version"]').content`). Do **not** reintroduce hardcoded version strings elsewhere. Current: `5.9.81`. (Historical note: the console banner had silently drifted to 5.9.75 because it was a separate hardcoded string; the derive-from-meta refactor in 5.9.81 fixed that.)
 - **Deploy:** Current workflow: `index.html` is downloaded from a Claude.ai chat session to `~/Downloads`, manually copied into `~/Documents/GitHub/crewlogic`, then committed to `main` via GitHub Desktop. Cloudflare Pages auto-deploys from `main` to `crewlogicai.com` (custom domain on the Cloudflare Pages project). The `crewlogic.pages.dev` URL still resolves as a transition fallback. Migrating this workflow to use Claude Code directly is in progress.
 
 ## Edge Function source code
