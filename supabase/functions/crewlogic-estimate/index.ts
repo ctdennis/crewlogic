@@ -1,11 +1,12 @@
-// Supabase Edge Function: crewlogic-estimate (v1.3)
-// Estimate CRUD operations - replaces n8n crewlogic-estimate webhook (save + calcDistances + searchClients).
+// Supabase Edge Function: crewlogic-estimate (v1.4)
+// Estimate CRUD operations - fully replaces the n8n crewlogic-estimate webhook.
 // Deploy: supabase functions deploy crewlogic-estimate
 //
 // Actions:
 //   save           - upsert estimate to Supabase estimates table
 //   calcDistances  - Google Maps Distance Matrix lookup for cost analysis routing
 //   searchClients  - Vonigo client search (MD5 /security/login/ auth — no OAuth)
+//   delete         - delete a submitted quote from Vonigo (POST /data/Quotes/ method 4)
 //
 // SECRETS REQUIRED (auto-populated):
 //   SUPABASE_URL
@@ -21,9 +22,11 @@
 //       same MD5 /security/login/ flow the other edge functions use (the prior
 //       "requires Vonigo OAuth" note was incorrect — there is no OAuth). Vonigo
 //       creds come from the vonigo_credentials Vault via get_vonigo_credential.
-//
-// Other actions still in n8n:
-//   - delete (Vonigo quote cleanup)
+// v1.4: Added delete — migrated from n8n (same MD5 auth). Deletes the submitted
+//       Vonigo quote by objectID (method 4). The CrewLogic-side soft-delete
+//       (estimates.status='deleted') is done client-side; this action only handles
+//       the Vonigo quote removal. crewlogic-estimate now fully replaces the n8n
+//       webhook — no actions remain in n8n for this endpoint.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -392,6 +395,37 @@ async function handleSearchClients(body: Record<string, unknown>): Promise<Respo
   return jsonResponse({ success: true, clients });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// HANDLER: delete
+// Deletes a submitted quote from Vonigo (method 4). Mirrors the n8n delete action.
+// The CrewLogic-side soft-delete (estimates.status='deleted') is done client-side
+// before this is called; this only removes the Vonigo quote. Best-effort by design
+// (the frontend tolerates failure since the estimate is already archived locally).
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleDelete(body: Record<string, unknown>): Promise<Response> {
+  const franchiseExternalId = String(body.franchiseID || "");
+  const vonigoQuoteID = body.vonigoQuoteID;
+  if (!franchiseExternalId) return jsonResponse({ success: false, error: "franchiseID required" }, 400);
+  // No Vonigo quote → nothing to delete in Vonigo (estimate was never submitted).
+  if (!vonigoQuoteID) {
+    return jsonResponse({ success: true, deleted: false, note: "no vonigoQuoteID — nothing to delete in Vonigo" });
+  }
+
+  const securityToken = await vonigoLogin(franchiseExternalId);
+
+  const res = await fetch(VONIGO_BASE + "/data/Quotes/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ securityToken, method: "4", objectID: vonigoQuoteID }),
+  });
+  const data = await res.json();
+  if (data.errNo !== 0) {
+    console.warn(`[delete] Vonigo errNo ${data.errNo}: ${data.errMsg || ""} (quote ${vonigoQuoteID})`);
+    return jsonResponse({ success: false, error: `Vonigo delete failed: ${data.errMsg || "errNo " + data.errNo}` }, 502);
+  }
+  return jsonResponse({ success: true, deleted: true, vonigoQuoteID });
+}
+
 function jsonResponse(data: unknown, status: number = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -403,6 +437,7 @@ const ACTION_HANDLERS: Record<string, (body: Record<string, unknown>) => Promise
   save: handleSave,
   calcDistances: handleCalcDistances,
   searchClients: handleSearchClients,
+  delete: handleDelete,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

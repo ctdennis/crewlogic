@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.84 | 2026-05-25">
+  <meta name="crewlogic-version" content="v5.9.85 | 2026-05-25">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11167,15 +11167,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Delete from Vonigo if submitted (Vonigo has no soft delete)
       if (vonigoQuoteID) {
         try {
-          await apiFetch(N8N_BASE + '/crewlogic-estimate', {
-            method: 'POST',
-            body: JSON.stringify({
-              action: 'delete',
-              email: currentUser.email,
-              franchiseID: currentUser.franchiseID,
-              deleteIDs: [estimateID],
-              vonigoQuoteID
-            })
+          await edgeFunctionCall('crewlogic-estimate', {
+            action: 'delete',
+            email: currentUser.email,
+            franchiseID: currentUser.franchiseID,
+            deleteIDs: [estimateID],
+            vonigoQuoteID
           });
         } catch(e) {
           console.error('Vonigo delete error:', e);
