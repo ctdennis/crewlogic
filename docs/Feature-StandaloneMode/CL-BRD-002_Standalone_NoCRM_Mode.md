@@ -457,14 +457,22 @@ Touches shared surfaces (`crewlogic-oauth-callback`, paywall). Do only after Sta
 Until then, onboard pilot companies by hand-creating their tenant (the Stage A path).
 
 - 🔒 **S-C.0 (SEC-1, HARD GATE) — tighten existing RLS before ANY non-Junkluggers tenant exists.**
+  See `SEC-1-supabaseFetch-audit.md` for the full 80-call inventory. **Key constraint:** `supabaseFetch`
+  sends only the anon key (no per-user JWT), so `auth.uid()` is null on every browser→PostgREST call —
+  an `auth.uid()`-based policy would break all 80 calls. SEC-1 therefore STARTS with an
+  auth-architecture decision (A: adopt Supabase Auth / B: edge-function gateway / C: custom signed JWT;
+  recommend A), then:
   ```
-  Plan first; treat as a security change (run the security-review skill; do a regression pass).
-  D0 found profiles/franchises/tenants/estimates/customer_price_lists have RLS enabled but fully
-  permissive policies (USING (true), role public). Replace them with franchise/tenant-scoped
-  policies (caller's franchise via profiles.auth_user_id = auth.uid()), WITHOUT breaking existing
-  app queries (the app currently relies on permissive reads — audit every supabaseFetch path first
-  and adjust, ideally in a dev environment). Edge functions use the service role and are unaffected.
-  No second tenant may be onboarded until this is live and verified.
+  Plan first; treat as a security change (security-review skill + regression pass over all 80 call
+  sites, ideally in a dev environment).
+  1. Implement the chosen auth approach so the DB can identify the caller's franchise/tenant
+     (Option A: OAuth callback mints a real Supabase session; supabaseFetch sends the user JWT as
+     bearer — response shapes unchanged, so the change is per-header not per-query).
+  2. Replace the permissive policies on profiles/franchises/tenants/estimates/customer_price_lists
+     AND the new standalone tables with franchise/tenant-scoped policies. Verify row-id writes
+     (PATCH/DELETE ?id=eq.X) are REJECTED when the row is outside the caller's franchise.
+  3. Fix the 10 UNSCOPED calls listed in the audit §3.2.
+  No second tenant may be onboarded until 1–3 are live and verified.
   ```
 - **S-C.1** = P2.1 self-serve provisioning (now low-risk: the native stack it provisions into is proven).
 - **S-C.2** = P2.4 billing/paywall + de-hardcode super-admin and `#90` gates.
