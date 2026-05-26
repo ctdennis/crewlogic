@@ -45,6 +45,9 @@ const CORS_HEADERS = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+// When "true" (set on DEV deployments only), every Vonigo WRITE action is refused so dev
+// can never mutate the real (prod) Vonigo. Reads (searchClients, lookups) are unaffected.
+const VONIGO_READONLY = Deno.env.get("VONIGO_READONLY") === "true";
 
 const VONIGO_BASE = "https://junkluggers.vonigo.com/api/v1";
 const TENANT_ID = "946a4535-aa61-45b6-a6fb-9190ff546d41"; // Junkluggers
@@ -437,6 +440,7 @@ async function handleSearchClients(body: Record<string, unknown>): Promise<Respo
 // (the frontend tolerates failure since the estimate is already archived locally).
 // ─────────────────────────────────────────────────────────────────────────────
 async function handleDelete(body: Record<string, unknown>): Promise<Response> {
+  if (VONIGO_READONLY) return jsonResponse({ success: false, error: "Vonigo writes are disabled in this environment (dev is read-only). Delete from Vonigo only in production." }, 403);
   const franchiseExternalId = String(body.franchiseID || "");
   const vonigoQuoteID = body.vonigoQuoteID;
   if (!franchiseExternalId) return jsonResponse({ success: false, error: "franchiseID required" }, 400);
@@ -468,6 +472,7 @@ async function handleDelete(body: Record<string, unknown>): Promise<Response> {
 // frontend's pdfBase64 is intentionally ignored (n8n never uploaded it).
 // ─────────────────────────────────────────────────────────────────────────────
 async function handleSubmitQuote(body: Record<string, unknown>): Promise<Response> {
+  if (VONIGO_READONLY) return jsonResponse({ success: false, error: "Vonigo writes are disabled in this environment (dev is read-only). Submit to Vonigo only in production." }, 403);
   const franchiseExternalId = String(body.franchiseID || "");
   const clientID = body.clientID;
   const contactID = body.contactID;
