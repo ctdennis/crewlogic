@@ -3333,7 +3333,35 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     const EDGE_ANON_KEY = IS_DEV_ENV
       ? 'sb_publishable_PNHsikZJAodAZAINaBJbxQ_m2USrJnW'
       : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
-    if (IS_DEV_ENV) console.warn('%c⚙ DEV ENV — talking to crewlogic-dev', 'color:#f59e0b;font-weight:bold', SUPABASE_URL);
+    if (IS_DEV_ENV) {
+      console.warn('%c⚙ DEV ENV — talking to crewlogic-dev', 'color:#f59e0b;font-weight:bold', SUPABASE_URL);
+      applyDevEnvChrome();
+    }
+
+    // Painfully-obvious DEV environment chrome (dev hosts only): amber "DEV" tab icon +
+    // title, amber accent scheme, a viewport frame, and a corner badge. Inert on prod
+    // (never called there). pointer-events:none so overlays never block taps.
+    function applyDevEnvChrome() {
+      try {
+        const A = '#f59e0b'; // dev amber
+        const favSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="' + A + '"/><text x="16" y="22" font-family="monospace" font-size="13" font-weight="700" fill="#0f1923" text-anchor="middle">DEV</text></svg>';
+        let icon = document.querySelector('link[rel="icon"]');
+        if (!icon) { icon = document.createElement('link'); icon.rel = 'icon'; document.head.appendChild(icon); }
+        icon.type = 'image/svg+xml';
+        icon.href = 'data:image/svg+xml;base64,' + btoa(favSvg);
+        document.title = '🔧 DEV — CrewLogicAI';
+        const tc = document.querySelector('meta[name="theme-color"]');
+        if (tc) tc.content = A;
+        const st = document.createElement('style');
+        st.textContent =
+          ':root{--accent-green:' + A + ' !important;--accent-green-dim:#d97706 !important;}' +
+          '#devEnvFrame{position:fixed;inset:0;border:4px solid ' + A + ';pointer-events:none;z-index:99998;}' +
+          '#devEnvBadge{position:fixed;left:8px;bottom:8px;background:' + A + ';color:#0f1923;font:700 11px/1 system-ui,-apple-system,sans-serif;letter-spacing:1px;padding:5px 10px;border-radius:6px;z-index:99999;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,0.45);}';
+        document.head.appendChild(st);
+        const frame = document.createElement('div'); frame.id = 'devEnvFrame'; document.body.appendChild(frame);
+        const badge = document.createElement('div'); badge.id = 'devEnvBadge'; badge.textContent = '🔧 DEV · crewlogic-dev'; document.body.appendChild(badge);
+      } catch (e) { console.warn('applyDevEnvChrome failed', e); }
+    }
     const SESSION_KEY = 'cl_session_v2';
 
     // Helper for Edge Function calls — POST JSON, returns parsed JSON.
