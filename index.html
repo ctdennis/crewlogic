@@ -6784,7 +6784,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       modal.innerHTML =
         '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius,12px);max-width:520px;width:100%;max-height:80vh;overflow:auto;padding:18px;">'
         + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
-        + '<div style="font-size:15px;font-weight:700;color:var(--text-primary);">🩹 Recover photos (' + orphans.length + ')</div>'
+        + '<div data-recon-title style="font-size:15px;font-weight:700;color:var(--text-primary);">🩹 Recover photos (' + orphans.length + ')</div>'
         + '<button onclick="document.getElementById(\'photoReconcilerModal\').remove()" style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;line-height:1;">✕</button>'
         + '</div>'
         + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">These photos are in cloud Storage for this estimate but aren\'t linked to any line. Pick a charge and Restore.</div>'
@@ -6805,9 +6805,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         charge.photoUrl = fullPath;
       }
       renderCharges();
-      saveEstimateDraft(); // persist (note: blocked on won/lost estimates — those show 'locked')
+      saveEstimateDraft(); // persist (blocked on won/lost estimates — those show 'locked')
       const row = document.getElementById('orphan-row-' + i);
       if (row) row.remove();
+      // Close the modal once everything is restored; otherwise update the remaining count
+      // so the stale "(N)" header + "Pick a charge" instruction don't linger.
+      const modal = document.getElementById('photoReconcilerModal');
+      if (modal) {
+        const remaining = modal.querySelectorAll('[id^="orphan-row-"]').length;
+        if (remaining === 0) {
+          modal.remove();
+        } else {
+          const title = modal.querySelector('[data-recon-title]');
+          if (title) title.textContent = '🩹 Recover photos (' + remaining + ')';
+        }
+      }
     }
 
     // Show a badge on the estimate editor if photos are pending sync
