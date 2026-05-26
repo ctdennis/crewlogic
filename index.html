@@ -10426,12 +10426,43 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // ===== SUBMIT TO VONIGO =====
-    function submitEstimateToVonigo() {
+    // Photos NOT in cloud Storage (still a local photoID or base64) — these won't be sent
+    // to Vonigo on submit, nor copied on clone. Returns the affected room labels.
+    function listNonStoragePhotos(estimate) {
+      const rooms = [];
+      (estimate && Array.isArray(estimate.charges) ? estimate.charges : []).forEach((c, ci) => {
+        (c && Array.isArray(c.photos) ? c.photos : []).forEach(ref => {
+          if (typeof ref === 'string' && (ref.startsWith('photo_') || ref.startsWith('data:'))) {
+            rooms.push(c.room || c.name || ('charge ' + (ci + 1)));
+          }
+        });
+      });
+      return rooms;
+    }
+
+    // Confirm gate for Submit/Clone when photos haven't synced. drainFirst lets pending
+    // uploads finish first so transient (yellow) photos clear before we warn.
+    async function confirmIfUnsyncedPhotos(estimate, actionLabel, drainFirst) {
+      if (drainFirst) { try { await drainPhotoQueue(); } catch(e) {} }
+      const rooms = listNonStoragePhotos(estimate);
+      if (!rooms.length) return true;
+      const uniq = [...new Set(rooms)];
+      const msg = '⚠ ' + rooms.length + (rooms.length > 1 ? ' photos have' : ' photo has')
+        + ' not synced to the cloud and will NOT be included.\n\nRoom(s): '
+        + uniq.slice(0, 8).join(', ') + (uniq.length > 8 ? '…' : '')
+        + '\n\n' + actionLabel + ' anyway?';
+      return confirm(msg);
+    }
+
+    async function submitEstimateToVonigo() {
       if (!currentEstimate.clientID) {
         document.getElementById('estFeedback').textContent = 'Enter a Vonigo job number and tap Look up before submitting.';
         document.getElementById('estFeedback').className = 'settings-feedback error';
         return;
       }
+
+      // Guardrail: don't silently submit with photos that never reached Storage.
+      if (!(await confirmIfUnsyncedPhotos(currentEstimate, 'Submit to Vonigo', true))) return;
 
       const volumeCharges = (currentEstimate.charges || []).filter(c => c.type === 'volume');
       if (volumeCharges.length === 0) {
@@ -11124,6 +11155,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         original = all.find(e => String(e.estimateID) === String(estimateID));
       }
       if (!original) {
+        document.getElementById('cloneOptionsModal').style.display = 'none';
+        document.getElementById('cloneModalButtons').style.display = '';
+        return;
+      }
+
+      // Guardrail: warn if the source has unsynced photos — they won't copy to the clone
+      // (exactly how a clone inherits broken photo references).
+      if (photoChoice === 'copy' && !(await confirmIfUnsyncedPhotos(original, 'Clone', false))) {
         document.getElementById('cloneOptionsModal').style.display = 'none';
         document.getElementById('cloneModalButtons').style.display = '';
         return;
