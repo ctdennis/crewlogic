@@ -1150,7 +1150,8 @@
       <button onclick="closeWizardMenu();showShedWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🏚️ Shed</button>
       <button onclick="closeWizardMenu();showStorageWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">📦 Storage Unit</button>
       <button onclick="closeWizardMenu();showMattressWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🛏️ Mattress</button>
-      <button onclick="closeWizardMenu();showPalletWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;">🪵 Pallets</button>
+      <button onclick="closeWizardMenu();showPalletWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🪵 Pallets</button>
+      <button onclick="closeWizardMenu();openPhotoReconciler();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;">🩹 Recover photos</button>
     </div>
 
     <div class="app-content">
@@ -6720,6 +6721,88 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         console.warn('mergeQueuedPhotos failed:', e);
       }
       return estimate;
+    }
+
+    // ===== ORPHAN PHOTO RECONCILER =====
+    // Finds Storage objects in this estimate's folder that no charge references (orphaned by
+    // the unassigned/chargeIdx relink gap, charge deletions, or clone churn) and lets the
+    // user restore them to a charge. Also the recovery tool for already-lost photos.
+    async function openPhotoReconciler() {
+      if (!currentEstimate || !currentEstimate.estimateID) return;
+      const folder = currentUser.franchiseID + '/' + currentEstimate.estimateID;
+      // Everything the estimate already points at: active photos, soft-deleted photos, cover.
+      const referenced = new Set();
+      (currentEstimate.charges || []).forEach(c => {
+        (c && Array.isArray(c.photos) ? c.photos : []).forEach(p => { if (typeof p === 'string') referenced.add(p); });
+        (c && Array.isArray(c.deletedPhotos) ? c.deletedPhotos : []).forEach(d => { if (d && d.path) referenced.add(d.path); });
+      });
+      if (currentEstimate.coverPhoto) referenced.add(currentEstimate.coverPhoto);
+
+      let objects = [];
+      try {
+        const { data, error } = await supabaseClient.storage.from('estimate-photos').list(folder, { limit: 1000 });
+        if (error) throw error;
+        objects = data || [];
+      } catch (e) {
+        alert('Could not read Storage for this estimate: ' + (e.message || e));
+        return;
+      }
+      const orphans = objects
+        .filter(o => o && o.id && o.name && !o.name.includes('cover'))   // files only, skip cover
+        .map(o => folder + '/' + o.name)
+        .filter(full => !referenced.has(full));
+
+      buildPhotoReconcilerModal(orphans);
+    }
+
+    function buildPhotoReconcilerModal(orphans) {
+      const existing = document.getElementById('photoReconcilerModal');
+      if (existing) existing.remove();
+      if (!orphans.length) { alert('No orphaned photos in Storage for this estimate. ✅'); return; }
+
+      const chargeOpts = (currentEstimate.charges || []).map((c, i) =>
+        '<option value="' + i + '">' + String(c.room || c.name || ('Charge ' + (i + 1))).replace(/</g, '&lt;') + '</option>'
+      ).join('') || '<option value="0">(no charges)</option>';
+
+      let rows = '';
+      orphans.forEach((full, i) => {
+        rows += '<div id="orphan-row-' + i + '" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">'
+          + '<img data-photo-path="' + full.replace(/"/g, '&quot;') + '" style="width:64px;height:50px;object-fit:cover;border-radius:4px;border:1px solid var(--border);background:var(--surface-2);flex-shrink:0;" />'
+          + '<select id="orphan-charge-' + i + '" class="form-select" style="flex:1;font-size:12px;">' + chargeOpts + '</select>'
+          + '<button onclick="restoreOrphanPhoto(' + i + ',this.parentElement.querySelector(\'img\').getAttribute(\'data-photo-path\'))" style="background:var(--accent-green);border:none;border-radius:var(--radius-sm);padding:6px 12px;font-size:12px;font-weight:700;color:#000;cursor:pointer;flex-shrink:0;">Restore</button>'
+          + '</div>';
+      });
+
+      const modal = document.createElement('div');
+      modal.id = 'photoReconcilerModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99990;display:flex;align-items:center;justify-content:center;padding:16px;';
+      modal.innerHTML =
+        '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius,12px);max-width:520px;width:100%;max-height:80vh;overflow:auto;padding:18px;">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+        + '<div style="font-size:15px;font-weight:700;color:var(--text-primary);">🩹 Recover photos (' + orphans.length + ')</div>'
+        + '<button onclick="document.getElementById(\'photoReconcilerModal\').remove()" style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;line-height:1;">✕</button>'
+        + '</div>'
+        + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">These photos are in cloud Storage for this estimate but aren\'t linked to any line. Pick a charge and Restore.</div>'
+        + rows
+        + '</div>';
+      document.body.appendChild(modal);
+      resolvePhotoThumbnails(); // resolve the orphan thumbnails (modal imgs have data-photo-path)
+    }
+
+    function restoreOrphanPhoto(i, fullPath) {
+      const sel = document.getElementById('orphan-charge-' + i);
+      const chargeIdx = sel ? parseInt(sel.value, 10) : 0;
+      const charge = currentEstimate.charges && currentEstimate.charges[chargeIdx];
+      if (!charge) return;
+      if (!Array.isArray(charge.photos)) charge.photos = [];
+      if (!charge.photos.includes(fullPath)) {
+        charge.photos.push(fullPath);
+        charge.photoUrl = fullPath;
+      }
+      renderCharges();
+      saveEstimateDraft(); // persist (note: blocked on won/lost estimates — those show 'locked')
+      const row = document.getElementById('orphan-row-' + i);
+      if (row) row.remove();
     }
 
     // Show a badge on the estimate editor if photos are pending sync
