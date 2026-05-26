@@ -25,7 +25,7 @@ insert into public.estimates
 values
   (9000000000001, '22222222-2222-2222-2222-222222222222', 'dev-owner@crewlogic.test',
    'Healthy Won — has charges', 'won', 'Smith, John', '123 Main St, Columbus OH 43215', '43215', 850, 1.5,
-   '{"charges":[{"area":"Garage","room":"","description":"Misc junk","price":850,"truckPct":1.5,"photos":[]}],"notes":"Access via side door"}'::jsonb);
+   '{"charges":[{"type":"volume","room":"Garage","area":"Garage","truckLabel":"1/2","truckQty":1,"pctRecycled":0,"pctDonated":0,"description":"Misc junk and boxes","notIncluded":"","photos":[]},{"type":"surcharge","name":"Stairs surcharge","qty":1,"unitPrice":50,"description":"2nd-floor carry","area":"","photos":[]}],"notes":"Access via side door"}'::jsonb);
 
 -- (2) Bug-repro won estimate with EMPTY payload — charges load empty in memory.
 -- Pre-fix: backing out hard-deletes this row. Post-fix: it must survive (silent exit / soft-delete only).
