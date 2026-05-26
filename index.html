@@ -10849,20 +10849,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (delBtn) delBtn.style.color = window._showDeletedEstimates ? '#ef4444' : 'var(--text-muted)';
 
       if (window._showDeletedEstimates) {
-        // Fetch deleted estimates from Supabase
-        const listEl = document.getElementById('estimatesList');
-        listEl.innerHTML = '<div class="price-loading"><span class="spinner-inline"></span>Loading deleted estimates...</div>';
-        try {
-          const data = await supabaseFetch(
-            '/rest/v1/estimates?status=eq.deleted&owner_email=eq.' + encodeURIComponent(currentUser.email) +
-            '&order=deleted_at.desc&select=estimate_id,owner_email,label,status,client_name,address,zip,total_price,total_trucks,cover_photo,deleted_at,updated_at'
-          );
-          renderDeletedEstimatesList(data || []);
-        } catch(e) {
-          listEl.innerHTML = '<div class="price-error">Could not load deleted estimates.</div>';
-        }
+        await loadDeletedEstimatesView();
       } else {
         renderEstimatesList(window._cachedEstimates || []);
+      }
+    }
+
+    // Fetch + render the Deleted estimates list. Shared by the Deleted toggle and restore
+    // so a restore re-renders the Deleted view immediately (the restored row drops out).
+    async function loadDeletedEstimatesView() {
+      const listEl = document.getElementById('estimatesList');
+      listEl.innerHTML = '<div class="price-loading"><span class="spinner-inline"></span>Loading deleted estimates...</div>';
+      try {
+        const data = await supabaseFetch(
+          '/rest/v1/estimates?status=eq.deleted&owner_email=eq.' + encodeURIComponent(currentUser.email) +
+          '&order=deleted_at.desc&select=estimate_id,owner_email,label,status,client_name,address,zip,total_price,total_trucks,cover_photo,deleted_at,updated_at'
+        );
+        renderDeletedEstimatesList(data || []);
+      } catch(e) {
+        listEl.innerHTML = '<div class="price-error">Could not load deleted estimates.</div>';
       }
     }
 
@@ -11210,7 +11215,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             deleted_at: null
           })
         });
-        initEstimatesList();
+        // Refresh whichever view is on screen. In the Deleted view, re-fetch it so the
+        // restored estimate drops out immediately; otherwise refresh the active list.
+        if (window._showDeletedEstimates) {
+          await loadDeletedEstimatesView();
+        } else {
+          initEstimatesList();
+        }
       } catch(e) {
         alert('Restore failed. Please try again.');
       }
