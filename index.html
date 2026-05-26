@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.87 | 2026-05-25">
+  <meta name="crewlogic-version" content="v5.9.88 | 2026-05-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -6750,6 +6750,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return false;
     }
 
+    // Whether the current estimate may be AUTO-DISCARDED when the user exits without saving.
+    // This is deliberately strict: it must be a brand-new, blank, never-meaningfully-saved
+    // throwaway draft created THIS session. An already-persisted estimate (opened from the
+    // list) — especially one that is won/lost/submitted or has a Vonigo quote — is NEVER
+    // auto-discardable, even if its charges momentarily failed to load (the data-loss bug).
+    function isDiscardableDraft() {
+      if (!currentEstimate || !currentEstimate.estimateID) return false;
+      if (!currentEstimate._isNewDraft) return false;            // not created fresh this session
+      if (hasUserContent()) return false;                        // has charges/notes/terms
+      if (currentEstimate.status && currentEstimate.status !== 'draft') return false; // won/lost/submitted/deleted
+      if (currentEstimate.vonigoQuoteID) return false;           // already submitted to Vonigo
+      return true;
+    }
+
     // Local estimates cache
     function getLocalEstimates() {
       try { return JSON.parse(storage.get(EST_STORAGE_KEY) || '[]'); } catch(e) { return []; }
@@ -6958,6 +6972,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         estimateID: generateEstimateID(),
         label: '',
         status: 'draft',
+        _isNewDraft: true, // throwaway flag: ONLY a brand-new blank draft may be auto-discarded on exit
         sharedWith: 'private',
         clientName: '',
         address: '',
@@ -7031,6 +7046,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           clientPhone:      row.client_phone || null
         });
         if (currentEstimate) {
+          // An estimate loaded from the list is already persisted — it can never be an
+          // auto-discardable throwaway, regardless of any stale flag in legacy payloads.
+          currentEstimate._isNewDraft = false;
           // Clear pending volume lines for clones but keep vonigoQuoteID
           // (clone may have been submitted — openEstimateEditor handles button state)
           if (currentEstimate.clonedFrom) {
@@ -7327,15 +7345,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     function promptSaveBeforeLeaving() {
-      const userHasContent = hasUserContent();
       // Three distinct exit scenarios:
-      //   1. Empty draft (no charges, no notes) — likely a "lookup-and-bail" that
-      //      only got into the DB via Street View auto-save. Offer to discard.
-      //   2. Dirty estimate (user made changes since last save). Offer to save.
-      //   3. Clean estimate with content — silent exit, no prompt.
-      const isEmptyDraft = !userHasContent;
-      if (!isDirty && !isEmptyDraft) {
-        // Scenario 3: clean & populated → silent exit
+      //   1. Discardable throwaway draft (brand-new, blank, never meaningfully saved) —
+      //      offer to discard (soft-delete, recoverable 30 days).
+      //   2. Dirty estimate (user made changes since last save) — offer to save.
+      //   3. Anything else (incl. a clean/empty already-persisted estimate) — silent exit.
+      //      Critically: an existing estimate that merely LOOKS empty (e.g. charges failed
+      //      to load) is NOT discardable and exits silently — it is never deleted here.
+      const discardable = isDiscardableDraft();
+      if (!discardable && !isDirty) {
+        // Scenario 3: nothing to prompt about → silent exit
         backToEstimatesList();
         return;
       }
@@ -7345,11 +7364,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const descEl = document.querySelector('#savePromptModal [data-modal-desc]');
       const leaveBtnLabel = document.querySelector('#savePromptModal [data-leave-btn-label]');
       const leaveBtnSub = document.querySelector('#savePromptModal [data-leave-btn-sub]');
-      if (isEmptyDraft) {
-        if (titleEl) titleEl.textContent = 'Discard this estimate?';
-        if (descEl) descEl.textContent = 'You haven\'t added any items or notes. Exiting will discard this estimate.';
-        if (leaveBtnLabel) leaveBtnLabel.textContent = '🗑 Discard Estimate';
-        if (leaveBtnSub) leaveBtnSub.textContent = 'Permanently delete this draft';
+      if (discardable) {
+        if (titleEl) titleEl.textContent = 'Discard this draft?';
+        if (descEl) descEl.textContent = 'You haven\'t added any items or notes. This empty draft will be moved to Deleted (recoverable for 30 days).';
+        if (leaveBtnLabel) leaveBtnLabel.textContent = '🗑 Discard Draft';
+        if (leaveBtnSub) leaveBtnSub.textContent = 'Move to Deleted — recoverable for 30 days';
       } else {
         if (titleEl) titleEl.textContent = 'Save before leaving?';
         if (descEl) descEl.textContent = 'Any unsaved changes will be lost.';
@@ -7374,26 +7393,28 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function leaveWithoutSaving() {
       document.getElementById('savePromptModal').style.display = 'none';
       isDirty = false;
-      // If estimate has no user content, hard-delete it (the only reason it's in the DB
-      // is auto-save side effects like Street View cover upload). User intent is clear:
-      // they backed out of a brand-new estimate without contributing anything, so we
-      // shouldn't leave it cluttering their list.
-      const shouldDiscard = !hasUserContent() && currentEstimate && currentEstimate.estimateID;
-      const idToDiscard = shouldDiscard ? currentEstimate.estimateID : null;
+      // Only a brand-new, blank, never-meaningfully-saved throwaway draft is auto-removed
+      // on exit — and even then via SOFT-delete (status='deleted' + deleted_at), so it lands
+      // in the Deleted view, is restorable, and is purged by the 30-day sweep. We NEVER hard-
+      // delete here, and an already-persisted estimate (e.g. one whose charges failed to load)
+      // is never discardable, so it is left fully intact. This is the data-loss fix.
+      const idToDiscard = isDiscardableDraft() ? currentEstimate.estimateID : null;
       // Strip from local cache SYNCHRONOUSLY before navigating, so the list re-renders
-      // without the discarded estimate.
+      // without the discarded draft.
       if (idToDiscard) {
         try {
           const all = getLocalEstimates();
           setLocalEstimates(all.filter(e => String(e.estimateID) !== String(idToDiscard)));
         } catch(e) { console.warn('discard: local cache strip failed', e); }
-        // Await the DB delete so the subsequent list refresh doesn't re-fetch
-        // the still-present row and put it back in the cache. Storage cleanup
-        // stays fire-and-forget after navigation (the slow part — list+delete
-        // across photo folders).
+        // Await the soft-delete so the subsequent list refresh doesn't re-fetch the row.
+        // Photos/Storage are intentionally LEFT in place (the draft is recoverable for 30
+        // days; the estimate sweep cron removes row + photos together at expiry).
         try {
-          await supabaseFetch('/rest/v1/estimates?estimate_id=eq.' + idToDiscard, { method: 'DELETE' });
-        } catch(e) { console.warn('discard: DB delete failed', e); }
+          await supabaseFetch('/rest/v1/estimates?estimate_id=eq.' + idToDiscard, {
+            method: 'PATCH',
+            body: JSON.stringify({ status: 'deleted', deleted_at: new Date().toISOString() })
+          });
+        } catch(e) { console.warn('discard: soft-delete failed', e); }
       }
       if (pendingNavModule) {
         const mod = pendingNavModule;
@@ -7402,61 +7423,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       } else {
         backToEstimatesList();
       }
-      // Fire-and-forget cleanup of Storage + IndexedDB — don't block navigation on it
-      if (idToDiscard) {
-        discardUnsavedStorageCleanup(idToDiscard).catch(e => console.warn('Discard storage cleanup failed:', e));
-      }
     }
 
-    // Hard-delete an unsaved draft's storage objects + IndexedDB photo queue.
-    // The DB row delete is now handled synchronously in leaveWithoutSaving() to
-    // avoid a race with the list refresh. This function is fire-and-forget for
-    // the slower Storage/IDB cleanup.
-    async function discardUnsavedStorageCleanup(estimateID) {
-      // Clean up any photos uploaded to Storage during the brief lookup session
-      try {
-        const folder = currentUser.franchiseID + '/' + estimateID;
-        const { data: files } = await supabaseClient.storage.from('estimate-photos').list(folder);
-        if (files && files.length > 0) {
-          const paths = files.map(f => folder + '/' + f.name);
-          await supabaseClient.storage.from('estimate-photos').remove(paths);
-        }
-      } catch(e) { console.warn('discard: storage cleanup failed', e); }
-      // Clean up any queued photos in IndexedDB
-      try {
-        const queued = await idbGetByEstimate(String(estimateID));
-        for (const r of queued) await idbDelete(r.photoID);
-      } catch(e) {}
-    }
-
-    // Hard-delete an unsaved draft + clean up its photo folder.
-    // Called from leaveWithoutSaving when user backs out of a never-explicitly-saved estimate.
-    async function discardUnsavedEstimate(estimateID) {
-      // Remove from local cache first (immediate UI consistency)
-      try {
-        const all = getLocalEstimates();
-        setLocalEstimates(all.filter(e => String(e.estimateID) !== String(estimateID)));
-      } catch(e) {}
-      // Hard-delete the DB row (no archive — this estimate was never explicitly saved)
-      try {
-        await supabaseFetch('/rest/v1/estimates?estimate_id=eq.' + estimateID, { method: 'DELETE' });
-      } catch(e) { console.warn('discard: DB delete failed', e); }
-      // Clean up any photos uploaded to Storage during the brief lookup session
-      // (typically just a Street View cover photo, sometimes nothing)
-      try {
-        const folder = currentUser.franchiseID + '/' + estimateID;
-        const { data: files } = await supabaseClient.storage.from('estimate-photos').list(folder);
-        if (files && files.length > 0) {
-          const paths = files.map(f => folder + '/' + f.name);
-          await supabaseClient.storage.from('estimate-photos').remove(paths);
-        }
-      } catch(e) { console.warn('discard: storage cleanup failed', e); }
-      // Clean up any queued photos in IndexedDB
-      try {
-        const queued = await idbGetByEstimate(String(estimateID));
-        for (const r of queued) await idbDelete(r.photoID);
-      } catch(e) {}
-    }
+    // (Removed: discardUnsavedStorageCleanup / discardUnsavedEstimate — these hard-deleted
+    //  the DB row + photos on exit. Discard is now a recoverable SOFT-delete in
+    //  leaveWithoutSaving(), and photo cleanup is handled by the 30-day estimate sweep.
+    //  There is no longer any client-side hard DELETE against the estimates table.)
 
     function backToEstimatesList() {
       document.getElementById('estimateEditorScreen').classList.remove('active');
@@ -10297,6 +10269,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               delete p.priceBook;
               delete p.row_number;
               delete p.costAnalysis;
+              delete p._isNewDraft;  // transient throwaway flag — must never persist into payload
               // Strip base64 photos from charges — only keep Supabase paths and Drive URLs.
               // Base64 is temporary until upload completes; don't persist it to Supabase.
               // CRITICAL: if base64 gets stripped here AND the upload never completes,
@@ -10330,6 +10303,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const data = await res.json();
         if (data.success) {
           isDirty = false; // changes are now saved
+          if (currentEstimate) currentEstimate._isNewDraft = false; // saved → no longer a throwaway draft
           feedbackEl.textContent = '';
           feedbackEl.className = 'settings-feedback ok';
           setSaveButtonsState('saved');
