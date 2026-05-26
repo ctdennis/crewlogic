@@ -26,7 +26,7 @@ insert into public.estimates
 values
   (9000000000001, '22222222-2222-2222-2222-222222222222', 'dev-owner@crewlogic.test',
    'Healthy Won — has charges', 'won', 'Smith, John', '123 Main St, Columbus OH 43215', '43215', 850, 1.5, 'DEV-1001',
-   '{"charges":[{"type":"volume","room":"Garage","area":"Garage","truckLabel":"1/2","truckQty":1,"pctRecycled":0,"pctDonated":0,"description":"Misc junk and boxes","notIncluded":"","photos":[]},{"type":"surcharge","name":"Stairs surcharge","qty":1,"unitPrice":50,"description":"2nd-floor carry","area":"","photos":[]}],"notes":"Access via side door"}'::jsonb);
+   '{"charges":[{"type":"volume","room":"Garage","area":"Garage","truckLabel":"1/2","truckQty":1,"pctRecycled":0,"pctDonated":0,"description":"Misc junk and boxes","notIncluded":"","photos":["90/9000000000001/demo_room_0.jpg","data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==","photo_9000000000001_unassigned_1_0"]},{"type":"surcharge","name":"Stairs surcharge","qty":1,"unitPrice":50,"description":"2nd-floor carry","area":"","photos":[]}],"notes":"Access via side door — volume charge has 3 demo photos: green(path)/yellow(base64)/red(orphan photoID)"}'::jsonb);
 
 -- (2) Bug-repro won estimate with EMPTY payload — charges load empty in memory.
 -- job_id + total_price>0 make openEstimateEditor open the editor with an EMPTY charge list

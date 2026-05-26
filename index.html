@@ -9219,9 +9219,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                 + (isPhotoID ? ' data-photo-ref="' + url + '"' : '')
                 + (!isLegacy && !isPhotoID ? ' data-photo-path="' + url + '"' : '')
                 + ' style="width:72px;height:56px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer;background:var(--surface-2);" onclick="viewChargePhotoIdx(' + globalIdx + ',' + pi + ')" />';
-              if (isPhotoID) {
-                html += '<div style="position:absolute;bottom:2px;left:2px;background:rgba(0,0,0,0.6);border-radius:2px;padding:1px 3px;font-size:9px;color:#fff;">⏳</div>';
-              }
+              // Per-photo cloud-sync status dot (colored async by resolvePhotoThumbnails):
+              // green=in Storage, yellow=uploading/pending, red=not synced (blob unreachable here).
+              html += '<span class="photo-sync-dot" data-sync-ref="' + (url || '').replace(/"/g,'&quot;') + '" title="Checking sync…" style="position:absolute;bottom:3px;left:3px;width:11px;height:11px;border-radius:50%;background:#9ca3af;border:1.5px solid rgba(0,0,0,0.55);box-shadow:0 0 0 1px rgba(255,255,255,0.25);z-index:2;pointer-events:none;"></span>';
               html += '<button onclick="removeChargePhotoIdx(' + globalIdx + ',' + pi + ')" style="position:absolute;top:-4px;right:-4px;background:#ef4444;border:none;border-radius:50%;width:16px;height:16px;color:#fff;font-size:10px;cursor:pointer;line-height:16px;text-align:center;padding:0;">✕</button>';
               html += '</div>';
             });
@@ -9366,6 +9366,37 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           if (src) img.src = src;
         } catch(e) {}
       }
+      // Color the per-photo cloud-sync status dots
+      const dots = document.querySelectorAll('.photo-sync-dot[data-sync-ref]');
+      for (const dot of dots) {
+        const state = await classifyPhotoSync(dot.getAttribute('data-sync-ref'));
+        const map = {
+          green:  ['#22c55e', 'Synced to cloud'],
+          yellow: ['#f59e0b', 'Uploading — not yet synced'],
+          red:    ['#ef4444', 'NOT synced — image is only on the device that took it']
+        };
+        const [color, label] = map[state] || map.red;
+        dot.style.background = color;
+        dot.title = label;
+      }
+    }
+
+    // Classify a charge photo reference's cloud-sync status for the UI dot.
+    // green = in Supabase Storage (or legacy remote URL); yellow = captured locally,
+    // upload still pending; red = a photoID whose image blob isn't recoverable here.
+    async function classifyPhotoSync(ref) {
+      if (!ref) return 'red';
+      if (ref.startsWith('data:')) return 'yellow';
+      if (ref.startsWith('http'))  return 'green';
+      if (ref.startsWith('photo_')) {
+        try {
+          const rec = await idbGet(ref);
+          if (rec && (rec.status === 'uploaded' || rec.supabasePath)) return 'green';
+          if (rec && rec.base64) return 'yellow';
+        } catch(e) {}
+        return 'red';
+      }
+      return 'green';
     }
 
     // ===== VOLUME CHARGE AUTO-CALC =====
