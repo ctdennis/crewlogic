@@ -7412,7 +7412,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         try {
           await supabaseFetch('/rest/v1/estimates?estimate_id=eq.' + idToDiscard, {
             method: 'PATCH',
-            body: JSON.stringify({ status: 'deleted', deleted_at: new Date().toISOString() })
+            body: JSON.stringify({ status: 'deleted', deleted_at: new Date().toISOString(), status_before_delete: (currentEstimate.status || 'draft') })
           });
         } catch(e) { console.warn('discard: soft-delete failed', e); }
       }
@@ -11166,13 +11166,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const listEl = document.getElementById('estimatesList');
       listEl.innerHTML = '<div class="price-loading"><span class="spinner-inline"></span>Archiving estimate...</div>';
 
+      // Capture the pre-delete status from the DB so Restore can return it exactly
+      // (won/lost/draft). Read fresh rather than trusting the local cache.
+      let prevStatus = 'draft';
+      try {
+        const cur = await supabaseFetch('/rest/v1/estimates?estimate_id=eq.' + estimateID + '&select=status');
+        if (cur && cur[0] && cur[0].status && cur[0].status !== 'deleted') prevStatus = cur[0].status;
+      } catch(e) {}
+
       // Soft delete — mark as deleted in Supabase, keep storage intact
       try {
         await supabaseFetch('/rest/v1/estimates?estimate_id=eq.' + estimateID, {
           method: 'PATCH',
           body: JSON.stringify({
             status: 'deleted',
-            deleted_at: new Date().toISOString()
+            deleted_at: new Date().toISOString(),
+            status_before_delete: prevStatus
           })
         });
       } catch(e) {
@@ -11208,11 +11217,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     async function restoreEstimate(estimateID) {
       try {
+        // Restore to the status the estimate had before deletion (won/lost/draft).
+        // Fallback to 'draft' for rows deleted before status_before_delete existed.
+        let restoreStatus = 'draft';
+        try {
+          const rows = await supabaseFetch('/rest/v1/estimates?estimate_id=eq.' + estimateID + '&select=status_before_delete');
+          if (rows && rows[0] && rows[0].status_before_delete) restoreStatus = rows[0].status_before_delete;
+        } catch(e) {}
         await supabaseFetch('/rest/v1/estimates?estimate_id=eq.' + estimateID, {
           method: 'PATCH',
           body: JSON.stringify({
-            status: 'draft',
-            deleted_at: null
+            status: restoreStatus,
+            deleted_at: null,
+            status_before_delete: null
           })
         });
         // Refresh whichever view is on screen. In the Deleted view, re-fetch it so the

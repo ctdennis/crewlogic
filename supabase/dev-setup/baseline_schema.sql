@@ -75,7 +75,8 @@ CREATE TABLE IF NOT EXISTS public.estimates (
   price_book jsonb DEFAULT '[]'::jsonb,
   deleted_at timestamp with time zone,
   client_phone text,
-  customer_price_list text
+  customer_price_list text,
+  status_before_delete text
 );
 
 CREATE TABLE IF NOT EXISTS public.feedback (
