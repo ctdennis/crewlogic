@@ -20,18 +20,21 @@ insert into public.profiles (franchise_id, email, name, role)
 values ('22222222-2222-2222-2222-222222222222', 'dev-owner@crewlogic.test', 'Dev Owner', 'owner');
 
 -- (1) Healthy won estimate WITH charges — control: must open + exit normally, never auto-discard.
+-- job_id set so openEstimateEditor shows #estMainContent (charges visible) without a price lookup.
 insert into public.estimates
-  (estimate_id, franchise_id, owner_email, label, status, client_name, address, zip, total_price, total_trucks, payload)
+  (estimate_id, franchise_id, owner_email, label, status, client_name, address, zip, total_price, total_trucks, job_id, payload)
 values
   (9000000000001, '22222222-2222-2222-2222-222222222222', 'dev-owner@crewlogic.test',
-   'Healthy Won — has charges', 'won', 'Smith, John', '123 Main St, Columbus OH 43215', '43215', 850, 1.5,
+   'Healthy Won — has charges', 'won', 'Smith, John', '123 Main St, Columbus OH 43215', '43215', 850, 1.5, 'DEV-1001',
    '{"charges":[{"type":"volume","room":"Garage","area":"Garage","truckLabel":"1/2","truckQty":1,"pctRecycled":0,"pctDonated":0,"description":"Misc junk and boxes","notIncluded":"","photos":[]},{"type":"surcharge","name":"Stairs surcharge","qty":1,"unitPrice":50,"description":"2nd-floor carry","area":"","photos":[]}],"notes":"Access via side door"}'::jsonb);
 
 -- (2) Bug-repro won estimate with EMPTY payload — charges load empty in memory.
+-- job_id + total_price>0 make openEstimateEditor open the editor with an EMPTY charge list
+-- (faithfully reproducing the incident), rather than the job picker.
 -- Pre-fix: backing out hard-deletes this row. Post-fix: it must survive (silent exit / soft-delete only).
 insert into public.estimates
-  (estimate_id, franchise_id, owner_email, label, status, client_name, address, zip, total_price, total_trucks, payload)
+  (estimate_id, franchise_id, owner_email, label, status, client_name, address, zip, total_price, total_trucks, job_id, payload)
 values
   (9000000000002, '22222222-2222-2222-2222-222222222222', 'dev-owner@crewlogic.test',
-   'Bug Repro Won — empty charges', 'won', 'Doe, Jane', '456 Oak Ave, Columbus OH 43215', '43215', 1200, 2,
+   'Bug Repro Won — empty charges', 'won', 'Doe, Jane', '456 Oak Ave, Columbus OH 43215', '43215', 1200, 2, 'DEV-1002',
    '{}'::jsonb);
