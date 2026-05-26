@@ -6894,7 +6894,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (searchQuery) {
           listEl.innerHTML = '<div class="estimates-empty">No estimates match &quot;' + searchQuery.replace(/[<>&"]/g, '') + '&quot;.<br>Try a different search or clear the filter.</div>';
         } else {
-          listEl.innerHTML = '<div class="estimates-empty">' + (showAll ? 'No estimates yet.' : 'No active estimates.') + '<br>' + (showAll ? 'Tap + New to create one.' : 'Tap "Active only" to show won/lost.') + '</div>';
+          listEl.innerHTML = '<div class="estimates-empty">' + (showAll ? 'No estimates yet.' : 'No active estimates.') + '<br>' + (showAll ? 'Tap + New to create one.' : 'Tap "Show all" to show won/lost.') + '</div>';
         }
         return;
       }
@@ -11232,13 +11232,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             status_before_delete: null
           })
         });
-        // Refresh whichever view is on screen. In the Deleted view, re-fetch it so the
-        // restored estimate drops out immediately; otherwise refresh the active list.
-        if (window._showDeletedEstimates) {
-          await loadDeletedEstimatesView();
-        } else {
-          initEstimatesList();
-        }
+        // A restored estimate keeps its real status (won/lost/draft). Since the default
+        // "Active only" view hides won/lost, switch to "Show all" and reload fresh from the
+        // backend so the user actually SEES the restored estimate (and the cache is current).
+        window._showDeletedEstimates = false;
+        window._showAllEstimates = true;
+        const filterBtn = document.getElementById('estimatesFilterBtn');
+        if (filterBtn) { filterBtn.textContent = 'Active only'; filterBtn.style.color = 'var(--accent-green)'; }
+        const delBtn = document.getElementById('estimatesDeletedBtn');
+        if (delBtn) delBtn.style.color = 'var(--text-muted)';
+        await initEstimatesList();
       } catch(e) {
         alert('Restore failed. Please try again.');
       }
