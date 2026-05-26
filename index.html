@@ -6571,6 +6571,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _uploadPhotoFromQueue(photoID);
     }
 
+    // Replace a photo reference (photoID or path) with another wherever it appears across
+    // ALL charges of an estimate. Robust to unassigned photos (chargeIdx=-1) — it never
+    // relies on the index, only on finding the actual reference. Returns true if changed.
+    function replacePhotoRefInEstimate(estimate, fromRef, toRef) {
+      if (!estimate || !Array.isArray(estimate.charges) || !fromRef) return false;
+      let changed = false;
+      for (const charge of estimate.charges) {
+        if (!charge || !Array.isArray(charge.photos)) continue;
+        for (let i = 0; i < charge.photos.length; i++) {
+          if (charge.photos[i] === fromRef) { charge.photos[i] = toRef; changed = true; }
+        }
+        if (charge.photoUrl === fromRef) charge.photoUrl = toRef;
+      }
+      return changed;
+    }
+
     // Upload one photo from IndexedDB queue to Supabase.
     async function _uploadPhotoFromQueue(photoID) {
       let record;
@@ -6587,17 +6603,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Success — update IndexedDB
         await idbPut({ ...record, status: 'uploaded', supabasePath: path, base64: null });
 
-        // Replace photoID reference with real Supabase path in currentEstimate (if still open)
+        // Replace the photoID with the real Supabase path — searching ALL charges, not
+        // charges[record.chargeIdx]. Unassigned photos have chargeIdx=-1 (charges[-1] is
+        // undefined), which previously skipped the swap and stranded the photo as a photoID
+        // forever even though the blob reached Storage. This is the core durability fix.
         if (currentEstimate && currentEstimate.estimateID === record.estimateID) {
-          const charge = currentEstimate.charges[record.chargeIdx];
-          if (charge && charge.photos) {
-            const pos = charge.photos.indexOf(photoID);
-            if (pos !== -1) charge.photos[pos] = path;
-            charge.photoUrl = path; // backwards compat
-          }
+          const changed = replacePhotoRefInEstimate(currentEstimate, photoID, path);
           renderCharges();
           updatePhotoCaptureOverlay();
-          autoSaveDraft();
+          if (changed) autoSaveDraft();
         }
       } catch(e) {
         // Upload failed — revert to pending so drain will retry
@@ -6661,33 +6675,40 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
         let changed = false;
         for (const record of queued) {
-          const charge = estimate.charges && estimate.charges[record.chargeIdx];
-          if (!charge) continue;
-          if (!charge.photos) charge.photos = [];
-
           if (record.status === 'uploaded' && record.supabasePath) {
-            // Photo made it to Supabase — ensure path is in charges
-            if (!charge.photos.includes(record.supabasePath)) {
-              // Remove any stale photoID reference
-              const staleIdx = charge.photos.indexOf(record.photoID);
-              if (staleIdx !== -1) charge.photos.splice(staleIdx, 1);
-              charge.photos.push(record.supabasePath);
-              charge.photoUrl = record.supabasePath;
-              changed = true;
+            // Photo reached Storage. Relink by photoID wherever it appears (robust to
+            // unassigned/chargeIdx=-1 — the gap that stranded photos as photoIDs forever).
+            let linked = replacePhotoRefInEstimate(estimate, record.photoID, record.supabasePath);
+            if (!linked && record.chargeIdx >= 0) {
+              // Never made it into charge.photos as a photoID — attach by chargeIdx.
+              const charge = estimate.charges && estimate.charges[record.chargeIdx];
+              if (charge) {
+                if (!Array.isArray(charge.photos)) charge.photos = [];
+                if (!charge.photos.includes(record.supabasePath)) {
+                  charge.photos.push(record.supabasePath);
+                  charge.photoUrl = record.supabasePath;
+                }
+                linked = true;
+              }
             }
-            // Clean up IndexedDB — no longer needed
-            await idbDelete(record.photoID);
+            if (linked) {
+              changed = true;
+              await idbDelete(record.photoID); // safely linked → IndexedDB copy no longer needed
+            }
+            // If still unlinked (uploaded but no charge to attach to), KEEP the IDB record —
+            // it's the only pointer to that Storage blob; deleting it would orphan the photo.
           } else if (record.status === 'pending' || record.status === 'uploading') {
-            // Photo not yet in Supabase — ensure photoID placeholder is in charges
-            // The thumbnail will render from IndexedDB base64
-            if (!charge.photos.includes(record.photoID) && !charge.photos.includes(record.supabasePath)) {
-              charge.photos.push(record.photoID);
-              changed = true;
+            // Not yet in Storage — ensure the photoID placeholder is on its charge so the
+            // thumbnail renders from IndexedDB base64 (yellow dot).
+            const charge = (record.chargeIdx >= 0 && estimate.charges) ? estimate.charges[record.chargeIdx] : null;
+            if (charge) {
+              if (!Array.isArray(charge.photos)) charge.photos = [];
+              if (!charge.photos.includes(record.photoID) && !charge.photos.includes(record.supabasePath)) {
+                charge.photos.push(record.photoID);
+                changed = true;
+              }
             }
-            // Reset uploading → pending so drain picks it up
-            if (record.status === 'uploading') {
-              await idbPut({ ...record, status: 'pending' });
-            }
+            if (record.status === 'uploading') await idbPut({ ...record, status: 'pending' });
           }
         }
 
