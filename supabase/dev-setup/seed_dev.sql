@@ -38,3 +38,12 @@ values
   (9000000000002, '22222222-2222-2222-2222-222222222222', 'dev-owner@crewlogic.test',
    'Bug Repro Won — empty charges', 'won', 'Doe, Jane', '456 Oak Ave, Columbus OH 43215', '43215', 1200, 2, 'DEV-1002',
    '{}'::jsonb);
+
+-- (3) DRAFT estimate for photo-capture testing. status='draft' so autosave persists;
+-- job_id + a charge so it opens straight into the editor (no Vonigo lookup needed in dev).
+insert into public.estimates
+  (estimate_id, franchise_id, owner_email, label, status, client_name, address, zip, total_price, total_trucks, job_id, payload)
+values
+  (9000000000003, '22222222-2222-2222-2222-222222222222', 'dev-owner@crewlogic.test',
+   'Photo Test — DRAFT', 'draft', 'Test, Photo', '789 Test Rd, Columbus OH 43215', '43215', 0, 1, 'DEV-1003',
+   '{"charges":[{"type":"volume","room":"Garage","area":"Garage","truckLabel":"1/4","truckQty":1,"pctRecycled":0,"pctDonated":0,"description":"Add photos here to test sync persistence","notIncluded":"","photos":[]}],"notes":"Draft for photo-sync testing"}'::jsonb);
