@@ -22,7 +22,7 @@ generated from prod's catalog via the Management API:
 - **Vault secrets / Vonigo credentials** — encrypted per-project; dev is Vonigo-free
   by design (standalone work needs no CRM). Add real Vonigo creds to dev's Vault only
   if/when testing Vonigo *reads* in dev.
-- **Storage bucket `estimate-photos`** — create in dev when photo features are tested.
+- **Storage bucket `estimate-photos`** — created in dev via `storage_setup.sql` (bucket + anon read/upload/delete policies mirroring prod), so photo upload/sign works in dev.
 - **Data** — dev uses synthetic data (a test `crm_provider='none'` tenant), never a
   copy of prod customer data.
 - **Cron jobs / edge-function secrets** — re-create/set on dev as needed, pointing at dev.
