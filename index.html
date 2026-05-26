@@ -3585,6 +3585,39 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function showLogin() {
       document.getElementById('loginScreen').style.display = 'flex';
       document.getElementById('appShell').classList.remove('active');
+      injectDevSignIn();
+    }
+
+    // Dev-only login bypass — injected only on dev hosts (IS_DEV_ENV). Sets a seeded
+    // dev owner (matches supabase/dev-setup/seed_dev.sql) and enters the app without
+    // Google OAuth. Inert on prod: the button is never injected there.
+    function injectDevSignIn() {
+      if (!IS_DEV_ENV || document.getElementById('devSignInBtn')) return;
+      const login = document.getElementById('loginScreen');
+      if (!login) return;
+      const btn = document.createElement('button');
+      btn.id = 'devSignInBtn';
+      btn.textContent = '🔧 Dev sign-in (crewlogic-dev)';
+      btn.style.cssText = 'margin-top:18px;padding:12px 20px;border:1px dashed #f59e0b;border-radius:var(--radius-sm,8px);background:rgba(245,158,11,0.12);color:#f59e0b;font-weight:600;cursor:pointer;';
+      btn.onclick = devSignIn;
+      login.appendChild(btn);
+    }
+
+    function devSignIn() {
+      currentUser = {
+        email: 'dev-owner@crewlogic.test',
+        name: 'Dev Owner',
+        role: 'owner',
+        franchiseID: 'DEV1',
+        franchiseInternalID: '22222222-2222-2222-2222-222222222222',
+        tenantID: '11111111-1111-1111-1111-111111111111',
+        franchiseName: 'Dev Standalone Co',
+        subscriptionStatus: 'tester',
+        subscriptionTier: 'tester',
+        costSettings: {}
+      };
+      storage.set(SESSION_KEY, JSON.stringify(currentUser));
+      showApp();
     }
 
     function triggerGoogleSignIn(inviteToken) {
