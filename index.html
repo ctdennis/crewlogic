@@ -3315,8 +3315,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // ===== CONSTANTS =====
     const GOOGLE_CLIENT_ID = '183516161425-i97sjngldvkd5tffj1kfjdj31285177p.apps.googleusercontent.com';
     const N8N_BASE = 'https://junkluggers.app.n8n.cloud/webhook';
-    const EDGE_BASE = 'https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1';
-    const EDGE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
+    // ===== ENVIRONMENT (dev vs prod, by hostname) =====
+    // Single source of truth for which Supabase project the app talks to.
+    // Dev = localhost / the Cloudflare "dev" branch preview. Everything else = prod.
+    const _DEV_HOSTNAMES = ['localhost', '127.0.0.1', 'dev.crewlogic.pages.dev'];
+    const IS_DEV_ENV = _DEV_HOSTNAMES.includes(location.hostname);
+    const SUPABASE_URL = IS_DEV_ENV
+      ? 'https://bagkimfwmpwjfhfhmsrb.supabase.co'    // crewlogic-dev
+      : 'https://ozfkpxyachigfpcmvekz.supabase.co';   // crewlogic-prod
+    const SUPABASE_ANON_KEY = IS_DEV_ENV
+      ? 'sb_publishable_PNHsikZJAodAZAINaBJbxQ_m2USrJnW'   // crewlogic-dev
+      : 'sb_publishable_Jcy2e2s2x12kY0Az6jGzUw_Jn3ikNpt';  // crewlogic-prod
+    const EDGE_BASE = SUPABASE_URL + '/functions/v1';
+    // Edge functions authenticate with the project anon key. Prod uses its legacy
+    // JWT anon key (some functions verify_jwt); dev reuses its publishable key until
+    // dev edge functions are deployed (none yet — dev edge calls will 404 by design).
+    const EDGE_ANON_KEY = IS_DEV_ENV
+      ? 'sb_publishable_PNHsikZJAodAZAINaBJbxQ_m2USrJnW'
+      : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
+    if (IS_DEV_ENV) console.warn('%c⚙ DEV ENV — talking to crewlogic-dev', 'color:#f59e0b;font-weight:bold', SUPABASE_URL);
     const SESSION_KEY = 'cl_session_v2';
 
     // Helper for Edge Function calls — POST JSON, returns parsed JSON.
@@ -3400,8 +3417,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     // ===== ANALYZE VOICE — direct Supabase Edge Function call =====
     async function callAnalyzeVoice({ transcript, areas, photos }) {
-      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
-      const res = await fetch('https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1/crewlogic-ai', {
+      const SUPABASE_ANON_KEY = EDGE_ANON_KEY;
+      const res = await fetch(EDGE_BASE + '/crewlogic-ai', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -3604,8 +3621,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     // ===== TEAM / INVITE SYSTEM =====
 
-    const SUPABASE_URL = 'https://ozfkpxyachigfpcmvekz.supabase.co';
-    const SUPABASE_ANON_KEY = 'sb_publishable_Jcy2e2s2x12kY0Az6jGzUw_Jn3ikNpt';
+    // SUPABASE_URL / SUPABASE_ANON_KEY are defined in the ENVIRONMENT block near the top.
 
     // Supabase JS client (for Storage signed URLs)
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -10227,8 +10243,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Disable any save buttons during the in-flight save
       setSaveButtonsState('saving');
       try {
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
-        const res = await fetch('https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1/crewlogic-estimate', {
+        const SUPABASE_ANON_KEY = EDGE_ANON_KEY;
+        const res = await fetch(EDGE_BASE + '/crewlogic-estimate', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -10597,8 +10613,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             feedbackEl.textContent = 'Analyzing property type...';
             const coverResolved = await resolvePhotoRef(currentEstimate.coverPhoto);
             if (coverResolved) {
-              const SUPABASE_ANON_KEY_INLINE = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
-              const cpRes = await fetch('https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1/crewlogic-ai', {
+              const SUPABASE_ANON_KEY_INLINE = EDGE_ANON_KEY;
+              const cpRes = await fetch(EDGE_BASE + '/crewlogic-ai', {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
@@ -10676,8 +10692,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         }
         try {
           console.log('[JobSummary] Starting AI call for', (currentEstimate.charges || []).length, 'charges');
-          const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
-          const summaryRes = await fetch('https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1/crewlogic-ai', {
+          const SUPABASE_ANON_KEY = EDGE_ANON_KEY;
+          const summaryRes = await fetch(EDGE_BASE + '/crewlogic-ai', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -10899,8 +10915,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       // Save to Edge Function (was n8n in prior versions)
       try {
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
-        await fetch('https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1/crewlogic-estimate', {
+        const SUPABASE_ANON_KEY = EDGE_ANON_KEY;
+        await fetch(EDGE_BASE + '/crewlogic-estimate', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -16449,8 +16465,8 @@ Please review the estimate below. If you have any questions or would like to adj
     // The frontend Maps API key has HTTP referrer restrictions which Geocoding API rejects,
     // so we call through the Edge Function which holds an unrestricted (or IP-restricted) key.
     async function reverseGeocodeViaEdge(lat, lng) {
-      const url = 'https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1/crewlogic-ai';
-      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
+      const url = EDGE_BASE + '/crewlogic-ai';
+      const SUPABASE_ANON_KEY = EDGE_ANON_KEY;
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 12000);
       try {
@@ -16513,8 +16529,8 @@ Please review the estimate below. If you have any questions or would like to adj
     window.backfillSignAddresses = backfillSignAddresses;
 
     async function detectYardSign(analysisBase64) {
-      const url = 'https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1/crewlogic-ai';
-      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
+      const url = EDGE_BASE + '/crewlogic-ai';
+      const SUPABASE_ANON_KEY = EDGE_ANON_KEY;
       // Hard timeout to prevent UI hang if Edge Function is slow/down
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 30000);
@@ -17074,8 +17090,8 @@ Please review the estimate below. If you have any questions or would like to adj
     // Edge Function reads the reward + crew + franchise config, calls PromoVault Quick Send,
     // and updates the sign_rewards row with status/promovault_reward_id/reward_link/issued_at.
     async function deliverRewardViaEdge(rewardId) {
-      const url = 'https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1/crewlogic-ai';
-      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
+      const url = EDGE_BASE + '/crewlogic-ai';
+      const SUPABASE_ANON_KEY = EDGE_ANON_KEY;
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 30000);
       try {
@@ -17227,8 +17243,8 @@ Please review the estimate below. If you have any questions or would like to adj
 
     // Generate magic-link invite for a crew member, then show share sheet
     async function inviteCrew(crewMemberId) {
-      const url = 'https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1/crewlogic-ai';
-      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8';
+      const url = EDGE_BASE + '/crewlogic-ai';
+      const SUPABASE_ANON_KEY = EDGE_ANON_KEY;
       try {
         const res = await fetch(url, {
           method: 'POST',
