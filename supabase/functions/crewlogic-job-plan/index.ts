@@ -44,7 +44,9 @@ const CORS = {
 const TENANT_ID = '946a4535-aa61-45b6-a6fb-9190ff546d41'; // Junkluggers
 const ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001';
 const ANTHROPIC_MAX_TOKENS = 4000;
-const SUPABASE_URL_BASE = 'https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1';
+// Derive from the project's own URL so dev calls dev's functions (not prod's). Falls back
+// to prod if SUPABASE_URL is somehow unset. (Prod behavior unchanged: SUPABASE_URL=prod there.)
+const SUPABASE_URL_BASE = (Deno.env.get('SUPABASE_URL') || 'https://ozfkpxyachigfpcmvekz.supabase.co') + '/functions/v1';
 
 interface WorkOrder {
   jobID: string;
