@@ -7,6 +7,8 @@
 -- Clean any prior seed (vonigo_credentials first to satisfy the FK; NOTE: re-seeding
 -- wipes any Vonigo creds you entered in dev Settings — re-enter them after a re-seed).
 delete from public.vonigo_credentials where franchise_id in ('22222222-2222-2222-2222-222222222222', '44444444-4444-4444-4444-444444444444');
+-- Also drop the Vault secrets the creds reference, or a re-save 409s on the leftover name.
+delete from vault.secrets where name in ('vonigo_md5_22222222_2222_2222_2222_222222222222', 'vonigo_md5_44444444_4444_4444_4444_444444444444');
 delete from public.estimates  where owner_email in ('dev-owner@crewlogic.test', 'dev-vonigo@crewlogic.test');
 delete from public.profiles   where email in ('dev-owner@crewlogic.test', 'dev-vonigo@crewlogic.test');
 delete from public.franchises where id in ('22222222-2222-2222-2222-222222222222', '44444444-4444-4444-4444-444444444444');
