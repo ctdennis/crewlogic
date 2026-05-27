@@ -39,6 +39,12 @@
 //       itemsList, so AI text with en-dashes/curly quotes triggered Vonigo's
 //       generic "data validation failed". (b) On create failure, log the full
 //       payload (securityToken redacted) + Vonigo's full response for diagnosis.
+// v1.7: Fix per-franchise tax handling. Charges historically defaulted to taxID 146
+//       (the original franchise's "Non-Taxable" schedule); franchises on a different
+//       tax schedule got Vonigo "-7207 Tax reference not found" and the whole quote
+//       was rejected. applyLivePriceBookTaxIDs() now re-derives each charge's taxID
+//       from the live price book (crewlogic-price-lookup, which returns taxID per
+//       priceItemID) before create — also corrects older estimates' stale taxIDs.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -484,6 +490,40 @@ function sanitizeVonigoText(s: unknown): string {
     .replace(/[^\x00-\x7F]/g, "");    // drop any remaining non-ASCII
 }
 
+// Override each charge's taxID with the franchise's live per-item tax schedule, looked
+// up from crewlogic-price-lookup (which returns taxID per priceItemID). Vonigo rejects a
+// quote when a charge's taxID isn't a valid tax reference for that franchise. Best-effort:
+// any lookup failure or unmatched item leaves that charge's taxID unchanged.
+async function applyLivePriceBookTaxIDs(
+  franchiseID: string,
+  zip: string,
+  charges: unknown,
+): Promise<unknown> {
+  if (!Array.isArray(charges) || !franchiseID || !zip) return charges;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/crewlogic-price-lookup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SERVICE_KEY}`, "apikey": SERVICE_KEY },
+      body: JSON.stringify({ franchiseID, zipCode: zip }),
+    });
+    const data = await res.json();
+    if (!data?.success || !Array.isArray(data.blocks)) return charges;
+    const taxByItemID: Record<string, number> = {};
+    for (const b of data.blocks) {
+      for (const it of (b.items || [])) {
+        if (it?.priceItemID != null && it?.taxID != null) taxByItemID[String(it.priceItemID)] = it.taxID;
+      }
+    }
+    return charges.map((c) => {
+      const id = (c as Record<string, unknown>)?.priceItemID;
+      const t = taxByItemID[String(id)];
+      return t != null ? { ...(c as Record<string, unknown>), taxID: String(t) } : c;
+    });
+  } catch (_e) {
+    return charges;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // HANDLER: submitQuote
 // Creates a Vonigo quote from an estimate and uploads its photos. Mirrors the n8n
@@ -507,6 +547,14 @@ async function handleSubmitQuote(body: Record<string, unknown>): Promise<Respons
   const notesCreate = sanitizeVonigoText(body.customerSituation || body.notes || "");
   const itemsList = sanitizeVonigoText(body.itemsList || "");
 
+  // Re-derive each charge's tax schedule from the LIVE Vonigo price book. Tax references
+  // are per-franchise: a wrong/placeholder taxID (the frontend historically defaulted to
+  // 146 = the original franchise's "Non-Taxable" schedule) makes Vonigo reject the whole
+  // quote with "Tax reference not found" for franchises on a different schedule. Pulling
+  // taxID per priceItemID here fixes that — and also corrects older estimates whose stored
+  // charges still carry a stale taxID. Best-effort: if the lookup fails, charges pass through.
+  const charges = await applyLivePriceBookTaxIDs(franchiseExternalId, String(body.zip || ""), body.charges);
+
   // 1) Create the quote (method 3). Charges are pre-built by the frontend.
   const createBody: Record<string, unknown> = {
     securityToken,
@@ -520,7 +568,7 @@ async function handleSubmitQuote(body: Record<string, unknown>): Promise<Respons
       { fieldID: 10336, fieldValue: itemsList },
       { fieldID: 11215, fieldValue: itemLocations },
     ],
-    Charges: body.charges,
+    Charges: charges,
   };
   if (body.jobID) createBody.jobID = body.jobID;
 

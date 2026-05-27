@@ -67,6 +67,7 @@ interface VonigoPriceItem {
   isQuantifiable?: boolean;
   isAllowDecimals?: boolean;
   isHourlyPrice?: boolean;
+  taxID?: number;   // Vonigo per-item tax schedule — must be carried through to the quote charge
 }
 
 async function vonigoLogin(username: string, password: string): Promise<string> {
@@ -252,7 +253,7 @@ Deno.serve(async (req: Request) => {
       .trim();
 
     // 5) Group items into blocks, filter excluded blocks and inactive items
-    const blockMap: Record<number, { priceBlockID: number; name: string; sequence: number; items: Array<{ priceItemID: number; name: string; value: number; unitOfMeasure: string; sequence: number }> }> = {};
+    const blockMap: Record<number, { priceBlockID: number; name: string; sequence: number; items: Array<{ priceItemID: number; name: string; value: number; unitOfMeasure: string; sequence: number; taxID?: number }> }> = {};
     for (const item of allItems) {
       if (!item.isActive) continue;
       if (EXCLUDED_BLOCK_IDS.includes(item.priceBlockID)) continue;
@@ -270,6 +271,7 @@ Deno.serve(async (req: Request) => {
         value: item.value,
         unitOfMeasure: item.unitOfMeasure,
         sequence: item.sequence,
+        taxID: item.taxID,   // per-item Vonigo tax schedule (restores the months-ago fix lost in migration)
       });
     }
     const blocks = Object.values(blockMap)
