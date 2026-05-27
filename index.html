@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.89 | 2026-05-26">
+  <meta name="crewlogic-version" content="v5.9.90 | 2026-05-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1269,6 +1269,7 @@
           <button class="settings-tab" id="stab-proposal" onclick="showSettingsTab('proposal')">📄 Proposal</button>
           <button class="settings-tab" id="stab-pricing" onclick="showSettingsTab('pricing')">★ Pricing</button>
           <button class="settings-tab" id="stab-pricebook" onclick="showSettingsTab('pricebook')" style="display:none;">💲 Price Book</button>
+          <button class="settings-tab" id="stab-customers" onclick="showSettingsTab('customers')" style="display:none;">👤 Customers</button>
           <button class="settings-tab" id="stab-signs" onclick="showSettingsTab('signs')">🪧 Yard Signs</button>
           <button class="settings-tab" id="stab-tools" onclick="showSettingsTab('tools')">🛠 Tools</button>
           <button class="settings-tab" id="stab-account" onclick="showSettingsTab('account')">⚙️ Account</button>
@@ -1749,6 +1750,43 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <div class="settings-feedback" id="priceBookFeedback"></div>
           </div>
         </div><!-- end pricebook tab -->
+
+        <!-- TAB: Customers (native customer store, crm_provider=none) -->
+        <div id="stab-content-customers" style="display:none;">
+          <div class="settings-card fade-in fade-in-delay-2">
+            <div class="settings-card-title" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+              <span>Customers</span>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <button onclick="downloadCustomerTemplate()" style="padding:5px 10px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;font-weight:600;cursor:pointer;">⬇ Template</button>
+                <button onclick="document.getElementById('custCsvInput').click()" style="padding:5px 10px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;font-weight:600;cursor:pointer;">⬆ Import CSV</button>
+                <button onclick="showCustomerForm()" style="padding:5px 12px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;">+ Add</button>
+              </div>
+            </div>
+            <input type="file" id="custCsvInput" accept=".csv,text/csv" style="display:none;" onchange="importCustomersCsv(event)">
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">Your customer list — not a CRM. Use <b>Template</b> for the exact CSV columns before importing.</div>
+            <input type="text" class="form-input" id="custSearch" placeholder="Search name / email / address…" oninput="renderCustomersTab()" style="margin-bottom:10px;">
+            <div id="customersList" style="font-size:13px;color:var(--text-muted);">Loading…</div>
+            <div class="settings-feedback" id="customersFeedback"></div>
+          </div>
+
+          <!-- Add/Edit Customer Form -->
+          <div class="settings-card fade-in fade-in-delay-3" id="customerForm" style="display:none;">
+            <div class="settings-card-title" id="customerFormTitle">Add Customer</div>
+            <input type="hidden" id="custId">
+            <div class="form-group"><div class="form-label">Name *</div><input type="text" class="form-input" id="custName" placeholder="Smith, Bill or Acme Corp"></div>
+            <div class="form-group"><div class="form-label">Type</div><select class="form-select" id="custType"><option value="residential">Residential</option><option value="commercial">Commercial</option></select></div>
+            <div class="form-group"><div class="form-label">Address</div><input type="text" class="form-input" id="custAddress" placeholder="10 Wagoneer Way"></div>
+            <div class="form-group"><div class="form-label">ZIP</div><input type="text" class="form-input" id="custZip" inputmode="numeric" placeholder="02718"></div>
+            <div class="form-group"><div class="form-label">Email</div><input type="email" class="form-input" id="custEmail" inputmode="email" placeholder="bill@example.com"></div>
+            <div class="form-group"><div class="form-label">Phone</div><input type="tel" class="form-input" id="custPhone" inputmode="tel" placeholder="(555) 555-1234"></div>
+            <div id="custDedupWarn" style="display:none;margin-bottom:12px;padding:10px;background:rgba(245,200,66,0.12);border:1px solid var(--accent-yellow);border-radius:var(--radius-sm);font-size:12px;color:var(--text-secondary);line-height:1.5;"></div>
+            <div style="display:flex;gap:8px;">
+              <button onclick="saveCustomer()" id="custSaveBtn" style="flex:1;padding:10px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;">Save</button>
+              <button onclick="cancelCustomerForm()" style="padding:10px 16px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;">Cancel</button>
+            </div>
+            <div class="settings-feedback" id="customerFormFeedback"></div>
+          </div>
+        </div><!-- end customers tab -->
 
         <!-- TAB: Yard Signs -->
         <div id="stab-content-signs" style="display:none;">
@@ -4929,6 +4967,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // overrides) stays visible for BOTH providers; it overrides the standard list per customer.
       const _pbTab = document.getElementById('stab-pricebook');
       if (_pbTab) _pbTab.style.display = (currentUser.pricingSource === 'native') ? '' : 'none';
+      // The native Customers store is also native-only — Vonigo tenants' customers live in Vonigo.
+      const _custTab = document.getElementById('stab-customers');
+      if (_custTab) _custTab.style.display = (currentUser.customerSource === 'native' || currentUser.pricingSource === 'native') ? '' : 'none';
 
       // Initialize Signs module visibility
       initSignsModule();
@@ -14566,7 +14607,7 @@ RECYCLING & DONATION
 
     // ===== SETTINGS TABS =====
     function showSettingsTab(tab) {
-      ['franchise','cost','proposal','account','pricing','pricebook','signs','tools'].forEach(t => {
+      ['franchise','cost','proposal','account','pricing','pricebook','customers','signs','tools'].forEach(t => {
         const el = document.getElementById('stab-content-' + t);
         if (el) el.style.display = t === tab ? 'block' : 'none';
         const btn = document.getElementById('stab-' + t);
@@ -14578,10 +14619,228 @@ RECYCLING & DONATION
       if (tab === 'pricing') loadCustomerPricingList();
       // Render the native price book when switching to the pricebook tab
       if (tab === 'pricebook') renderPriceBookTab();
+      // Render the native customers list when switching to the customers tab
+      if (tab === 'customers') renderCustomersTab();
       // Render yard signs settings
       if (tab === 'signs') renderSignsSettingsTab();
       // Render tools inventory
       if (tab === 'tools') renderToolsTab();
+    }
+
+    // ===== CUSTOMERS (native customer store; crm_provider=none) =====
+    let _custForceSave = false;
+    const _custEsc = s => String(s == null ? '' : s).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+    function _custFeedback(msg, ok) {
+      const f = document.getElementById('customersFeedback');
+      if (f) { f.textContent = msg || ''; f.className = 'settings-feedback' + (ok ? ' ok' : (msg ? ' error' : '')); }
+    }
+    function _custFormFeedback(msg, ok) {
+      const f = document.getElementById('customerFormFeedback');
+      if (f) { f.textContent = msg || ''; f.className = 'settings-feedback' + (ok ? ' ok' : (msg ? ' error' : '')); }
+    }
+
+    async function renderCustomersTab() {
+      const el = document.getElementById('customersList');
+      if (!el) return;
+      _custFeedback('');
+      try {
+        const fid = currentUser.franchiseInternalID;
+        const rows = await supabaseFetch('/rest/v1/customers?franchise_id=eq.' + fid + '&select=id,name,type,address,zip,email,phone&order=name.asc');
+        const q = (document.getElementById('custSearch')?.value || '').trim().toLowerCase();
+        const list = q
+          ? (rows || []).filter(c => [c.name, c.email, c.address, c.zip, c.phone].some(v => (v || '').toLowerCase().includes(q)))
+          : (rows || []);
+        if (!list.length) {
+          el.innerHTML = '<div style="padding:8px 0;">' + (q ? 'No customers match your search.' : 'No customers yet. Tap <b>+ Add</b> or <b>Import CSV</b>.') + '</div>';
+          return;
+        }
+        const b = 'padding:5px 9px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input);color:var(--text-secondary);font-size:12px;cursor:pointer;flex-shrink:0;';
+        let html = '';
+        list.forEach(c => {
+          const meta = [c.address, c.zip].filter(Boolean).join(' · ');
+          const contact = [c.email, c.phone].filter(Boolean).join(' · ');
+          html += '<div style="display:flex;align-items:center;gap:6px;padding:10px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;">'
+            + '<div style="flex:1;min-width:140px;">'
+            + '<span style="font-weight:600;color:var(--text-primary);">' + _custEsc(c.name) + '</span>'
+            + ' <span style="font-size:10px;background:' + (c.type === 'commercial' ? 'var(--accent-blue)' : 'var(--bg-input)') + ';color:' + (c.type === 'commercial' ? '#000' : 'var(--text-muted)') + ';padding:1px 6px;border-radius:8px;font-weight:700;text-transform:uppercase;">' + _custEsc((c.type || 'residential').slice(0, 4)) + '</span>'
+            + (meta ? '<div style="font-size:11px;color:var(--text-muted);">' + _custEsc(meta) + '</div>' : '')
+            + (contact ? '<div style="font-size:11px;color:var(--text-muted);">' + _custEsc(contact) + '</div>' : '')
+            + '</div>'
+            + '<button onclick="showCustomerForm(\'' + c.id + '\')" style="' + b + '">Edit</button>'
+            + '<button onclick="deleteCustomer(\'' + c.id + '\',\'' + _custEsc(c.name).replace(/'/g, '&#39;') + '\')" style="' + b + 'color:#ef4444;" title="Delete">✕</button>'
+            + '</div>';
+        });
+        el.innerHTML = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">' + list.length + ' customer' + (list.length === 1 ? '' : 's') + '</div>' + html;
+      } catch (e) {
+        el.innerHTML = '<div class="price-error">Could not load customers.</div>';
+      }
+    }
+
+    async function showCustomerForm(id) {
+      _custForceSave = false;
+      _custFormFeedback('');
+      const warn = document.getElementById('custDedupWarn'); if (warn) warn.style.display = 'none';
+      document.getElementById('customerFormTitle').textContent = id ? 'Edit Customer' : 'Add Customer';
+      document.getElementById('custId').value = id || '';
+      let c = { name: '', type: 'residential', address: '', zip: '', email: '', phone: '' };
+      if (id) {
+        try {
+          const rows = await supabaseFetch('/rest/v1/customers?id=eq.' + id + '&select=name,type,address,zip,email,phone&limit=1');
+          if (rows && rows[0]) c = rows[0];
+        } catch (e) { _custFormFeedback('Could not load customer.', false); }
+      }
+      document.getElementById('custName').value = c.name || '';
+      document.getElementById('custType').value = c.type || 'residential';
+      document.getElementById('custAddress').value = c.address || '';
+      document.getElementById('custZip').value = c.zip || '';
+      document.getElementById('custEmail').value = c.email || '';
+      document.getElementById('custPhone').value = c.phone || '';
+      document.getElementById('customerForm').style.display = 'block';
+      document.getElementById('customerForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function cancelCustomerForm() {
+      document.getElementById('customerForm').style.display = 'none';
+      _custForceSave = false;
+    }
+
+    // Case-insensitive exact match (ilike with no wildcards) on email / address, per franchise.
+    // Two simple filters rather than or=() so commas in an address don't break the query.
+    async function _findCustomerDupes(fid, email, address, excludeId) {
+      const found = {};
+      const add = arr => (arr || []).forEach(r => { if (r.id !== excludeId) found[r.id] = r; });
+      if (email) add(await supabaseFetch('/rest/v1/customers?franchise_id=eq.' + fid + '&email=ilike.' + encodeURIComponent(email) + '&select=id,name,email,address&limit=5'));
+      if (address) add(await supabaseFetch('/rest/v1/customers?franchise_id=eq.' + fid + '&address=ilike.' + encodeURIComponent(address) + '&select=id,name,email,address&limit=5'));
+      return Object.values(found);
+    }
+
+    async function saveCustomer() {
+      const id = document.getElementById('custId').value.trim();
+      const name = document.getElementById('custName').value.trim();
+      if (!name) { _custFormFeedback('Name is required.', false); return; }
+      const fid = currentUser.franchiseInternalID;
+      const nz = v => { v = (v || '').trim(); return v === '' ? null : v; };
+      const email = nz(document.getElementById('custEmail').value);
+      const address = nz(document.getElementById('custAddress').value);
+      const payload = {
+        franchise_id: fid, name, type: document.getElementById('custType').value || 'residential',
+        address, zip: nz(document.getElementById('custZip').value),
+        email, phone: nz(document.getElementById('custPhone').value),
+        source: 'native', updated_at: new Date().toISOString()
+      };
+      // Dedup warning on add/edit — unless the user already acknowledged.
+      if (!_custForceSave && (email || address)) {
+        try {
+          const dupes = await _findCustomerDupes(fid, email, address, id || null);
+          if (dupes.length) {
+            const warn = document.getElementById('custDedupWarn');
+            warn.innerHTML = '⚠️ Possible duplicate' + (dupes.length > 1 ? 's' : '') + ': '
+              + dupes.map(d => '<b>' + _custEsc(d.name) + '</b>' + (d.email ? ' (' + _custEsc(d.email) + ')' : '')).join(', ')
+              + '. Click <b>Save</b> again to add anyway.';
+            warn.style.display = 'block';
+            _custForceSave = true;
+            return;
+          }
+        } catch (e) { /* dedup is best-effort; fall through to save */ }
+      }
+      _custSaveBtnBusy(true);
+      try {
+        if (id) {
+          await supabaseFetch('/rest/v1/customers?id=eq.' + id, { method: 'PATCH', body: JSON.stringify(payload) });
+        } else {
+          await supabaseFetch('/rest/v1/customers', { method: 'POST', body: JSON.stringify(payload) });
+        }
+        cancelCustomerForm();
+        _custFeedback('Saved.', true);
+        renderCustomersTab();
+      } catch (e) {
+        _custFormFeedback('Save failed.', false);
+      } finally { _custSaveBtnBusy(false); }
+    }
+    function _custSaveBtnBusy(busy) {
+      const btn = document.getElementById('custSaveBtn');
+      if (btn) { btn.disabled = busy; btn.style.opacity = busy ? '0.6' : ''; btn.textContent = busy ? 'Saving…' : 'Save'; }
+    }
+
+    async function deleteCustomer(id, name) {
+      if (!confirm('Delete customer “' + (name || '') + '”? This does not affect estimates already created for them.')) return;
+      try {
+        await supabaseFetch('/rest/v1/customers?id=eq.' + id, { method: 'DELETE' });
+        _custFeedback('Deleted.', true);
+        renderCustomersTab();
+      } catch (e) { _custFeedback('Delete failed.', false); }
+    }
+
+    // ----- CSV import / template -----
+    const _CUST_CSV_COLS = ['name', 'type', 'address', 'zip', 'email', 'phone'];
+    function downloadCustomerTemplate() {
+      const sample = ['Smith, Bill', 'residential', '10 Wagoneer Way', '02718', 'bill@example.com', '(555) 555-1234'];
+      const csv = _CUST_CSV_COLS.join(',') + '\n' + sample.map(_csvCell).join(',') + '\n';
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'crewlogic-customers-template.csv';
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    }
+    function _csvCell(v) {
+      v = String(v == null ? '' : v);
+      return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    }
+    // Minimal CSV parser: handles quoted fields, embedded commas/quotes/newlines.
+    function _parseCsv(text) {
+      const rows = []; let row = [], field = '', inQ = false;
+      text = text.replace(/\r\n?/g, '\n');
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (inQ) {
+          if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
+          else field += ch;
+        } else if (ch === '"') inQ = true;
+        else if (ch === ',') { row.push(field); field = ''; }
+        else if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+        else field += ch;
+      }
+      if (field !== '' || row.length) { row.push(field); rows.push(row); }
+      return rows.filter(r => r.some(c => c.trim() !== ''));
+    }
+
+    async function importCustomersCsv(ev) {
+      const file = ev.target.files && ev.target.files[0];
+      ev.target.value = '';   // allow re-importing the same filename
+      if (!file) return;
+      _custFeedback('Reading ' + file.name + '…');
+      try {
+        const text = await file.text();
+        const rows = _parseCsv(text);
+        if (rows.length < 2) { _custFeedback('CSV has no data rows.', false); return; }
+        const header = rows[0].map(h => h.trim().toLowerCase());
+        const idx = {}; _CUST_CSV_COLS.forEach(c => idx[c] = header.indexOf(c));
+        if (idx.name < 0) { _custFeedback('CSV needs a “name” column — download the Template.', false); return; }
+        const fid = currentUser.franchiseInternalID;
+        // Skip rows whose email already exists (best-effort dedup on bulk import).
+        const existing = await supabaseFetch('/rest/v1/customers?franchise_id=eq.' + fid + '&email=not.is.null&select=email');
+        const have = new Set((existing || []).map(r => (r.email || '').toLowerCase()));
+        const nz = v => { v = (v == null ? '' : String(v)).trim(); return v === '' ? null : v; };
+        const out = []; let skipped = 0;
+        for (let r = 1; r < rows.length; r++) {
+          const get = c => idx[c] >= 0 ? rows[r][idx[c]] : '';
+          const name = nz(get('name'));
+          if (!name) { skipped++; continue; }
+          const email = nz(get('email'));
+          if (email && have.has(email.toLowerCase())) { skipped++; continue; }
+          if (email) have.add(email.toLowerCase());
+          let type = (nz(get('type')) || 'residential').toLowerCase();
+          type = type.startsWith('com') ? 'commercial' : 'residential';
+          out.push({ franchise_id: fid, name, type, address: nz(get('address')), zip: nz(get('zip')), email, phone: nz(get('phone')), source: 'native' });
+        }
+        if (!out.length) { _custFeedback('Nothing to import (' + skipped + ' row(s) skipped).', false); return; }
+        await supabaseFetch('/rest/v1/customers', { method: 'POST', body: JSON.stringify(out) });
+        _custFeedback('Imported ' + out.length + ' customer' + (out.length === 1 ? '' : 's') + (skipped ? ' · ' + skipped + ' skipped (duplicate/blank)' : '') + '.', true);
+        renderCustomersTab();
+      } catch (e) {
+        _custFeedback('Import failed — check the file matches the Template.', false);
+      }
     }
 
     // ===== PRICE BOOK (native pricing editor; crm_provider=none) =====
