@@ -7431,10 +7431,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       // Inline Job Picker: show only for fresh estimates with no job # yet.
       // Existing estimates being reopened jump straight to the editor.
+      // No-CRM tenants don't use the Vonigo job entry/picker — hide the job-# row + schedule
+      // picker and show the ZIP entry instead. Vonigo tenants keep the job entry visible.
+      const _isNative = currentUser.pricingSource === 'native';
+      const _stepZip = document.getElementById('estStepZip');
+      if (_stepZip) _stepZip.style.display = _isNative ? 'none' : '';
       if (currentEstimate.jobID) {
         hideInlineJobPicker();
-      } else if (currentUser.pricingSource === 'native') {
-        // No-CRM: skip the Vonigo job picker. Enter customer + ZIP, then load native pricing.
+      } else if (_isNative) {
         hideInlineJobPicker();
         const _zr = document.getElementById('estManualZipRow'); if (_zr) _zr.style.display = 'flex';
       } else {
