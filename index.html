@@ -3387,7 +3387,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // payload should include franchiseID and one of: zoneID (preferred when
     // known — instant + precise) or zipCode (fallback for manual entry).
     async function priceLookup(payload) {
-      const res = await fetch(EDGE_BASE + '/crewlogic-price-lookup', {
+      // Per-capability provider seam: native price book vs Vonigo. Defaults to Vonigo
+      // (crewlogic-price-lookup) when pricingSource is unset, so existing tenants are unaffected.
+      const fn = (currentUser && currentUser.pricingSource === 'native') ? 'crewlogic-pricing' : 'crewlogic-price-lookup';
+      const res = await fetch(EDGE_BASE + '/' + fn, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -3652,6 +3655,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           franchiseInternalID: '44444444-4444-4444-4444-444444444444',
           tenantID: '946a4535-aa61-45b6-a6fb-9190ff546d41',
           franchiseName: 'Dev Vonigo (90)',
+          pricingSource: 'vonigo',
           subscriptionStatus: 'tester',
           subscriptionTier: 'tester',
           vonigoConfigured: false,
@@ -3666,6 +3670,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           franchiseInternalID: '22222222-2222-2222-2222-222222222222',
           tenantID: '11111111-1111-1111-1111-111111111111',
           franchiseName: 'Dev Standalone Co',
+          pricingSource: 'native',
           subscriptionStatus: 'tester',
           subscriptionTier: 'tester',
           costSettings: {}
