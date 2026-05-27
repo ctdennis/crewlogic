@@ -43,7 +43,9 @@
 //       page) — e.g. attaching to a job that already has an estimate. Previously the
 //       server's .json() threw and "Unexpected token '<' ... is not valid JSON" leaked
 //       to the UI; now we safe-parse the create response, log the raw body, and return
-//       a clear actionable message (job already has an estimate / unexpected response).
+//       a plain message naming the job: "There is already an estimate assigned to Vonigo
+//       job XXXXXX. To post this estimate from CrewLogic you will first need to remove the
+//       estimate in Vonigo." (no Vonigo reason codes surfaced to the user).
 // v1.7: Fix per-franchise tax handling. Charges historically defaulted to taxID 146
 //       (the original franchise's "Non-Taxable" schedule); franchises on a different
 //       tax schedule got Vonigo "-7207 Tax reference not found" and the whole quote
@@ -595,8 +597,8 @@ async function handleSubmitQuote(body: Record<string, unknown>): Promise<Respons
     console.error(`[submitQuote] create returned non-JSON (HTTP ${createResp.status}): ${createRaw.slice(0, 600)}`);
     console.error(`[submitQuote] create payload: ${JSON.stringify({ ...createBody, securityToken: "[redacted]" })}`);
     const msg = createBody.jobID
-      ? "Vonigo rejected this submission. This job may already have an estimate attached — submit as a new draft instead, or remove the existing estimate in Vonigo first."
-      : `Vonigo returned an unexpected response (HTTP ${createResp.status}). Please try again, or check the job in Vonigo.`;
+      ? `There is already an estimate assigned to Vonigo job ${createBody.jobID}. To post this estimate from CrewLogic you will first need to remove the estimate in Vonigo.`
+      : "CrewLogic couldn't post this estimate to Vonigo. Please try again, or check the job in Vonigo.";
     return jsonResponse({ success: false, error: msg }, 502);
   }
   if (createData.errNo !== 0 || !createData.Quote) {
