@@ -138,8 +138,15 @@ async function callAnthropic({
 // HANDLER: analyzeEstimate
 // Voice transcript + optional photos → charge array
 // ════════════════════════════════════════════════════════════════════════════
-function buildEstimateSystemPrompt(areas: string[]): string {
-  return `You are helping a junk removal estimator. A full truck holds 480 cubic feet (8x12x5 ft interior), which is about 17.8 cubic yards.
+function buildEstimateSystemPrompt(areas: string[], truckCY = 16): string {
+  const cap = (truckCY && truckCY > 0) ? truckCY : 16;
+  // Physical full-truck reference for the AI's volume math. 480 cubic feet at the default
+  // 16 CY (unchanged for existing franchises); scales proportionally for franchises on a
+  // different truck size so fraction estimates calibrate to THEIR truck. The frontend's
+  // pricing/CY conversions use the same setting via truckCapacityCY().
+  const refCFt = Math.round(480 * (cap / 16));
+  const refCY = (refCFt / 27).toFixed(1);
+  return `You are helping a junk removal estimator. A full truck holds ${refCFt} cubic feet, which is about ${refCY} cubic yards.
 Volume fractions: Included (0), Minimum (0.0625), 1/8 (0.125), 1/4 (0.25), 3/8 (0.375), 1/2 (0.5), 5/8 (0.625), 3/4 (0.75), 7/8 (0.875), Full (1.0).
 truckLabel is the fraction size of ONE truck. truckQty is how many of that fraction size. truckVolume = truckLabel value x truckQty.
 For loads over 1 truck, ALWAYS use truckLabel "Full" and set truckQty to the total number of trucks as a decimal rounded to nearest 0.125. NEVER split into multiple charge rows.
@@ -154,8 +161,8 @@ CUSTOMER-FACING LANGUAGE — descriptions appear on customer estimates, so use n
 - Reasoning field is internal-only (not shown to customer) — but still keep it professional
 
 DIMENSIONAL CALCULATIONS - when explicit measurements are given, always calculate precisely:
-- Rectangular space: (L ft x W ft x H ft x fill%) / 480 = truck fraction
-- Individual furniture/appliance: (L ft x W ft x H ft) / 480 = truck fraction. Use the FULL bounding-box volume. Do NOT apply a packing-reduction factor to standalone furniture — bulky rigid items (sofas, recliners, dressers, mattresses, appliances) do not nest and the crew cannot reclaim the empty space around them.
+- Rectangular space: (L ft x W ft x H ft x fill%) / ${refCFt} = truck fraction
+- Individual furniture/appliance: (L ft x W ft x H ft) / ${refCFt} = truck fraction. Use the FULL bounding-box volume. Do NOT apply a packing-reduction factor to standalone furniture — bulky rigid items (sofas, recliners, dressers, mattresses, appliances) do not nest and the crew cannot reclaim the empty space around them.
 - Pile/group of small loose items (bags, boxes, toys, clothing) that genuinely compress: you may apply a 0.6 packing factor to the enclosing volume.
 - Fill defaults: empty=5%, quarter=25%, half=50%, three-quarters=75%, packed=100%
 - Convert inches to feet before calculating
@@ -176,6 +183,7 @@ When you cannot measure but can see furniture, anchor each visible item to these
   Refrigerator / large appliance  ~10%      ~48        ~1.8
   Washer or dryer (each)          ~3.5%     ~17        ~0.6
   Patio / outdoor set             ~19%      ~90        ~3.3
+The Truck % column above assumes a 480 cubic-foot full truck; if the full-truck volume stated at the top differs, compute truck % as (item cubic ft / full-truck cubic ft) — the cubic-ft and cubic-yd anchors are physical and do not change.
 When furniture is involved, estimate slightly HIGH rather than low — an under-filled truck means a costly return trip.
 
 CONFIDENCE & ROUNDING:
@@ -238,6 +246,7 @@ async function handleAnalyzeEstimate(payload: Record<string, unknown>): Promise<
   const transcript = payload.transcript as string | undefined;
   const areas = (payload.areas as string[]) || [];
   const photos = (payload.photos as string[]) || [];
+  const truckCY = Number(payload.truckCY) || 16;   // per-franchise truck size; default 16 CY
 
   if (!transcript && photos.length === 0) {
     throw new Error('transcript or photos required');
@@ -312,7 +321,7 @@ async function handleAnalyzeEstimate(payload: Record<string, unknown>): Promise<
   }
 
   const result = await callAnthropic({
-    system: buildEstimateSystemPrompt(areas),
+    system: buildEstimateSystemPrompt(areas, truckCY),
     userContent,
     maxTokens: 800,
     label: 'analyzeEstimate',
