@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.90 | 2026-05-27">
+  <meta name="crewlogic-version" content="v5.9.91 | 2026-05-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1703,7 +1703,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
             <!-- Client Search -->
             <div style="margin-bottom:12px;" id="clientSearchSection">
-              <div class="form-label">Search Vonigo Client</div>
+              <div class="form-label" id="clientSearchLabel">Search Vonigo Client</div>
               <div style="display:flex;gap:8px;">
                 <input type="text" class="form-input" id="clientSearchInput" placeholder="Customer name..." style="flex:1;" onkeydown="if(event.key==='Enter')searchVonigoClients()">
                 <button onclick="searchVonigoClients()" style="padding:8px 14px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;">Search</button>
@@ -3906,6 +3906,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     async function getFranchiseUUID() {
+      // Prefer the resolved internal ID (set at sign-in for both Vonigo and native tenants).
+      // The fallback query is Junkluggers-tenant-scoped, so it only works for that tenant —
+      // native (non-Junkluggers) tenants must use franchiseInternalID.
+      if (currentUser && currentUser.franchiseInternalID) return currentUser.franchiseInternalID;
       try {
         const data = await supabaseFetch(
           '/rest/v1/franchises?select=id&external_id=eq.' + currentUser.franchiseID +
@@ -3922,6 +3926,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       selectedClientAddress = null;
       document.getElementById('customerPricingFormTitle').textContent = 'Add Customer Price List';
       document.getElementById('clientSearchSection').style.display = '';
+      const _csLabel = document.getElementById('clientSearchLabel');
+      if (_csLabel) _csLabel.textContent = (currentUser && (currentUser.customerSource === 'native' || currentUser.pricingSource === 'native')) ? 'Search Customer' : 'Search Vonigo Client';
       document.getElementById('clientSearchInput').value = '';
       document.getElementById('clientSearchResults').innerHTML = '';
       document.getElementById('selectedClientDisplay').style.display = 'none';
@@ -3964,25 +3970,44 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       container.innerHTML = html;
     }
 
+    // Search native customers (crm_provider=none) by name/email/address. Returns objects
+    // shaped like the Vonigo client results so the shared render/select code is unchanged.
+    async function searchNativeCustomers(q) {
+      const fid = currentUser.franchiseInternalID;
+      // Strip chars that would break PostgREST's or=() grouping; '%' wildcards the ilike.
+      const pat = encodeURIComponent('%' + q.replace(/[(),]/g, ' ').trim() + '%');
+      const rows = await supabaseFetch('/rest/v1/customers?franchise_id=eq.' + fid +
+        '&or=(name.ilike.' + pat + ',email.ilike.' + pat + ',address.ilike.' + pat + ')' +
+        '&select=id,name,address,zip,email&order=name.asc&limit=20');
+      return (rows || []).map(c => ({ clientID: c.id, name: c.name, address: c.address || '', zip: c.zip || '' }));
+    }
+
     async function searchVonigoClients() {
       const q = document.getElementById('clientSearchInput').value.trim();
       if (!q) return;
       const resultsEl = document.getElementById('clientSearchResults');
       resultsEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">Searching...</div>';
+      const isNative = !!(currentUser && (currentUser.customerSource === 'native' || currentUser.pricingSource === 'native'));
       try {
-        const data = await edgeFunctionCall('crewlogic-estimate', {
-          action: 'searchClients',
-          email: currentUser.email,
-          franchiseID: currentUser.franchiseID,
-          searchPar: q
-        });
-        if (!data.success || !data.clients.length) {
-          resultsEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">No clients found.</div>';
+        let clients;
+        if (isNative) {
+          clients = await searchNativeCustomers(q);
+        } else {
+          const data = await edgeFunctionCall('crewlogic-estimate', {
+            action: 'searchClients',
+            email: currentUser.email,
+            franchiseID: currentUser.franchiseID,
+            searchPar: q
+          });
+          clients = (data && data.success) ? data.clients : null;
+        }
+        if (!clients || !clients.length) {
+          resultsEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">No ' + (isNative ? 'customers' : 'clients') + ' found.</div>';
           return;
         }
-        window._clientSearchResults = data.clients;
+        window._clientSearchResults = clients;
         let html = '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-top:4px;">';
-        data.clients.forEach((c, ci) => {
+        clients.forEach((c, ci) => {
           const addr = (c.address || '').split('\n').join(', ');
           html += '<div data-client-idx="' + ci + '" class="client-search-result" style="padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--bg-card);">';
           html += '<div style="font-weight:600;font-size:13px;color:var(--text-primary);">' + c.name + '</div>';
