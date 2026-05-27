@@ -14734,9 +14734,14 @@ RECYCLING & DONATION
           const dupes = await _findCustomerDupes(fid, email, address, id || null);
           if (dupes.length) {
             const warn = document.getElementById('custDedupWarn');
-            warn.innerHTML = '⚠️ Possible duplicate' + (dupes.length > 1 ? 's' : '') + ': '
-              + dupes.map(d => '<b>' + _custEsc(d.name) + '</b>' + (d.email ? ' (' + _custEsc(d.email) + ')' : '')).join(', ')
-              + '. Click <b>Save</b> again to add anyway.';
+            const ub = 'padding:4px 10px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;';
+            warn.innerHTML = '⚠️ Possible duplicate' + (dupes.length > 1 ? 's' : '') + ' already in your list:'
+              + dupes.map(d => '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;">'
+                  + '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;"><b>' + _custEsc(d.name) + '</b>'
+                  + (d.email ? ' · ' + _custEsc(d.email) : '') + (d.address ? ' · ' + _custEsc(d.address) : '') + '</span>'
+                  + '<button onclick="showCustomerForm(\'' + d.id + '\')" style="' + ub + '">Use this</button>'
+                  + '</div>').join('')
+              + '<div style="margin-top:8px;">Tap <b>Use this</b> to open the existing customer, or <b>Save</b> again to add as new.</div>';
             warn.style.display = 'block';
             _custForceSave = true;
             return;
