@@ -1878,7 +1878,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               <div class="form-label">Client Phone</div>
               <input type="tel" class="form-input" id="estClientPhone" placeholder="(555) 555-1234" oninput="autoSaveDraft();updateClientInfoBar()" inputmode="tel" autocomplete="tel">
             </div>
-            <div class="form-group">
+            <div class="form-group" id="estJobIDDisplayGroup">
               <div class="form-label">Vonigo Job #</div>
               <div style="font-family:'Space Mono',monospace;font-size:15px;color:var(--accent-green);" id="estJobIDDisplay">—</div>
             </div>
@@ -5008,15 +5008,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // has had its job lookup completed (jobID set). All buttons stay disabled
     // until a job is linked to prevent saving incomplete records.
     function updateEditorToolbarState() {
-      const hasJob = !!(currentEstimate && currentEstimate.jobID);
+      const isNative = !!(currentUser && currentUser.pricingSource === 'native');
+      // Vonigo: enabled once a job is linked. Native (no-CRM): enabled once pricing is
+      // loaded (ZIP → price book), since there's no job to look up.
+      const ready = isNative
+        ? !!(typeof priceBlocks !== 'undefined' && priceBlocks && priceBlocks.length)
+        : !!(currentEstimate && currentEstimate.jobID);
       const editorToolbar = document.getElementById('editorToolbar');
       if (!editorToolbar) return;
       const buttons = editorToolbar.querySelectorAll('button');
       buttons.forEach(el => {
-        el.disabled = !hasJob;
-        el.style.opacity = hasJob ? '' : '0.4';
-        el.style.cursor = hasJob ? 'pointer' : 'not-allowed';
-        el.title = hasJob ? '' : 'Look up a Vonigo job first';
+        el.disabled = !ready;
+        el.style.opacity = ready ? '' : '0.4';
+        el.style.cursor = ready ? 'pointer' : 'not-allowed';
+        el.title = ready ? '' : (isNative ? 'Enter a ZIP and tap Load Prices first' : 'Look up a Vonigo job first');
       });
     }
     window.updateEditorToolbarState = updateEditorToolbarState;
@@ -7342,6 +7347,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const zr = document.getElementById('estManualZipRow'); if (zr) zr.style.display = 'none';
         renderCharges();
         updateTotals();
+        updateEditorToolbarState();   // pricing is loaded → enable Photo/Describe/Manual/More/Save
+      } else if (st) {
+        st.textContent = 'No price book found for this ZIP'; st.className = 'zip-status error';
       }
     }
 
@@ -7436,6 +7444,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const _isNative = currentUser.pricingSource === 'native';
       const _stepZip = document.getElementById('estStepZip');
       if (_stepZip) _stepZip.style.display = _isNative ? 'none' : '';
+      const _jobGrp = document.getElementById('estJobIDDisplayGroup');
+      if (_jobGrp) _jobGrp.style.display = _isNative ? 'none' : '';
       if (currentEstimate.jobID) {
         hideInlineJobPicker();
       } else if (_isNative) {
