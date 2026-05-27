@@ -7328,6 +7328,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
     }
 
+    // No-CRM "Load Prices": capture free-text customer + ZIP, then load native pricing.
+    async function loadEstimatePricing() {
+      const zipEl = document.getElementById('estZip');
+      const zip = (zipEl ? zipEl.value : '').trim();
+      const st = document.getElementById('zipLookupStatus');
+      if (!/^\d{5}$/.test(zip)) { if (st) { st.textContent = 'Enter a 5-digit ZIP'; st.className = 'zip-status error'; } return; }
+      currentEstimate.zip = zip;
+      autoSaveDraft();                    // capture name/address/etc. typed so far
+      await autoRefetchPriceBlocks(zip);  // loads pricing via the provider seam (native here)
+      if (priceBlocks && priceBlocks.length) {
+        const mc = document.getElementById('estMainContent'); if (mc) mc.style.display = 'block';
+        const zr = document.getElementById('estManualZipRow'); if (zr) zr.style.display = 'none';
+        renderCharges();
+        updateTotals();
+      }
+    }
+
     function openEstimateEditor() {
       isDirty = false; // ensure clean state when editor opens
       _suppressAutoSave = true; // prevent autoSaveDraft during field population
@@ -7416,6 +7433,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Existing estimates being reopened jump straight to the editor.
       if (currentEstimate.jobID) {
         hideInlineJobPicker();
+      } else if (currentUser.pricingSource === 'native') {
+        // No-CRM: skip the Vonigo job picker. Enter customer + ZIP, then load native pricing.
+        hideInlineJobPicker();
+        const _zr = document.getElementById('estManualZipRow'); if (_zr) _zr.style.display = 'flex';
       } else {
         showInlineJobPicker();
       }
@@ -7502,6 +7523,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       // If already submitted to Vonigo, disable submit button
       const submitBtn = document.getElementById('estSubmitBtn');
+      // No-CRM tenants finalize via the PDF proposal, not Vonigo — hide the submit button.
+      if (submitBtn) submitBtn.style.display = (currentUser.pricingSource === 'native') ? 'none' : '';
       const feedbackEl = document.getElementById('estFeedback');
       // vonigoQuoteID comes ONLY from the row-level column — never from nested payload
       // Clones always have null here; only submitted originals have a value
