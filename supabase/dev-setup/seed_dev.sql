@@ -10,7 +10,7 @@ delete from public.vonigo_credentials where franchise_id in ('22222222-2222-2222
 delete from public.estimates  where owner_email in ('dev-owner@crewlogic.test', 'dev-vonigo@crewlogic.test');
 delete from public.profiles   where email in ('dev-owner@crewlogic.test', 'dev-vonigo@crewlogic.test');
 delete from public.franchises where id in ('22222222-2222-2222-2222-222222222222', '44444444-4444-4444-4444-444444444444');
-delete from public.tenants    where id in ('11111111-1111-1111-1111-111111111111', '946a4535-aa61-45b6-a6fb-9190ff546d41');
+delete from public.tenants    where id in ('11111111-1111-1111-1111-111111111111', '946a4535-aa61-45b6-a6fb-9190ff546d41', '33333333-3333-3333-3333-333333333333') or slug in ('dev-standalone', 'dev-vonigo');
 
 insert into public.tenants (id, slug, name, crm_type, subscription_status)
 values ('11111111-1111-1111-1111-111111111111', 'dev-standalone', 'Dev Standalone Co', 'none', 'trialing');
