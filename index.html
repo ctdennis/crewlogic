@@ -16368,13 +16368,20 @@ Please review the estimate below. If you have any questions or would like to adj
 
       mattWizardCalcData = { trucksNeeded, actualTrucks, allFit, desc, mattPieces, bsPieces, totalPieces: mattPieces + bsPieces, truckResults };
 
-      // Build summary
+      // Build summary. The billed volume is the floor-area figure (actualTrucks). The packing
+      // sim can spread items across more physical loads than that bills for (mattresses pack
+      // loosely) — when it does, say so explicitly so 2 diagrams + a 1-truck bill isn't confusing.
+      const billedTruckSpan = Math.max(1, Math.ceil(actualTrucks));
+      const loadNote = (trucksNeeded > billedTruckSpan)
+        ? '<div style="font-size:11px;color:var(--text-secondary);margin-top:6px;border-top:1px solid var(--border);padding-top:6px;">📦 Packs across ' + trucksNeeded + ' loads · priced by floor area as ' + formatTrucks(actualTrucks) + '</div>'
+        : '';
       const summaryEl = document.getElementById('mattWizardResultSummary');
       summaryEl.innerHTML =
         '<div style="background:var(--bg-card);border:1px solid var(--accent-yellow);border-radius:var(--radius-sm);padding:12px;">' +
         '<div style="font-size:11px;color:var(--accent-yellow);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Result</div>' +
         '<div style="font-family:monospace;font-size:20px;font-weight:700;color:var(--accent-green);margin-bottom:4px;">' + formatTrucks(actualTrucks) + '</div>' +
         '<div style="font-size:12px;color:var(--text-muted);">' + (allFit ? '✓ All ' + totalItems + ' items fit' : '⚠️ ' + remaining.length + ' items overflow') + ' &bull; ' + desc + '</div>' +
+        loadNote +
         '</div>';
 
       // Build per-truck diagram cards
@@ -16384,7 +16391,7 @@ Please review the estimate below. If you have any questions or would like to adj
         const groups = {};
         result.placed.forEach(p => { const k = p.item.sizeLabel + ' ' + (p.item.type === 'M' ? 'Matt' : 'BS'); groups[k] = (groups[k]||0)+1; });
         cardsHtml += '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;">' +
-          '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">' + (trucksNeeded > 1 ? 'Truck ' + (ti+1) : 'Loading Diagram') + '</div>' +
+          '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">' + (trucksNeeded > 1 ? 'Load ' + (ti+1) : 'Loading Diagram') + '</div>' +
           '<div id="mattWizDiagram' + ti + '"></div>' +
           '<div style="font-size:11px;color:var(--text-secondary);margin-top:6px;">' + Object.entries(groups).map(([k,v]) => v + 'x ' + k).join(', ') + '</div>' +
           '</div>';
