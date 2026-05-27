@@ -10,6 +10,10 @@
 //   reverseGeocode     — lat/lng → formatted address (Google Geocoding)
 //   issueReward        — deliver a sign_rewards row via PromoVault Quick Send
 //
+// v4.0: analyzeEstimate accepts truckCY (per-franchise truck size, default 16) and
+//       sizes the full-truck volume reference at truckCY × 27 cf. Previously fixed at
+//       480 cf (~17.8 CY), larger than the 16 CY billed, which under-estimated every
+//       volume fraction by ~10%. Now AI volume math matches the app's truck size.
 // v3.9: analyzeEstimate now fetches photo URLs server-side and forwards them
 //       to Anthropic as base64, instead of passing the URL for Anthropic to
 //       fetch (which failed intermittently on expired/unreachable Supabase
@@ -140,12 +144,12 @@ async function callAnthropic({
 // ════════════════════════════════════════════════════════════════════════════
 function buildEstimateSystemPrompt(areas: string[], truckCY = 16): string {
   const cap = (truckCY && truckCY > 0) ? truckCY : 16;
-  // Physical full-truck reference for the AI's volume math. 480 cubic feet at the default
-  // 16 CY (unchanged for existing franchises); scales proportionally for franchises on a
-  // different truck size so fraction estimates calibrate to THEIR truck. The frontend's
-  // pricing/CY conversions use the same setting via truckCapacityCY().
-  const refCFt = Math.round(480 * (cap / 16));
-  const refCY = (refCFt / 27).toFixed(1);
+  // Full-truck volume for the AI's fraction math = the franchise's ACTUAL truck (cubic
+  // yards × 27 cf/yd). Previously fixed at 480 cf (~17.8 CY) — larger than the 16 CY the
+  // app bills against — which made the AI under-estimate every fraction by ~10%. Now the
+  // AI, pricing, CY displays, and storage tools all use ONE truck volume (truckCY).
+  const refCFt = Math.round(cap * 27);
+  const refCY = cap.toFixed(1);
   return `You are helping a junk removal estimator. A full truck holds ${refCFt} cubic feet, which is about ${refCY} cubic yards.
 Volume fractions: Included (0), Minimum (0.0625), 1/8 (0.125), 1/4 (0.25), 3/8 (0.375), 1/2 (0.5), 5/8 (0.625), 3/4 (0.75), 7/8 (0.875), Full (1.0).
 truckLabel is the fraction size of ONE truck. truckQty is how many of that fraction size. truckVolume = truckLabel value x truckQty.
@@ -183,7 +187,7 @@ When you cannot measure but can see furniture, anchor each visible item to these
   Refrigerator / large appliance  ~10%      ~48        ~1.8
   Washer or dryer (each)          ~3.5%     ~17        ~0.6
   Patio / outdoor set             ~19%      ~90        ~3.3
-The Truck % column above assumes a 480 cubic-foot full truck; if the full-truck volume stated at the top differs, compute truck % as (item cubic ft / full-truck cubic ft) — the cubic-ft and cubic-yd anchors are physical and do not change.
+The Truck % column is approximate — always compute truck % as (item cubic ft / full-truck cubic ft) using the full-truck volume stated at the top. The cubic-ft and cubic-yd anchors are physical measurements and do not change with truck size.
 When furniture is involved, estimate slightly HIGH rather than low — an under-filled truck means a costly return trip.
 
 CONFIDENCE & ROUNDING:
