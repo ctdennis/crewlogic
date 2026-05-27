@@ -1268,6 +1268,7 @@
           <button class="settings-tab" id="stab-cost" onclick="showSettingsTab('cost')">💰 Cost</button>
           <button class="settings-tab" id="stab-proposal" onclick="showSettingsTab('proposal')">📄 Proposal</button>
           <button class="settings-tab" id="stab-pricing" onclick="showSettingsTab('pricing')">★ Pricing</button>
+          <button class="settings-tab" id="stab-pricebook" onclick="showSettingsTab('pricebook')" style="display:none;">💲 Price Book</button>
           <button class="settings-tab" id="stab-signs" onclick="showSettingsTab('signs')">🪧 Yard Signs</button>
           <button class="settings-tab" id="stab-tools" onclick="showSettingsTab('tools')">🛠 Tools</button>
           <button class="settings-tab" id="stab-account" onclick="showSettingsTab('account')">⚙️ Account</button>
@@ -1735,6 +1736,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <div class="settings-feedback" id="cplFeedback"></div>
           </div>
         </div><!-- end pricing tab -->
+
+        <!-- TAB: Price Book (native pricing, crm_provider=none) -->
+        <div id="stab-content-pricebook" style="display:none;">
+          <div class="settings-card fade-in fade-in-delay-2">
+            <div class="settings-card-title" style="display:flex;align-items:center;justify-content:space-between;">
+              <span>Price Book</span>
+              <button onclick="createPriceList()" style="padding:5px 12px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;">+ New list</button>
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">Your standard pricing. Zips not assigned to a specific list are priced by the <b>Default</b> list — add a list and assign zips to price an area differently.</div>
+            <div id="priceBookContent" style="font-size:13px;color:var(--text-muted);">Loading…</div>
+            <div class="settings-feedback" id="priceBookFeedback"></div>
+          </div>
+        </div><!-- end pricebook tab -->
 
         <!-- TAB: Yard Signs -->
         <div id="stab-content-signs" style="display:none;">
@@ -4909,6 +4923,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Route Optimizer only available for franchise 90
       const routerCard = document.getElementById('routerCard');
       if (routerCard) routerCard.style.display = (String(currentUser.franchiseID) === '90' && currentUser.role === 'owner') ? '' : 'none';
+
+      // Provider-gate the pricing tabs: native tenants manage their own Price Book;
+      // Vonigo tenants use the Vonigo-backed customer pricing tab.
+      const _isNativePricing = (currentUser.pricingSource === 'native');
+      const _pbTab = document.getElementById('stab-pricebook');
+      const _cpTab = document.getElementById('stab-pricing');
+      if (_pbTab) _pbTab.style.display = _isNativePricing ? '' : 'none';
+      if (_cpTab) _cpTab.style.display = _isNativePricing ? 'none' : '';
 
       // Initialize Signs module visibility
       initSignsModule();
@@ -14505,7 +14527,7 @@ RECYCLING & DONATION
 
     // ===== SETTINGS TABS =====
     function showSettingsTab(tab) {
-      ['franchise','cost','proposal','account','pricing','signs','tools'].forEach(t => {
+      ['franchise','cost','proposal','account','pricing','pricebook','signs','tools'].forEach(t => {
         const el = document.getElementById('stab-content-' + t);
         if (el) el.style.display = t === tab ? 'block' : 'none';
         const btn = document.getElementById('stab-' + t);
@@ -14515,11 +14537,106 @@ RECYCLING & DONATION
       if (tab === 'cost') renderAllFacilityLists();
       // Load customer pricing list when switching to pricing tab
       if (tab === 'pricing') loadCustomerPricingList();
+      // Render the native price book when switching to the pricebook tab
+      if (tab === 'pricebook') renderPriceBookTab();
       // Render yard signs settings
       if (tab === 'signs') renderSignsSettingsTab();
       // Render tools inventory
       if (tab === 'tools') renderToolsTab();
     }
+
+    // ===== PRICE BOOK (native pricing editor; crm_provider=none) =====
+    function _pbFeedback(msg, ok) {
+      const f = document.getElementById('priceBookFeedback');
+      if (f) { f.textContent = msg || ''; f.className = 'settings-feedback' + (ok ? ' ok' : (msg ? ' error' : '')); }
+    }
+
+    async function renderPriceBookTab() {
+      const el = document.getElementById('priceBookContent');
+      if (!el) return;
+      el.innerHTML = 'Loading…';
+      _pbFeedback('');
+      try {
+        const fid = currentUser.franchiseInternalID;
+        const lists = await supabaseFetch('/rest/v1/price_lists?franchise_id=eq.' + fid + '&select=id,name,is_default,num_id&order=is_default.desc,name.asc');
+        if (!lists || !lists.length) {
+          el.innerHTML = '<div style="padding:8px 0;">No price lists yet. Tap <b>+ New list</b> to create your first — it becomes the Default so every zip is priced.</div>';
+          return;
+        }
+        const esc = s => String(s == null ? '' : s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+        const b = 'padding:5px 9px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input);color:var(--text-secondary);font-size:12px;cursor:pointer;flex-shrink:0;';
+        let html = '';
+        lists.forEach(l => {
+          html += '<div style="display:flex;align-items:center;gap:6px;padding:10px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;">'
+            + '<div style="flex:1;min-width:120px;"><span style="font-weight:600;color:var(--text-primary);">' + esc(l.name) + '</span>'
+            + (l.is_default ? ' <span style="font-size:10px;background:var(--accent-green);color:#000;padding:1px 6px;border-radius:8px;font-weight:700;">DEFAULT</span>' : '') + '</div>'
+            + '<button onclick="editPriceListItems(\'' + l.id + '\')" style="' + b + '">Items</button>'
+            + (l.is_default ? '' : '<button onclick="editPriceListZips(\'' + l.id + '\')" style="' + b + '">Zips</button>')
+            + (l.is_default ? '' : '<button onclick="setDefaultPriceList(\'' + l.id + '\')" style="' + b + '">Make default</button>')
+            + '<button onclick="renamePriceList(\'' + l.id + '\')" style="' + b + '" title="Rename">✎</button>'
+            + (l.is_default ? '' : '<button onclick="deletePriceList(\'' + l.id + '\')" style="' + b + 'color:#ef4444;" title="Delete">✕</button>')
+            + '</div>';
+        });
+        el.innerHTML = html;
+      } catch (e) {
+        el.innerHTML = '<div class="price-error">Could not load price lists.</div>';
+      }
+    }
+
+    async function createPriceList() {
+      const name = (prompt('Name for the new price list:') || '').trim();
+      if (!name) return;
+      try {
+        const fid = currentUser.franchiseInternalID;
+        const existing = await supabaseFetch('/rest/v1/price_lists?franchise_id=eq.' + fid + '&select=id');
+        const isFirst = !existing || existing.length === 0;   // first list auto-becomes the default
+        await supabaseFetch('/rest/v1/price_lists', {
+          method: 'POST',
+          body: JSON.stringify({ franchise_id: fid, name: name, is_default: isFirst })
+        });
+        _pbFeedback('Created.', true);
+        renderPriceBookTab();
+      } catch (e) { _pbFeedback('Create failed.', false); }
+    }
+
+    async function renamePriceList(id) {
+      const name = (prompt('New name:') || '').trim();
+      if (!name) return;
+      try {
+        await supabaseFetch('/rest/v1/price_lists?id=eq.' + id, {
+          method: 'PATCH',
+          body: JSON.stringify({ name: name, updated_at: new Date().toISOString() })
+        });
+        renderPriceBookTab();
+      } catch (e) { _pbFeedback('Rename failed.', false); }
+    }
+
+    async function deletePriceList(id) {
+      if (!confirm('Delete this price list and all its items + zip assignments? (The Default list can’t be deleted.)')) return;
+      try {
+        await supabaseFetch('/rest/v1/price_lists?id=eq.' + id, { method: 'DELETE' });
+        renderPriceBookTab();
+      } catch (e) { _pbFeedback('Delete failed.', false); }
+    }
+
+    async function setDefaultPriceList(id) {
+      try {
+        const fid = currentUser.franchiseInternalID;
+        // Unset the current default first — a partial unique index allows only one per franchise.
+        await supabaseFetch('/rest/v1/price_lists?franchise_id=eq.' + fid + '&is_default=eq.true', {
+          method: 'PATCH', body: JSON.stringify({ is_default: false })
+        });
+        await supabaseFetch('/rest/v1/price_lists?id=eq.' + id, {
+          method: 'PATCH', body: JSON.stringify({ is_default: true })
+        });
+        _pbFeedback('Default updated.', true);
+        renderPriceBookTab();
+      } catch (e) { _pbFeedback('Could not set default.', false); }
+    }
+
+    // Item + zip editors — built in the next increments (3b / 3c).
+    function editPriceListItems(id) { _pbFeedback('Item editor is the next increment.', false); }
+    function editPriceListZips(id) { _pbFeedback('Zip assignment is a following increment.', false); }
 
     // ===== PROPOSAL SETTINGS =====
     const PROPOSAL_FIELDS = ['Tagline','About','ServiceArea','Terms','EmailTemplate'];
