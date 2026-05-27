@@ -14632,9 +14632,141 @@ RECYCLING & DONATION
       } catch (e) { _pbFeedback('Could not set default.', false); }
     }
 
-    // Item + zip editors — built in the next increments (3b / 3c).
-    function editPriceListItems(id) { _pbFeedback('Item editor is the next increment.', false); }
-    function editPriceListZips(id) { _pbFeedback('Zip assignment is a following increment.', false); }
+    // ----- Price-book item editor (3b) -----
+    const PB_VOLUME_TIERS = [
+      { label: 'Minimum', frac: 0.0625 }, { label: '1/8 Truckload', frac: 0.125 },
+      { label: '1/4 Truckload', frac: 0.25 }, { label: '3/8 Truckload', frac: 0.375 },
+      { label: '1/2 Truckload', frac: 0.5 }, { label: '5/8 Truckload', frac: 0.625 },
+      { label: '3/4 Truckload', frac: 0.75 }, { label: '7/8 Truckload', frac: 0.875 },
+      { label: 'Full Truckload', frac: 1.0 }
+    ];
+    const PB_FREEFORM_BLOCKS = [
+      { type: 'surcharge',   name: 'Surcharges' },
+      { type: 'labor',       name: 'Labor' },
+      { type: 'single_item', name: 'Single Items' }
+    ];
+    let _pbEditor = null;
+
+    async function editPriceListItems(listId) {
+      try {
+        // Ensure the 4 standard blocks exist (new lists have none yet)
+        let blocks = await supabaseFetch('/rest/v1/price_blocks?price_list_id=eq.' + listId + '&select=id,block_type') || [];
+        const want = [{ type: 'volume', name: 'Volume', seq: 1 }].concat(PB_FREEFORM_BLOCKS.map((b, i) => ({ type: b.type, name: b.name, seq: i + 2 })));
+        for (const w of want) {
+          if (!blocks.some(b => b.block_type === w.type)) {
+            await supabaseFetch('/rest/v1/price_blocks', { method: 'POST', body: JSON.stringify({ price_list_id: listId, name: w.name, block_type: w.type, sequence: w.seq }) });
+          }
+        }
+        const full = await supabaseFetch('/rest/v1/price_blocks?price_list_id=eq.' + listId + '&select=id,name,block_type,sequence,price_items(id,name,value,unit_of_measure,fraction_value,sequence)&order=sequence');
+        buildItemEditorModal(listId, full || []);
+      } catch (e) { _pbFeedback('Could not open the item editor.', false); }
+    }
+
+    function pbFreeRow(type, it) {
+      const escA = s => String(s == null ? '' : s).replace(/"/g, '&quot;');
+      return '<div class="pb-ff-row" data-type="' + type + '" data-id="' + (it && it.id ? it.id : '') + '" style="display:flex;align-items:center;gap:6px;padding:3px 0;">'
+        + '<input class="form-input pb-ff-name" placeholder="Name" value="' + (it ? escA(it.name) : '') + '" style="flex:1;min-width:90px;padding:6px;font-size:13px;">'
+        + '<span style="color:var(--text-muted);">$</span>'
+        + '<input class="form-input pb-ff-val" type="number" min="0" step="0.01" placeholder="0" value="' + (it ? it.value : '') + '" style="width:78px;padding:6px;font-size:13px;">'
+        + '<input class="form-input pb-ff-unit" placeholder="unit" value="' + (it ? escA(it.unit_of_measure) : '') + '" style="width:62px;padding:6px;font-size:12px;">'
+        + '<button onclick="pbDeleteRow(this)" style="background:none;border:none;color:#ef4444;font-size:16px;cursor:pointer;" title="Delete">✕</button>'
+        + '</div>';
+    }
+
+    function buildItemEditorModal(listId, blocks) {
+      const ex = document.getElementById('pbItemModal'); if (ex) ex.remove();
+      const volBlock = blocks.find(b => b.block_type === 'volume');
+      _pbEditor = { listId: listId, volumeBlockId: volBlock ? volBlock.id : null, blockIds: {} };
+      PB_FREEFORM_BLOCKS.forEach(b => { const blk = blocks.find(x => x.block_type === b.type); _pbEditor.blockIds[b.type] = blk ? blk.id : null; });
+
+      const volItems = (volBlock && volBlock.price_items) || [];
+      let volRows = '';
+      PB_VOLUME_TIERS.forEach(t => {
+        const it = volItems.find(i => i.name === t.label);
+        volRows += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">'
+          + '<div style="flex:1;font-size:13px;color:var(--text-primary);">' + t.label + '</div>'
+          + '<span style="color:var(--text-muted);">$</span>'
+          + '<input class="form-input pb-vol" type="number" min="0" step="0.01" data-label="' + t.label + '" data-frac="' + t.frac + '" data-id="' + (it ? it.id : '') + '" value="' + (it ? it.value : '') + '" style="width:90px;padding:6px;font-size:13px;">'
+          + '</div>';
+      });
+
+      let ffHtml = '';
+      PB_FREEFORM_BLOCKS.forEach(b => {
+        const blk = blocks.find(x => x.block_type === b.type);
+        const rows = ((blk && blk.price_items) || []).sort((a, c) => (a.sequence || 0) - (c.sequence || 0)).map(it => pbFreeRow(b.type, it)).join('');
+        ffHtml += '<div style="margin-top:14px;"><div style="font-weight:700;font-size:13px;color:var(--text-primary);margin-bottom:4px;">' + b.name + '</div>'
+          + '<div id="pb-rows-' + b.type + '">' + rows + '</div>'
+          + '<button onclick="pbAddRow(\'' + b.type + '\')" style="margin-top:4px;padding:4px 10px;font-size:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-secondary);cursor:pointer;">+ Add</button></div>';
+      });
+
+      const modal = document.createElement('div');
+      modal.id = 'pbItemModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99990;display:flex;align-items:center;justify-content:center;padding:16px;';
+      modal.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius,12px);max-width:560px;width:100%;max-height:85vh;overflow:auto;padding:18px;">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><div style="font-size:15px;font-weight:700;color:var(--text-primary);">Edit items</div>'
+        + '<button onclick="document.getElementById(\'pbItemModal\').remove()" style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;line-height:1;">✕</button></div>'
+        + '<div style="font-weight:700;font-size:13px;color:var(--text-primary);margin:8px 0 2px;">Volume <span style="font-weight:400;color:var(--text-muted);font-size:11px;">— $ per truckload tier; leave blank to skip</span></div>'
+        + volRows + ffHtml
+        + '<div style="display:flex;gap:8px;margin-top:16px;"><button onclick="savePriceListItems()" style="flex:1;padding:10px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;">Save</button>'
+        + '<button onclick="document.getElementById(\'pbItemModal\').remove()" style="padding:10px 16px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;">Cancel</button></div>'
+        + '<div class="settings-feedback" id="pbItemFeedback"></div></div>';
+      document.body.appendChild(modal);
+    }
+
+    function pbAddRow(type) {
+      const c = document.getElementById('pb-rows-' + type);
+      if (c) c.insertAdjacentHTML('beforeend', pbFreeRow(type, null));
+    }
+
+    async function pbDeleteRow(btn) {
+      const row = btn.closest('.pb-ff-row'); if (!row) return;
+      const id = row.getAttribute('data-id');
+      if (id) { try { await supabaseFetch('/rest/v1/price_items?id=eq.' + id, { method: 'DELETE' }); } catch (e) {} }
+      row.remove();
+    }
+
+    async function savePriceListItems() {
+      if (!_pbEditor) return;
+      const ed = _pbEditor;
+      const fb = document.getElementById('pbItemFeedback');
+      if (fb) { fb.textContent = 'Saving…'; fb.className = 'settings-feedback loading'; }
+      try {
+        // Volume tiers: blank → delete (if existed); value → upsert
+        let seq = 0;
+        for (const inp of document.querySelectorAll('#pbItemModal .pb-vol')) {
+          seq++;
+          const id = inp.getAttribute('data-id');
+          const raw = String(inp.value).trim();
+          const val = raw === '' ? null : parseFloat(raw);
+          if (val != null && !isNaN(val)) {
+            if (id) await supabaseFetch('/rest/v1/price_items?id=eq.' + id, { method: 'PATCH', body: JSON.stringify({ value: val }) });
+            else if (ed.volumeBlockId) await supabaseFetch('/rest/v1/price_items', { method: 'POST', body: JSON.stringify({ price_block_id: ed.volumeBlockId, name: inp.getAttribute('data-label'), value: val, unit_of_measure: 'volume', fraction_value: parseFloat(inp.getAttribute('data-frac')), sequence: seq }) });
+          } else if (id) {
+            await supabaseFetch('/rest/v1/price_items?id=eq.' + id, { method: 'DELETE' });
+          }
+        }
+        // Free-form rows: named rows → upsert (deletes handled live by pbDeleteRow)
+        let fseq = 0;
+        for (const r of document.querySelectorAll('#pbItemModal .pb-ff-row')) {
+          fseq++;
+          const id = r.getAttribute('data-id');
+          const name = (r.querySelector('.pb-ff-name').value || '').trim();
+          if (!name) continue;
+          const val = parseFloat(r.querySelector('.pb-ff-val').value) || 0;
+          const unit = (r.querySelector('.pb-ff-unit').value || '').trim() || null;
+          if (id) await supabaseFetch('/rest/v1/price_items?id=eq.' + id, { method: 'PATCH', body: JSON.stringify({ name: name, value: val, unit_of_measure: unit }) });
+          else { const blockId = ed.blockIds[r.getAttribute('data-type')]; if (blockId) await supabaseFetch('/rest/v1/price_items', { method: 'POST', body: JSON.stringify({ price_block_id: blockId, name: name, value: val, unit_of_measure: unit, sequence: fseq }) }); }
+        }
+        document.getElementById('pbItemModal').remove();
+        _pbFeedback('Items saved.', true);
+        renderPriceBookTab();
+      } catch (e) {
+        if (fb) { fb.textContent = 'Save failed.'; fb.className = 'settings-feedback error'; }
+      }
+    }
+
+    // Zip editor — next increment (3c).
+    function editPriceListZips(id) { _pbFeedback('Zip assignment is the next increment.', false); }
 
     // ===== PROPOSAL SETTINGS =====
     const PROPOSAL_FIELDS = ['Tagline','About','ServiceArea','Terms','EmailTemplate'];
