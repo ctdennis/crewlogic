@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Dev tooling & approval discipline (READ FIRST)
+
+Approvals in `.claude/settings.local.json` match by **exact command prefix, one command at a time**. A pipe (`|`), redirect (`>` / `2>&1`), `;`/`&&` chain, or an **absolute path** makes a command miss its allow-rule and forces an unnecessary prompt. Therefore:
+
+- **Run dev tooling in EXACTLY these forms** — relative path, from the repo root, **no `|`, no `>`/`2>&1`, no `;`/`&&`, no absolute paths.** Read the JSON/text output directly; if you must filter it, do that in a separate step.
+  - Dev SQL (wrapper refuses unless linked to crewlogic-dev): `bash supabase/dev-setup/dev-sql.sh "<sql>"`
+  - Syntax-check index.html: `bash supabase/dev-setup/check-html.sh`
+  - Deploy a function to dev: `supabase functions deploy --project-ref bagkimfwmpwjfhfhmsrb <name> --use-api --no-verify-jwt`
+  - Set a dev secret: `supabase secrets set --project-ref bagkimfwmpwjfhfhmsrb KEY=VALUE`
+- **Before ANY command that may prompt** (anything prod-touching, destructive, or not matching an allow-rule), FIRST write a one-line plain-English note — **What it does · what it touches (dev vs prod) · impact & reversibility** — then run it. Never fire a gated command without that line.
+- **Always gated (do not bypass):** `git push origin main`; `supabase functions deploy` / `secrets set` / `secrets unset` with the **prod** ref `ozfkpxyachigfpcmvekz`; `supabase db query` (direct); `supabase db push`.
+
 ## What this is
 
 CrewLogicAI is a single-page web app for The Junkluggers franchise crews/owners: AI-assisted junk-removal estimating, pricing, job planning, route/truck-load math, and a "yard signs" tracking/rewards game. **The entire application lives in one file: `index.html` (~18.4k lines).** There is no build step, no package manager, no test suite, and no framework — it is vanilla HTML/CSS/JS with CDN-loaded libraries.
