@@ -33,6 +33,12 @@
 //       edits the quote (method 2) to set dwelling/parking/jobType option IDs.
 //       Charges + option IDs are computed by the frontend and passed through.
 //       (The frontend's pdfBase64 is intentionally ignored — n8n never uploaded it.)
+// v1.6: submitQuote create-call hardening. (a) Sanitize ALL Vonigo text fields
+//       (notes/itemsList/itemLocations) to ASCII via shared sanitizeVonigoText —
+//       the create call previously only stripped •/em-dash and never touched
+//       itemsList, so AI text with en-dashes/curly quotes triggered Vonigo's
+//       generic "data validation failed". (b) On create failure, log the full
+//       payload (securityToken redacted) + Vonigo's full response for diagnosis.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -464,6 +470,20 @@ async function handleDelete(body: Record<string, unknown>): Promise<Response> {
   return jsonResponse({ success: true, deleted: true, vonigoQuoteID });
 }
 
+// Vonigo's API rejects non-ASCII text field values with a generic "data validation
+// failed" error. AI-generated notes/itemsList routinely contain en/em dashes, curly
+// quotes, bullets and ellipses (e.g. "2–3 pieces"), so normalize the common ones to
+// ASCII and strip anything still non-ASCII. Both the create and edit calls use this.
+function sanitizeVonigoText(s: unknown): string {
+  return String(s ?? "")
+    .replace(/[•·]/g, "-")
+    .replace(/[—–]/g, "-")            // em/en dash → hyphen
+    .replace(/[‘’‚‛]/g, "'")  // curly single quotes
+    .replace(/[“”„‟]/g, '"')  // curly double quotes
+    .replace(/…/g, "...")        // ellipsis
+    .replace(/[^\x00-\x7F]/g, "");    // drop any remaining non-ASCII
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // HANDLER: submitQuote
 // Creates a Vonigo quote from an estimate and uploads its photos. Mirrors the n8n
@@ -483,8 +503,9 @@ async function handleSubmitQuote(body: Record<string, unknown>): Promise<Respons
   }
 
   const securityToken = await vonigoLogin(franchiseExternalId);
-  const itemLocations = buildItemLocations(body.areas);
-  const notesCreate = String(body.customerSituation || body.notes || "").replace(/•/g, "-").replace(/—/g, "-");
+  const itemLocations = sanitizeVonigoText(buildItemLocations(body.areas));
+  const notesCreate = sanitizeVonigoText(body.customerSituation || body.notes || "");
+  const itemsList = sanitizeVonigoText(body.itemsList || "");
 
   // 1) Create the quote (method 3). Charges are pre-built by the frontend.
   const createBody: Record<string, unknown> = {
@@ -496,7 +517,7 @@ async function handleSubmitQuote(body: Record<string, unknown>): Promise<Respons
     serviceTypeID: "11",
     Fields: [
       { fieldID: 914, fieldValue: notesCreate },
-      { fieldID: 10336, fieldValue: body.itemsList || "" },
+      { fieldID: 10336, fieldValue: itemsList },
       { fieldID: 11215, fieldValue: itemLocations },
     ],
     Charges: body.charges,
@@ -510,6 +531,10 @@ async function handleSubmitQuote(body: Record<string, unknown>): Promise<Respons
   })).json();
   if (createData.errNo !== 0 || !createData.Quote) {
     console.error(`[submitQuote] create failed errNo ${createData.errNo}: ${createData.errMsg || ""}`);
+    // Log the full payload (token redacted) + Vonigo's full response so a generic
+    // "data validation failed" can be traced to the exact field/charge next time.
+    console.error(`[submitQuote] create payload: ${JSON.stringify({ ...createBody, securityToken: "[redacted]" })}`);
+    console.error(`[submitQuote] create response: ${JSON.stringify(createData)}`);
     return jsonResponse({ success: false, error: createData.errMsg || `Vonigo create failed (errNo ${createData.errNo})` }, 502);
   }
   const quoteID = createData.Quote.objectID;
@@ -539,8 +564,7 @@ async function handleSubmitQuote(body: Record<string, unknown>): Promise<Respons
   }
 
   // 3) Edit quote fields (method 2) — set option-ID fields + sanitized notes.
-  const notesEdit = String(body.customerSituation || body.notes || "")
-    .replace(/•/g, "").replace(/—/g, "-").replace(/[^\x00-\x7F]/g, "");
+  const notesEdit = sanitizeVonigoText(body.customerSituation || body.notes || "");
   const editData = await (await fetch(VONIGO_BASE + "/data/Quotes/", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
