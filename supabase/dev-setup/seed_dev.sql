@@ -4,11 +4,13 @@
 -- in index.html (devSignIn): email dev-owner@crewlogic.test / external_id DEV1.
 -- Apply (linked to dev): supabase db query --linked -f supabase/dev-setup/seed_dev.sql
 
--- Clean any prior seed
-delete from public.estimates  where owner_email = 'dev-owner@crewlogic.test';
-delete from public.profiles   where email = 'dev-owner@crewlogic.test';
-delete from public.franchises where id = '22222222-2222-2222-2222-222222222222';
-delete from public.tenants    where id = '11111111-1111-1111-1111-111111111111';
+-- Clean any prior seed (vonigo_credentials first to satisfy the FK; NOTE: re-seeding
+-- wipes any Vonigo creds you entered in dev Settings — re-enter them after a re-seed).
+delete from public.vonigo_credentials where franchise_id in ('22222222-2222-2222-2222-222222222222', '44444444-4444-4444-4444-444444444444');
+delete from public.estimates  where owner_email in ('dev-owner@crewlogic.test', 'dev-vonigo@crewlogic.test');
+delete from public.profiles   where email in ('dev-owner@crewlogic.test', 'dev-vonigo@crewlogic.test');
+delete from public.franchises where id in ('22222222-2222-2222-2222-222222222222', '44444444-4444-4444-4444-444444444444');
+delete from public.tenants    where id in ('11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333333');
 
 insert into public.tenants (id, slug, name, crm_type, subscription_status)
 values ('11111111-1111-1111-1111-111111111111', 'dev-standalone', 'Dev Standalone Co', 'none', 'trialing');
@@ -18,6 +20,18 @@ values ('22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-1111111
 
 insert into public.profiles (franchise_id, email, name, role)
 values ('22222222-2222-2222-2222-222222222222', 'dev-owner@crewlogic.test', 'Dev Owner', 'owner');
+
+-- Vonigo-provider test tenant: external_id '90' so entered creds authenticate as franchise #90
+-- and reads return real #90 data. Writes are blocked server-side (VONIGO_READONLY on dev).
+-- Sign in via "🔧 Dev sign-in · Vonigo #90", then Settings → enter the #90 Vonigo credentials.
+insert into public.tenants (id, slug, name, crm_type, subscription_status)
+values ('33333333-3333-3333-3333-333333333333', 'dev-vonigo', 'Dev Vonigo (90)', 'vonigo', 'trialing');
+
+insert into public.franchises (id, tenant_id, external_id, franchise_name, subscription_tier, vonigo_configured)
+values ('44444444-4444-4444-4444-444444444444', '33333333-3333-3333-3333-333333333333', '90', 'Dev Vonigo (90)', 'tester', false);
+
+insert into public.profiles (franchise_id, email, name, role)
+values ('44444444-4444-4444-4444-444444444444', 'dev-vonigo@crewlogic.test', 'Dev Vonigo Owner', 'owner');
 
 -- (1) Healthy won estimate WITH charges — control: must open + exit normally, never auto-discard.
 -- job_id set so openEstimateEditor shows #estMainContent (charges visible) without a price lookup.
