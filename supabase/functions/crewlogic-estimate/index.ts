@@ -39,6 +39,11 @@
 //       itemsList, so AI text with en-dashes/curly quotes triggered Vonigo's
 //       generic "data validation failed". (b) On create failure, log the full
 //       payload (securityToken redacted) + Vonigo's full response for diagnosis.
+// v1.8: Graceful handling when Vonigo's create returns a non-JSON body (HTML error
+//       page) — e.g. attaching to a job that already has an estimate. Previously the
+//       server's .json() threw and "Unexpected token '<' ... is not valid JSON" leaked
+//       to the UI; now we safe-parse the create response, log the raw body, and return
+//       a clear actionable message (job already has an estimate / unexpected response).
 // v1.7: Fix per-franchise tax handling. Charges historically defaulted to taxID 146
 //       (the original franchise's "Non-Taxable" schedule); franchises on a different
 //       tax schedule got Vonigo "-7207 Tax reference not found" and the whole quote
@@ -572,11 +577,28 @@ async function handleSubmitQuote(body: Record<string, unknown>): Promise<Respons
   };
   if (body.jobID) createBody.jobID = body.jobID;
 
-  const createData = await (await fetch(VONIGO_BASE + "/data/Quotes/", {
+  const createResp = await fetch(VONIGO_BASE + "/data/Quotes/", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(createBody),
-  })).json();
+  });
+  // Vonigo sometimes returns a non-JSON body (an HTML error page) instead of its usual
+  // { errNo, ... } — most commonly when attaching a quote to a job that already has an
+  // estimate. Parse defensively so a JSON.parse error ("Unexpected token '<'") never
+  // leaks to the UI; surface a clear, actionable message instead.
+  const createRaw = await createResp.text();
+  // deno-lint-ignore no-explicit-any
+  let createData: any;
+  try {
+    createData = JSON.parse(createRaw);
+  } catch {
+    console.error(`[submitQuote] create returned non-JSON (HTTP ${createResp.status}): ${createRaw.slice(0, 600)}`);
+    console.error(`[submitQuote] create payload: ${JSON.stringify({ ...createBody, securityToken: "[redacted]" })}`);
+    const msg = createBody.jobID
+      ? "Vonigo rejected this submission. This job may already have an estimate attached — submit as a new draft instead, or remove the existing estimate in Vonigo first."
+      : `Vonigo returned an unexpected response (HTTP ${createResp.status}). Please try again, or check the job in Vonigo.`;
+    return jsonResponse({ success: false, error: msg }, 502);
+  }
   if (createData.errNo !== 0 || !createData.Quote) {
     console.error(`[submitQuote] create failed errNo ${createData.errNo}: ${createData.errMsg || ""}`);
     // Log the full payload (token redacted) + Vonigo's full response so a generic

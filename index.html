@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.91 | 2026-05-27">
+  <meta name="crewlogic-version" content="v5.9.92 | 2026-05-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3429,7 +3429,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         },
         body: JSON.stringify(body)
       });
-      return res.json();
+      // Defensive parse: a gateway/timeout/error can return an HTML page, not JSON.
+      // Don't let a raw "Unexpected token '<'" JSON.parse error reach the UI — callers
+      // check `data.success`, so return a clean error object instead.
+      const text = await res.text();
+      try {
+        return JSON.parse(text);
+      } catch (_e) {
+        return { success: false, error: 'The server returned an unexpected response (HTTP ' + res.status + '). Please try again.' };
+      }
     }
 
     // Calls the crewlogic-price-lookup Edge Function. Returns a Response-like
