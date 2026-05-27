@@ -122,3 +122,19 @@ single items, surcharges, labor. Keep entry fast (inline rows).
 4. Customers table + UI + CSV import/template (§7).
 5. `none` estimate creation + provider-gated UI (§8).
 6. Promote to prod once verified. (SEC-1 proceeds in parallel as the go-live gate.)
+
+## 11. Variable truck size & tier model (added 2026-05-27)
+- **Truck capacity is a per-company setting** (cubic yards per full truck, default 16), in Cost
+  settings (`cost_settings.truckCY`). It replaces the ~10 hardcoded `16`s (CY displays index.html
+  9221/9342, PDF CY cols 12414/12452/12839/12855, cost analysis 15225, proposal CY
+  18584/18600/18686/18691) and the `/480` floor-volume constant (15924). **It must also be passed to
+  `crewlogic-ai`**, whose volume estimation relates cubic yards ↔ truck fraction and assumes 16 today.
+  This is a tech-debt win for the existing Vonigo/Junkluggers app too (de-magic-numbers `16`).
+- **Tiers ship as eighths** (Included/Minimum/1/8…Full) for now. They are **dimensionless**
+  (truck-size-independent), so variable truck size needs **no** tier change — only the CY conversion.
+- **Variable tier models (e.g. 1/16) are future** — Vonigo supports multiple. The data layer already
+  accommodates them: `price_items.fraction_value` encodes the tier set, so different granularity =
+  different items, no schema change. The hardcoded eighths to make data-driven later are the **swap
+  points**: frontend `volLabelMap` / `findVolumeItem` fraction labels / volume dropdown options
+  (~7703, ~9566, ~9120) and the `crewlogic-ai` volume prompt. Going fully data-driven would also add
+  `fraction_value` to the pricing response (diverging slightly from the Vonigo shape) — defer until needed.
