@@ -14797,8 +14797,90 @@ RECYCLING & DONATION
       }
     }
 
-    // Zip editor — next increment (3c).
-    function editPriceListZips(id) { _pbFeedback('Zip assignment is the next increment.', false); }
+    // ----- Price-book zip assignment (3c) -----
+    let _pbZipEditor = null;
+
+    async function editPriceListZips(listId) {
+      try {
+        const lists = await supabaseFetch('/rest/v1/price_lists?id=eq.' + listId + '&select=name,is_default');
+        const list = lists && lists[0];
+        if (list && list.is_default) { _pbFeedback('The Default list already covers every unassigned zip — assign zips to other lists.', false); return; }
+        const zips = await supabaseFetch('/rest/v1/price_list_zips?price_list_id=eq.' + listId + '&select=zip&order=zip.asc') || [];
+        buildZipEditorModal(listId, (list && list.name) || 'Price List', zips.map(z => z.zip));
+      } catch (e) { _pbFeedback('Could not open zip assignment.', false); }
+    }
+
+    function buildZipEditorModal(listId, name, zips) {
+      const ex = document.getElementById('pbZipModal'); if (ex) ex.remove();
+      _pbZipEditor = { listId: listId };
+      const esc = s => String(s == null ? '' : s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+      const chips = zips.length
+        ? zips.map(z => '<span style="display:inline-flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:12px;padding:2px 8px;margin:2px;font-size:12px;color:var(--text-primary);">' + z + ' <span onclick="pbRemoveZip(\'' + z + '\')" style="cursor:pointer;color:#ef4444;">✕</span></span>').join('')
+        : '<span style="color:var(--text-muted);font-size:12px;">No zips assigned yet — this list is unused until you add some.</span>';
+      const modal = document.createElement('div');
+      modal.id = 'pbZipModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99990;display:flex;align-items:center;justify-content:center;padding:16px;';
+      modal.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius,12px);max-width:520px;width:100%;max-height:85vh;overflow:auto;padding:18px;">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><div style="font-size:15px;font-weight:700;color:var(--text-primary);">Zips → ' + esc(name) + '</div>'
+        + '<button onclick="document.getElementById(\'pbZipModal\').remove()" style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;line-height:1;">✕</button></div>'
+        + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.5;">Zips here are priced by this list (and removed from any other). Unassigned zips stay on the Default list.</div>'
+        + '<div style="font-weight:700;font-size:12px;color:var(--text-primary);margin-bottom:4px;">Assigned (' + zips.length + ')</div>'
+        + '<div id="pbZipChips" style="margin-bottom:12px;">' + chips + '</div>'
+        + '<div class="form-label">Add zips — space / comma / newline separated; ranges (02718-02748) and prefixes (028*) OK</div>'
+        + '<textarea id="pbZipInput" class="form-input" rows="3" placeholder="02718 02719 02720   or   02718-02748   or   028*" style="width:100%;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>'
+        + '<div style="display:flex;gap:8px;margin-top:10px;"><button onclick="pbAddZips()" style="flex:1;padding:10px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;">Add zips</button>'
+        + '<button onclick="document.getElementById(\'pbZipModal\').remove()" style="padding:10px 16px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;">Done</button></div>'
+        + '<div class="settings-feedback" id="pbZipFeedback"></div></div>';
+      document.body.appendChild(modal);
+    }
+
+    function _pbZipFeedback(msg, ok) {
+      const f = document.getElementById('pbZipFeedback');
+      if (f) { f.textContent = msg || ''; f.className = 'settings-feedback' + (ok ? ' ok' : (msg ? ' error' : '')); }
+    }
+
+    async function pbAddZips() {
+      const ed = _pbZipEditor; if (!ed) return;
+      const raw = (document.getElementById('pbZipInput').value || '').trim();
+      if (!raw) return;
+      const set = new Set();
+      for (const tok of raw.split(/[\s,;]+/).filter(Boolean)) {
+        const range = tok.match(/^(\d{5})-(\d{5})$/);
+        const pref = tok.match(/^(\d{3,4})\*$/);
+        if (range) {
+          let a = parseInt(range[1], 10), b = parseInt(range[2], 10);
+          if (b < a) { const t = a; a = b; b = t; }
+          if (b - a <= 2000) for (let n = a; n <= b; n++) set.add(String(n).padStart(5, '0'));
+        } else if (pref) {
+          const lo = parseInt(pref[1].padEnd(5, '0'), 10), hi = parseInt(pref[1].padEnd(5, '9'), 10);
+          for (let n = lo; n <= hi; n++) set.add(String(n).padStart(5, '0'));
+        } else if (/^\d{5}$/.test(tok)) {
+          set.add(tok);
+        }
+      }
+      const zips = [...set];
+      if (!zips.length) { _pbZipFeedback('No valid 5-digit zips found.', false); return; }
+      _pbZipFeedback('Assigning ' + zips.length + ' zip' + (zips.length !== 1 ? 's' : '') + '…');
+      try {
+        const fid = currentUser.franchiseInternalID;
+        // Upsert on the (franchise_id, zip) PK — moves a zip from its current list to this one.
+        await supabaseFetch('/rest/v1/price_list_zips?on_conflict=franchise_id,zip', {
+          method: 'POST',
+          headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify(zips.map(z => ({ franchise_id: fid, zip: z, price_list_id: ed.listId })))
+        });
+        editPriceListZips(ed.listId); // refresh
+      } catch (e) { _pbZipFeedback('Could not assign zips.', false); }
+    }
+
+    async function pbRemoveZip(zip) {
+      const ed = _pbZipEditor; if (!ed) return;
+      try {
+        const fid = currentUser.franchiseInternalID;
+        await supabaseFetch('/rest/v1/price_list_zips?franchise_id=eq.' + fid + '&zip=eq.' + zip, { method: 'DELETE' });
+        editPriceListZips(ed.listId); // refresh (zip falls back to the Default list)
+      } catch (e) { _pbZipFeedback('Could not remove zip.', false); }
+    }
 
     // ===== PROPOSAL SETTINGS =====
     const PROPOSAL_FIELDS = ['Tagline','About','ServiceArea','Terms','EmailTemplate'];
