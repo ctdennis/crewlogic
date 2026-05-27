@@ -1742,7 +1742,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           <div class="settings-card fade-in fade-in-delay-2">
             <div class="settings-card-title" style="display:flex;align-items:center;justify-content:space-between;">
               <span>Price Book</span>
-              <button onclick="createPriceList()" style="padding:5px 12px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;">+ New list</button>
+              <button onclick="createPriceList()" style="padding:5px 12px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;">+ Add Price List</button>
             </div>
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">Your standard pricing. Zips not assigned to a specific list are priced by the <b>Default</b> list — add a list and assign zips to price an area differently.</div>
             <div id="priceBookContent" style="font-size:13px;color:var(--text-muted);">Loading…</div>
@@ -4924,13 +4924,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const routerCard = document.getElementById('routerCard');
       if (routerCard) routerCard.style.display = (String(currentUser.franchiseID) === '90' && currentUser.role === 'owner') ? '' : 'none';
 
-      // Provider-gate the pricing tabs: native tenants manage their own Price Book;
-      // Vonigo tenants use the Vonigo-backed customer pricing tab.
-      const _isNativePricing = (currentUser.pricingSource === 'native');
+      // The Price Book tab (standard pricing) is native-only — Vonigo tenants get their
+      // standard pricing from Vonigo. The "Pricing" tab (customer-specific negotiated
+      // overrides) stays visible for BOTH providers; it overrides the standard list per customer.
       const _pbTab = document.getElementById('stab-pricebook');
-      const _cpTab = document.getElementById('stab-pricing');
-      if (_pbTab) _pbTab.style.display = _isNativePricing ? '' : 'none';
-      if (_cpTab) _cpTab.style.display = _isNativePricing ? 'none' : '';
+      if (_pbTab) _pbTab.style.display = (currentUser.pricingSource === 'native') ? '' : 'none';
 
       // Initialize Signs module visibility
       initSignsModule();
@@ -14560,7 +14558,7 @@ RECYCLING & DONATION
         const fid = currentUser.franchiseInternalID;
         const lists = await supabaseFetch('/rest/v1/price_lists?franchise_id=eq.' + fid + '&select=id,name,is_default,num_id&order=is_default.desc,name.asc');
         if (!lists || !lists.length) {
-          el.innerHTML = '<div style="padding:8px 0;">No price lists yet. Tap <b>+ New list</b> to create your first — it becomes the Default so every zip is priced.</div>';
+          el.innerHTML = '<div style="padding:8px 0;">No price lists yet. Tap <b>+ Add Price List</b> to create your first — it becomes the Default so every zip is priced.</div>';
           return;
         }
         const esc = s => String(s == null ? '' : s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
