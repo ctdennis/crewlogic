@@ -14645,16 +14645,48 @@ RECYCLING & DONATION
       { type: 'labor',       name: 'Labor' },
       { type: 'single_item', name: 'Single Items' }
     ];
+    // Standard category template (mirrors the Vonigo price book). New lists auto-populate with
+    // these at $0 — the owner just fills prices, and can add/delete others for their own pricing.
+    const PB_STANDARD_ITEMS = {
+      surcharge: [
+        { name: 'Mattress / Box Spring', unit: 'ea' }, { name: 'Electronic Waste', unit: 'ea' },
+        { name: 'TV / Monitor', unit: 'ea' }, { name: 'Paint Can', unit: 'ea' }, { name: 'Tire', unit: 'ea' },
+        { name: 'Freon Appliance', unit: 'ea' }, { name: 'Cast Iron Tub', unit: 'ea' }, { name: 'Hot Tub', unit: 'ea' },
+        { name: 'Water Heater', unit: 'ea' }, { name: 'Upright Piano', unit: 'ea' }, { name: 'Baby Grand Piano', unit: 'ea' },
+        { name: 'Pool Table', unit: 'ea' }, { name: 'Riding Mower', unit: 'ea' }, { name: 'Safe', unit: 'ea' },
+        { name: 'Sleeper / Reclining Sofa', unit: 'ea' }, { name: 'Trampoline', unit: 'ea' }, { name: 'Fuel Surcharge', unit: 'flat' }
+      ],
+      labor: [
+        { name: 'Packing / Bagging', unit: 'hour' }, { name: 'Labor With Junk Removal', unit: 'hour' },
+        { name: 'Additional Lugger', unit: 'hour' }, { name: 'Walk-Up', unit: 'flight' }, { name: 'Long Carry', unit: 'hour' },
+        { name: 'Labor Only', unit: 'hour' }, { name: 'Travel Time', unit: 'hour' }
+      ],
+      single_item: [
+        { name: 'Bookcase', unit: 'ea' }, { name: 'Dishwasher', unit: 'ea' }, { name: 'Dresser', unit: 'ea' }, { name: 'Dryer', unit: 'ea' },
+        { name: 'Hot Tub (2-4 person)', unit: 'ea' }, { name: 'Hot Tub (5+ person)', unit: 'ea' }, { name: 'Loveseat', unit: 'ea' },
+        { name: 'Mattress - Full', unit: 'ea' }, { name: 'Mattress - King', unit: 'ea' }, { name: 'Mattress - Queen', unit: 'ea' },
+        { name: 'Mattress - Twin', unit: 'ea' }, { name: 'Piano - Baby Grand', unit: 'ea' }, { name: 'Piano - Upright', unit: 'ea' },
+        { name: 'Recliner', unit: 'ea' }, { name: 'Refrigerator', unit: 'ea' }, { name: 'Sofa - Sectional (2pc)', unit: 'ea' },
+        { name: 'Sofa - Sectional (3pc)', unit: 'ea' }, { name: 'Sofa - Sleeper', unit: 'ea' }, { name: 'Sofa (3-seat)', unit: 'ea' },
+        { name: 'Stove', unit: 'ea' }, { name: 'Treadmill', unit: 'ea' }, { name: 'TV - Over 42"', unit: 'ea' }, { name: 'TV - Up to 42"', unit: 'ea' },
+        { name: 'Washer / Dryer Stacked', unit: 'ea' }, { name: 'Washing Machine', unit: 'ea' }
+      ]
+    };
     let _pbEditor = null;
 
     async function editPriceListItems(listId) {
       try {
-        // Ensure the 4 standard blocks exist (new lists have none yet)
+        // Ensure the 4 standard blocks exist (new lists have none yet); seed standard items on creation.
         let blocks = await supabaseFetch('/rest/v1/price_blocks?price_list_id=eq.' + listId + '&select=id,block_type') || [];
         const want = [{ type: 'volume', name: 'Volume', seq: 1 }].concat(PB_FREEFORM_BLOCKS.map((b, i) => ({ type: b.type, name: b.name, seq: i + 2 })));
         for (const w of want) {
           if (!blocks.some(b => b.block_type === w.type)) {
-            await supabaseFetch('/rest/v1/price_blocks', { method: 'POST', body: JSON.stringify({ price_list_id: listId, name: w.name, block_type: w.type, sequence: w.seq }) });
+            const created = await supabaseFetch('/rest/v1/price_blocks', { method: 'POST', body: JSON.stringify({ price_list_id: listId, name: w.name, block_type: w.type, sequence: w.seq }) });
+            const blk = Array.isArray(created) ? created[0] : created;
+            const tmpl = PB_STANDARD_ITEMS[w.type];
+            if (blk && tmpl && tmpl.length) {
+              await supabaseFetch('/rest/v1/price_items', { method: 'POST', body: JSON.stringify(tmpl.map((t, i) => ({ price_block_id: blk.id, name: t.name, value: 0, unit_of_measure: t.unit, sequence: i + 1 }))) });
+            }
           }
         }
         const full = await supabaseFetch('/rest/v1/price_blocks?price_list_id=eq.' + listId + '&select=id,name,block_type,sequence,price_items(id,name,value,unit_of_measure,fraction_value,sequence)&order=sequence');
