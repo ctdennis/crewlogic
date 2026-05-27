@@ -58,6 +58,10 @@ create table if not exists public.customers (
   updated_at timestamptz not null default now()
 );
 create index if not exists customers_franchise_idx on public.customers (franchise_id);
+-- Dedup foundation (Step 4 add-customer warns on matches; not hard-unique — emails/addresses
+-- can legitimately repeat). Case-insensitive lookups by email and by address, per franchise.
+create index if not exists customers_email_idx on public.customers (franchise_id, lower(email))   where email   is not null and email   <> '';
+create index if not exists customers_addr_idx  on public.customers (franchise_id, lower(address)) where address is not null and address <> '';
 
 -- Numeric surrogate IDs for shape-parity with crewlogic-price-lookup (which returns numeric
 -- priceListID/priceBlockID/priceItemID; the frontend interpolates some of them unquoted).

@@ -14569,6 +14569,7 @@ RECYCLING & DONATION
             + '<div style="flex:1;min-width:120px;"><span style="font-weight:600;color:var(--text-primary);">' + esc(l.name) + '</span>'
             + (l.is_default ? ' <span style="font-size:10px;background:var(--accent-green);color:#000;padding:1px 6px;border-radius:8px;font-weight:700;">DEFAULT</span>' : '') + '</div>'
             + '<button onclick="editPriceListItems(\'' + l.id + '\')" style="' + b + '">Items</button>'
+            + '<button onclick="copyPriceList(\'' + l.id + '\')" style="' + b + '">Copy</button>'
             + (l.is_default ? '' : '<button onclick="editPriceListZips(\'' + l.id + '\')" style="' + b + '">Zips</button>')
             + (l.is_default ? '' : '<button onclick="setDefaultPriceList(\'' + l.id + '\')" style="' + b + '">Make default</button>')
             + '<button onclick="renamePriceList(\'' + l.id + '\')" style="' + b + '" title="Rename">✎</button>'
@@ -14630,6 +14631,26 @@ RECYCLING & DONATION
         _pbFeedback('Default updated.', true);
         renderPriceBookTab();
       } catch (e) { _pbFeedback('Could not set default.', false); }
+    }
+
+    async function copyPriceList(id) {
+      try {
+        const fid = currentUser.franchiseInternalID;
+        const src = await supabaseFetch('/rest/v1/price_lists?id=eq.' + id + '&select=name');
+        const srcName = (src && src[0] && src[0].name) || 'Price List';
+        // New list — never the default, and intentionally WITHOUT zip assignments.
+        const created = await supabaseFetch('/rest/v1/price_lists', { method: 'POST', body: JSON.stringify({ franchise_id: fid, name: 'Copy of ' + srcName, is_default: false }) });
+        const newId = (Array.isArray(created) ? created[0] : created).id;
+        const blocks = await supabaseFetch('/rest/v1/price_blocks?price_list_id=eq.' + id + '&select=name,block_type,sequence,price_items(name,value,unit_of_measure,fraction_value,sequence,is_active)&order=sequence') || [];
+        for (const b of blocks) {
+          const nb = await supabaseFetch('/rest/v1/price_blocks', { method: 'POST', body: JSON.stringify({ price_list_id: newId, name: b.name, block_type: b.block_type, sequence: b.sequence }) });
+          const nbId = (Array.isArray(nb) ? nb[0] : nb).id;
+          const items = b.price_items || [];
+          if (items.length) await supabaseFetch('/rest/v1/price_items', { method: 'POST', body: JSON.stringify(items.map(i => ({ price_block_id: nbId, name: i.name, value: i.value, unit_of_measure: i.unit_of_measure, fraction_value: i.fraction_value, sequence: i.sequence, is_active: i.is_active }))) });
+        }
+        _pbFeedback('Copied to "Copy of ' + srcName + '" — assign its own zips.', true);
+        renderPriceBookTab();
+      } catch (e) { _pbFeedback('Copy failed.', false); }
     }
 
     // ----- Price-book item editor (3b) -----
@@ -14858,11 +14879,20 @@ RECYCLING & DONATION
           set.add(tok);
         }
       }
-      const zips = [...set];
+      let zips = [...set];
       if (!zips.length) { _pbZipFeedback('No valid 5-digit zips found.', false); return; }
-      _pbZipFeedback('Assigning ' + zips.length + ' zip' + (zips.length !== 1 ? 's' : '') + '…');
       try {
         const fid = currentUser.franchiseInternalID;
+        // Validation: a zip can only be on one list. Flag any entered zips already on a DIFFERENT
+        // list and confirm the move; if declined, assign only the un-conflicting ones.
+        const existing = await supabaseFetch('/rest/v1/price_list_zips?franchise_id=eq.' + fid + '&zip=in.(' + zips.join(',') + ')&select=zip,price_list_id') || [];
+        const movers = existing.filter(e => e.price_list_id !== ed.listId).map(e => e.zip);
+        if (movers.length && !confirm(movers.length + ' of these zip(s) are already assigned to another price list (a zip can be on only one). Move them to this list?')) {
+          const mset = new Set(movers);
+          zips = zips.filter(z => !mset.has(z));
+          if (!zips.length) { _pbZipFeedback('Nothing added — the entered zips are all on other lists.', false); return; }
+        }
+        _pbZipFeedback('Assigning ' + zips.length + ' zip' + (zips.length !== 1 ? 's' : '') + '…');
         // Upsert on the (franchise_id, zip) PK — moves a zip from its current list to this one.
         await supabaseFetch('/rest/v1/price_list_zips?on_conflict=franchise_id,zip', {
           method: 'POST',
