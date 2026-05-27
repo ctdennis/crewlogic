@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.92 | 2026-05-27">
+  <meta name="crewlogic-version" content="v5.9.93 | 2026-05-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1424,6 +1424,10 @@
                   <input type="text" class="form-input" id="settingsTruckHome" placeholder="123 Main Street, Mytown, OH 12345" autocomplete="off" style="font-size:13px;">
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;">
+                  <div class="settings-input-group">
+                    <label class="settings-input-label">Truck Size (CY)</label>
+                    <input type="number" class="form-input cost-compact-input" id="settingsTruckCY" placeholder="16" inputmode="decimal" min="1" step="0.5">
+                  </div>
                   <div class="settings-input-group">
                     <label class="settings-input-label">MPG</label>
                     <input type="number" class="form-input cost-compact-input" id="settingsMPG" placeholder="10" inputmode="decimal" min="1">
@@ -6178,7 +6182,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         resultRow('Floor (8" box)', r(V_floor)+' cf') + resultRow('Wall Framing (2×4)', r(V_wallFraming)+' cf') + resultRow('Siding', r(V_siding)+' cf') + resultRow('Roof Rafters (6")', r(V_roofRafters)+' cf') + resultRow('Shingles', r(V_shingles)+' cf') + resultRow('Structure Subtotal', r(V_structure_cf)+' cf | '+r(V_structure_cf/27)+' cy', 'highlight');
       document.getElementById('resultsInterior').innerHTML = resultRow(fillPct+'% of '+r(A*B*D)+' cf', r(V_interior_cf)+' cf | '+r(V_interior_cf/27)+' cy', 'highlight');
       document.getElementById('resultsGrandTotals').innerHTML =
-        resultRow('Total Volume', r(V_grand_cf)+' cf | '+r(V_grand_cf/27)+' cy', 'grand') + resultRow('Est. Weight', Math.round(V_grand_cf*7).toLocaleString()+' lbs') + resultRow('Est. Truck Loads', Math.ceil(V_grand_cf/27/16)+'');
+        resultRow('Total Volume', r(V_grand_cf)+' cf | '+r(V_grand_cf/27)+' cy', 'grand') + resultRow('Est. Weight', Math.round(V_grand_cf*7).toLocaleString()+' lbs') + resultRow('Est. Truck Loads', Math.ceil(V_grand_cf/27/truckCapacityCY())+'');
       document.getElementById('resultsSurface').innerHTML =
         resultRow('Floor', r(B*D)+' sf') + resultRow('Long Walls', r(2*B*A)+' sf') + resultRow('Gable Ends', r(2*((D*A)+(0.5*D*roofRise)))+' sf') + resultRow('Roof', r(roofArea)+' sf');
       document.getElementById('estimatorScreen').classList.remove('active');
@@ -6377,8 +6381,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const fullness = parseFloat(document.getElementById('storageFull').value);
       if (isNaN(width) || isNaN(length) || isNaN(height)) { errorEl.textContent = 'Please enter all 3 unit dimensions'; return; }
       const usedCY = (width * length * height * fullness) / 27;
-      const eighths = Math.ceil(usedCY / 16 * 8);
-      const truckCY = eighths * 2;
+      const eighths = Math.ceil(usedCY / truckCapacityCY() * 8);
+      const truckCY = eighths * (truckCapacityCY() / 8);
       const labels = { 1:'1/8', 2:'1/4', 3:'3/8', 4:'1/2', 5:'5/8', 6:'3/4', 7:'7/8' };
       const truckLbl = eighths >= 8 ? Math.floor(eighths/8) + (eighths%8 ? ' ' + labels[eighths%8] : '') + ' truck' + (eighths >= 16 ? 's' : '') : labels[eighths] + ' truck';
       const fullLabels = {'0.125':'1/8 full','0.25':'1/4 full','0.5':'1/2 full','0.75':'3/4 full','1':'Fully packed'};
@@ -9333,7 +9337,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Update CY display
         const cyEl = document.getElementById('cyDisplay_' + idx);
         if (cyEl) {
-          const cy = vol * qty * 16;
+          const cy = vol * qty * truckCapacityCY();
           cyEl.textContent = cy > 0 ? (Number.isInteger(cy) ? cy : parseFloat(cy.toFixed(2))) + ' CY' : '';
         }
       }
@@ -9454,7 +9458,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
           // Row 2: Volume selector + Qty
           html += '<div style="display:flex;gap:8px;margin-top:6px;">';
-          const cyVol = (volLabelMap[charge.truckLabel] || 0) * (parseFloat(charge.truckQty) || 1) * 16;
+          const cyVol = (volLabelMap[charge.truckLabel] || 0) * (parseFloat(charge.truckQty) || 1) * truckCapacityCY();
           const cyDisplay = cyVol > 0 ? (Number.isInteger(cyVol) ? cyVol : parseFloat(cyVol.toFixed(2))) + ' CY' : '';
           html += '<select class="form-select" style="flex:1" data-idx="' + globalIdx + '" data-field="truckLabel" onchange="updateChargeFromInput(this)"><option value="">Vol...</option>' + volOptions + '</select>';
           html += '<div id="cyDisplay_' + globalIdx + '" style="flex-shrink:0;min-width:48px;text-align:center;font-size:11px;font-family:monospace;color:var(--text-muted);padding:0 4px;display:flex;align-items:center;justify-content:center;">' + cyDisplay + '</div>';
@@ -9903,6 +9907,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       btn.style.background = on ? 'rgba(74,222,128,0.15)' : 'rgba(96,165,250,0.12)';
       btn.style.borderColor = on ? 'var(--accent-green)' : 'var(--accent-blue)';
       btn.style.color = on ? 'var(--accent-green)' : 'var(--accent-blue)';
+    }
+
+    // Cubic yards in one full truckload. Per-franchise Cost setting (cost_settings.truckCY);
+    // defaults to 16 so existing tenants are unchanged. Single source of truth for every
+    // truck-fraction ↔ cubic-yards conversion (CY displays, PDF, cost analysis, proposal).
+    function truckCapacityCY() {
+      const v = currentUser && currentUser.costSettings && parseFloat(currentUser.costSettings.truckCY);
+      return (v && v > 0) ? v : 16;
     }
 
     function calcVolumePrice(totalTrucks) {
@@ -12526,7 +12538,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         doc.setFontSize(9);
         doc.text(area, col.area, y + 10);
         doc.setTextColor(...gray);
-        doc.text((trucks * 16).toFixed(1), col.cy, y + 10, { align: 'right' });
+        doc.text((trucks * truckCapacityCY()).toFixed(1), col.cy, y + 10, { align: 'right' });
         doc.setTextColor(...dark);
         doc.text(trucks.toFixed(3), col.trucks, y + 10, { align: 'right' });
         rowIdx++;
@@ -12564,7 +12576,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
       doc.text('Total Volume (trucks)', col.area, y + 13);
-      doc.text((totalTrucks * 16).toFixed(1), col.cy, y + 13, { align: 'right' });
+      doc.text((totalTrucks * truckCapacityCY()).toFixed(1), col.cy, y + 13, { align: 'right' });
       doc.text(totalTrucks.toFixed(3), col.trucks, y + 13, { align: 'right' });
       if (!hasRealSplit) {
         // Single tier — use the actual rate for this fraction, not full truck price
@@ -12951,7 +12963,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         doc.text(tv > 0 ? tv.toFixed(3) : '-', dc.vol, y + 13, { align: 'right' });
         if (tv > 0) {
           doc.setTextColor(...gray);
-          doc.text((tv * 16).toFixed(1), dc.cy, y + 13, { align: 'right' });
+          doc.text((tv * truckCapacityCY()).toFixed(1), dc.cy, y + 13, { align: 'right' });
           doc.setTextColor(...dark);
         }
 
@@ -12967,7 +12979,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       doc.setFontSize(9);
       doc.text('Total Volume', dc.room, y + 17);
       doc.text(totalTrucks.toFixed(3), dc.vol, y + 17, { align: 'right' });
-      doc.text((totalTrucks * 16).toFixed(1), dc.cy, y + 17, { align: 'right' });
+      doc.text((totalTrucks * truckCapacityCY()).toFixed(1), dc.cy, y + 17, { align: 'right' });
 
       // Footer
       doc.setDrawColor(...lightgray);
@@ -15685,6 +15697,7 @@ Please review the estimate below. If you have any questions or would like to adj
 
     // ===== COST SETTINGS =====
     const COST_SETTINGS_FIELDS = [
+      'truckCY',
       'truckHome','MPG','fuelCost','crewRate','disposalCost',
       'disposalWait','recyclingWait','donationWait',
       'recyclingRevenue','royaltyPct',
@@ -15836,7 +15849,7 @@ Please review the estimate below. If you have any questions or would like to adj
       const includedTons = parseFloat(document.getElementById('caContainerTons').value) || 0;
       const overage = parseFloat(document.getElementById('caContainerOverage').value) || 0;
       const totalTrucks = parseFloat(currentEstimate.totalTrucks || 0);
-      const jobCY = totalTrucks * 16;
+      const jobCY = totalTrucks * truckCapacityCY();
       const containerCapacityCY = count * size;
 
       // Update job CY display
@@ -15862,10 +15875,10 @@ Please review the estimate below. If you have any questions or would like to adj
 
       // CY overflow — what containers can't hold, trucks must take to disposal
       const overflowCY = Math.max(0, jobCY - containerCapacityCY);
-      const overflowTrucks = overflowCY / 16;
+      const overflowTrucks = overflowCY / truckCapacityCY();
       const overflowFraction = totalTrucks > 0 ? overflowTrucks / totalTrucks : 0;
       const containersCY = Math.min(jobCY, containerCapacityCY);
-      const containerFraction = totalTrucks > 0 ? (containersCY / 16) / totalTrucks : 1;
+      const containerFraction = totalTrucks > 0 ? (containersCY / truckCapacityCY()) / totalTrucks : 1;
 
       // Weight overage on containers (secondary)
       const overageTons = Math.max(0, totalTrucks * containerFraction - (count * includedTons));
@@ -15889,7 +15902,7 @@ Please review the estimate below. If you have any questions or would like to adj
       const suggestedEl = document.getElementById('ccSuggestedCount');
       if (suggestedEl) {
         const hints = [];
-        const containersTrucks = (containerCapacityCY / 16).toFixed(2);
+        const containersTrucks = (containerCapacityCY / truckCapacityCY()).toFixed(2);
         hints.push('📦 ' + count + 'x ' + size + '-yd handles ' + Math.min(containerCapacityCY, jobCY).toFixed(0) + ' of ' + jobCY.toFixed(0) + ' CY (' + Math.min(parseFloat(containersTrucks), totalTrucks).toFixed(2) + ' trucks)');
         if (overflowCY > 0) {
           hints.push('🚛 Trucks take remaining ' + overflowCY.toFixed(0) + ' CY (' + overflowTrucks.toFixed(2) + ' trucks) to disposal');
@@ -19202,7 +19215,7 @@ Please review the estimate below. If you have any questions or would like to adj
         hazardKeywords.forEach(kw => { if (allText.indexOf(kw) !== -1) allHazmat.add(kw); });
 
         // Render this area
-        const areaCY = (areaTrucks * 16).toFixed(1);
+        const areaCY = (areaTrucks * truckCapacityCY()).toFixed(1);
         const areaLabel = formatTrucksDisplay(areaTrucks);
         const description = volCharges.map(c => c.description).filter(Boolean).join(' ') || 'No items identified';
 
@@ -19218,7 +19231,7 @@ Please review the estimate below. If you have any questions or would like to adj
       });
 
       // Total
-      const totalCY = (totalTrucks * 16).toFixed(1);
+      const totalCY = (totalTrucks * truckCapacityCY()).toFixed(1);
       const totalLabel = formatTrucksDisplay(totalTrucks);
 
       let html = '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:10px;">AI Volume Check</div>';
@@ -19304,12 +19317,12 @@ Please review the estimate below. If you have any questions or would like to adj
         hazardKeywords.forEach(kw => { if (allText.indexOf(kw) !== -1) allHazmat.add(kw); });
 
         const desc = volCharges.map(c => c.description).filter(Boolean).join(' ') || '—';
-        const areaCY = (areaTrucks * 16).toFixed(1);
+        const areaCY = (areaTrucks * truckCapacityCY()).toFixed(1);
         const areaLabel = formatTrucksDisplay(areaTrucks);
         areaLines.push(ar.area.name + ' — ' + areaLabel + ' (' + areaCY + ' CY)\n' + desc);
       });
 
-      const totalCY = (totalTrucks * 16).toFixed(1);
+      const totalCY = (totalTrucks * truckCapacityCY()).toFixed(1);
       const totalLabel = formatTrucksDisplay(totalTrucks);
 
       const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
