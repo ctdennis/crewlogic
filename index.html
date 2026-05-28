@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.10.2 | 2026-05-28">
+  <meta name="crewlogic-version" content="v5.10.3 | 2026-05-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -5135,11 +5135,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     function openModule(module) {
-      // If in estimate editor with unsaved changes, prompt first
+      // If in estimate editor with unsaved changes OR a discardable throwaway draft, prompt
+      // first (same condition as promptSaveBeforeLeaving, so both exit paths behave alike).
       const editorScreen = document.getElementById('estimateEditorScreen');
-      if (editorScreen && editorScreen.classList.contains('active') && isDirty) {
+      if (editorScreen && editorScreen.classList.contains('active') && (isDirty || isDiscardableDraft())) {
         pendingNavModule = module;
-        document.getElementById('savePromptModal').style.display = 'flex';
+        promptSaveBeforeLeaving();
         return;
       }
       hideAll();
@@ -10795,7 +10796,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const data = await res.json();
         if (data.success) {
           isDirty = false; // changes are now saved
-          if (currentEstimate) currentEstimate._isNewDraft = false; // saved → no longer a throwaway draft
+          // Only graduate out of "throwaway draft" once there's real estimating content.
+          // A save triggered by setup alone — the auto Street View cover or client info on a
+          // brand-new draft — must NOT clear this, or the discard-on-exit prompt is lost and
+          // an empty draft gets silently orphaned in the list. (Reopened estimates are always
+          // _isNewDraft=false, so this never affects them.)
+          if (currentEstimate && hasUserContent()) currentEstimate._isNewDraft = false;
           feedbackEl.textContent = '';
           feedbackEl.className = 'settings-feedback ok';
           setSaveButtonsState('saved');
