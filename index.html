@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.97 | 2026-05-28">
+  <meta name="crewlogic-version" content="v5.9.98 | 2026-05-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1779,39 +1779,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               • <b>state</b> = 2 letters (MA), <b>zip</b> = 5 digits. <b>email</b> is the match key — re-importing <b>updates</b> existing customers by email (no duplicates).<br>
               • Older files with a single <b>name</b> / <b>address</b> column still work (best effort): residential names parse as “Last, First”, and city/state/zip are pulled from the address.
             </div>
-            <input type="text" class="form-input" id="custSearch" placeholder="Search name / email / address…" oninput="renderCustomersTab()" style="margin-bottom:10px;">
+            <div style="display:flex;gap:6px;align-items:stretch;margin-bottom:10px;">
+              <input type="text" class="form-input" id="custSearch" placeholder="Search name / email / address…" oninput="renderCustomersList()" style="flex:1;margin:0;">
+              <button id="custFlaggedBtn" onclick="toggleCustFlaggedOnly()" title="Show only rows that need attention" style="flex-shrink:0;padding:0 12px;background:var(--bg-input);color:var(--accent-yellow);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">⚠ 0</button>
+            </div>
             <div id="customerImportResults" style="display:none;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:10px;"></div>
             <div id="customersList" style="font-size:13px;color:var(--text-muted);">Loading…</div>
             <div class="settings-feedback" id="customersFeedback"></div>
           </div>
-
-          <!-- Add/Edit Customer Form -->
-          <div class="settings-card fade-in fade-in-delay-3" id="customerForm" style="display:none;">
-            <div class="settings-card-title" id="customerFormTitle">Add Customer</div>
-            <input type="hidden" id="custId">
-            <div class="form-group"><div class="form-label">Type</div><select class="form-select" id="custType" onchange="onCustTypeChange()"><option value="residential">Residential</option><option value="commercial">Commercial</option></select></div>
-            <!-- Commercial: company name -->
-            <div class="form-group" id="custCompanyGroup" style="display:none;"><div class="form-label">Company *</div><input type="text" class="form-input" id="custCompany" placeholder="Acme Corp"></div>
-            <!-- Person: residential customer, or commercial contact -->
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-              <div class="form-group"><div class="form-label" id="custFirstLabel">First Name *</div><input type="text" class="form-input" id="custFirstName" placeholder="Bill"></div>
-              <div class="form-group"><div class="form-label" id="custLastLabel">Last Name *</div><input type="text" class="form-input" id="custLastName" placeholder="Smith"></div>
-            </div>
-            <div class="form-group"><div class="form-label">Street *</div><input type="text" class="form-input" id="custStreet" placeholder="10 Wagoneer Way"></div>
-            <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;">
-              <div class="form-group"><div class="form-label">City</div><input type="text" class="form-input" id="custCity" placeholder="Fall River"></div>
-              <div class="form-group"><div class="form-label">State</div><input type="text" class="form-input" id="custState" placeholder="MA" maxlength="2" style="text-transform:uppercase;"></div>
-              <div class="form-group"><div class="form-label">ZIP</div><input type="text" class="form-input" id="custZip" inputmode="numeric" placeholder="02718"></div>
-            </div>
-            <div class="form-group"><div class="form-label">Email</div><input type="email" class="form-input" id="custEmail" inputmode="email" placeholder="bill@example.com"></div>
-            <div class="form-group"><div class="form-label">Phone</div><input type="tel" class="form-input" id="custPhone" inputmode="tel" placeholder="(555) 555-1234"></div>
-            <div id="custDedupWarn" style="display:none;margin-bottom:12px;padding:10px;background:rgba(245,200,66,0.12);border:1px solid var(--accent-yellow);border-radius:var(--radius-sm);font-size:12px;color:var(--text-secondary);line-height:1.5;"></div>
-            <div style="display:flex;gap:8px;">
-              <button onclick="saveCustomer()" id="custSaveBtn" style="flex:1;padding:10px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;">Save</button>
-              <button onclick="cancelCustomerForm()" style="padding:10px 16px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;">Cancel</button>
-            </div>
-            <div class="settings-feedback" id="customerFormFeedback"></div>
-          </div>
+          <!-- Add/Edit Customer form is rendered inline within #customersList (accordion). -->
         </div><!-- end customers tab -->
 
         <!-- TAB: Yard Signs -->
@@ -14697,6 +14673,22 @@ RECYCLING & DONATION
     // ===== CUSTOMERS (native customer store; crm_provider=none) =====
     let _custForceSave = false;
     const _custEsc = s => String(s == null ? '' : s).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+    // Inline-edit + list state. Accordion: one row open at a time. _custOpenId = the open
+    // customer id, or '__new__' for the top add row, or null. Rows are cached so expand /
+    // collapse, search, and the flagged filter re-render without refetching.
+    let _custRows = null;
+    let _custOpenId = null;
+    let _custFlaggedOnly = false;
+    // Re-derive "needs attention" reasons from stored fields (stateless, so it self-clears
+    // once the row is fixed). Mirrors the import flags; uses the same helpers.
+    function _custAttention(c) {
+      const reasons = [];
+      if (!(c.street && String(c.street).trim())) reasons.push('No street — Street View cover photo & routing disabled');
+      if ((c.type || 'residential') !== 'commercial' && _CUST_JOINT_RE.test([c.first_name, c.last_name].filter(Boolean).join(' ')))
+        reasons.push('Joint name (couple) — confirm first / last');
+      if (c.email && _isPlaceholderEmail(c.email)) reasons.push('Placeholder email — not used for matching');
+      return reasons;
+    }
     // Display name from structured fields: company (commercial) wins, else "First Last".
     function _custComposeName(r) {
       const person = [r.first_name, r.last_name].filter(Boolean).join(' ').trim();
@@ -14728,73 +14720,127 @@ RECYCLING & DONATION
       const el = document.getElementById('customersList');
       if (!el) return;
       _custFeedback('');
+      el.innerHTML = '<div style="padding:8px 0;">Loading…</div>';
       try {
         const fid = currentUser.franchiseInternalID;
-        const rows = await supabaseFetch('/rest/v1/customers?franchise_id=eq.' + fid + '&select=id,name,type,company,first_name,last_name,street,city,state,address,zip,email,phone&order=name.asc');
-        const q = (document.getElementById('custSearch')?.value || '').trim().toLowerCase();
-        const list = q
-          ? (rows || []).filter(c => [c.name, _custComposeName(c), c.company, c.first_name, c.last_name, c.email, _custComposeAddress(c), c.zip, c.phone].some(v => (v || '').toLowerCase().includes(q)))
-          : (rows || []);
-        if (!list.length) {
-          el.innerHTML = '<div style="padding:8px 0;">' + (q ? 'No customers match your search.' : 'No customers yet. Tap <b>+ Add</b> or <b>Import CSV</b>.') + '</div>';
-          return;
-        }
-        const b = 'padding:5px 9px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input);color:var(--text-secondary);font-size:12px;cursor:pointer;flex-shrink:0;';
-        let html = '';
-        list.forEach(c => {
-          const dispName = _custComposeName(c) || '(no name)';
-          const dispAddr = _custComposeAddress(c);
-          const contact = [c.email, c.phone].filter(Boolean).join(' · ');
-          const needsStreet = !(c.street && c.street.trim());
-          html += '<div style="display:flex;align-items:center;gap:6px;padding:10px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;">'
-            + '<div style="flex:1;min-width:140px;">'
-            + '<span style="font-weight:600;color:var(--text-primary);">' + _custEsc(dispName) + '</span>'
-            + ' <span style="font-size:10px;background:' + (c.type === 'commercial' ? 'var(--accent-blue)' : 'var(--bg-input)') + ';color:' + (c.type === 'commercial' ? '#000' : 'var(--text-muted)') + ';padding:1px 6px;border-radius:8px;font-weight:700;text-transform:uppercase;">' + _custEsc((c.type || 'residential').slice(0, 4)) + '</span>'
-            + (needsStreet ? ' <span style="font-size:10px;background:rgba(245,200,66,0.18);color:var(--accent-yellow);padding:1px 6px;border-radius:8px;font-weight:700;" title="No street address — Street View cover photo & routing won\'t work">⚠ needs street</span>' : '')
-            + (dispAddr ? '<div style="font-size:11px;color:var(--text-muted);">' + _custEsc(dispAddr) + '</div>' : '')
-            + (contact ? '<div style="font-size:11px;color:var(--text-muted);">' + _custEsc(contact) + '</div>' : '')
-            + '</div>'
-            + '<button onclick="showCustomerForm(\'' + c.id + '\')" style="' + b + '">Edit</button>'
-            + '<button onclick="deleteCustomer(\'' + c.id + '\',\'' + _custEsc(dispName).replace(/'/g, '&#39;') + '\')" style="' + b + 'color:#ef4444;" title="Delete">✕</button>'
-            + '</div>';
-        });
-        el.innerHTML = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">' + list.length + ' customer' + (list.length === 1 ? '' : 's') + '</div>' + html;
+        _custRows = (await supabaseFetch('/rest/v1/customers?franchise_id=eq.' + fid + '&select=id,name,type,company,first_name,last_name,street,city,state,address,zip,email,phone&order=name.asc')) || [];
+        renderCustomersList();
       } catch (e) {
         el.innerHTML = '<div class="price-error">Could not load customers.</div>';
       }
     }
 
-    async function showCustomerForm(id) {
-      _custForceSave = false;
-      _custFormFeedback('');
-      const warn = document.getElementById('custDedupWarn'); if (warn) warn.style.display = 'none';
-      document.getElementById('customerFormTitle').textContent = id ? 'Edit Customer' : 'Add Customer';
-      document.getElementById('custId').value = id || '';
-      let c = { type: 'residential', company: '', first_name: '', last_name: '', street: '', city: '', state: '', zip: '', email: '', phone: '' };
-      if (id) {
-        try {
-          const rows = await supabaseFetch('/rest/v1/customers?id=eq.' + id + '&select=type,company,first_name,last_name,street,city,state,zip,email,phone&limit=1');
-          if (rows && rows[0]) c = rows[0];
-        } catch (e) { _custFormFeedback('Could not load customer.', false); }
+    // Pure render from cached _custRows (no refetch) — drives expand/collapse, search, and
+    // the flagged-only toggle. The open row is always shown even if a filter would hide it,
+    // so editing never makes the row you're working on vanish.
+    function renderCustomersList() {
+      const el = document.getElementById('customersList');
+      if (!el || !_custRows) return;
+      const q = (document.getElementById('custSearch')?.value || '').trim().toLowerCase();
+      const matchQ = c => !q || [c.name, _custComposeName(c), c.company, c.first_name, c.last_name, c.email, _custComposeAddress(c), c.zip, c.phone].some(v => (v || '').toLowerCase().includes(q));
+      let items = _custRows.map(c => ({ c, att: _custAttention(c) }));
+      const flaggedTotal = items.filter(i => i.att.length).length;
+      items = items.filter(i => i.c.id === _custOpenId || (matchQ(i.c) && (!_custFlaggedOnly || i.att.length)));
+
+      const fb = document.getElementById('custFlaggedBtn');
+      if (fb) {
+        fb.textContent = '⚠ ' + flaggedTotal;
+        fb.title = _custFlaggedOnly ? 'Showing flagged only — tap to show all' : 'Show only rows that need attention';
+        fb.style.opacity = flaggedTotal ? '1' : '0.5';
+        fb.style.background = _custFlaggedOnly ? 'var(--accent-yellow)' : 'var(--bg-input)';
+        fb.style.color = _custFlaggedOnly ? '#000' : 'var(--accent-yellow)';
       }
-      document.getElementById('custType').value = c.type || 'residential';
-      document.getElementById('custCompany').value = c.company || '';
-      document.getElementById('custFirstName').value = c.first_name || '';
-      document.getElementById('custLastName').value = c.last_name || '';
-      document.getElementById('custStreet').value = c.street || '';
-      document.getElementById('custCity').value = c.city || '';
-      document.getElementById('custState').value = c.state || '';
-      document.getElementById('custZip').value = c.zip || '';
-      document.getElementById('custEmail').value = c.email || '';
-      document.getElementById('custPhone').value = c.phone || '';
-      onCustTypeChange();
-      document.getElementById('customerForm').style.display = 'block';
-      document.getElementById('customerForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      let html = '';
+      if (_custOpenId === '__new__') html += _custRowHtml(null, []);
+      if (!items.length) {
+        html += '<div style="padding:8px 0;">' + (_custFlaggedOnly ? 'No flagged customers.' : (q ? 'No customers match your search.' : 'No customers yet. Tap <b>+ Add</b> or <b>Import CSV</b>.')) + '</div>';
+      } else {
+        items.forEach(i => html += _custRowHtml(i.c, i.att));
+      }
+      const n = _custRows.length;
+      const sub = _custFlaggedOnly ? ' · showing ' + items.length + ' flagged' : (q ? ' · ' + items.length + ' match' + (items.length === 1 ? '' : 'es') : '');
+      el.innerHTML = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">' + n + ' customer' + (n === 1 ? '' : 's') + sub + '</div>' + html;
+    }
+
+    function toggleCustFlaggedOnly() { _custFlaggedOnly = !_custFlaggedOnly; renderCustomersList(); }
+    function toggleCustomerRow(id) { _custForceSave = false; _custOpenId = (_custOpenId === id ? null : id); renderCustomersList(); }
+
+    // One list row: a clickable header (toggles inline edit) + a body that holds the edit
+    // form when open. c = null renders the top "new customer" row.
+    function _custRowHtml(c, att) {
+      const isNew = !c;
+      const open = isNew || c.id === _custOpenId;
+      const id = isNew ? '__new__' : c.id;
+      const dispName = isNew ? 'New customer' : (_custComposeName(c) || '(no name)');
+      const dispAddr = isNew ? '' : _custComposeAddress(c);
+      const contact = isNew ? '' : [c.email, c.phone].filter(Boolean).join(' · ');
+      const type = isNew ? 'residential' : (c.type || 'residential');
+      const delB = 'padding:5px 9px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input);font-size:12px;cursor:pointer;flex-shrink:0;';
+      const warnBadge = (att && att.length)
+        ? ' <span style="font-size:10px;background:rgba(245,200,66,0.18);color:var(--accent-yellow);padding:1px 6px;border-radius:8px;font-weight:700;cursor:help;" title="' + _custEsc(att.join('  •  ')) + '">⚠ ' + att.length + '</span>'
+        : '';
+      const chevron = '<span style="display:inline-block;width:14px;color:var(--text-muted);transition:transform 0.15s;transform:rotate(' + (open ? '90' : '0') + 'deg);">▸</span>';
+      const head = '<div onclick="toggleCustomerRow(\'' + id + '\')" style="display:flex;align-items:center;gap:6px;padding:10px 0;cursor:pointer;flex-wrap:wrap;">'
+        + chevron
+        + '<div style="flex:1;min-width:140px;">'
+        + '<span style="font-weight:600;color:var(--text-primary);">' + _custEsc(dispName) + '</span>'
+        + (isNew ? '' : ' <span style="font-size:10px;background:' + (type === 'commercial' ? 'var(--accent-blue)' : 'var(--bg-input)') + ';color:' + (type === 'commercial' ? '#000' : 'var(--text-muted)') + ';padding:1px 6px;border-radius:8px;font-weight:700;text-transform:uppercase;">' + _custEsc(type.slice(0, 4)) + '</span>')
+        + warnBadge
+        + (dispAddr ? '<div style="font-size:11px;color:var(--text-muted);">' + _custEsc(dispAddr) + '</div>' : '')
+        + (contact ? '<div style="font-size:11px;color:var(--text-muted);">' + _custEsc(contact) + '</div>' : '')
+        + '</div>'
+        + (isNew ? '' : '<button onclick="event.stopPropagation();deleteCustomer(\'' + c.id + '\',\'' + _custEsc(dispName).replace(/'/g, '&#39;') + '\')" style="' + delB + 'color:#ef4444;" title="Delete">✕</button>')
+        + '</div>';
+      const body = open ? '<div style="padding:4px 0 14px 14px;">' + _custFormFieldsHtml(isNew ? null : c) + '</div>' : '';
+      return '<div style="border-bottom:1px solid var(--border);">' + head + body + '</div>';
+    }
+
+    // The edit form fields — same IDs as the old static form. Only ONE row is open at a
+    // time, so the IDs are unique in the DOM and saveCustomer / onCustTypeChange still work.
+    function _custFormFieldsHtml(c) {
+      c = c || { type: 'residential' };
+      const v = k => _custEsc(c[k] == null ? '' : c[k]);
+      const isComm = (c.type || 'residential') === 'commercial';
+      const sel = t => (c.type || 'residential') === t ? ' selected' : '';
+      return ''
+        + '<input type="hidden" id="custId" value="' + (c.id || '') + '">'
+        + '<div class="form-group"><div class="form-label">Type</div><select class="form-select" id="custType" onchange="onCustTypeChange()"><option value="residential"' + sel('residential') + '>Residential</option><option value="commercial"' + sel('commercial') + '>Commercial</option></select></div>'
+        + '<div class="form-group" id="custCompanyGroup" style="display:' + (isComm ? '' : 'none') + ';"><div class="form-label">Company *</div><input type="text" class="form-input" id="custCompany" value="' + v('company') + '" placeholder="Acme Corp"></div>'
+        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'
+        + '<div class="form-group"><div class="form-label" id="custFirstLabel">' + (isComm ? 'Contact First Name' : 'First Name *') + '</div><input type="text" class="form-input" id="custFirstName" value="' + v('first_name') + '" placeholder="Bill"></div>'
+        + '<div class="form-group"><div class="form-label" id="custLastLabel">' + (isComm ? 'Contact Last Name' : 'Last Name *') + '</div><input type="text" class="form-input" id="custLastName" value="' + v('last_name') + '" placeholder="Smith"></div>'
+        + '</div>'
+        + '<div class="form-group"><div class="form-label">Street *</div><input type="text" class="form-input" id="custStreet" value="' + v('street') + '" placeholder="10 Wagoneer Way"></div>'
+        + '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;">'
+        + '<div class="form-group"><div class="form-label">City</div><input type="text" class="form-input" id="custCity" value="' + v('city') + '" placeholder="Fall River"></div>'
+        + '<div class="form-group"><div class="form-label">State</div><input type="text" class="form-input" id="custState" value="' + v('state') + '" maxlength="2" placeholder="MA" style="text-transform:uppercase;"></div>'
+        + '<div class="form-group"><div class="form-label">ZIP</div><input type="text" class="form-input" id="custZip" value="' + v('zip') + '" inputmode="numeric" placeholder="02718"></div>'
+        + '</div>'
+        + '<div class="form-group"><div class="form-label">Email</div><input type="email" class="form-input" id="custEmail" value="' + v('email') + '" inputmode="email" placeholder="bill@example.com"></div>'
+        + '<div class="form-group"><div class="form-label">Phone</div><input type="tel" class="form-input" id="custPhone" value="' + v('phone') + '" inputmode="tel" placeholder="(555) 555-1234"></div>'
+        + '<div id="custDedupWarn" style="display:none;margin-bottom:12px;padding:10px;background:rgba(245,200,66,0.12);border:1px solid var(--accent-yellow);border-radius:var(--radius-sm);font-size:12px;color:var(--text-secondary);line-height:1.5;"></div>'
+        + '<div style="display:flex;gap:8px;">'
+        + '<button onclick="saveCustomer()" id="custSaveBtn" style="flex:1;padding:10px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;">Save</button>'
+        + '<button onclick="cancelCustomerForm()" style="padding:10px 16px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;">Cancel</button>'
+        + '</div>'
+        + '<div class="settings-feedback" id="customerFormFeedback"></div>';
+    }
+
+    // Open a row inline (accordion). No id → the top "new customer" row. Data comes from the
+    // cached _custRows, so no per-row fetch. renderCustomersList always shows the open row.
+    function showCustomerForm(id) {
+      _custForceSave = false;
+      _custOpenId = id || '__new__';
+      renderCustomersList();
+      const t = document.getElementById('custType');
+      if (t) t.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     function cancelCustomerForm() {
-      document.getElementById('customerForm').style.display = 'none';
+      _custOpenId = null;
       _custForceSave = false;
+      renderCustomersList();
     }
 
     // Case-insensitive exact match (ilike with no wildcards) on email / address, per franchise.
@@ -14864,7 +14910,8 @@ RECYCLING & DONATION
         } else {
           await supabaseFetch('/rest/v1/customers', { method: 'POST', body: JSON.stringify(payload) });
         }
-        cancelCustomerForm();
+        _custOpenId = null;
+        _custForceSave = false;
         _custFeedback('Saved.', true);
         renderCustomersTab();
       } catch (e) {
@@ -14880,6 +14927,7 @@ RECYCLING & DONATION
       if (!confirm('Delete customer “' + (name || '') + '”? This does not affect estimates already created for them.')) return;
       try {
         await supabaseFetch('/rest/v1/customers?id=eq.' + id, { method: 'DELETE' });
+        if (_custOpenId === id) _custOpenId = null;
         _custFeedback('Deleted.', true);
         renderCustomersTab();
       } catch (e) { _custFeedback('Delete failed.', false); }
