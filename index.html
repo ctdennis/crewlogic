@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.99 | 2026-05-28">
+  <meta name="crewlogic-version" content="v5.10.0 | 2026-05-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1850,6 +1850,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           <div id="scheduleList" style="max-height:50vh;overflow-y:auto;-webkit-overflow-scrolling:touch;">
             <div style="padding:24px 16px;text-align:center;color:var(--text-muted);font-size:12px;">Loading...</div>
           </div>
+        </div>
+
+        <!-- NATIVE (no-CRM): customer-first entry. Pick a saved customer to auto-fill client
+             info and load pricing from their ZIP. ZIP/address entry is the manual fallback. -->
+        <div id="estCustomerPicker" style="display:none;margin-bottom:8px;">
+          <div class="form-label">Customer</div>
+          <input type="text" class="form-input" id="estCustSearchInput" placeholder="Search customers by name / address / email…" oninput="estCustomerSearch()" autocomplete="off">
+          <div id="estCustSearchResults" style="margin-top:6px;"></div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">No saved customer? <span onclick="estUseManualEntry()" style="color:var(--accent-blue);cursor:pointer;text-decoration:underline;">Enter ZIP / address manually</span></div>
         </div>
 
         <!-- Manual ZIP fallback if job has no ZIP -->
@@ -7429,6 +7438,119 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
     }
 
+    // ===== NATIVE estimate entry: customer-first picker (crm_provider=none) =====
+    let _estCustSearchTimer = null;
+    function estCustomerSearch() {
+      clearTimeout(_estCustSearchTimer);
+      _estCustSearchTimer = setTimeout(_estCustomerSearchRun, 250);
+    }
+    async function _estCustomerSearchRun() {
+      const inp = document.getElementById('estCustSearchInput');
+      const el = document.getElementById('estCustSearchResults');
+      if (!el) return;
+      const q = (inp ? inp.value : '').trim();
+      if (q.length < 2) { el.innerHTML = ''; return; }
+      el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:6px 0;">Searching…</div>';
+      try {
+        const rows = await searchNativeCustomers(q);   // [{ clientID, name, address, zip }]
+        let html = '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;">';
+        rows.forEach(c => {
+          html += '<div onclick="estSelectCustomer(\'' + c.clientID + '\')" style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:var(--bg-card);">'
+            + '<div style="font-weight:600;font-size:13px;color:var(--text-primary);">' + _custEsc(c.name || '(no name)') + '</div>'
+            + (c.address ? '<div style="font-size:11px;color:var(--text-muted);">' + _custEsc(c.address) + '</div>' : '')
+            + '</div>';
+        });
+        html += '<div onclick="estAddCustomerInline()" style="padding:10px 12px;cursor:pointer;background:var(--bg-input);color:var(--accent-green);font-weight:700;font-size:12px;">+ Add “' + _custEsc(q) + '” as new customer</div>';
+        html += '</div>';
+        el.innerHTML = html;
+      } catch (e) {
+        el.innerHTML = '<div style="font-size:12px;color:#ef4444;padding:6px 0;">Search failed.</div>';
+      }
+    }
+    async function estSelectCustomer(id) {
+      const el = document.getElementById('estCustSearchResults');
+      try {
+        const rows = await supabaseFetch('/rest/v1/customers?id=eq.' + id + '&select=name,company,first_name,last_name,street,city,state,zip,email,phone,address&limit=1');
+        const c = rows && rows[0];
+        if (!c) { if (el) el.innerHTML = '<div style="font-size:12px;color:#ef4444;padding:6px 0;">Could not load customer.</div>'; return; }
+        _estApplyCustomer(c);
+      } catch (e) {
+        if (el) el.innerHTML = '<div style="font-size:12px;color:#ef4444;padding:6px 0;">Could not load customer.</div>';
+      }
+    }
+    // Fill the estimate's client fields from a customer record and drive pricing off its ZIP.
+    function _estApplyCustomer(c) {
+      const name = c.name || _custComposeName(c) || '';
+      const addr = c.address || _custComposeAddress(c) || '';
+      const set = (id, val) => { const e = document.getElementById(id); if (e) e.value = val || ''; };
+      set('estClientName', name);
+      set('estAddress', addr);
+      set('estClientEmail', c.email);
+      set('estClientPhone', c.phone);
+      currentEstimate.clientName = name;
+      currentEstimate.address = addr;
+      currentEstimate.clientEmail = c.email || '';
+      currentEstimate.clientPhone = c.phone || '';
+      const labelEl = document.getElementById('estLabel');
+      if (labelEl && !labelEl.value.trim()) { labelEl.value = name; currentEstimate.label = name; }
+      updateClientInfoBar();
+      const cp = document.getElementById('estCustomerPicker'); if (cp) cp.style.display = 'none';
+      const zip = String(c.zip || '').replace(/\D/g, '').slice(0, 5);
+      if (/^\d{5}$/.test(zip)) {
+        const z = document.getElementById('estZip'); if (z) z.value = zip;
+        loadEstimatePricing();    // reads estZip → loads pricing, reveals the editor
+      } else {
+        // Customer has no usable ZIP — fall back to manual ZIP entry (address already filled).
+        const zr = document.getElementById('estManualZipRow'); if (zr) zr.style.display = 'flex';
+      }
+    }
+    function estUseManualEntry() {
+      const cp = document.getElementById('estCustomerPicker'); if (cp) cp.style.display = 'none';
+      const zr = document.getElementById('estManualZipRow'); if (zr) zr.style.display = 'flex';
+      const z = document.getElementById('estZip'); if (z) z.focus();
+    }
+    // "+ Add new" inline: capture a minimal customer, save it to Customers, then use it.
+    function estAddCustomerInline() {
+      const q = (document.getElementById('estCustSearchInput')?.value || '').trim();
+      const el = document.getElementById('estCustSearchResults');
+      if (!el) return;
+      const inp = (id, ph, val) => '<input id="' + id + '" class="form-input" placeholder="' + ph + '" value="' + _custEsc(val || '') + '" style="margin:0;" autocomplete="off">';
+      el.innerHTML = '<div style="border:1px solid var(--accent-green);border-radius:var(--radius-sm);padding:12px;display:flex;flex-direction:column;gap:8px;">'
+        + '<div style="font-weight:700;font-size:13px;color:var(--text-primary);">New customer</div>'
+        + inp('estNewCustName', 'Name (First Last)', q)
+        + inp('estNewCustStreet', 'Street *', '')
+        + '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:6px;">' + inp('estNewCustCity', 'City', '') + inp('estNewCustState', 'ST', '') + inp('estNewCustZip', 'ZIP', '') + '</div>'
+        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">' + inp('estNewCustEmail', 'Email', '') + inp('estNewCustPhone', 'Phone', '') + '</div>'
+        + '<div id="estNewCustErr" style="font-size:11px;color:#ef4444;"></div>'
+        + '<div style="display:flex;gap:8px;">'
+        + '<button onclick="estSaveNewCustomer()" style="flex:1;padding:9px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;">Add &amp; use</button>'
+        + '<button onclick="_estCustomerSearchRun()" style="padding:9px 14px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;">Cancel</button>'
+        + '</div></div>';
+    }
+    async function estSaveNewCustomer() {
+      const g = id => (document.getElementById(id)?.value || '').trim();
+      const err = document.getElementById('estNewCustErr');
+      const nm = g('estNewCustName'), street = g('estNewCustStreet');
+      if (!nm) { if (err) err.textContent = 'Name is required.'; return; }
+      if (!street) { if (err) err.textContent = 'Street is required.'; return; }
+      let first_name = null, last_name = null;
+      const parts = nm.split(/\s+/);
+      if (parts.length > 1) { last_name = parts.pop(); first_name = parts.join(' '); } else { last_name = nm; }
+      const prob = _custNameProblem(first_name, last_name);
+      if (prob === 'spreadsheet error in name' || prob === 'invalid characters in name') { if (err) err.textContent = 'Name has invalid characters.'; return; }
+      const rec = { franchise_id: currentUser.franchiseInternalID, type: 'residential', company: null,
+        first_name, last_name, street: street || null, city: g('estNewCustCity') || null,
+        state: (g('estNewCustState').toUpperCase()) || null, zip: _custFixZip(g('estNewCustZip')),
+        email: g('estNewCustEmail') || null, phone: g('estNewCustPhone') || null, source: 'native' };
+      rec.name = _custComposeName(rec);
+      rec.address = _custComposeAddress(rec) || null;
+      try {
+        const saved = await supabaseFetch('/rest/v1/customers', { method: 'POST', body: JSON.stringify(rec) });
+        const c = (saved && saved[0]) ? saved[0] : rec;
+        _estApplyCustomer(c);
+      } catch (e) { if (err) err.textContent = 'Could not save customer.'; }
+    }
+
     function openEstimateEditor() {
       isDirty = false; // ensure clean state when editor opens
       _suppressAutoSave = true; // prevent autoSaveDraft during field population
@@ -7526,7 +7648,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         hideInlineJobPicker();
       } else if (_isNative) {
         hideInlineJobPicker();
-        const _zr = document.getElementById('estManualZipRow'); if (_zr) _zr.style.display = 'flex';
+        const _cp = document.getElementById('estCustomerPicker');
+        const _zr = document.getElementById('estManualZipRow');
+        if (!currentEstimate.zip) {
+          // Fresh native draft: lead with the customer picker; ZIP entry is the manual fallback.
+          if (_cp) _cp.style.display = 'block';
+          if (_zr) _zr.style.display = 'none';
+          const _si = document.getElementById('estCustSearchInput'); if (_si) _si.value = '';
+          const _sr = document.getElementById('estCustSearchResults'); if (_sr) _sr.innerHTML = '';
+        } else {
+          if (_cp) _cp.style.display = 'none';
+          if (_zr) _zr.style.display = 'none';
+        }
       } else {
         showInlineJobPicker();
       }
