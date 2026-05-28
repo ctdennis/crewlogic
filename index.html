@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.95 | 2026-05-28">
+  <meta name="crewlogic-version" content="v5.9.96 | 2026-05-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14825,6 +14825,12 @@ RECYCLING & DONATION
         if (!company) { _custFormFeedback('Company is required for a commercial customer.', false); return; }
       } else if (!first_name && !last_name) {
         _custFormFeedback('First and last name are required.', false); return;
+      } else {
+        // Reject special characters in a person's name (/, & and "and" stay allowed for couples).
+        const np = _custNameProblem(first_name, last_name);
+        if (np === 'spreadsheet error in name' || np === 'invalid characters in name') {
+          _custFormFeedback('Name has invalid characters — use letters, spaces, and . , \' - (or / & for couples).', false); return;
+        }
       }
       const fid = currentUser.franchiseInternalID;
       const rec = { type, company, first_name, last_name, street, city, state, zip, email, phone };
@@ -14919,6 +14925,48 @@ RECYCLING & DONATION
       return rows.filter(r => r.some(c => c.trim() !== ''));
     }
 
+    // ----- Import/entry validation helpers -----
+    // Valid PERSON name chars: letters (any language), space, and . , ' ’ - plus the joint
+    // separators / & (husband/wife teams). Anything else (#, digits, !, @, spreadsheet
+    // errors like "#Func!") means a corrupted row → reject. Company names are NOT checked.
+    const _CUST_NAME_OK = /^[\p{L}\s.,'’\/&-]+$/u;
+    // Joint husband/wife separators — allowed in a person name but flagged for review.
+    const _CUST_JOINT_RE = /\/|&|\band\b/i;
+    // Spreadsheet error tokens that corrupt a name cell (#REF!, #NAME?, #Func!, #N/A, …).
+    // Only used to give a clearer reject reason; _CUST_NAME_OK rejects these regardless.
+    const _CUST_SS_ERR_RE = /#(ref|name|value|func|div|num|null|n\/a)|#\w*[!?]/i;
+    // Returns null if the person name is OK, else a short human reason for the reject/flag.
+    function _custNameProblem(first, last) {
+      const combined = [first, last].filter(Boolean).join(' ').trim();
+      if (!combined) return 'missing name';
+      if (_CUST_SS_ERR_RE.test(combined)) return 'spreadsheet error in name';
+      if (!_CUST_NAME_OK.test(combined)) return 'invalid characters in name';
+      return null;
+    }
+    // Strip control chars + collapse whitespace; '' → null. Safe silent auto-fix.
+    function _custClean(v) {
+      if (v == null) return null;
+      v = String(v).replace(/[ -]/g, '').replace(/\s+/g, ' ').trim();
+      return v === '' ? null : v;
+    }
+    // Recover a zip: keep digits, left-pad to 5 (02745 imported as 2745). ZIP+4 → "NNNNN-NNNN".
+    function _custFixZip(z) {
+      const d = String(z == null ? '' : z).replace(/\D/g, '');
+      if (!d) return null;
+      if (d.length === 9) return d.slice(0, 5) + '-' + d.slice(5);
+      if (d.length <= 5) return d.padStart(5, '0');
+      return d.slice(0, 5);
+    }
+    // Placeholder / junk emails that shouldn't count as a real dedup match key.
+    function _isPlaceholderEmail(e) {
+      const s = String(e || '').toLowerCase().trim();
+      const m = s.match(/^([^@\s]+)@([^@\s]+\.[^@\s]+)$/);
+      if (!m) return true;   // not a valid email shape
+      if (['no', 'none', 'noemail', 'na', 'n/a', 'test', 'email', 'x', 'xxx'].includes(m[1])) return true;
+      if (/^(example|test|email)\./.test(m[2])) return true;
+      return false;
+    }
+
     // Split a single address blob ("[street, ]CITY, STATE, ZIP") into parts, filling only
     // blanks. Works from the end (zip → state → city → street) so a real street survives.
     function _custParseAddressBlob(addr, cur) {
@@ -14963,31 +15011,47 @@ RECYCLING & DONATION
           type = type.startsWith('com') ? 'commercial' : 'residential';
 
           // Name — prefer structured columns; else route a combined `name` by type.
-          let company = nz(get('company')), first_name = nz(get('first_name')), last_name = nz(get('last_name'));
+          // _custClean silently strips control chars + collapses whitespace (safe auto-fix).
+          let company = _custClean(get('company')), first_name = _custClean(get('first_name')), last_name = _custClean(get('last_name'));
           let nameIssue = false;
           if (!company && !first_name && !last_name) {
-            const raw = nz(get('name'));
+            const raw = _custClean(get('name'));
             if (raw) {
               if (type === 'commercial') {
                 company = raw;                                  // company names stay whole (never split)
               } else {
                 const ci = raw.indexOf(',');
-                if (ci >= 0) { last_name = nz(raw.slice(0, ci)); first_name = nz(raw.slice(ci + 1)); }   // "Last, First"
-                else { const sp = raw.lastIndexOf(' '); if (sp > 0) { first_name = nz(raw.slice(0, sp)); last_name = nz(raw.slice(sp + 1)); } else { last_name = raw; nameIssue = true; } }
+                if (ci >= 0) { last_name = _custClean(raw.slice(0, ci)); first_name = _custClean(raw.slice(ci + 1)); }   // "Last, First"
+                else { const sp = raw.lastIndexOf(' '); if (sp > 0) { first_name = _custClean(raw.slice(0, sp)); last_name = _custClean(raw.slice(sp + 1)); } else { last_name = raw; nameIssue = true; } }
               }
             }
           }
           if (!company && !first_name && !last_name) { skippedItems.push({ row: rowNo, who: '(blank)', reason: 'missing name' }); continue; }
 
+          // Reject corrupted PERSON names (spreadsheet errors, stray symbols, digits). Joint
+          // separators / & "and" pass here and are flagged below; company names are exempt.
+          if (type !== 'commercial') {
+            const np = _custNameProblem(first_name, last_name);
+            if (np && np !== 'missing name') {
+              skippedItems.push({ row: rowNo, who: [first_name, last_name].filter(Boolean).join(' ') || '(name)', reason: np });
+              continue;
+            }
+          }
+
           // Address — prefer structured; else parse the `address` blob (fills blanks only).
-          let street = nz(get('street')), city = nz(get('city')), state = nz(get('state')), zip = nz(get('zip'));
+          let street = _custClean(get('street')), city = _custClean(get('city')), state = nz(get('state')), zip = nz(get('zip'));
           if ((!street || !city || !state || !zip) && nz(get('address'))) {
             const p = _custParseAddressBlob(get('address'), { street, city, state, zip });
             street = p.street; city = p.city; state = p.state; zip = p.zip;
           }
           if (state) state = String(state).toUpperCase();
+          zip = _custFixZip(zip);   // recover leading zeros (02745 imported as 2745)
 
-          const email = nz(get('email')), phone = nz(get('phone'));
+          // Email — drop placeholder/junk addresses so they don't become a false dedup key.
+          let email = nz(get('email')), emailFlag = null;
+          if (email && _isPlaceholderEmail(email)) { emailFlag = 'placeholder email ignored (not used for matching)'; email = null; }
+          const phone = nz(get('phone'));
+
           const rec = { franchise_id: fid, type, company, first_name, last_name, street, city, state, zip, email, phone, source: 'native' };
           rec.name = _custComposeName(rec);
           rec.address = _custComposeAddress(rec) || null;
@@ -14997,8 +15061,12 @@ RECYCLING & DONATION
           if (key && seen.has(key)) { skippedItems.push({ row: rowNo, who, reason: 'duplicate email in file' }); continue; }
           if (key) seen.add(key);
 
+          // Needs-attention flags (imported, but worth a human look).
           if (!street) attentionItems.push({ row: rowNo, who, reason: 'missing street — cover photo & routing disabled' });
-          else if (nameIssue) attentionItems.push({ row: rowNo, who, reason: 'name format unclear — check first/last' });
+          if (type !== 'commercial' && _CUST_JOINT_RE.test([first_name, last_name].filter(Boolean).join(' ')))
+            attentionItems.push({ row: rowNo, who, reason: 'joint name (couple) — confirm first/last' });
+          if (emailFlag) attentionItems.push({ row: rowNo, who, reason: emailFlag });
+          if (nameIssue) attentionItems.push({ row: rowNo, who, reason: 'name format unclear — check first/last' });
 
           if (key && idByEmail[key]) updates.push({ id: idByEmail[key], rec });
           else inserts.push(rec);
