@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.94 | 2026-05-28">
+  <meta name="crewlogic-version" content="v5.9.95 | 2026-05-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1767,8 +1767,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               </div>
             </div>
             <input type="file" id="custCsvInput" accept=".csv,text/csv" style="display:none;" onchange="importCustomersCsv(event)">
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">Your customer list — not a CRM. Use <b>Template</b> for the exact CSV columns before importing.</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;line-height:1.5;">Your customer list — not a CRM. <b>Download the Template</b> for the exact columns before importing.
+              <span onclick="var h=document.getElementById('custImportHelp');h.style.display=h.style.display==='none'?'block':'none';" style="color:var(--accent-blue);cursor:pointer;white-space:nowrap;">ⓘ import help</span>
+            </div>
+            <div id="custImportHelp" style="display:none;font-size:11px;color:var(--text-secondary);line-height:1.6;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:10px;">
+              <b>Columns</b> (header row, in any order): <code>type, company, first_name, last_name, street, city, state, zip, email, phone</code>.<br>
+              • <b>type</b> — “Residential” or “Commercial”.<br>
+              • <b>Residential</b> → fill <b>first_name / last_name</b> (leave company blank).<br>
+              • <b>Commercial</b> → fill <b>company</b> (first/last optional, for a contact).<br>
+              • <b>street</b> is required for the Street View cover photo &amp; routing — rows without one import but are flagged <b>⚠ needs street</b>.<br>
+              • <b>state</b> = 2 letters (MA), <b>zip</b> = 5 digits. <b>email</b> is the match key — re-importing <b>updates</b> existing customers by email (no duplicates).<br>
+              • Older files with a single <b>name</b> / <b>address</b> column still work (best effort): residential names parse as “Last, First”, and city/state/zip are pulled from the address.
+            </div>
             <input type="text" class="form-input" id="custSearch" placeholder="Search name / email / address…" oninput="renderCustomersTab()" style="margin-bottom:10px;">
+            <div id="customerImportResults" style="display:none;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:10px;"></div>
             <div id="customersList" style="font-size:13px;color:var(--text-muted);">Loading…</div>
             <div class="settings-feedback" id="customersFeedback"></div>
           </div>
@@ -1777,10 +1789,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           <div class="settings-card fade-in fade-in-delay-3" id="customerForm" style="display:none;">
             <div class="settings-card-title" id="customerFormTitle">Add Customer</div>
             <input type="hidden" id="custId">
-            <div class="form-group"><div class="form-label">Name *</div><input type="text" class="form-input" id="custName" placeholder="Smith, Bill or Acme Corp"></div>
-            <div class="form-group"><div class="form-label">Type</div><select class="form-select" id="custType"><option value="residential">Residential</option><option value="commercial">Commercial</option></select></div>
-            <div class="form-group"><div class="form-label">Address</div><input type="text" class="form-input" id="custAddress" placeholder="10 Wagoneer Way"></div>
-            <div class="form-group"><div class="form-label">ZIP</div><input type="text" class="form-input" id="custZip" inputmode="numeric" placeholder="02718"></div>
+            <div class="form-group"><div class="form-label">Type</div><select class="form-select" id="custType" onchange="onCustTypeChange()"><option value="residential">Residential</option><option value="commercial">Commercial</option></select></div>
+            <!-- Commercial: company name -->
+            <div class="form-group" id="custCompanyGroup" style="display:none;"><div class="form-label">Company *</div><input type="text" class="form-input" id="custCompany" placeholder="Acme Corp"></div>
+            <!-- Person: residential customer, or commercial contact -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <div class="form-group"><div class="form-label" id="custFirstLabel">First Name *</div><input type="text" class="form-input" id="custFirstName" placeholder="Bill"></div>
+              <div class="form-group"><div class="form-label" id="custLastLabel">Last Name *</div><input type="text" class="form-input" id="custLastName" placeholder="Smith"></div>
+            </div>
+            <div class="form-group"><div class="form-label">Street *</div><input type="text" class="form-input" id="custStreet" placeholder="10 Wagoneer Way"></div>
+            <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;">
+              <div class="form-group"><div class="form-label">City</div><input type="text" class="form-input" id="custCity" placeholder="Fall River"></div>
+              <div class="form-group"><div class="form-label">State</div><input type="text" class="form-input" id="custState" placeholder="MA" maxlength="2" style="text-transform:uppercase;"></div>
+              <div class="form-group"><div class="form-label">ZIP</div><input type="text" class="form-input" id="custZip" inputmode="numeric" placeholder="02718"></div>
+            </div>
             <div class="form-group"><div class="form-label">Email</div><input type="email" class="form-input" id="custEmail" inputmode="email" placeholder="bill@example.com"></div>
             <div class="form-group"><div class="form-label">Phone</div><input type="tel" class="form-input" id="custPhone" inputmode="tel" placeholder="(555) 555-1234"></div>
             <div id="custDedupWarn" style="display:none;margin-bottom:12px;padding:10px;background:rgba(245,200,66,0.12);border:1px solid var(--accent-yellow);border-radius:var(--radius-sm);font-size:12px;color:var(--text-secondary);line-height:1.5;"></div>
@@ -14675,6 +14697,24 @@ RECYCLING & DONATION
     // ===== CUSTOMERS (native customer store; crm_provider=none) =====
     let _custForceSave = false;
     const _custEsc = s => String(s == null ? '' : s).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+    // Display name from structured fields: company (commercial) wins, else "First Last".
+    function _custComposeName(r) {
+      const person = [r.first_name, r.last_name].filter(Boolean).join(' ').trim();
+      return ((r.company || '').trim()) || person || (r.name || '').trim() || '';
+    }
+    // Full address from parts → "Street, City, ST ZIP".
+    function _custComposeAddress(r) {
+      const cityState = [r.city, r.state].filter(Boolean).join(', ');
+      const csz = [cityState, r.zip].filter(Boolean).join(' ').trim();
+      return [r.street, csz].filter(Boolean).join(', ').trim();
+    }
+    // Type toggle: commercial shows Company + relabels the person fields as the contact.
+    function onCustTypeChange() {
+      const isComm = document.getElementById('custType').value === 'commercial';
+      document.getElementById('custCompanyGroup').style.display = isComm ? '' : 'none';
+      document.getElementById('custFirstLabel').textContent = isComm ? 'Contact First Name' : 'First Name *';
+      document.getElementById('custLastLabel').textContent  = isComm ? 'Contact Last Name'  : 'Last Name *';
+    }
     function _custFeedback(msg, ok) {
       const f = document.getElementById('customersFeedback');
       if (f) { f.textContent = msg || ''; f.className = 'settings-feedback' + (ok ? ' ok' : (msg ? ' error' : '')); }
@@ -14690,10 +14730,10 @@ RECYCLING & DONATION
       _custFeedback('');
       try {
         const fid = currentUser.franchiseInternalID;
-        const rows = await supabaseFetch('/rest/v1/customers?franchise_id=eq.' + fid + '&select=id,name,type,address,zip,email,phone&order=name.asc');
+        const rows = await supabaseFetch('/rest/v1/customers?franchise_id=eq.' + fid + '&select=id,name,type,company,first_name,last_name,street,city,state,address,zip,email,phone&order=name.asc');
         const q = (document.getElementById('custSearch')?.value || '').trim().toLowerCase();
         const list = q
-          ? (rows || []).filter(c => [c.name, c.email, c.address, c.zip, c.phone].some(v => (v || '').toLowerCase().includes(q)))
+          ? (rows || []).filter(c => [c.name, _custComposeName(c), c.company, c.first_name, c.last_name, c.email, _custComposeAddress(c), c.zip, c.phone].some(v => (v || '').toLowerCase().includes(q)))
           : (rows || []);
         if (!list.length) {
           el.innerHTML = '<div style="padding:8px 0;">' + (q ? 'No customers match your search.' : 'No customers yet. Tap <b>+ Add</b> or <b>Import CSV</b>.') + '</div>';
@@ -14702,17 +14742,20 @@ RECYCLING & DONATION
         const b = 'padding:5px 9px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input);color:var(--text-secondary);font-size:12px;cursor:pointer;flex-shrink:0;';
         let html = '';
         list.forEach(c => {
-          const meta = [c.address, c.zip].filter(Boolean).join(' · ');
+          const dispName = _custComposeName(c) || '(no name)';
+          const dispAddr = _custComposeAddress(c);
           const contact = [c.email, c.phone].filter(Boolean).join(' · ');
+          const needsStreet = !(c.street && c.street.trim());
           html += '<div style="display:flex;align-items:center;gap:6px;padding:10px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;">'
             + '<div style="flex:1;min-width:140px;">'
-            + '<span style="font-weight:600;color:var(--text-primary);">' + _custEsc(c.name) + '</span>'
+            + '<span style="font-weight:600;color:var(--text-primary);">' + _custEsc(dispName) + '</span>'
             + ' <span style="font-size:10px;background:' + (c.type === 'commercial' ? 'var(--accent-blue)' : 'var(--bg-input)') + ';color:' + (c.type === 'commercial' ? '#000' : 'var(--text-muted)') + ';padding:1px 6px;border-radius:8px;font-weight:700;text-transform:uppercase;">' + _custEsc((c.type || 'residential').slice(0, 4)) + '</span>'
-            + (meta ? '<div style="font-size:11px;color:var(--text-muted);">' + _custEsc(meta) + '</div>' : '')
+            + (needsStreet ? ' <span style="font-size:10px;background:rgba(245,200,66,0.18);color:var(--accent-yellow);padding:1px 6px;border-radius:8px;font-weight:700;" title="No street address — Street View cover photo & routing won\'t work">⚠ needs street</span>' : '')
+            + (dispAddr ? '<div style="font-size:11px;color:var(--text-muted);">' + _custEsc(dispAddr) + '</div>' : '')
             + (contact ? '<div style="font-size:11px;color:var(--text-muted);">' + _custEsc(contact) + '</div>' : '')
             + '</div>'
             + '<button onclick="showCustomerForm(\'' + c.id + '\')" style="' + b + '">Edit</button>'
-            + '<button onclick="deleteCustomer(\'' + c.id + '\',\'' + _custEsc(c.name).replace(/'/g, '&#39;') + '\')" style="' + b + 'color:#ef4444;" title="Delete">✕</button>'
+            + '<button onclick="deleteCustomer(\'' + c.id + '\',\'' + _custEsc(dispName).replace(/'/g, '&#39;') + '\')" style="' + b + 'color:#ef4444;" title="Delete">✕</button>'
             + '</div>';
         });
         el.innerHTML = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">' + list.length + ' customer' + (list.length === 1 ? '' : 's') + '</div>' + html;
@@ -14727,19 +14770,24 @@ RECYCLING & DONATION
       const warn = document.getElementById('custDedupWarn'); if (warn) warn.style.display = 'none';
       document.getElementById('customerFormTitle').textContent = id ? 'Edit Customer' : 'Add Customer';
       document.getElementById('custId').value = id || '';
-      let c = { name: '', type: 'residential', address: '', zip: '', email: '', phone: '' };
+      let c = { type: 'residential', company: '', first_name: '', last_name: '', street: '', city: '', state: '', zip: '', email: '', phone: '' };
       if (id) {
         try {
-          const rows = await supabaseFetch('/rest/v1/customers?id=eq.' + id + '&select=name,type,address,zip,email,phone&limit=1');
+          const rows = await supabaseFetch('/rest/v1/customers?id=eq.' + id + '&select=type,company,first_name,last_name,street,city,state,zip,email,phone&limit=1');
           if (rows && rows[0]) c = rows[0];
         } catch (e) { _custFormFeedback('Could not load customer.', false); }
       }
-      document.getElementById('custName').value = c.name || '';
       document.getElementById('custType').value = c.type || 'residential';
-      document.getElementById('custAddress').value = c.address || '';
+      document.getElementById('custCompany').value = c.company || '';
+      document.getElementById('custFirstName').value = c.first_name || '';
+      document.getElementById('custLastName').value = c.last_name || '';
+      document.getElementById('custStreet').value = c.street || '';
+      document.getElementById('custCity').value = c.city || '';
+      document.getElementById('custState').value = c.state || '';
       document.getElementById('custZip').value = c.zip || '';
       document.getElementById('custEmail').value = c.email || '';
       document.getElementById('custPhone').value = c.phone || '';
+      onCustTypeChange();
       document.getElementById('customerForm').style.display = 'block';
       document.getElementById('customerForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -14761,18 +14809,28 @@ RECYCLING & DONATION
 
     async function saveCustomer() {
       const id = document.getElementById('custId').value.trim();
-      const name = document.getElementById('custName').value.trim();
-      if (!name) { _custFormFeedback('Name is required.', false); return; }
-      const fid = currentUser.franchiseInternalID;
+      const type = document.getElementById('custType').value || 'residential';
       const nz = v => { v = (v || '').trim(); return v === '' ? null : v; };
+      const company = nz(document.getElementById('custCompany').value);
+      const first_name = nz(document.getElementById('custFirstName').value);
+      const last_name = nz(document.getElementById('custLastName').value);
+      const street = nz(document.getElementById('custStreet').value);
+      const city = nz(document.getElementById('custCity').value);
+      const state = nz((document.getElementById('custState').value || '').toUpperCase());
+      const zip = nz(document.getElementById('custZip').value);
       const email = nz(document.getElementById('custEmail').value);
-      const address = nz(document.getElementById('custAddress').value);
-      const payload = {
-        franchise_id: fid, name, type: document.getElementById('custType').value || 'residential',
-        address, zip: nz(document.getElementById('custZip').value),
-        email, phone: nz(document.getElementById('custPhone').value),
-        source: 'native', updated_at: new Date().toISOString()
-      };
+      const phone = nz(document.getElementById('custPhone').value);
+      // Required name per type
+      if (type === 'commercial') {
+        if (!company) { _custFormFeedback('Company is required for a commercial customer.', false); return; }
+      } else if (!first_name && !last_name) {
+        _custFormFeedback('First and last name are required.', false); return;
+      }
+      const fid = currentUser.franchiseInternalID;
+      const rec = { type, company, first_name, last_name, street, city, state, zip, email, phone };
+      const name = _custComposeName(rec);
+      const address = _custComposeAddress(rec) || null;
+      const payload = Object.assign({ franchise_id: fid, name, address, source: 'native', updated_at: new Date().toISOString() }, rec);
       // Dedup warning on add/edit — unless the user already acknowledged.
       if (!_custForceSave && (email || address)) {
         try {
@@ -14822,10 +14880,16 @@ RECYCLING & DONATION
     }
 
     // ----- CSV import / template -----
-    const _CUST_CSV_COLS = ['name', 'type', 'address', 'zip', 'email', 'phone'];
+    // Canonical template columns (the documented "happy path"). Import also accepts a
+    // legacy combined `name` and/or `address` column and parses them (best effort).
+    const _CUST_CSV_COLS = ['type', 'company', 'first_name', 'last_name', 'street', 'city', 'state', 'zip', 'email', 'phone'];
     function downloadCustomerTemplate() {
-      const sample = ['Smith, Bill', 'residential', '10 Wagoneer Way', '02718', 'bill@example.com', '(555) 555-1234'];
-      const csv = _CUST_CSV_COLS.join(',') + '\n' + sample.map(_csvCell).join(',') + '\n';
+      // Two example rows: one residential (person), one commercial (company + optional contact).
+      const examples = [
+        ['residential', '', 'Bill', 'Smith', '10 Wagoneer Way', 'Fall River', 'MA', '02718', 'bill@example.com', '(555) 555-1234'],
+        ['commercial', 'Acme Corp', 'Jane', 'Doe', '500 Industrial Rd', 'Taunton', 'MA', '02780', 'jane@acme.com', '(555) 555-0100']
+      ];
+      const csv = _CUST_CSV_COLS.join(',') + '\n' + examples.map(r => r.map(_csvCell).join(',')).join('\n') + '\n';
       const blob = new Blob([csv], { type: 'text/csv' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -14855,62 +14919,132 @@ RECYCLING & DONATION
       return rows.filter(r => r.some(c => c.trim() !== ''));
     }
 
+    // Split a single address blob ("[street, ]CITY, STATE, ZIP") into parts, filling only
+    // blanks. Works from the end (zip → state → city → street) so a real street survives.
+    function _custParseAddressBlob(addr, cur) {
+      const out = { street: cur.street, city: cur.city, state: cur.state, zip: cur.zip };
+      const parts = String(addr || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (!parts.length) return out;
+      if (!out.zip) { const last = parts[parts.length - 1]; const m = last && last.match(/\d{5}/); if (m) { out.zip = m[0]; parts.pop(); } }
+      if (!out.state && parts.length && /^[A-Za-z]{2}$/.test(parts[parts.length - 1])) out.state = parts.pop().toUpperCase();
+      if (!out.city && parts.length) out.city = parts.pop();
+      if (!out.street && parts.length) out.street = parts.join(', ');
+      return out;
+    }
+
     async function importCustomersCsv(ev) {
       const file = ev.target.files && ev.target.files[0];
       ev.target.value = '';   // allow re-importing the same filename
       if (!file) return;
+      _renderCustImportResults(null);
       _custFeedback('Reading ' + file.name + '…');
       try {
         const text = await file.text();
         const rows = _parseCsv(text);
         if (rows.length < 2) { _custFeedback('CSV has no data rows.', false); return; }
-        const header = rows[0].map(h => h.trim().toLowerCase());
-        const idx = {}; _CUST_CSV_COLS.forEach(c => idx[c] = header.indexOf(c));
-        if (idx.name < 0) { _custFeedback('CSV needs a “name” column — download the Template.', false); return; }
+        const header = rows[0].map(h => h.trim().toLowerCase().replace(/\s+/g, '_'));
+        const cols = ['name', 'type', 'company', 'first_name', 'last_name', 'street', 'city', 'state', 'address', 'zip', 'email', 'phone'];
+        const idx = {}; cols.forEach(c => idx[c] = header.indexOf(c));
+        if (idx.company < 0 && idx.first_name < 0 && idx.last_name < 0 && idx.name < 0) {
+          _custFeedback('CSV needs name columns (company / first_name / last_name) or a single “name” column — see the Template.', false); return;
+        }
         const fid = currentUser.franchiseInternalID;
-        // Map existing customers by email so a re-import UPDATES them (e.g. backfills zip)
-        // rather than skipping — exports often omit a zip column.
         const existing = await supabaseFetch('/rest/v1/customers?franchise_id=eq.' + fid + '&select=id,email');
         const idByEmail = {};
         (existing || []).forEach(r => { if (r.email) idByEmail[r.email.toLowerCase()] = r.id; });
         const nz = v => { v = (v == null ? '' : String(v)).trim(); return v === '' ? null : v; };
-        const inserts = []; const updates = []; const seen = new Set(); let skipped = 0;
+
+        const inserts = [], updates = [], skippedItems = [], attentionItems = [];
+        const seen = new Set();
         for (let r = 1; r < rows.length; r++) {
           const get = c => idx[c] >= 0 ? rows[r][idx[c]] : '';
-          const name = nz(get('name'));
-          if (!name) { skipped++; continue; }
-          const address = nz(get('address'));
-          // ZIP: prefer a real zip column; else pull the LAST 5-digit group out of the
-          // address (exports commonly bundle it, e.g. "FALL RIVER, MA, 02724").
-          let zip = nz(get('zip'));
-          if (!zip && address) { const m = address.match(/\b\d{5}\b/g); if (m) zip = m[m.length - 1]; }
-          const email = nz(get('email'));
+          const rowNo = r + 1;
           let type = (nz(get('type')) || 'residential').toLowerCase();
           type = type.startsWith('com') ? 'commercial' : 'residential';
-          const rec = { franchise_id: fid, name, type, address, zip, email, phone: nz(get('phone')), source: 'native' };
+
+          // Name — prefer structured columns; else route a combined `name` by type.
+          let company = nz(get('company')), first_name = nz(get('first_name')), last_name = nz(get('last_name'));
+          let nameIssue = false;
+          if (!company && !first_name && !last_name) {
+            const raw = nz(get('name'));
+            if (raw) {
+              if (type === 'commercial') {
+                company = raw;                                  // company names stay whole (never split)
+              } else {
+                const ci = raw.indexOf(',');
+                if (ci >= 0) { last_name = nz(raw.slice(0, ci)); first_name = nz(raw.slice(ci + 1)); }   // "Last, First"
+                else { const sp = raw.lastIndexOf(' '); if (sp > 0) { first_name = nz(raw.slice(0, sp)); last_name = nz(raw.slice(sp + 1)); } else { last_name = raw; nameIssue = true; } }
+              }
+            }
+          }
+          if (!company && !first_name && !last_name) { skippedItems.push({ row: rowNo, who: '(blank)', reason: 'missing name' }); continue; }
+
+          // Address — prefer structured; else parse the `address` blob (fills blanks only).
+          let street = nz(get('street')), city = nz(get('city')), state = nz(get('state')), zip = nz(get('zip'));
+          if ((!street || !city || !state || !zip) && nz(get('address'))) {
+            const p = _custParseAddressBlob(get('address'), { street, city, state, zip });
+            street = p.street; city = p.city; state = p.state; zip = p.zip;
+          }
+          if (state) state = String(state).toUpperCase();
+
+          const email = nz(get('email')), phone = nz(get('phone'));
+          const rec = { franchise_id: fid, type, company, first_name, last_name, street, city, state, zip, email, phone, source: 'native' };
+          rec.name = _custComposeName(rec);
+          rec.address = _custComposeAddress(rec) || null;
+          const who = rec.name || '(no name)';
+
           const key = email ? email.toLowerCase() : null;
-          if (key && seen.has(key)) { skipped++; continue; }   // duplicate within the file
+          if (key && seen.has(key)) { skippedItems.push({ row: rowNo, who, reason: 'duplicate email in file' }); continue; }
           if (key) seen.add(key);
+
+          if (!street) attentionItems.push({ row: rowNo, who, reason: 'missing street — cover photo & routing disabled' });
+          else if (nameIssue) attentionItems.push({ row: rowNo, who, reason: 'name format unclear — check first/last' });
+
           if (key && idByEmail[key]) updates.push({ id: idByEmail[key], rec });
           else inserts.push(rec);
         }
-        if (!inserts.length && !updates.length) { _custFeedback('Nothing to import (' + skipped + ' row(s) skipped).', false); return; }
+
+        if (!inserts.length && !updates.length) {
+          _renderCustImportResults({ added: 0, updated: 0, skippedItems, attentionItems });
+          _custFeedback('Nothing imported.', false); return;
+        }
+        _custFeedback('Importing…');
         if (inserts.length) await supabaseFetch('/rest/v1/customers', { method: 'POST', body: JSON.stringify(inserts) });
         for (const u of updates) {
+          const p = u.rec;
           await supabaseFetch('/rest/v1/customers?id=eq.' + u.id, {
             method: 'PATCH',
-            body: JSON.stringify({ name: u.rec.name, type: u.rec.type, address: u.rec.address, zip: u.rec.zip, phone: u.rec.phone, updated_at: new Date().toISOString() })
+            body: JSON.stringify({ name: p.name, type: p.type, company: p.company, first_name: p.first_name, last_name: p.last_name, street: p.street, city: p.city, state: p.state, zip: p.zip, address: p.address, phone: p.phone, updated_at: new Date().toISOString() })
           });
         }
-        const parts = [];
-        if (inserts.length) parts.push(inserts.length + ' added');
-        if (updates.length) parts.push(updates.length + ' updated');
-        if (skipped) parts.push(skipped + ' skipped');
-        _custFeedback('Import complete — ' + parts.join(' · ') + '.', true);
+        _custFeedback('');
+        _renderCustImportResults({ added: inserts.length, updated: updates.length, skippedItems, attentionItems });
         renderCustomersTab();
       } catch (e) {
         _custFeedback('Import failed — check the file matches the Template.', false);
       }
+    }
+
+    // Render the post-import summary (added / updated / skipped-with-reasons / needs-attention).
+    function _renderCustImportResults(res) {
+      const el = document.getElementById('customerImportResults');
+      if (!el) return;
+      if (!res) { el.style.display = 'none'; el.innerHTML = ''; return; }
+      const list = items => items.map(i => '<div style="font-size:11px;color:var(--text-secondary);padding:2px 0;">Row ' + i.row + ' — <b>' + _custEsc(i.who) + '</b> — ' + _custEsc(i.reason) + '</div>').join('');
+      let html = '<div style="font-weight:700;color:var(--text-primary);margin-bottom:4px;">Import complete</div>'
+        + '<div style="font-size:12px;color:var(--accent-green);margin-bottom:6px;">✓ ' + res.added + ' added · ' + res.updated + ' updated</div>';
+      if (res.skippedItems.length) {
+        html += '<div style="font-size:12px;color:#ef4444;font-weight:600;margin-top:6px;">✕ ' + res.skippedItems.length + ' not imported</div>'
+          + '<div style="max-height:160px;overflow:auto;">' + list(res.skippedItems) + '</div>';
+      }
+      if (res.attentionItems.length) {
+        html += '<div style="font-size:12px;color:var(--accent-yellow);font-weight:600;margin-top:6px;">⚠ ' + res.attentionItems.length + ' imported but need attention</div>'
+          + '<div style="max-height:160px;overflow:auto;">' + list(res.attentionItems) + '</div>';
+      }
+      html += '<div style="text-align:right;margin-top:8px;"><button onclick="_renderCustImportResults(null)" style="padding:4px 10px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px;cursor:pointer;">Dismiss</button></div>';
+      el.innerHTML = html;
+      el.style.display = 'block';
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
     // ===== PRICE BOOK (native pricing editor; crm_provider=none) =====
