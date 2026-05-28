@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.93 | 2026-05-27">
+  <meta name="crewlogic-version" content="v5.9.94 | 2026-05-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14868,25 +14868,45 @@ RECYCLING & DONATION
         const idx = {}; _CUST_CSV_COLS.forEach(c => idx[c] = header.indexOf(c));
         if (idx.name < 0) { _custFeedback('CSV needs a “name” column — download the Template.', false); return; }
         const fid = currentUser.franchiseInternalID;
-        // Skip rows whose email already exists (best-effort dedup on bulk import).
-        const existing = await supabaseFetch('/rest/v1/customers?franchise_id=eq.' + fid + '&email=not.is.null&select=email');
-        const have = new Set((existing || []).map(r => (r.email || '').toLowerCase()));
+        // Map existing customers by email so a re-import UPDATES them (e.g. backfills zip)
+        // rather than skipping — exports often omit a zip column.
+        const existing = await supabaseFetch('/rest/v1/customers?franchise_id=eq.' + fid + '&select=id,email');
+        const idByEmail = {};
+        (existing || []).forEach(r => { if (r.email) idByEmail[r.email.toLowerCase()] = r.id; });
         const nz = v => { v = (v == null ? '' : String(v)).trim(); return v === '' ? null : v; };
-        const out = []; let skipped = 0;
+        const inserts = []; const updates = []; const seen = new Set(); let skipped = 0;
         for (let r = 1; r < rows.length; r++) {
           const get = c => idx[c] >= 0 ? rows[r][idx[c]] : '';
           const name = nz(get('name'));
           if (!name) { skipped++; continue; }
+          const address = nz(get('address'));
+          // ZIP: prefer a real zip column; else pull the LAST 5-digit group out of the
+          // address (exports commonly bundle it, e.g. "FALL RIVER, MA, 02724").
+          let zip = nz(get('zip'));
+          if (!zip && address) { const m = address.match(/\b\d{5}\b/g); if (m) zip = m[m.length - 1]; }
           const email = nz(get('email'));
-          if (email && have.has(email.toLowerCase())) { skipped++; continue; }
-          if (email) have.add(email.toLowerCase());
           let type = (nz(get('type')) || 'residential').toLowerCase();
           type = type.startsWith('com') ? 'commercial' : 'residential';
-          out.push({ franchise_id: fid, name, type, address: nz(get('address')), zip: nz(get('zip')), email, phone: nz(get('phone')), source: 'native' });
+          const rec = { franchise_id: fid, name, type, address, zip, email, phone: nz(get('phone')), source: 'native' };
+          const key = email ? email.toLowerCase() : null;
+          if (key && seen.has(key)) { skipped++; continue; }   // duplicate within the file
+          if (key) seen.add(key);
+          if (key && idByEmail[key]) updates.push({ id: idByEmail[key], rec });
+          else inserts.push(rec);
         }
-        if (!out.length) { _custFeedback('Nothing to import (' + skipped + ' row(s) skipped).', false); return; }
-        await supabaseFetch('/rest/v1/customers', { method: 'POST', body: JSON.stringify(out) });
-        _custFeedback('Imported ' + out.length + ' customer' + (out.length === 1 ? '' : 's') + (skipped ? ' · ' + skipped + ' skipped (duplicate/blank)' : '') + '.', true);
+        if (!inserts.length && !updates.length) { _custFeedback('Nothing to import (' + skipped + ' row(s) skipped).', false); return; }
+        if (inserts.length) await supabaseFetch('/rest/v1/customers', { method: 'POST', body: JSON.stringify(inserts) });
+        for (const u of updates) {
+          await supabaseFetch('/rest/v1/customers?id=eq.' + u.id, {
+            method: 'PATCH',
+            body: JSON.stringify({ name: u.rec.name, type: u.rec.type, address: u.rec.address, zip: u.rec.zip, phone: u.rec.phone, updated_at: new Date().toISOString() })
+          });
+        }
+        const parts = [];
+        if (inserts.length) parts.push(inserts.length + ' added');
+        if (updates.length) parts.push(updates.length + ' updated');
+        if (skipped) parts.push(skipped + ' skipped');
+        _custFeedback('Import complete — ' + parts.join(' · ') + '.', true);
         renderCustomersTab();
       } catch (e) {
         _custFeedback('Import failed — check the file matches the Template.', false);
