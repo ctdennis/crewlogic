@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.9.98 | 2026-05-28">
+  <meta name="crewlogic-version" content="v5.9.99 | 2026-05-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14679,14 +14679,14 @@ RECYCLING & DONATION
     let _custRows = null;
     let _custOpenId = null;
     let _custFlaggedOnly = false;
-    // Re-derive "needs attention" reasons from stored fields (stateless, so it self-clears
-    // once the row is fixed). Mirrors the import flags; uses the same helpers.
+    // Re-derive "needs attention" from stored fields (stateless → self-clears when fixed).
+    // Missing street is the only persistent flag: it's an objective gap (breaks Street View
+    // cover + routing) and is now required on save, so editing+saving clears it. Joint names
+    // are legitimate (accepted on save) and placeholder emails are nulled at import, so
+    // neither is nagged here — both still appear in the one-time import summary.
     function _custAttention(c) {
       const reasons = [];
       if (!(c.street && String(c.street).trim())) reasons.push('No street — Street View cover photo & routing disabled');
-      if ((c.type || 'residential') !== 'commercial' && _CUST_JOINT_RE.test([c.first_name, c.last_name].filter(Boolean).join(' ')))
-        reasons.push('Joint name (couple) — confirm first / last');
-      if (c.email && _isPlaceholderEmail(c.email)) reasons.push('Placeholder email — not used for matching');
       return reasons;
     }
     // Display name from structured fields: company (commercial) wins, else "First Last".
@@ -14778,7 +14778,7 @@ RECYCLING & DONATION
       const type = isNew ? 'residential' : (c.type || 'residential');
       const delB = 'padding:5px 9px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input);font-size:12px;cursor:pointer;flex-shrink:0;';
       const warnBadge = (att && att.length)
-        ? ' <span style="font-size:10px;background:rgba(245,200,66,0.18);color:var(--accent-yellow);padding:1px 6px;border-radius:8px;font-weight:700;cursor:help;" title="' + _custEsc(att.join('  •  ')) + '">⚠ ' + att.length + '</span>'
+        ? ' <span style="font-size:10px;background:rgba(245,200,66,0.18);color:var(--accent-yellow);padding:1px 6px;border-radius:8px;font-weight:700;cursor:help;" title="' + _custEsc(att.join('  •  ')) + '">⚠ needs street</span>'
         : '';
       const chevron = '<span style="display:inline-block;width:14px;color:var(--text-muted);transition:transform 0.15s;transform:rotate(' + (open ? '90' : '0') + 'deg);">▸</span>';
       const head = '<div onclick="toggleCustomerRow(\'' + id + '\')" style="display:flex;align-items:center;gap:6px;padding:10px 0;cursor:pointer;flex-wrap:wrap;">'
@@ -14878,6 +14878,8 @@ RECYCLING & DONATION
           _custFormFeedback('Name has invalid characters — use letters, spaces, and . , \' - (or / & for couples).', false); return;
         }
       }
+      // Street is required (drives Street View cover photo + routing for all customer types).
+      if (!street) { _custFormFeedback('Street address is required.', false); return; }
       const fid = currentUser.franchiseInternalID;
       const rec = { type, company, first_name, last_name, street, city, state, zip, email, phone };
       const name = _custComposeName(rec);
