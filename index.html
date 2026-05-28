@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.10.3 | 2026-05-28">
+  <meta name="crewlogic-version" content="v5.10.4 | 2026-05-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7714,6 +7714,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (currentEstimate.priceBlocks && currentEstimate.priceBlocks.length > 0) {
         priceBlocks = currentEstimate.priceBlocks;
         priceListID = currentEstimate.priceListID;
+        priceListName = currentEstimate.priceListName || '';
+        document.getElementById('estMainContent').style.display = 'block';
+        document.getElementById('estPriceListDisplay').textContent = priceListName;
+        const zipStatus = document.getElementById('estZipStatus');
+        const clientLabel = currentEstimate.clientName ? currentEstimate.clientName + '  |  ' + priceListName : priceListName;
+        zipStatus.textContent = '✓ ' + clientLabel;
+        zipStatus.className = 'zip-status ok';
+      } else if (currentUser.pricingSource === 'native' && (currentEstimate.zip || (currentEstimate.priceBook && currentEstimate.priceBook.length))) {
+        // Native estimate reopened from the list: priceBlocks isn't persisted (and native has
+        // no jobID), so pricing lives in the saved priceBook. Restore it and show the editor —
+        // so a set-up-but-empty native draft looks the same on re-entry as when first created,
+        // instead of collapsing to just the cover photo + Back button.
+        priceBlocks = (currentEstimate.priceBook && currentEstimate.priceBook.length) ? currentEstimate.priceBook : [];
+        priceListID = currentEstimate.priceListID || null;
         priceListName = currentEstimate.priceListName || '';
         document.getElementById('estMainContent').style.display = 'block';
         document.getElementById('estPriceListDisplay').textContent = priceListName;
