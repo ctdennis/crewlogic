@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.11.3 | 2026-05-29">
+  <meta name="crewlogic-version" content="v5.11.4 | 2026-05-29">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15245,7 +15245,7 @@ RECYCLING & DONATION
         (existing || []).forEach(r => { if (r.email) idByEmail[r.email.toLowerCase()] = r.id; });
         const nz = v => { v = (v == null ? '' : String(v)).trim(); return v === '' ? null : v; };
 
-        const inserts = [], updates = [], skippedItems = [], attentionItems = [];
+        const inserts = [], updates = [], skippedItems = [], attentionItems = [], noteItems = [];
         const seen = new Set();
         for (let r = 1; r < rows.length; r++) {
           const get = c => idx[c] >= 0 ? rows[r][idx[c]] : '';
@@ -15290,9 +15290,7 @@ RECYCLING & DONATION
           if (state) state = String(state).toUpperCase();
           zip = _custFixZip(zip);   // recover leading zeros (02745 imported as 2745)
 
-          // Email — drop placeholder/junk addresses so they don't become a false dedup key.
-          let email = nz(get('email')), emailFlag = null;
-          if (email && _isPlaceholderEmail(email)) { emailFlag = 'placeholder email ignored (not used for matching)'; email = null; }
+          const email = nz(get('email'));
           const phone = nz(get('phone'));
 
           const rec = { franchise_id: fid, type, company, first_name, last_name, street, city, state, zip, email, phone, source: 'native' };
@@ -15300,23 +15298,31 @@ RECYCLING & DONATION
           rec.address = _custComposeAddress(rec) || null;
           const who = rec.name || '(no name)';
 
-          const key = email ? email.toLowerCase() : null;
-          if (key && seen.has(key)) { skippedItems.push({ row: rowNo, who, reason: 'duplicate email in file' }); continue; }
-          if (key) seen.add(key);
+          // A valid, real email is required — reject blank, malformed, and placeholder/junk
+          // addresses (noemail@, no@email, none@none.com, test@…, example.com, etc.) entirely.
+          if (!email || _isPlaceholderEmail(email)) {
+            skippedItems.push({ row: rowNo, who, reason: email ? 'invalid / placeholder email' : 'missing email' });
+            continue;
+          }
 
-          // Needs-attention flags (imported, but worth a human look).
+          const key = email.toLowerCase();
+          if (seen.has(key)) { skippedItems.push({ row: rowNo, who, reason: 'duplicate email in file' }); continue; }
+          seen.add(key);
+
+          // ⚠ Needs attention = the persistent, findable list flag (missing street). This stays
+          // in lockstep with the list's ⚠ badge/filter so the summary count is actionable there.
           if (!street) attentionItems.push({ row: rowNo, who, reason: 'missing street — cover photo & routing disabled' });
+          // ℹ Notes = imported fine, just a one-time FYI (no persistent flag, nothing to "fix").
           if (type !== 'commercial' && _CUST_JOINT_RE.test([first_name, last_name].filter(Boolean).join(' ')))
-            attentionItems.push({ row: rowNo, who, reason: 'joint name (couple) — confirm first/last' });
-          if (emailFlag) attentionItems.push({ row: rowNo, who, reason: emailFlag });
-          if (nameIssue) attentionItems.push({ row: rowNo, who, reason: 'name format unclear — check first/last' });
+            noteItems.push({ row: rowNo, who, reason: 'joint name (couple) — verify first/last' });
+          if (nameIssue) noteItems.push({ row: rowNo, who, reason: 'name format unclear — check first/last' });
 
           if (key && idByEmail[key]) updates.push({ id: idByEmail[key], rec });
           else inserts.push(rec);
         }
 
         if (!inserts.length && !updates.length) {
-          _renderCustImportResults({ added: 0, updated: 0, skippedItems, attentionItems });
+          _renderCustImportResults({ added: 0, updated: 0, skippedItems, attentionItems, noteItems });
           _custFeedback('Nothing imported.', false); return;
         }
         _custFeedback('Importing…');
@@ -15329,7 +15335,7 @@ RECYCLING & DONATION
           });
         }
         _custFeedback('');
-        _renderCustImportResults({ added: inserts.length, updated: updates.length, skippedItems, attentionItems });
+        _renderCustImportResults({ added: inserts.length, updated: updates.length, skippedItems, attentionItems, noteItems });
         renderCustomersTab();
       } catch (e) {
         _custFeedback('Import failed — check the file matches the Template.', false);
@@ -15351,6 +15357,10 @@ RECYCLING & DONATION
       if (res.attentionItems.length) {
         html += '<div style="font-size:12px;color:var(--accent-yellow);font-weight:600;margin-top:6px;">⚠ ' + res.attentionItems.length + ' imported but need attention</div>'
           + '<div style="max-height:160px;overflow:auto;">' + list(res.attentionItems) + '</div>';
+      }
+      if ((res.noteItems || []).length) {
+        html += '<div style="font-size:12px;color:var(--text-muted);font-weight:600;margin-top:6px;">ℹ ' + res.noteItems.length + ' imported — notes (no action needed)</div>'
+          + '<div style="max-height:160px;overflow:auto;">' + list(res.noteItems) + '</div>';
       }
       html += '<div style="text-align:right;margin-top:8px;"><button onclick="_renderCustImportResults(null)" style="padding:4px 10px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px;cursor:pointer;">Dismiss</button></div>';
       el.innerHTML = html;
