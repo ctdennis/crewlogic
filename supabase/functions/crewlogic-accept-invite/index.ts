@@ -42,33 +42,54 @@ Deno.serve(async (req: Request) => {
   if (iErr) return json({ success: false, error: "invite_lookup_failed" }, 500);
   if (!invite) return json({ success: false, error: "invite_invalid" }, 400);
   if (invite.expires_at && new Date(invite.expires_at) < new Date()) return json({ success: false, error: "invite_expired" }, 400);
-  if (!invite.franchise_id) return json({ success: false, error: "invite_has_no_franchise" }, 400);
   // The invite is addressed to a specific email — only that person may accept it (a leaked
-  // token can't be redeemed by a different account).
+  // token can't be redeemed by a different account). Empty invite.email = open invite.
   if (invite.email && String(invite.email).toLowerCase() !== email.toLowerCase()) {
     return json({ success: false, error: "invite_email_mismatch" }, 403);
   }
 
-  // 3) Idempotent: if this email already has a profile, we're done (covers re-clicks / races).
+  // 3) Idempotent: if this email already has a profile, we're done (covers re-clicks / races,
+  // and avoids creating a duplicate tenant on a native-onboarding retry).
   const { data: existing } = await sb.from("profiles").select("id, franchise_id").eq("email", email).maybeSingle();
   if (existing) {
     return json({ success: true, email, franchiseId: existing.franchise_id, alreadyProvisioned: true });
   }
   if (invite.accepted_at) return json({ success: false, error: "invite_already_used" }, 400);
 
-  // 4) Create the profile under the invite's (pre-provisioned, native) franchise.
+  // 4) Resolve the franchise. If the invite already points to one (team member, or a
+  // pre-provisioned franchise), use it. Otherwise this is a NEW native franchise — create the
+  // tenant (native defaults via migration 0004) + franchise here (provisioning at accept time,
+  // same model as the legacy guest flow). The owner supplies the company name on the accept
+  // screen. subscription_tier=null so trial access is governed by the tenant's
+  // subscription_status='trialing' (default) rather than the paywalling 'free' tier default.
+  let franchiseId = invite.franchise_id as string | null;
+  if (!franchiseId) {
+    const companyName = (String(body.companyName || "").trim()) || ((email.split("@")[1] || "My Company"));
+    const slug = companyName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "").slice(0, 40)
+      + "-" + crypto.randomUUID().slice(0, 8);
+    const { data: tenant, error: tErr } = await sb.from("tenants")
+      .insert({ name: companyName, slug, crm_type: "none" }).select("id").single();
+    if (tErr || !tenant) return json({ success: false, error: "tenant_create_failed", detail: tErr?.message }, 500);
+    const { data: fr, error: fErr } = await sb.from("franchises")
+      .insert({ tenant_id: tenant.id, external_id: "native-" + String(tenant.id).slice(0, 8), franchise_name: companyName, subscription_tier: null })
+      .select("id").single();
+    if (fErr || !fr) return json({ success: false, error: "franchise_create_failed", detail: fErr?.message }, 500);
+    franchiseId = fr.id as string;
+  }
+
+  // 5) Create the owner profile under the resolved franchise.
   const { error: pErr } = await sb.from("profiles").insert({
     auth_user_id: user.id,
     email,
     name: (user.user_metadata && (user.user_metadata as Record<string, unknown>).name) || email,
     role: invite.role || "owner",
-    franchise_id: invite.franchise_id,
+    franchise_id: franchiseId,
     accepted_invite_id: invite.id,
   });
   if (pErr) return json({ success: false, error: "profile_create_failed", detail: pErr.message }, 500);
 
-  // 5) Mark the invite accepted (best-effort).
+  // 6) Mark the invite accepted (best-effort).
   await sb.from("invites").update({ accepted_at: new Date().toISOString() }).eq("id", invite.id);
 
-  return json({ success: true, email, franchiseId: invite.franchise_id });
+  return json({ success: true, email, franchiseId });
 });

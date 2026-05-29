@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.12.2 | 2026-05-29">
+  <meta name="crewlogic-version" content="v5.12.3 | 2026-05-29">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1077,6 +1077,12 @@
       <div style="margin-bottom:12px;">
         <div class="form-label">Your name</div>
         <input type="text" class="form-input" id="inviteName" placeholder="First Last" autocomplete="name">
+      </div>
+      <!-- Company name — shown only for new-franchise (no franchise_id) invites; the new owner
+           names their own company, which provisions the native tenant+franchise on accept. -->
+      <div id="inviteCompanyGroup" style="margin-bottom:12px;display:none;">
+        <div class="form-label">Company name</div>
+        <input type="text" class="form-input" id="inviteCompany" placeholder="Acme Junk Removal" autocomplete="organization">
       </div>
       <div style="margin-bottom:20px;">
         <div class="form-label">Sign in with</div>
@@ -3724,11 +3730,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               const res = await fetch(EDGE_BASE + '/crewlogic-accept-invite', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'apikey': EDGE_ANON_KEY, 'Authorization': 'Bearer ' + sbSession.access_token },
-                body: JSON.stringify({ inviteToken: pendingToken })
+                body: JSON.stringify({ inviteToken: pendingToken, companyName: storage.get('pending_invite_company') || '' })
               });
               const data = await res.json().catch(() => ({}));
               if (data && data.success) {
-                ['pending_invite_token','pending_invite_id','pending_invite_franchise_id','pending_invite_role'].forEach(k => storage.remove(k));
+                ['pending_invite_token','pending_invite_id','pending_invite_franchise_id','pending_invite_role','pending_invite_company'].forEach(k => storage.remove(k));
                 built = await buildSessionFromSupabaseAuth(sbSession.user.email);
               }
             } catch (e) { /* fall through to no_account */ }
@@ -4938,9 +4944,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         return true;
       }
 
-      // Show franchise name
-      const fname = invite.franchises ? invite.franchises.franchise_name : 'your team';
+      // Show franchise name. A no-franchise invite is a NEW native franchise — the owner names
+      // their own company (reveal the Company field; provisioning happens on accept).
+      const isNewFranchise = !invite.franchise_id;
+      const fname = invite.franchises ? invite.franchises.franchise_name : (isNewFranchise ? 'a new CrewLogicAI workspace' : 'your team');
       document.getElementById('inviteFranchiseName').textContent = fname;
+      const _coGroup = document.getElementById('inviteCompanyGroup');
+      if (_coGroup) _coGroup.style.display = isNewFranchise ? 'block' : 'none';
 
       // Store token for use after Google sign-in
       storage.set('pending_invite_token', token);
@@ -4977,6 +4987,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         return;
       }
       if (nameInput && nameInput.value.trim()) storage.set('pending_invite_name', nameInput.value.trim());
+      // New-franchise invite: capture the company name so provisioning can name the franchise.
+      const coInput = document.getElementById('inviteCompany');
+      if (coInput && coInput.value.trim()) storage.set('pending_invite_company', coInput.value.trim());
       if (statusEl) { statusEl.textContent = 'Sending sign-in link…'; statusEl.style.color = 'var(--text-muted)'; }
       try {
         const { error } = await supabaseClient.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } });
