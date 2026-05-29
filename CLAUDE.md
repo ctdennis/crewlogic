@@ -8,6 +8,7 @@ Approvals in `.claude/settings.local.json` match by **exact command prefix, one 
 
 - **Run dev tooling in EXACTLY these forms** — relative path, from the repo root, **no `|`, no `>`/`2>&1`, no `;`/`&&`, no absolute paths.** Read the JSON/text output directly; if you must filter it, do that in a separate step.
   - Dev SQL (wrapper refuses unless linked to crewlogic-dev): `bash supabase/dev-setup/dev-sql.sh "<sql>"`
+  - **Read-only PROD SQL** (allowlisted; refuses unless linked to prod; rejects anything but a single read statement AND runs it inside a `READ ONLY` transaction so Postgres blocks any write): `bash supabase/dev-setup/prod-readonly-sql.sh "<SELECT ...>"`. Use this for prod SELECTs instead of `supabase db query` (which stays gated, since it can also write).
   - Syntax-check index.html: `bash supabase/dev-setup/check-html.sh`
   - Deploy a function to dev: `supabase functions deploy --project-ref bagkimfwmpwjfhfhmsrb <name> --use-api --no-verify-jwt`
   - Set a dev secret: `supabase secrets set --project-ref bagkimfwmpwjfhfhmsrb KEY=VALUE`
