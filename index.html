@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.12.1 | 2026-05-29">
+  <meta name="crewlogic-version" content="v5.12.2 | 2026-05-29">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3567,6 +3567,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const hasInvite = await checkInviteToken();
       if (hasInvite) return;
 
+      // Phase 2: an active invite acceptance (pending token + a Supabase Auth session from the
+      // magic link) must win over any stale cached session — handle it before the cached restore.
+      if (storage.get('pending_invite_token') && await resumeNativeSession()) return;
+
       // Check if returning from OAuth callback with session in query param or hash
       const _sessionParam = new URLSearchParams(window.location.search).get('session');
       const _sessionHash = window.location.hash && window.location.hash.startsWith('#session=') ? window.location.hash.slice(9) : null;
@@ -3696,49 +3700,50 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         storage.remove(SESSION_KEY);
       }
 
-      // Phase 2: native (Supabase Auth) sign-in. If a magic link just landed, supabase-js has
-      // auto-detected the token and created a session — build our standard currentUser from it.
-      try {
-        const { data: { session: sbSession } } = await supabaseClient.auth.getSession();
-        if (sbSession && sbSession.user && sbSession.user.email) {
-          let built = await buildSessionFromSupabaseAuth(sbSession.user.email);
-          // No profile yet, but there's a pending invite → provision via the edge function
-          // (service role), passing the USER's access token so it can verify who's accepting.
-          if (!built) {
-            const pendingToken = storage.get('pending_invite_token');
-            if (pendingToken) {
-              try {
-                const res = await fetch(EDGE_BASE + '/crewlogic-accept-invite', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'apikey': EDGE_ANON_KEY, 'Authorization': 'Bearer ' + sbSession.access_token },
-                  body: JSON.stringify({ inviteToken: pendingToken })
-                });
-                const data = await res.json().catch(() => ({}));
-                if (data && data.success) {
-                  storage.remove('pending_invite_token');
-                  storage.remove('pending_invite_id');
-                  storage.remove('pending_invite_franchise_id');
-                  storage.remove('pending_invite_role');
-                  built = await buildSessionFromSupabaseAuth(sbSession.user.email);
-                }
-              } catch (e) { /* provisioning failed — fall through to no_account */ }
-            }
-          }
-          if (built) {
-            currentUser = built;
-            storage.set(SESSION_KEY, JSON.stringify(currentUser));
-            history.replaceState(null, '', window.location.pathname);  // strip the #access_token hash
-            showApp();
-            return;
-          }
-          // Authenticated but no profile and no usable invite.
-          showAuthErrorScreen('no_account');
-          return;
-        }
-      } catch (e) { /* no supabase session — fall through to login */ }
+      // Phase 2: returning native owner (Supabase Auth session) — general fallback.
+      if (await resumeNativeSession()) return;
 
       // Show login
       showLogin();
+    }
+
+    // Phase 2: if supabase-js has a Supabase Auth session (a magic link just landed, or a
+    // returning native owner), build/restore the native currentUser. If there's no profile yet
+    // but a pending invite is present, provision it via crewlogic-accept-invite (service role,
+    // passing the user's access token). Returns true if it took over (app or auth-error shown);
+    // false if there's no Supabase session to act on.
+    async function resumeNativeSession() {
+      try {
+        const { data: { session: sbSession } } = await supabaseClient.auth.getSession();
+        if (!sbSession || !sbSession.user || !sbSession.user.email) return false;
+        let built = await buildSessionFromSupabaseAuth(sbSession.user.email);
+        if (!built) {
+          const pendingToken = storage.get('pending_invite_token');
+          if (pendingToken) {
+            try {
+              const res = await fetch(EDGE_BASE + '/crewlogic-accept-invite', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'apikey': EDGE_ANON_KEY, 'Authorization': 'Bearer ' + sbSession.access_token },
+                body: JSON.stringify({ inviteToken: pendingToken })
+              });
+              const data = await res.json().catch(() => ({}));
+              if (data && data.success) {
+                ['pending_invite_token','pending_invite_id','pending_invite_franchise_id','pending_invite_role'].forEach(k => storage.remove(k));
+                built = await buildSessionFromSupabaseAuth(sbSession.user.email);
+              }
+            } catch (e) { /* fall through to no_account */ }
+          }
+        }
+        if (built) {
+          currentUser = built;
+          storage.set(SESSION_KEY, JSON.stringify(currentUser));
+          history.replaceState(null, '', window.location.pathname);  // strip the #access_token hash
+          showApp();
+          return true;
+        }
+        showAuthErrorScreen('no_account');
+        return true;
+      } catch (e) { return false; }
     }
 
     function showLogin() {
