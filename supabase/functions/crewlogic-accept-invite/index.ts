@@ -37,12 +37,17 @@ Deno.serve(async (req: Request) => {
   if (!inviteToken) return json({ success: false, error: "invite_token_required" }, 400);
 
   const { data: invite, error: iErr } = await sb.from("invites")
-    .select("id, franchise_id, role, expires_at, accepted_at")
+    .select("id, franchise_id, role, email, expires_at, accepted_at")
     .eq("token", inviteToken).maybeSingle();
   if (iErr) return json({ success: false, error: "invite_lookup_failed" }, 500);
   if (!invite) return json({ success: false, error: "invite_invalid" }, 400);
   if (invite.expires_at && new Date(invite.expires_at) < new Date()) return json({ success: false, error: "invite_expired" }, 400);
   if (!invite.franchise_id) return json({ success: false, error: "invite_has_no_franchise" }, 400);
+  // The invite is addressed to a specific email — only that person may accept it (a leaked
+  // token can't be redeemed by a different account).
+  if (invite.email && String(invite.email).toLowerCase() !== email.toLowerCase()) {
+    return json({ success: false, error: "invite_email_mismatch" }, 403);
+  }
 
   // 3) Idempotent: if this email already has a profile, we're done (covers re-clicks / races).
   const { data: existing } = await sb.from("profiles").select("id, franchise_id").eq("email", email).maybeSingle();
