@@ -189,7 +189,7 @@ async function fetchGoogleUserInfo(accessToken: string): Promise<any> {
 // Step 4: Look up profile by email (joined with franchise + tenant)
 // ─────────────────────────────────────────────────────────────────────────────
 async function lookupProfile(email: string): Promise<any> {
-  const select = "role,franchise_id,email,name,franchises(external_id,franchise_name,cost_settings,subscription_tier,vonigo_configured,tenants(subscription_status))";
+  const select = "role,franchise_id,email,name,franchises(external_id,franchise_name,cost_settings,subscription_tier,vonigo_configured,tenants(id,subscription_status,pricing_source,customer_source,submission_target))";
   const url = `${SUPABASE_URL}/rest/v1/profiles?select=${encodeURIComponent(select)}&email=eq.${encodeURIComponent(email)}`;
   const res = await fetch(url, { headers: SB_HEADERS });
   if (!res.ok) {
@@ -298,6 +298,7 @@ function buildSession(opts: {
   const { profile, userInfo, googleAccessToken, supabaseAccessToken, inviteToken } = opts;
   const f = profile.franchises || {};
   const cs = f.cost_settings || {};
+  const t = f.tenants || {};
 
   const session: Record<string, unknown> = {
     token: googleAccessToken,
@@ -305,6 +306,14 @@ function buildSession(opts: {
     email: userInfo.email,
     role: profile.role || "owner",
     franchiseID: f.external_id || null,
+    franchiseInternalID: profile.franchise_id || null,
+    tenantID: t.id || null,
+    // Per-capability provider seam (CL-SPEC-001 §3). Default to vonigo so any tenant
+    // missing the columns (pre-migration / stale cache) keeps current behavior; new
+    // self-serve tenants carry their own native defaults from the DB.
+    pricingSource: t.pricing_source || "vonigo",
+    customerSource: t.customer_source || "vonigo",
+    submissionTarget: t.submission_target || "vonigo",
     franchiseName: f.franchise_name || null,
     subscriptionStatus: f.subscription_tier ||
       f.tenants?.subscription_status ||

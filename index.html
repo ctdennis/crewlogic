@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.10.5 | 2026-05-29">
+  <meta name="crewlogic-version" content="v5.11.0 | 2026-05-29">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3727,6 +3727,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           tenantID: '946a4535-aa61-45b6-a6fb-9190ff546d41',
           franchiseName: 'Dev Vonigo (90)',
           pricingSource: 'vonigo',
+          customerSource: 'vonigo',
+          submissionTarget: 'vonigo',
           subscriptionStatus: 'tester',
           subscriptionTier: 'tester',
           vonigoConfigured: false,
@@ -3742,6 +3744,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           tenantID: '11111111-1111-1111-1111-111111111111',
           franchiseName: 'Dev Standalone Co',
           pricingSource: 'native',
+          customerSource: 'native',
+          submissionTarget: 'none',
           subscriptionStatus: 'tester',
           subscriptionTier: 'tester',
           costSettings: {}
@@ -7764,8 +7768,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       // If already submitted to Vonigo, disable submit button
       const submitBtn = document.getElementById('estSubmitBtn');
-      // No-CRM tenants finalize via the PDF proposal, not Vonigo — hide the submit button.
-      if (submitBtn) submitBtn.style.display = (currentUser.pricingSource === 'native') ? 'none' : '';
+      // Submit-to-CRM visibility keys on the SUBMISSION capability (seam), not pricing.
+      // Hide ONLY when submission_target is explicitly 'none' — so a stale session missing the
+      // flag (undefined) still shows the button for existing Vonigo users (cache-safe).
+      if (submitBtn) submitBtn.style.display = (currentUser.submissionTarget === 'none') ? 'none' : '';
       const feedbackEl = document.getElementById('estFeedback');
       // vonigoQuoteID comes ONLY from the row-level column — never from nested payload
       // Clones always have null here; only submitted originals have a value
