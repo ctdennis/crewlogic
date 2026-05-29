@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.11.4 | 2026-05-29">
+  <meta name="crewlogic-version" content="v5.12.0 | 2026-05-29">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1052,6 +1052,14 @@
 
       <div id="loginSpinner" style="display:none;width:20px;height:20px;border:2px solid #2d4050;border-top-color:#4ade80;border-radius:50%;animation:spin 0.7s linear infinite;"></div>
       <div id="loginStatus" style="font-size:13px;color:var(--text-muted);text-align:center;min-height:20px;"></div>
+
+      <!-- Native email (magic-link) sign-in — Phase 2. Hidden by default; revealed on dev hosts
+           during build (showLogin), and for everyone once Phase 2 is promoted. -->
+      <div id="emailSignInWrap" style="display:none;flex-direction:column;gap:8px;margin-top:18px;width:100%;max-width:280px;">
+        <div style="font-size:11px;color:var(--text-muted);text-align:center;">or sign in with email</div>
+        <input type="email" id="magicLinkEmail" class="form-input" placeholder="you@company.com" inputmode="email" autocomplete="email" style="text-align:center;" onkeydown="if(event.key==='Enter')sendMagicLink()">
+        <button id="magicLinkBtn" onclick="sendMagicLink()" style="padding:10px 16px;background:var(--bg-card);color:var(--accent-green);border:1px solid var(--accent-green);border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">Email me a sign-in link</button>
+      </div>
     </div>
   </div>
 
@@ -3682,6 +3690,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         storage.remove(SESSION_KEY);
       }
 
+      // Phase 2: native (Supabase Auth) sign-in. If a magic link just landed, supabase-js has
+      // auto-detected the token and created a session — build our standard currentUser from it.
+      try {
+        const { data: { session: sbSession } } = await supabaseClient.auth.getSession();
+        if (sbSession && sbSession.user && sbSession.user.email) {
+          const built = await buildSessionFromSupabaseAuth(sbSession.user.email);
+          if (built) {
+            currentUser = built;
+            storage.set(SESSION_KEY, JSON.stringify(currentUser));
+            history.replaceState(null, '', window.location.pathname);  // strip the #access_token hash
+            showApp();
+            return;
+          }
+          // Authenticated but no profile yet → (invite-provisioning increment handles this next).
+          showAuthErrorScreen('no_account');
+          return;
+        }
+      } catch (e) { /* no supabase session — fall through to login */ }
+
       // Show login
       showLogin();
     }
@@ -3690,6 +3717,58 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.getElementById('loginScreen').style.display = 'flex';
       document.getElementById('appShell').classList.remove('active');
       injectDevSignIn();
+      // Phase 2 (native email sign-in): reveal on dev hosts during build; ungate for prod at promotion.
+      const _emailWrap = document.getElementById('emailSignInWrap');
+      if (_emailWrap && IS_DEV_ENV) _emailWrap.style.display = 'flex';
+    }
+
+    // Phase 2: send a magic-link sign-in email (native owners) via Supabase Auth.
+    async function sendMagicLink() {
+      const email = (document.getElementById('magicLinkEmail')?.value || '').trim();
+      const statusEl = document.getElementById('loginStatus');
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+        if (statusEl) { statusEl.textContent = 'Enter a valid email.'; statusEl.style.color = '#ef4444'; }
+        return;
+      }
+      if (statusEl) { statusEl.textContent = 'Sending sign-in link…'; statusEl.style.color = '#94a3b8'; }
+      try {
+        const { error } = await supabaseClient.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } });
+        if (error) throw error;
+        if (statusEl) { statusEl.textContent = '✓ Check your email for a sign-in link.'; statusEl.style.color = '#4ade80'; }
+      } catch (e) {
+        if (statusEl) { statusEl.textContent = 'Could not send link: ' + (e.message || 'error'); statusEl.style.color = '#ef4444'; }
+      }
+    }
+
+    // Phase 2: build the standard currentUser session (same shape as the OAuth callback) from
+    // a Supabase-Auth-authenticated email, by reading profile→franchise→tenant (incl. the
+    // per-capability provider flags). Returns null if no profile exists for that email.
+    async function buildSessionFromSupabaseAuth(email) {
+      const rows = await supabaseFetch('/rest/v1/profiles?select=role,franchise_id,name,franchises(external_id,franchise_name,cost_settings,subscription_tier,vonigo_configured,tenants(id,subscription_status,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(email));
+      const p = rows && rows[0];
+      if (!p) return null;
+      const f = p.franchises || {};
+      const t = f.tenants || {};
+      const cs = f.cost_settings || {};
+      return {
+        email,
+        name: p.name || email,
+        role: p.role || 'owner',
+        franchiseID: f.external_id || null,
+        franchiseInternalID: p.franchise_id || null,
+        tenantID: t.id || null,
+        franchiseName: f.franchise_name || null,
+        pricingSource: t.pricing_source || 'vonigo',
+        customerSource: t.customer_source || 'vonigo',
+        submissionTarget: t.submission_target || 'vonigo',
+        subscriptionStatus: f.subscription_tier || t.subscription_status || 'trialing',
+        subscriptionTier: f.subscription_tier || null,
+        vonigoConfigured: f.vonigo_configured || false,
+        costSettings: cs,
+        phone: cs.phone || '', website: cs.website || '',
+        officeAddress: cs.officeAddress || '', officeCity: cs.officeCity || '',
+        officeState: cs.officeState || '', officeZip: cs.officeZip || ''
+      };
     }
 
     // Dev-only login bypass — injected only on dev hosts (IS_DEV_ENV). Sets a seeded
