@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.10.4 | 2026-05-28">
+  <meta name="crewlogic-version" content="v5.10.5 | 2026-05-29">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7193,7 +7193,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       filtered.forEach(function(est) {
         const status = est.status || 'draft';
         const updated = est.updatedAt ? new Date(est.updatedAt).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : '';
-        const trucks = parseFloat(est.totalTrucks) || 0;
+        const trucks = billedTruckTotal(est.totalTrucks, !!est.splitPricing);
         const price = parseFloat(est.totalPrice) || 0;
         const eid = String(est.estimateID);
         const coverRaw = est.coverPhoto || '';
@@ -10108,6 +10108,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return { total, fullRate, lines };
     }
 
+    // The truck quantity actually BILLED (and shown to the customer). In split mode the
+    // fractional remainder is snapped to its price tier — so e.g. Minimum(1/16)+1/8+1/4 =
+    // 0.438 raw bills at the 1/2 tier and must DISPLAY as 0.5, matching the price. In
+    // non-split mode the raw total is what's multiplied by the full rate, so show it as-is.
+    // NOTE: this is display-only — pricing still uses the raw sum (currentEstimate.totalTrucks).
+    function billedTruckTotal(rawTotal, splitOn) {
+      rawTotal = parseFloat(rawTotal) || 0;
+      if (!splitOn || rawTotal <= 0) return rawTotal;
+      const whole = Math.floor(rawTotal);
+      const partial = Math.round((rawTotal - whole) * 1000) / 1000;
+      return whole + (partial > 0 ? roundToNearestVolumeTier(partial) : 0);
+    }
+
     // ===== TOTALS =====
     function updateTotals() {
       const charges = currentEstimate.charges || [];
@@ -10119,7 +10132,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       currentEstimate.totalTrucks = Math.round(totalTrucks * 1000) / 1000;
 
       const volDisplay = document.getElementById('estVolumeTotalDisplay');
-      if (volDisplay) volDisplay.textContent = currentEstimate.totalTrucks.toFixed(3) + ' trucks';
+      // Show the BILLED truck total (snapped to the price tier), not the raw arithmetic sum.
+      if (volDisplay) volDisplay.textContent = billedTruckTotal(currentEstimate.totalTrucks, !!currentEstimate.splitPricing).toFixed(3) + ' trucks';
 
       // Calculate volume price based on split toggle
       const splitOn = !!currentEstimate.splitPricing;
@@ -12730,8 +12744,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
       doc.text('Total Volume (trucks)', col.area, y + 13);
-      doc.text((totalTrucks * truckCapacityCY()).toFixed(1), col.cy, y + 13, { align: 'right' });
-      doc.text(totalTrucks.toFixed(3), col.trucks, y + 13, { align: 'right' });
+      const pdfBilledTrucks = billedTruckTotal(totalTrucks, pdfSplit);
+      doc.text((pdfBilledTrucks * truckCapacityCY()).toFixed(1), col.cy, y + 13, { align: 'right' });
+      doc.text(pdfBilledTrucks.toFixed(3), col.trucks, y + 13, { align: 'right' });
       if (!hasRealSplit) {
         // Single tier — use the actual rate for this fraction, not full truck price
         const singleRate = (pdfVolumeLines && pdfVolumeLines.length === 1)
@@ -13132,8 +13147,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
       doc.text('Total Volume', dc.room, y + 17);
-      doc.text(totalTrucks.toFixed(3), dc.vol, y + 17, { align: 'right' });
-      doc.text((totalTrucks * truckCapacityCY()).toFixed(1), dc.cy, y + 17, { align: 'right' });
+      const pdfBilledTrucks2 = billedTruckTotal(totalTrucks, pdfSplit);
+      doc.text(pdfBilledTrucks2.toFixed(3), dc.vol, y + 17, { align: 'right' });
+      doc.text((pdfBilledTrucks2 * truckCapacityCY()).toFixed(1), dc.cy, y + 17, { align: 'right' });
 
       // Footer
       doc.setDrawColor(...lightgray);
