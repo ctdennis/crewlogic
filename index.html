@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.12.0 | 2026-05-29">
+  <meta name="crewlogic-version" content="v5.12.1 | 2026-05-29">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1089,6 +1089,12 @@
           </svg>
           Continue with Google
         </button>
+        <!-- Phase 2: native (no-Google) accept via email magic link. -->
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;">
+          <div style="font-size:11px;color:var(--text-muted);text-align:center;">or accept with email</div>
+          <input type="email" id="inviteEmail" class="form-input" placeholder="you@company.com" inputmode="email" autocomplete="email" onkeydown="if(event.key==='Enter')acceptInviteWithEmail()">
+          <button onclick="acceptInviteWithEmail()" style="width:100%;padding:10px 20px;background:var(--bg-card);color:var(--accent-green);border:1px solid var(--accent-green);border-radius:var(--radius-sm);font-size:14px;font-weight:600;cursor:pointer;">Email me a sign-in link</button>
+        </div>
       </div>
 
       <div id="inviteStatus" style="font-size:13px;color:var(--text-muted);text-align:center;"></div>
@@ -3695,7 +3701,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       try {
         const { data: { session: sbSession } } = await supabaseClient.auth.getSession();
         if (sbSession && sbSession.user && sbSession.user.email) {
-          const built = await buildSessionFromSupabaseAuth(sbSession.user.email);
+          let built = await buildSessionFromSupabaseAuth(sbSession.user.email);
+          // No profile yet, but there's a pending invite → provision via the edge function
+          // (service role), passing the USER's access token so it can verify who's accepting.
+          if (!built) {
+            const pendingToken = storage.get('pending_invite_token');
+            if (pendingToken) {
+              try {
+                const res = await fetch(EDGE_BASE + '/crewlogic-accept-invite', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'apikey': EDGE_ANON_KEY, 'Authorization': 'Bearer ' + sbSession.access_token },
+                  body: JSON.stringify({ inviteToken: pendingToken })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (data && data.success) {
+                  storage.remove('pending_invite_token');
+                  storage.remove('pending_invite_id');
+                  storage.remove('pending_invite_franchise_id');
+                  storage.remove('pending_invite_role');
+                  built = await buildSessionFromSupabaseAuth(sbSession.user.email);
+                }
+              } catch (e) { /* provisioning failed — fall through to no_account */ }
+            }
+          }
           if (built) {
             currentUser = built;
             storage.set(SESSION_KEY, JSON.stringify(currentUser));
@@ -3703,7 +3731,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             showApp();
             return;
           }
-          // Authenticated but no profile yet → (invite-provisioning increment handles this next).
+          // Authenticated but no profile and no usable invite.
           showAuthErrorScreen('no_account');
           return;
         }
@@ -4930,6 +4958,28 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Pass invite token through OAuth state so it survives the redirect
       const token = storage.get('pending_invite_token');
       triggerGoogleSignIn(token);
+    }
+
+    // Phase 2: accept an invite via email magic link (native owners, no Google). The pending
+    // invite token is already in storage (checkInviteToken); after the magic-link returns,
+    // initAuth provisions the profile via crewlogic-accept-invite using that token.
+    async function acceptInviteWithEmail() {
+      const email = (document.getElementById('inviteEmail')?.value || '').trim();
+      const nameInput = document.getElementById('inviteName');
+      const statusEl = document.getElementById('inviteStatus');
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+        if (statusEl) { statusEl.textContent = 'Enter a valid email.'; statusEl.style.color = 'var(--accent-red)'; }
+        return;
+      }
+      if (nameInput && nameInput.value.trim()) storage.set('pending_invite_name', nameInput.value.trim());
+      if (statusEl) { statusEl.textContent = 'Sending sign-in link…'; statusEl.style.color = 'var(--text-muted)'; }
+      try {
+        const { error } = await supabaseClient.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } });
+        if (error) throw error;
+        if (statusEl) { statusEl.textContent = '✓ Check your email for a sign-in link to finish joining.'; statusEl.style.color = 'var(--accent-green)'; }
+      } catch (e) {
+        if (statusEl) { statusEl.textContent = 'Could not send link: ' + (e.message || 'error'); statusEl.style.color = 'var(--accent-red)'; }
+      }
     }
 
     async function processPendingInvite(userEmail, userName) {
