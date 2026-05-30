@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.13.4 | 2026-05-30">
+  <meta name="crewlogic-version" content="v5.14.0 | 2026-05-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4691,16 +4691,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       feedback.textContent = 'Generating...';
       panel.style.display = 'block';
 
-      // Get franchise uuid from Supabase
-      const franchises = await supabaseFetch(
-        '/rest/v1/franchises?select=id&external_id=eq.' + currentUser.franchiseID + '&tenant_id=eq.946a4535-aa61-45b6-a6fb-9190ff546d41'
-      );
-      if (!franchises || !franchises[0]) {
+      // Resolve franchise UUID — getFranchiseUUID() prefers the session's franchiseInternalID,
+      // so this works for native tenants too (the old inline query was Junkluggers-tenant-scoped).
+      const franchiseUUID = await getFranchiseUUID();
+      if (!franchiseUUID) {
         feedback.textContent = 'Error: franchise not found';
         feedback.style.color = 'var(--accent-red)';
         return;
       }
-      const franchiseUUID = franchises[0].id;
 
       // Find inviter profile
       const profiles = await supabaseFetch('/rest/v1/profiles?select=id&email=eq.' + encodeURIComponent(currentUser.email));
@@ -4826,11 +4824,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const listEl = document.getElementById('teamMembersList');
       if (!listEl) return;
 
-      const franchises = await supabaseFetch(
-        '/rest/v1/franchises?select=id&external_id=eq.' + currentUser.franchiseID + '&tenant_id=eq.946a4535-aa61-45b6-a6fb-9190ff546d41'
-      );
-      if (!franchises || !franchises[0]) { listEl.textContent = 'Could not load team.'; return; }
-      const franchiseUUID = franchises[0].id;
+      // getFranchiseUUID() resolves via the session's franchiseInternalID, so the team list
+      // loads for native tenants too (not just the Junkluggers-tenant-scoped fallback).
+      const franchiseUUID = await getFranchiseUUID();
+      if (!franchiseUUID) { listEl.textContent = 'Could not load team.'; return; }
 
       const members = await supabaseFetch(
         '/rest/v1/profiles?select=name,email,role,created_at&franchise_id=eq.' + franchiseUUID + '&order=created_at.asc'
@@ -18901,7 +18898,7 @@ Please review the estimate below. If you have any questions or would like to adj
             '<input type="tel" class="form-input" id="crewPhone" placeholder="Phone (optional, for owner reference)" style="font-size:13px;margin-bottom:10px;">' +
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
               '<button onclick="cancelCrewAdd()" style="padding:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-muted);cursor:pointer;">Cancel</button>' +
-              '<button onclick="addCrewMember()" style="padding:12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;color:#000;cursor:pointer;">Save & Invite</button>' +
+              '<button onclick="addCrewMember()" style="padding:12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;color:#000;cursor:pointer;">Save</button>' +
             '</div>' +
             '<div id="crewMgmtFeedback" style="font-size:12px;margin-top:8px;min-height:16px;text-align:center;"></div>' +
           '</div>';
@@ -18913,22 +18910,13 @@ Please review the estimate below. If you have any questions or would like to adj
     // Build a single crew member row for the management list
     function crewRowHtml(c) {
       const isActive = c.status === 'active';
-      // Status badge logic: Inactive > Active+Signed-In > Invite Sent > Not Invited
-      let statusBadge;
-      if (!isActive) {
-        statusBadge = '<span style="background:rgba(239,68,68,0.15);color:#ef4444;padding:2px 7px;border-radius:99px;font-size:10px;">INACTIVE</span>';
-      } else if (c.invite_redeemed_at) {
-        statusBadge = '<span style="background:rgba(0,238,118,0.15);color:var(--accent-green);padding:2px 7px;border-radius:99px;font-size:10px;">ACTIVE</span>';
-      } else if (c.invite_sent_at) {
-        statusBadge = '<span style="background:rgba(168,85,247,0.15);color:#c084fc;padding:2px 7px;border-radius:99px;font-size:10px;">INVITE SENT</span>';
-      } else {
-        statusBadge = '<span style="background:var(--bg-input);color:var(--text-muted);padding:2px 7px;border-radius:99px;font-size:10px;">NOT INVITED</span>';
-      }
-      // Action buttons
-      const inviteBtnLabel = c.invite_sent_at ? 'Resend invite' : 'Send invite';
-      const inviteBtn = isActive
-        ? '<button onclick="inviteCrew(\'' + c.id + '\')" style="padding:4px 10px;background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px;color:var(--accent-green);cursor:pointer;">' + inviteBtnLabel + '</button>'
-        : '';
+      // Roster status is simply active/inactive (app-access invites live in Team Members).
+      const statusBadge = isActive
+        ? '<span style="background:rgba(0,238,118,0.15);color:var(--accent-green);padding:2px 7px;border-radius:99px;font-size:10px;">ACTIVE</span>'
+        : '<span style="background:rgba(239,68,68,0.15);color:#ef4444;padding:2px 7px;border-radius:99px;font-size:10px;">INACTIVE</span>';
+      // Action buttons. NOTE: app-access invites are issued from Settings → Team Members
+      // ("+ Invite"), the single unified invite path. This roster is the field crew for the
+      // yard-signs game; it intentionally has no "invite to app" button.
       const toggleBtn = '<button onclick="toggleCrewStatus(\'' + c.id + '\',\'' + (isActive ? 'inactive' : 'active') + '\')" style="padding:4px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px;color:' + (isActive ? 'var(--text-muted)' : 'var(--accent-green)') + ';cursor:pointer;">' + (isActive ? 'Deactivate' : 'Reactivate') + '</button>';
       const deleteBtn = '<button onclick="deleteCrewMember(\'' + c.id + '\')" style="padding:4px 8px;background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px;color:#ef4444;cursor:pointer;">✕</button>';
 
@@ -18941,7 +18929,7 @@ Please review the estimate below. If you have any questions or would like to adj
             statusBadge +
           '</div>' +
           '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">' +
-            inviteBtn + toggleBtn + deleteBtn +
+            toggleBtn + deleteBtn +
           '</div>' +
         '</div>';
     }
@@ -18972,12 +18960,9 @@ Please review the estimate below. If you have any questions or would like to adj
           headers: { 'Prefer': 'return=representation' },
           body: JSON.stringify({ franchise_id: franchiseUUID, first_name: fn, last_name: ln, email, phone: phone || null, status: 'active' })
         });
-        const newCrew = Array.isArray(created) ? created[0] : created;
         fb.style.color = 'var(--accent-green)';
-        fb.textContent = '✓ Added — generating invite link...';
-        // Auto-trigger invite flow for the new crew
-        await inviteCrew(newCrew.id);
-        // After invite shown, refresh list
+        fb.textContent = '✓ Added to crew roster.';
+        // Refresh list. App-access invites are issued separately from Settings → Team Members.
         openMgmtTab('crew');
       } catch(e) {
         fb.style.color = '#ef4444';
@@ -18985,83 +18970,9 @@ Please review the estimate below. If you have any questions or would like to adj
       }
     }
 
-    // Generate magic-link invite for a crew member, then show share sheet
-    async function inviteCrew(crewMemberId) {
-      const url = EDGE_BASE + '/crewlogic-ai';
-      const SUPABASE_ANON_KEY = EDGE_ANON_KEY;
-      try {
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
-            'apikey': SUPABASE_ANON_KEY
-          },
-          body: JSON.stringify({
-            action: 'inviteCrew',
-            crewMemberId,
-            redirectTo: 'https://crewlogicai.com/'
-          })
-        });
-        const data = await res.json();
-        if (!data.success || !data.inviteLink) {
-          alert('Failed to generate invite: ' + (data.error || 'unknown error'));
-          return;
-        }
-        showInviteShareSheet(data.crewName, data.email, data.inviteLink);
-      } catch(e) {
-        alert('Failed to generate invite: ' + (e.message || e));
-      }
-    }
-    window.inviteCrew = inviteCrew;
-
-    function showInviteShareSheet(crewName, email, inviteLink) {
-      const overlay = document.createElement('div');
-      overlay.id = 'inviteShareOverlay';
-      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:flex-end;justify-content:center;';
-      overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
-
-      const message = 'Hi ' + crewName.split(' ')[0] + '! Tap this link to set up CrewLogic on your phone:\n\n' + inviteLink;
-      const waUrl = 'https://wa.me/?text=' + encodeURIComponent(message);
-      const smsUrl = 'sms:?body=' + encodeURIComponent(message);
-
-      overlay.innerHTML =
-        '<div style="background:var(--bg-card);border-top:1px solid var(--border);border-radius:var(--radius-md) var(--radius-md) 0 0;padding:20px 16px;width:100%;max-width:480px;max-height:80vh;overflow-y:auto;">' +
-          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
-            '<div style="font-size:14px;font-weight:700;">Send invite to ' + escapeHtml(crewName) + '</div>' +
-            '<button onclick="document.getElementById(\'inviteShareOverlay\').remove()" style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;">✕</button>' +
-          '</div>' +
-          '<div style="font-size:11px;color:var(--text-muted);margin-bottom:14px;">Sent to: ' + escapeHtml(email) + '</div>' +
-          '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">' +
-            '<button onclick="copyInviteLink(\'' + inviteLink.replace(/\'/g, "\\\'") + '\')" style="width:100%;padding:14px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#000;cursor:pointer;">📋 Copy Invite Link</button>' +
-            '<a href="' + waUrl + '" target="_blank" style="text-decoration:none;"><button style="width:100%;padding:14px;background:#25d366;border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#fff;cursor:pointer;">🟢 Send via WhatsApp</button></a>' +
-            '<a href="' + smsUrl + '" style="text-decoration:none;"><button style="width:100%;padding:14px;background:#3b82f6;border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:#fff;cursor:pointer;">💬 Send via SMS</button></a>' +
-          '</div>' +
-          '<div style="font-size:10px;color:var(--text-muted);background:var(--bg-input);padding:8px;border-radius:var(--radius-sm);word-break:break-all;font-family:monospace;">' + escapeHtml(inviteLink) + '</div>' +
-          '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;text-align:center;">Link expires in 1 hour. Resend if needed.</div>' +
-        '</div>';
-      document.body.appendChild(overlay);
-    }
-    window.showInviteShareSheet = showInviteShareSheet;
-
-    function copyInviteLink(link) {
-      // Use modern clipboard API; fallback to execCommand for older browsers
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(link).then(() => {
-          const overlay = document.getElementById('inviteShareOverlay');
-          if (overlay) {
-            const toast = document.createElement('div');
-            toast.style.cssText = 'position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:var(--accent-green);color:#000;padding:10px 20px;border-radius:99px;font-size:13px;font-weight:700;z-index:10000;';
-            toast.textContent = '✓ Link copied';
-            document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 1500);
-          }
-        }).catch(() => alert('Could not copy. Long-press the link below to copy manually.'));
-      } else {
-        alert('Long-press the link below to copy manually.');
-      }
-    }
-    window.copyInviteLink = copyInviteLink;
+    // NOTE: the legacy per-crew "invite to app" share sheet (inviteCrew / showInviteShareSheet,
+    // which called the nonexistent crewlogic-ai:inviteCrew action) was removed. App-access
+    // invites are issued from Settings → Team Members ("+ Invite"), the single unified path.
 
     async function toggleCrewStatus(id, newStatus) {
       try {
