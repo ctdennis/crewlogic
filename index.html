@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.14.0 | 2026-05-30">
+  <meta name="crewlogic-version" content="v5.15.0 | 2026-05-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1059,6 +1059,25 @@
         <div style="font-size:11px;color:var(--text-muted);text-align:center;">or sign in with email</div>
         <input type="email" id="magicLinkEmail" class="form-input" placeholder="you@company.com" inputmode="email" autocomplete="email" style="text-align:center;" onkeydown="if(event.key==='Enter')sendMagicLink()">
         <button id="magicLinkBtn" onclick="sendMagicLink()" style="padding:10px 16px;background:var(--bg-card);color:var(--accent-green);border:1px solid var(--accent-green);border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">Email me a sign-in link</button>
+      </div>
+
+      <!-- Self-serve workspace signup — Phase 2 (dev-gated until promotion). Email-first: detect
+           the domain, then route junkluggers.com → Vonigo sign-in vs other → native onboarding. -->
+      <div id="signupEntry" style="display:none;margin-top:16px;text-align:center;">
+        <button onclick="showSignup()" style="background:none;border:none;color:var(--accent-green);font-size:13px;font-weight:600;cursor:pointer;text-decoration:underline;">New here? Create a workspace →</button>
+      </div>
+      <div id="signupWrap" style="display:none;flex-direction:column;gap:8px;margin-top:14px;width:100%;max-width:300px;">
+        <div style="font-size:14px;font-weight:700;color:var(--text-primary);text-align:center;">Create your workspace</div>
+        <input type="email" id="signupEmail" class="form-input" placeholder="Work email" inputmode="email" autocomplete="email" oninput="signupDetectDomain()" style="text-align:center;">
+        <div id="signupJunkluggersHint" style="display:none;font-size:11px;color:var(--accent-yellow,#f59e0b);text-align:center;line-height:1.4;">Junkluggers account detected — use <strong>Sign in with Google</strong> above to access Vonigo.</div>
+        <div id="signupNativeFields" style="display:none;flex-direction:column;gap:8px;">
+          <input type="text" id="signupCompany" class="form-input" placeholder="Company name" style="text-align:center;">
+          <input type="text" id="signupName" class="form-input" placeholder="Your name (optional)" autocomplete="name" style="text-align:center;">
+          <button onclick="signupWithGoogle()" style="padding:11px 16px;background:#fff;color:#1f2937;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">Continue with Google</button>
+          <button onclick="signupWithEmail()" style="padding:11px 16px;background:var(--bg-card);color:var(--accent-green);border:1px solid var(--accent-green);border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">Email me a sign-in link</button>
+        </div>
+        <div id="signupStatus" style="font-size:12px;text-align:center;min-height:16px;color:var(--text-muted);"></div>
+        <button onclick="hideSignup()" style="background:none;border:none;color:var(--text-muted);font-size:11px;cursor:pointer;">Cancel</button>
       </div>
     </div>
   </div>
@@ -3599,9 +3618,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const hasInvite = await checkInviteToken();
       if (hasInvite) return;
 
-      // Phase 2: an active invite acceptance (pending token + a Supabase Auth session from the
-      // magic link) must win over any stale cached session — handle it before the cached restore.
-      if (storage.get('pending_invite_token') && await resumeNativeSession()) return;
+      // Phase 2: an active invite acceptance OR a self-serve signup (pending intent + a Supabase
+      // Auth session from the magic link) must win over any stale cached session — handle it
+      // before the cached restore.
+      if ((storage.get('pending_invite_token') || storage.get('pending_signup') === '1') && await resumeNativeSession()) return;
 
       // Check if returning from OAuth callback with session in query param or hash
       const _sessionParam = new URLSearchParams(window.location.search).get('session');
@@ -3764,6 +3784,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                 built = await buildSessionFromSupabaseAuth(sbSession.user.email);
               }
             } catch (e) { /* fall through to no_account */ }
+          } else if (storage.get('pending_signup') === '1') {
+            // Self-serve native signup (magic-link path) — provision via crewlogic-signup.
+            try {
+              const res = await fetch(EDGE_BASE + '/crewlogic-signup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'apikey': EDGE_ANON_KEY, 'Authorization': 'Bearer ' + sbSession.access_token },
+                body: JSON.stringify({ companyName: storage.get('pending_signup_company') || '' })
+              });
+              const data = await res.json().catch(() => ({}));
+              if (data && data.success) {
+                ['pending_signup','pending_signup_company','pending_signup_name'].forEach(k => storage.remove(k));
+                built = await buildSessionFromSupabaseAuth(sbSession.user.email);
+              }
+            } catch (e) { /* fall through to no_account */ }
           }
         }
         if (built) {
@@ -3785,6 +3819,88 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Phase 2 (native email sign-in): reveal on dev hosts during build; ungate for prod at promotion.
       const _emailWrap = document.getElementById('emailSignInWrap');
       if (_emailWrap && IS_DEV_ENV) _emailWrap.style.display = 'flex';
+      // Phase 2 (self-serve signup): same dev gate. Reset the panel to its collapsed state.
+      const _signupEntry = document.getElementById('signupEntry');
+      if (_signupEntry && IS_DEV_ENV) _signupEntry.style.display = 'block';
+      hideSignup();
+    }
+
+    // ===== SELF-SERVE WORKSPACE SIGNUP (Phase 2) =====
+    function _isJunkluggersEmail(email) {
+      return /@junkluggers\.com$/i.test((email || '').trim());
+    }
+    function _validEmail(email) {
+      return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test((email || '').trim());
+    }
+    function showSignup() {
+      const entry = document.getElementById('signupEntry');
+      const wrap = document.getElementById('signupWrap');
+      if (entry) entry.style.display = 'none';
+      if (wrap) wrap.style.display = 'flex';
+      const em = document.getElementById('signupEmail');
+      if (em) setTimeout(() => em.focus(), 50);
+    }
+    function hideSignup() {
+      const entry = document.getElementById('signupEntry');
+      const wrap = document.getElementById('signupWrap');
+      if (wrap) wrap.style.display = 'none';
+      if (entry && IS_DEV_ENV) entry.style.display = 'block';
+      const st = document.getElementById('signupStatus');
+      if (st) st.textContent = '';
+      const nf = document.getElementById('signupNativeFields');
+      if (nf) nf.style.display = 'none';
+      const jh = document.getElementById('signupJunkluggersHint');
+      if (jh) jh.style.display = 'none';
+    }
+    // Detect the domain as they type: junkluggers.com → point them at the Vonigo Google button;
+    // any other valid domain → reveal the native company/name fields + provider buttons.
+    function signupDetectDomain() {
+      const email = (document.getElementById('signupEmail')?.value || '').trim();
+      const jh = document.getElementById('signupJunkluggersHint');
+      const nf = document.getElementById('signupNativeFields');
+      const isJL = _isJunkluggersEmail(email);
+      const hasDomain = _validEmail(email);
+      if (jh) jh.style.display = isJL ? 'block' : 'none';
+      if (nf) nf.style.display = (hasDomain && !isJL) ? 'flex' : 'none';
+    }
+    // Native self-serve signup via Google: stash the signup intent (company/name) so
+    // triggerGoogleSignIn rides it in the OAuth state (no hd restriction), then redirect.
+    function signupWithGoogle() {
+      const email = (document.getElementById('signupEmail')?.value || '').trim();
+      const company = (document.getElementById('signupCompany')?.value || '').trim();
+      const name = (document.getElementById('signupName')?.value || '').trim();
+      const st = document.getElementById('signupStatus');
+      const fail = (m) => { if (st) { st.textContent = m; st.style.color = '#ef4444'; } };
+      if (!_validEmail(email)) return fail('Enter a valid email.');
+      if (_isJunkluggersEmail(email)) return fail('Junkluggers? Use “Sign in with Google” above.');
+      if (!company) return fail('Enter a company name.');
+      storage.set('pending_signup', '1');
+      storage.set('pending_signup_company', company);
+      if (name) storage.set('pending_signup_name', name); else storage.remove('pending_signup_name');
+      triggerGoogleSignIn();
+    }
+    // Native self-serve signup via magic link: stash the intent, send the OTP. On return,
+    // resumeNativeSession() calls crewlogic-signup to provision.
+    async function signupWithEmail() {
+      const email = (document.getElementById('signupEmail')?.value || '').trim();
+      const company = (document.getElementById('signupCompany')?.value || '').trim();
+      const name = (document.getElementById('signupName')?.value || '').trim();
+      const st = document.getElementById('signupStatus');
+      const fail = (m) => { if (st) { st.textContent = m; st.style.color = '#ef4444'; } };
+      if (!_validEmail(email)) return fail('Enter a valid email.');
+      if (_isJunkluggersEmail(email)) return fail('Junkluggers? Use “Sign in with Google” above.');
+      if (!company) return fail('Enter a company name.');
+      storage.set('pending_signup', '1');
+      storage.set('pending_signup_company', company);
+      if (name) storage.set('pending_signup_name', name); else storage.remove('pending_signup_name');
+      if (st) { st.textContent = 'Sending sign-in link…'; st.style.color = '#94a3b8'; }
+      try {
+        const { error } = await supabaseClient.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } });
+        if (error) throw error;
+        if (st) { st.textContent = '✓ Check your email for a sign-in link to finish.'; st.style.color = '#4ade80'; }
+      } catch (e) {
+        fail('Could not send link: ' + (e.message || 'error'));
+      }
     }
 
     // Phase 2: send a magic-link sign-in email (native owners) via Supabase Auth.
@@ -3914,27 +4030,33 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         prompt: 'select_account'
       };
 
-      // Only restrict to junkluggers.com if not an invite flow
+      // Restrict to junkluggers.com ONLY for the plain (non-invite, non-signup) sign-in. Both the
+      // invite-accept and self-serve native-signup flows must accept any Google domain.
       const pendingToken = inviteToken || storage.get('pending_invite_token');
-      if (!pendingToken) {
+      const isSignup = !pendingToken && storage.get('pending_signup') === '1';
+      if (!pendingToken && !isSignup) {
         oauthParams.hd = 'junkluggers.com';
       }
 
-      // Pass invite token through OAuth state parameter so it survives redirect.
-      // New native workspace (company name present) → "inviteN:" + URL-safe base64 of {t,c} so the
-      // server-side callback can name the franchise (it can't read localStorage). Otherwise the
-      // existing "invite:" + token form (team-member / existing-franchise invites), unchanged.
+      // Pass intent through the OAuth state parameter so it survives the redirect (the callback
+      // can't read localStorage):
+      //   "invite:<token>"        team-member / existing-franchise invite
+      //   "inviteN:<b64url{t,c,n}>" new native workspace via invite (company name)
+      //   "signupN:<b64url{c,n}>"   self-serve native signup, no invite (company name)
+      const _b64url = (obj) => btoa(unescape(encodeURIComponent(JSON.stringify(obj))))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
       if (pendingToken) {
         const co = (storage.get('pending_invite_company') || '').trim();
         if (co) {
           const nm = (storage.get('pending_invite_name') || '').trim();
-          const json = JSON.stringify({ t: pendingToken, c: co, n: nm || undefined });
-          const b64 = btoa(unescape(encodeURIComponent(json)))
-            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-          oauthParams.state = 'inviteN:' + b64;
+          oauthParams.state = 'inviteN:' + _b64url({ t: pendingToken, c: co, n: nm || undefined });
         } else {
           oauthParams.state = 'invite:' + pendingToken;
         }
+      } else if (isSignup) {
+        const co = (storage.get('pending_signup_company') || '').trim();
+        const nm = (storage.get('pending_signup_name') || '').trim();
+        oauthParams.state = 'signupN:' + _b64url({ c: co, n: nm || undefined });
       }
 
       const params = new URLSearchParams(oauthParams);

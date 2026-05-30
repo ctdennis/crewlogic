@@ -95,6 +95,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     let inviteToken: string | null = null;
     let inviteCompany: string | null = null;
     let inviteName: string | null = null;
+    // Self-serve native signup (no invite). "signupN:" + base64url{c:company, n:name}. The
+    // company name can only reach this server-side callback via state, same as inviteN.
+    let isSignup = false;
+    let signupCompany: string | null = null;
+    let signupName: string | null = null;
     if (state.startsWith("invite:")) {
       inviteToken = state.slice(7);
     } else if (state.startsWith("inviteN:")) {
@@ -105,6 +110,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
         inviteName = (payload && payload.n) ? String(payload.n).trim() : null;
       } catch (e) {
         console.error("inviteN state decode failed:", e);
+      }
+    } else if (state.startsWith("signupN:")) {
+      try {
+        const payload = JSON.parse(b64urlDecode(state.slice(8)));
+        isSignup = true;
+        signupCompany = (payload && payload.c) ? String(payload.c).trim() : null;
+        signupName = (payload && payload.n) ? String(payload.n).trim() : null;
+      } catch (e) {
+        console.error("signupN state decode failed:", e);
       }
     }
 
@@ -126,10 +140,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
         return redirectError(provResult.error, userInfo.email);
       }
       resolvedProfile = provResult.profile;
+    } else if (!resolvedProfile && isSignup) {
+      // No profile + self-serve signup intent → provision a brand-new native workspace.
+      const provResult = await provisionFromSignup({
+        email: userInfo.email,
+        name: signupName || userInfo.name || null,
+        authUserId,
+        companyName: signupCompany,
+      });
+      if (provResult.error) {
+        return redirectError(provResult.error, userInfo.email);
+      }
+      resolvedProfile = provResult.profile;
     }
 
     if (!resolvedProfile) {
-      // No profile, no invite → friendly error
+      // No profile, no invite, no signup → friendly error
       return redirectError("no_account", userInfo.email);
     }
 
@@ -349,6 +375,66 @@ async function provisionFromInvite(opts: {
   // same shape it expects from a normal lookup.
   const hydrated = await lookupProfile(opts.email);
   return { profile: hydrated || inserted };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 5c: Provision a brand-new native workspace + owner profile WITHOUT an invite
+// (self-serve signup). Mirrors provisionFromInvite's native branch + profile insert, minus
+// the invite lookup/accept. The owner is role=owner. Parity with crewlogic-signup (email path).
+// ─────────────────────────────────────────────────────────────────────────────
+async function provisionFromSignup(opts: {
+  email: string;
+  name: string | null;
+  authUserId: string | null;
+  companyName: string | null;
+}): Promise<{ profile?: any; error?: string }> {
+
+  // Create tenant+franchise via the shared helper (service role — RLS blocks anon inserts on
+  // tenants/franchises). Fall back to the email domain if no company name came through.
+  let franchiseId: string;
+  try {
+    const sbAdmin = createClient(
+      Deno.env.get("SUPABASE_URL") || SUPABASE_URL,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "",
+    );
+    const r = await createNativeTenantAndFranchise(
+      sbAdmin,
+      opts.companyName || (opts.email.split("@")[1] || ""),
+    );
+    franchiseId = r.franchiseId;
+  } catch (e) {
+    console.error("Native provision (signup) failed:", e);
+    return { error: "native_provision_failed" };
+  }
+
+  // Insert the owner profile. on_conflict=email merges on the rare concurrent double-submit.
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/profiles?on_conflict=email`,
+      {
+        method: "POST",
+        headers: { ...SB_HEADERS, "Prefer": "return=representation,resolution=merge-duplicates" },
+        body: JSON.stringify({
+          id: crypto.randomUUID(),
+          auth_user_id: opts.authUserId,
+          email: opts.email,
+          name: opts.name,
+          role: "owner",
+          franchise_id: franchiseId,
+        }),
+      },
+    );
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status}: ${txt.slice(0, 300)}`);
+    }
+  } catch (e) {
+    console.error("Profile insert (signup) failed:", e);
+    return { error: "profile_create_failed" };
+  }
+
+  const hydrated = await lookupProfile(opts.email);
+  return hydrated ? { profile: hydrated } : { error: "profile_create_failed" };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
