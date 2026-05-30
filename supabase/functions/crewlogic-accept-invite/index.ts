@@ -8,6 +8,7 @@
 // Response:        { success, email, franchiseId } | { success:false, error }
 // Idempotent: if a profile already exists for the authed email, returns success without changes.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createNativeTenantAndFranchise } from "../_shared/provisionNative.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -65,16 +66,12 @@ Deno.serve(async (req: Request) => {
   let franchiseId = invite.franchise_id as string | null;
   if (!franchiseId) {
     const companyName = (String(body.companyName || "").trim()) || ((email.split("@")[1] || "My Company"));
-    const slug = companyName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "").slice(0, 40)
-      + "-" + crypto.randomUUID().slice(0, 8);
-    const { data: tenant, error: tErr } = await sb.from("tenants")
-      .insert({ name: companyName, slug, crm_type: "none" }).select("id").single();
-    if (tErr || !tenant) return json({ success: false, error: "tenant_create_failed", detail: tErr?.message }, 500);
-    const { data: fr, error: fErr } = await sb.from("franchises")
-      .insert({ tenant_id: tenant.id, external_id: "native-" + String(tenant.id).slice(0, 8), franchise_name: companyName, subscription_tier: null })
-      .select("id").single();
-    if (fErr || !fr) return json({ success: false, error: "franchise_create_failed", detail: fErr?.message }, 500);
-    franchiseId = fr.id as string;
+    try {
+      const r = await createNativeTenantAndFranchise(sb, companyName);
+      franchiseId = r.franchiseId;
+    } catch (e) {
+      return json({ success: false, error: "native_provision_failed", detail: String((e as Error).message) }, 500);
+    }
   }
 
   // 5) Create the owner profile under the resolved franchise.

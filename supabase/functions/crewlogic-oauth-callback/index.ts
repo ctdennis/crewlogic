@@ -17,15 +17,23 @@
 
 // deno-lint-ignore-file no-explicit-any
 
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createNativeTenantAndFranchise } from "../_shared/provisionNative.ts";
+
 // Set as Edge Function secrets (not committed):
 //   supabase secrets set GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=...
 const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID") || "";
 const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET") || "";
 
-const SUPABASE_URL = "https://ozfkpxyachigfpcmvekz.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8";
+// Environment-derived so the SAME file is correct on dev and prod. SUPABASE_URL and
+// SUPABASE_ANON_KEY are auto-injected by Supabase into every Edge Function (→ point at whichever
+// project this is deployed to). APP_BASE is the site we redirect back to — set the APP_BASE secret
+// on dev (= https://dev.crewlogic.pages.dev); prod has no secret and falls back to crewlogicai.com.
+// Fallbacks keep prod byte-identical to the previous hardcoded behavior.
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "https://ozfkpxyachigfpcmvekz.supabase.co";
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8";
 
-const APP_BASE = "https://crewlogicai.com";
+const APP_BASE = Deno.env.get("APP_BASE") || "https://crewlogicai.com";
 
 // This is the URL Google redirects to. MUST match (a) what the frontend sends as
 // `redirect_uri` when initiating OAuth and (b) what's listed in Google Cloud Console
@@ -79,7 +87,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // 4. Look up the user's profile in our DB
     const profile = await lookupProfile(userInfo.email);
 
-    const inviteToken = state.startsWith("invite:") ? state.slice(7) : null;
+    // OAuth state carries the invite, two shapes (back-compat):
+    //   "invite:<token>"           team-member / existing-franchise invite (no company name)
+    //   "inviteN:<base64url-json>" new native workspace — payload {t:token, c:companyName}.
+    // The company name can only reach this server-side callback via state (the browser's
+    // localStorage isn't readable here), so the new-native Google flow rides it in.
+    let inviteToken: string | null = null;
+    let inviteCompany: string | null = null;
+    if (state.startsWith("invite:")) {
+      inviteToken = state.slice(7);
+    } else if (state.startsWith("inviteN:")) {
+      try {
+        const payload = JSON.parse(b64urlDecode(state.slice(8)));
+        inviteToken = (payload && payload.t) ? String(payload.t) : null;
+        inviteCompany = (payload && payload.c) ? String(payload.c).trim() : null;
+      } catch (e) {
+        console.error("inviteN state decode failed:", e);
+      }
+    }
 
     // 5. Branch on profile state
     let resolvedProfile = profile;
@@ -91,6 +116,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         email: userInfo.email,
         name: userInfo.name || null,
         authUserId,
+        companyName: inviteCompany,
       });
       if (provResult.error) {
         return redirectError(provResult.error, userInfo.email);
@@ -119,6 +145,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return redirectError("server_error", "");
   }
 });
+
+// Decode a URL-safe base64 (no padding) UTF-8 string. Mirrors the client encoder in
+// triggerGoogleSignIn (btoa(unescape(encodeURIComponent(json))) → +/=→-_ stripped).
+function b64urlDecode(s: string): string {
+  let b64 = s.replace(/-/g, "+").replace(/_/g, "/");
+  while (b64.length % 4) b64 += "=";
+  return decodeURIComponent(escape(atob(b64)));
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Step 1: Exchange Google auth code for tokens
@@ -208,10 +242,11 @@ async function provisionFromInvite(opts: {
   email: string;
   name: string | null;
   authUserId: string | null;
+  companyName: string | null;
 }): Promise<{ profile?: any; error?: string }> {
 
   // Look up the invite
-  const inviteUrl = `${SUPABASE_URL}/rest/v1/invites?select=id,franchise_id,role,expires_at,accepted_at&token=eq.${encodeURIComponent(opts.inviteToken)}`;
+  const inviteUrl = `${SUPABASE_URL}/rest/v1/invites?select=id,franchise_id,role,email,expires_at,accepted_at&token=eq.${encodeURIComponent(opts.inviteToken)}`;
   let invite: any;
   try {
     const res = await fetch(inviteUrl, { headers: SB_HEADERS });
@@ -227,6 +262,33 @@ async function provisionFromInvite(opts: {
   if (invite.accepted_at) return { error: "invite_already_used" };
   if (invite.expires_at && new Date(invite.expires_at) < new Date()) {
     return { error: "invite_expired" };
+  }
+  // An invite addressed to a specific email may only be redeemed by that email (a leaked token
+  // can't be claimed by a different Google account). Empty invite.email = open invite. Parity with
+  // the email/magic-link path (crewlogic-accept-invite).
+  if (invite.email && String(invite.email).toLowerCase() !== opts.email.toLowerCase()) {
+    return { error: "invite_email_mismatch" };
+  }
+
+  // Resolve the franchise. Existing-franchise invite (team member) → use it, role from invite.
+  // New native workspace (no franchise_id) → create tenant+franchise via the shared helper using
+  // a service-role client (RLS blocks anon inserts on tenants/franchises), and the accepter is the
+  // workspace OWNER. Mirrors crewlogic-accept-invite.
+  let franchiseId: string | null = invite.franchise_id || null;
+  let role: string = invite.role || "estimator";
+  if (!franchiseId) {
+    try {
+      const sbAdmin = createClient(
+        Deno.env.get("SUPABASE_URL") || SUPABASE_URL,
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "",
+      );
+      const r = await createNativeTenantAndFranchise(sbAdmin, opts.companyName || "");
+      franchiseId = r.franchiseId;
+    } catch (e) {
+      console.error("Native provision failed:", e);
+      return { error: "native_provision_failed" };
+    }
+    role = invite.role || "owner";
   }
 
   // Insert the profile. on_conflict=email handles the rare race condition where
@@ -247,8 +309,8 @@ async function provisionFromInvite(opts: {
           auth_user_id: opts.authUserId,
           email: opts.email,
           name: opts.name,
-          role: invite.role || "estimator",
-          franchise_id: invite.franchise_id,
+          role,
+          franchise_id: franchiseId,
         }),
       }
     );

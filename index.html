@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.12.3 | 2026-05-29">
+  <meta name="crewlogic-version" content="v5.13.0 | 2026-05-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3894,9 +3894,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         oauthParams.hd = 'junkluggers.com';
       }
 
-      // Pass invite token through OAuth state parameter so it survives redirect
+      // Pass invite token through OAuth state parameter so it survives redirect.
+      // New native workspace (company name present) → "inviteN:" + URL-safe base64 of {t,c} so the
+      // server-side callback can name the franchise (it can't read localStorage). Otherwise the
+      // existing "invite:" + token form (team-member / existing-franchise invites), unchanged.
       if (pendingToken) {
-        oauthParams.state = 'invite:' + pendingToken;
+        const co = (storage.get('pending_invite_company') || '').trim();
+        if (co) {
+          const json = JSON.stringify({ t: pendingToken, c: co });
+          const b64 = btoa(unescape(encodeURIComponent(json)))
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+          oauthParams.state = 'inviteN:' + b64;
+        } else {
+          oauthParams.state = 'invite:' + pendingToken;
+        }
       }
 
       const params = new URLSearchParams(oauthParams);
@@ -4970,6 +4981,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (nameInput && nameInput.value.trim()) {
         storage.set('pending_invite_name', nameInput.value.trim());
       }
+      // New-franchise invite: capture the company name so provisioning can name the workspace.
+      // (triggerGoogleSignIn carries it through the OAuth state — the only channel that survives the
+      // redirect into the server-side callback, which can't read localStorage.)
+      const coInput = document.getElementById('inviteCompany');
+      if (coInput && coInput.value.trim()) storage.set('pending_invite_company', coInput.value.trim());
       // Pass invite token through OAuth state so it survives the redirect
       const token = storage.get('pending_invite_token');
       triggerGoogleSignIn(token);
