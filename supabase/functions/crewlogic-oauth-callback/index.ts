@@ -94,6 +94,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // localStorage isn't readable here), so the new-native Google flow rides it in.
     let inviteToken: string | null = null;
     let inviteCompany: string | null = null;
+    let inviteName: string | null = null;
     if (state.startsWith("invite:")) {
       inviteToken = state.slice(7);
     } else if (state.startsWith("inviteN:")) {
@@ -101,6 +102,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const payload = JSON.parse(b64urlDecode(state.slice(8)));
         inviteToken = (payload && payload.t) ? String(payload.t) : null;
         inviteCompany = (payload && payload.c) ? String(payload.c).trim() : null;
+        inviteName = (payload && payload.n) ? String(payload.n).trim() : null;
       } catch (e) {
         console.error("inviteN state decode failed:", e);
       }
@@ -114,7 +116,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const provResult = await provisionFromInvite({
         inviteToken,
         email: userInfo.email,
-        name: userInfo.name || null,
+        // Prefer the name the owner typed on the invite screen (carried in state); fall back to
+        // the Google account name only if they left it blank.
+        name: inviteName || userInfo.name || null,
         authUserId,
         companyName: inviteCompany,
       });

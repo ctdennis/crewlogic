@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.13.0 | 2026-05-30">
+  <meta name="crewlogic-version" content="v5.13.2 | 2026-05-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1067,26 +1067,44 @@
   <div id="inviteScreen" style="display:none;min-height:100vh;background:var(--bg-primary);flex-direction:column;align-items:center;justify-content:center;padding:24px;">
     <div style="width:100%;max-width:400px;">
       <div style="font-size:28px;font-weight:800;color:var(--accent-green);margin-bottom:4px;">CrewLogicAI</div>
-      <div style="font-size:14px;color:var(--text-muted);margin-bottom:32px;">You've been invited to join a team</div>
+      <div id="inviteHeading" style="font-size:14px;color:var(--text-muted);margin-bottom:32px;">You've been invited to join a team</div>
 
       <div id="inviteDetails" style="background:var(--bg-card);border-radius:var(--radius);padding:16px;margin-bottom:20px;border:1px solid var(--border);">
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">Invited to</div>
         <div id="inviteFranchiseName" style="font-size:16px;font-weight:700;color:var(--text-primary);">Loading...</div>
       </div>
 
-      <div style="margin-bottom:12px;">
-        <div class="form-label">Your name</div>
-        <input type="text" class="form-input" id="inviteName" placeholder="First Last" autocomplete="name">
+      <!-- Two-step accept. Stage 1: pick how to sign in (painfully obvious). Stage 2: an inline
+           expand that asks ONLY for what that method can't supply (Google gives name+email, so it
+           only needs the business name on a new workspace; email needs name+email+business name). -->
+
+      <!-- Stage 1: method picker -->
+      <div id="inviteMethodPicker" style="margin-bottom:8px;">
+        <div class="form-label" style="margin-bottom:10px;">How would you like to sign in?</div>
+        <button onclick="inviteChooseMethod('google')" style="width:100%;padding:13px 16px;background:#fff;color:#1f2937;border:none;border-radius:var(--radius-sm);font-family:'DM Sans',sans-serif;cursor:pointer;display:flex;align-items:center;gap:12px;text-align:left;margin-bottom:10px;">
+          <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;">
+            <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
+            <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/>
+            <path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/>
+            <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
+          </svg>
+          <span style="flex:1;line-height:1.3;"><span style="display:block;font-size:14px;font-weight:600;">Continue with Google</span><span style="display:block;font-size:11px;font-weight:500;color:#6b7280;">Fastest — uses your Google name &amp; email</span></span>
+          <span style="color:#9ca3af;font-size:18px;">›</span>
+        </button>
+        <button onclick="inviteChooseMethod('email')" style="width:100%;padding:13px 16px;background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;display:flex;align-items:center;gap:12px;text-align:left;">
+          <span style="font-size:18px;flex-shrink:0;width:18px;text-align:center;">✉️</span>
+          <span style="flex:1;line-height:1.3;"><span style="display:block;font-size:14px;font-weight:600;">Continue with email</span><span style="display:block;font-size:11px;font-weight:500;color:var(--text-muted);">We'll send you a secure sign-in link</span></span>
+          <span style="color:var(--text-muted);font-size:18px;">›</span>
+        </button>
       </div>
-      <!-- Company name — shown only for new-franchise (no franchise_id) invites; the new owner
-           names their own company, which provisions the native tenant+franchise on accept. -->
-      <div id="inviteCompanyGroup" style="margin-bottom:12px;display:none;">
-        <div class="form-label">Company name</div>
-        <input type="text" class="form-input" id="inviteCompany" placeholder="Acme Junk Removal" autocomplete="organization">
-      </div>
-      <div style="margin-bottom:20px;">
-        <div class="form-label">Sign in with</div>
-        <button onclick="acceptInviteWithGoogle()" style="width:100%;padding:10px 20px;background:#fff;color:#1f2937;border:none;border-radius:var(--radius-sm);font-family:'DM Sans',sans-serif;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;">
+
+      <!-- Stage 2a: Google expand — business name only (new workspace); else straight to Google -->
+      <div id="inviteGoogleForm" style="display:none;">
+        <div id="inviteGoogleCompanyGroup" style="margin-bottom:12px;display:none;">
+          <div class="form-label">Business name</div>
+          <input type="text" class="form-input" id="inviteGoogleCompany" placeholder="Acme Junk Removal" autocomplete="organization">
+        </div>
+        <button onclick="acceptInviteWithGoogle()" style="width:100%;padding:11px 20px;background:#fff;color:#1f2937;border:none;border-radius:var(--radius-sm);font-family:'DM Sans',sans-serif;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;">
           <svg width="16" height="16" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
             <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
             <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/>
@@ -1095,12 +1113,25 @@
           </svg>
           Continue with Google
         </button>
-        <!-- Phase 2: native (no-Google) accept via email magic link. -->
-        <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;">
-          <div style="font-size:11px;color:var(--text-muted);text-align:center;">or accept with email</div>
-          <input type="email" id="inviteEmail" class="form-input" placeholder="you@company.com" inputmode="email" autocomplete="email" onkeydown="if(event.key==='Enter')acceptInviteWithEmail()">
-          <button onclick="acceptInviteWithEmail()" style="width:100%;padding:10px 20px;background:var(--bg-card);color:var(--accent-green);border:1px solid var(--accent-green);border-radius:var(--radius-sm);font-size:14px;font-weight:600;cursor:pointer;">Email me a sign-in link</button>
+        <button onclick="inviteBackToPicker()" style="width:100%;margin-top:10px;background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;">← Back</button>
+      </div>
+
+      <!-- Stage 2b: Email expand — name + email + business name (new workspace) -->
+      <div id="inviteEmailForm" style="display:none;">
+        <div style="margin-bottom:12px;">
+          <div class="form-label">Your name</div>
+          <input type="text" class="form-input" id="inviteName" placeholder="First Last" autocomplete="name">
         </div>
+        <div style="margin-bottom:12px;">
+          <div class="form-label">Email address</div>
+          <input type="email" id="inviteEmail" class="form-input" placeholder="you@company.com" inputmode="email" autocomplete="email" onkeydown="if(event.key==='Enter')acceptInviteWithEmail()">
+        </div>
+        <div id="inviteCompanyGroup" style="margin-bottom:12px;display:none;">
+          <div class="form-label">Business name</div>
+          <input type="text" class="form-input" id="inviteCompany" placeholder="Acme Junk Removal" autocomplete="organization">
+        </div>
+        <button onclick="acceptInviteWithEmail()" style="width:100%;padding:11px 20px;background:var(--bg-card);color:var(--accent-green);border:1px solid var(--accent-green);border-radius:var(--radius-sm);font-size:14px;font-weight:600;cursor:pointer;">Email me a sign-in link</button>
+        <button onclick="inviteBackToPicker()" style="width:100%;margin-top:10px;background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;">← Back</button>
       </div>
 
       <div id="inviteStatus" style="font-size:13px;color:var(--text-muted);text-align:center;"></div>
@@ -3901,7 +3932,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (pendingToken) {
         const co = (storage.get('pending_invite_company') || '').trim();
         if (co) {
-          const json = JSON.stringify({ t: pendingToken, c: co });
+          const nm = (storage.get('pending_invite_name') || '').trim();
+          const json = JSON.stringify({ t: pendingToken, c: co, n: nm || undefined });
           const b64 = btoa(unescape(encodeURIComponent(json)))
             .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
           oauthParams.state = 'inviteN:' + b64;
@@ -4960,8 +4992,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const isNewFranchise = !invite.franchise_id;
       const fname = invite.franchises ? invite.franchises.franchise_name : (isNewFranchise ? 'a new CrewLogicAI workspace' : 'your team');
       document.getElementById('inviteFranchiseName').textContent = fname;
-      const _coGroup = document.getElementById('inviteCompanyGroup');
-      if (_coGroup) _coGroup.style.display = isNewFranchise ? 'block' : 'none';
+      const _heading = document.getElementById('inviteHeading');
+      if (_heading) _heading.textContent = isNewFranchise ? 'Set up your CrewLogicAI workspace' : "You've been invited to join a team";
+      // Business-name field appears (in whichever method they pick) only for a NEW workspace.
+      ['inviteCompanyGroup', 'inviteGoogleCompanyGroup'].forEach(id => {
+        const g = document.getElementById(id);
+        if (g) g.style.display = isNewFranchise ? 'block' : 'none';
+      });
+      // Always start on the method picker (in case of re-entry).
+      inviteBackToPicker();
 
       // Store token for use after Google sign-in
       storage.set('pending_invite_token', token);
@@ -4975,18 +5014,51 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return true;
     }
 
-    function acceptInviteWithGoogle() {
-      // Store the name they entered before redirect
-      const nameInput = document.getElementById('inviteName');
-      if (nameInput && nameInput.value.trim()) {
-        storage.set('pending_invite_name', nameInput.value.trim());
+    // Stage 1 → 2: reveal the chosen method's inline form, hide the picker.
+    function inviteChooseMethod(method) {
+      document.getElementById('inviteMethodPicker').style.display = 'none';
+      const statusEl = document.getElementById('inviteStatus');
+      if (statusEl) statusEl.textContent = '';
+      if (method === 'google') {
+        document.getElementById('inviteGoogleForm').style.display = 'block';
+        const c = document.getElementById('inviteGoogleCompany');
+        if (c && c.offsetParent !== null) c.focus();
+      } else {
+        document.getElementById('inviteEmailForm').style.display = 'block';
+        const n = document.getElementById('inviteName');
+        if (n) n.focus();
       }
-      // New-franchise invite: capture the company name so provisioning can name the workspace.
-      // (triggerGoogleSignIn carries it through the OAuth state — the only channel that survives the
-      // redirect into the server-side callback, which can't read localStorage.)
-      const coInput = document.getElementById('inviteCompany');
-      if (coInput && coInput.value.trim()) storage.set('pending_invite_company', coInput.value.trim());
-      // Pass invite token through OAuth state so it survives the redirect
+    }
+    // Stage 2 → 1: back to the method picker.
+    function inviteBackToPicker() {
+      const gf = document.getElementById('inviteGoogleForm');
+      const ef = document.getElementById('inviteEmailForm');
+      const mp = document.getElementById('inviteMethodPicker');
+      if (gf) gf.style.display = 'none';
+      if (ef) ef.style.display = 'none';
+      if (mp) mp.style.display = 'block';
+      const statusEl = document.getElementById('inviteStatus');
+      if (statusEl) statusEl.textContent = '';
+    }
+
+    function acceptInviteWithGoogle() {
+      // Google supplies the user's name + email; for a NEW workspace we still need the business
+      // name (required), which rides through the OAuth state — the only channel that survives the
+      // redirect into the server-side callback (it can't read localStorage).
+      const coGroup = document.getElementById('inviteGoogleCompanyGroup');
+      const isNewFranchise = coGroup && coGroup.style.display !== 'none';
+      const coInput = document.getElementById('inviteGoogleCompany');
+      const co = (coInput && coInput.value.trim()) || '';
+      if (isNewFranchise && !co) {
+        const statusEl = document.getElementById('inviteStatus');
+        if (statusEl) { statusEl.textContent = 'Enter your business name to continue.'; statusEl.style.color = 'var(--accent-red)'; }
+        if (coInput) coInput.focus();
+        return;
+      }
+      if (co) storage.set('pending_invite_company', co); else storage.remove('pending_invite_company');
+      // No name field on the Google path — Google is authoritative for the name. Clear any stale
+      // name from a prior email-form entry so it can't override the Google account name.
+      storage.remove('pending_invite_name');
       const token = storage.get('pending_invite_token');
       triggerGoogleSignIn(token);
     }
@@ -4998,14 +5070,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const email = (document.getElementById('inviteEmail')?.value || '').trim();
       const nameInput = document.getElementById('inviteName');
       const statusEl = document.getElementById('inviteStatus');
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-        if (statusEl) { statusEl.textContent = 'Enter a valid email.'; statusEl.style.color = 'var(--accent-red)'; }
-        return;
-      }
-      if (nameInput && nameInput.value.trim()) storage.set('pending_invite_name', nameInput.value.trim());
-      // New-franchise invite: capture the company name so provisioning can name the franchise.
+      const name = (nameInput && nameInput.value.trim()) || '';
+      const coGroup = document.getElementById('inviteCompanyGroup');
+      const isNewFranchise = coGroup && coGroup.style.display !== 'none';
       const coInput = document.getElementById('inviteCompany');
-      if (coInput && coInput.value.trim()) storage.set('pending_invite_company', coInput.value.trim());
+      const co = (coInput && coInput.value.trim()) || '';
+      const fail = (msg, el) => { if (statusEl) { statusEl.textContent = msg; statusEl.style.color = 'var(--accent-red)'; } if (el) el.focus(); };
+      if (!name) return fail('Enter your name.', nameInput);
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail('Enter a valid email.', document.getElementById('inviteEmail'));
+      if (isNewFranchise && !co) return fail('Enter your business name.', coInput);
+      storage.set('pending_invite_name', name);
+      // New-workspace invite: capture the company name so provisioning can name the franchise.
+      if (co) storage.set('pending_invite_company', co); else storage.remove('pending_invite_company');
       if (statusEl) { statusEl.textContent = 'Sending sign-in link…'; statusEl.style.color = 'var(--text-muted)'; }
       try {
         const { error } = await supabaseClient.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } });
