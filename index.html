@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.18.1 | 2026-05-31">
+  <meta name="crewlogic-version" content="v5.18.2 | 2026-05-31">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4186,7 +4186,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // session to supabaseClient; routing Storage through that made createSignedUrl return 400
     // ("object not found") under estimate-photos bucket RLS (the authenticated role isn't granted
     // SELECT, only anon is). This keeps Storage on the exact anon identity it used pre-migration.
-    const storageClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+    // Distinct storageKey so this client's GoTrue never shares state with supabaseClient's auth
+    // session (avoids the "Multiple GoTrueClient instances … same storage key" undefined-behavior
+    // warning, which matters because the login session lives under supabaseClient's key).
+    const storageClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false, storageKey: 'sb-crewlogic-storage' } });
 
     // Signed URL cache — avoids regenerating on every render
     const signedUrlCache = new Map(); // path -> { url, expires }
