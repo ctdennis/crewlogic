@@ -37,6 +37,8 @@ Deno.serve(async (req: Request) => {
 
   const body = await req.json().catch(() => ({} as Record<string, unknown>));
   const companyName = (String(body.companyName || "").trim()) || ((email.split("@")[1] || "My Company"));
+  // Owner's display name, collected on the post-verify "Name your workspace" step (optional).
+  const ownerName = String(body.ownerName || "").trim();
 
   // 2) Idempotent: if this email already has a profile, we're done (covers re-clicks / races and
   // avoids creating a duplicate tenant on a signup retry).
@@ -59,7 +61,7 @@ Deno.serve(async (req: Request) => {
   const { error: pErr } = await sb.from("profiles").insert({
     auth_user_id: user.id,
     email,
-    name: (user.user_metadata && (user.user_metadata as Record<string, unknown>).name) || email,
+    name: ownerName || (user.user_metadata && (user.user_metadata as Record<string, unknown>).name as string) || email,
     role: "owner",
     franchise_id: franchiseId,
   });
