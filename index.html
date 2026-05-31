@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.15.0 | 2026-05-30">
+  <meta name="crewlogic-version" content="v5.16.0 | 2026-05-31">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3784,20 +3784,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                 built = await buildSessionFromSupabaseAuth(sbSession.user.email);
               }
             } catch (e) { /* fall through to no_account */ }
-          } else if (storage.get('pending_signup') === '1') {
-            // Self-serve native signup (magic-link path) — provision via crewlogic-signup.
-            try {
-              const res = await fetch(EDGE_BASE + '/crewlogic-signup', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'apikey': EDGE_ANON_KEY, 'Authorization': 'Bearer ' + sbSession.access_token },
-                body: JSON.stringify({ companyName: storage.get('pending_signup_company') || '' })
-              });
-              const data = await res.json().catch(() => ({}));
-              if (data && data.success) {
-                ['pending_signup','pending_signup_company','pending_signup_name'].forEach(k => storage.remove(k));
-                built = await buildSessionFromSupabaseAuth(sbSession.user.email);
-              }
-            } catch (e) { /* fall through to no_account */ }
+          } else {
+            // No profile, no invite → brand-new native self-serve owner (Option B). Defer to the
+            // post-verify "Name your workspace" step, which collects the company name and then
+            // provisions via crewlogic-signup. Junkluggers emails don't self-provision natively —
+            // they belong on the Google/Vonigo path — so send them to the no-account screen.
+            if (_isJunkluggersEmail(sbSession.user.email)) { showAuthErrorScreen('no_account'); return true; }
+            showNameWorkspaceScreen(sbSession.user.email);
+            return true;
           }
         }
         if (built) {
@@ -3815,14 +3809,104 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function showLogin() {
       document.getElementById('loginScreen').style.display = 'flex';
       document.getElementById('appShell').classList.remove('active');
+      if (IS_DEV_ENV) {
+        // Dev build → clean two-card login (Stage 1 of the native-auth UX). Hide the legacy
+        // Google-first markup and its older Phase-2 sub-panels; loginV2 supersedes them.
+        const legacy = document.querySelector('#loginScreen .login-google-wrap');
+        if (legacy) legacy.style.display = 'none';
+        buildLoginV2();
+        const v2 = document.getElementById('loginV2');
+        if (v2) v2.style.display = 'flex';
+        loginV2Reset();
+        injectDevSignIn();
+        return;
+      }
       injectDevSignIn();
-      // Phase 2 (native email sign-in): reveal on dev hosts during build; ungate for prod at promotion.
-      const _emailWrap = document.getElementById('emailSignInWrap');
-      if (_emailWrap && IS_DEV_ENV) _emailWrap.style.display = 'flex';
-      // Phase 2 (self-serve signup): same dev gate. Reset the panel to its collapsed state.
-      const _signupEntry = document.getElementById('signupEntry');
-      if (_signupEntry && IS_DEV_ENV) _signupEntry.style.display = 'block';
       hideSignup();
+    }
+
+    // ===== NATIVE-AUTH LOGIN V2 (Stage 1, dev-gated) =====
+    // A clean two-card picker (Continue with Google / Continue with email) built on the fly so
+    // prod markup stays byte-identical. The email card is "Option B": it collects ONLY the email,
+    // sends a magic link, and defers the company name to the post-verify "Name your workspace"
+    // step (see resumeNativeSession → showNameWorkspaceScreen). Google stays the Junkluggers/Vonigo
+    // path here; "anyone-can-use-Google" lands in Stage 2.
+    function buildLoginV2() {
+      if (document.getElementById('loginV2')) return;
+      const login = document.getElementById('loginScreen');
+      if (!login) return;
+      const legacy = login.querySelector('.login-google-wrap');
+      const gIco = '<svg width="20" height="20" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>';
+      const cardCss = 'width:100%;padding:14px 16px;background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;display:flex;align-items:center;gap:14px;text-align:left;';
+      const wrap = document.createElement('div');
+      wrap.id = 'loginV2';
+      wrap.style.cssText = 'display:none;flex-direction:column;width:100%;max-width:340px;';
+      wrap.innerHTML =
+        '<div id="loginV2Picker">' +
+          '<div class="form-label" style="margin-bottom:10px;">How would you like to sign in?</div>' +
+          '<button onclick="loginV2Choose(\'google\')" style="' + cardCss + 'margin-bottom:12px;">' +
+            '<span style="flex-shrink:0;width:22px;display:flex;justify-content:center;">' + gIco + '</span>' +
+            '<span style="flex:1;line-height:1.35;"><span style="display:block;font-size:15px;font-weight:600;">Continue with Google</span><span style="display:block;font-size:11px;font-weight:500;color:var(--text-muted);">Fastest — uses your Google name &amp; email</span></span>' +
+            '<span style="color:var(--text-muted);font-size:20px;">›</span>' +
+          '</button>' +
+          '<button onclick="loginV2Choose(\'email\')" style="' + cardCss + '">' +
+            '<span style="flex-shrink:0;width:22px;text-align:center;font-size:18px;">✉️</span>' +
+            '<span style="flex:1;line-height:1.35;"><span style="display:block;font-size:15px;font-weight:600;">Continue with email</span><span style="display:block;font-size:11px;font-weight:500;color:var(--text-muted);">We\'ll send you a secure sign-in link</span></span>' +
+            '<span style="color:var(--text-muted);font-size:20px;">›</span>' +
+          '</button>' +
+        '</div>' +
+        '<div id="loginV2GoogleForm" style="display:none;">' +
+          '<div class="form-label" style="margin-bottom:10px;">Continue with Google</div>' +
+          '<button onclick="triggerGoogleSignIn()" style="width:100%;padding:12px 16px;background:#fff;color:#1f2937;border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;">' + gIco + ' Continue with Google</button>' +
+          '<button onclick="loginV2Back()" style="width:100%;margin-top:10px;background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;">← Back</button>' +
+        '</div>' +
+        '<div id="loginV2EmailForm" style="display:none;">' +
+          '<div class="form-label" style="margin-bottom:10px;">Continue with email</div>' +
+          '<input type="email" id="loginV2Email" class="form-input" placeholder="you@company.com" inputmode="email" autocomplete="email" oninput="loginV2Detect()" onkeydown="if(event.key===\'Enter\')loginV2SendLink()" style="text-align:center;">' +
+          '<div id="loginV2JlHint" style="display:none;font-size:12px;line-height:1.5;text-align:center;color:var(--accent-yellow,#fbbf24);margin-top:8px;">Junkluggers account — use <strong>Continue with Google</strong> to access Vonigo.</div>' +
+          '<button id="loginV2SendBtn" onclick="loginV2SendLink()" style="width:100%;margin-top:10px;padding:12px 16px;background:var(--bg-card);color:var(--accent-green);border:1px solid var(--accent-green);border-radius:var(--radius-sm);font-size:14px;font-weight:600;cursor:pointer;">Email me a sign-in link</button>' +
+          '<button onclick="loginV2Back()" style="width:100%;margin-top:10px;background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;">← Back</button>' +
+          '<div id="loginV2Status" style="font-size:12px;color:var(--text-muted);text-align:center;min-height:18px;margin-top:8px;"></div>' +
+        '</div>';
+      if (legacy) login.insertBefore(wrap, legacy); else login.appendChild(wrap);
+    }
+    function loginV2Show(which) {
+      ['loginV2Picker','loginV2GoogleForm','loginV2EmailForm'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = (id === which) ? 'block' : 'none';
+      });
+    }
+    function loginV2Reset() {
+      loginV2Show('loginV2Picker');
+      const e = document.getElementById('loginV2Email'); if (e) e.value = '';
+      const h = document.getElementById('loginV2JlHint'); if (h) h.style.display = 'none';
+      const s = document.getElementById('loginV2Status'); if (s) s.textContent = '';
+      const b = document.getElementById('loginV2SendBtn'); if (b) b.textContent = 'Email me a sign-in link';
+    }
+    function loginV2Choose(method) {
+      if (method === 'google') { loginV2Show('loginV2GoogleForm'); return; }
+      loginV2Show('loginV2EmailForm');
+      const e = document.getElementById('loginV2Email'); if (e) setTimeout(() => e.focus(), 50);
+    }
+    function loginV2Back() { loginV2Reset(); }
+    function loginV2Detect() {
+      const email = (document.getElementById('loginV2Email')?.value || '').trim();
+      const isJL = _isJunkluggersEmail(email);
+      const h = document.getElementById('loginV2JlHint'); if (h) h.style.display = isJL ? 'block' : 'none';
+      const b = document.getElementById('loginV2SendBtn'); if (b) b.textContent = isJL ? 'Continue with Google →' : 'Email me a sign-in link';
+    }
+    async function loginV2SendLink() {
+      const email = (document.getElementById('loginV2Email')?.value || '').trim();
+      const st = document.getElementById('loginV2Status');
+      const fail = (m) => { if (st) { st.textContent = m; st.style.color = '#ef4444'; } };
+      if (!_validEmail(email)) return fail('Enter a valid email.');
+      if (_isJunkluggersEmail(email)) { loginV2Choose('google'); return; }
+      if (st) { st.textContent = 'Sending sign-in link…'; st.style.color = '#94a3b8'; }
+      try {
+        const { error } = await supabaseClient.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } });
+        if (error) throw error;
+        if (st) { st.textContent = '✓ Check your email for a sign-in link to finish.'; st.style.color = '#4ade80'; }
+      } catch (e) { fail('Could not send link: ' + (e.message || 'error')); }
     }
 
     // ===== SELF-SERVE WORKSPACE SIGNUP (Phase 2) =====
@@ -5068,6 +5152,65 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       url.searchParams.delete('auth_error');
       url.searchParams.delete('email');
       window.location.replace(url.toString());
+    }
+
+    // ===== "NAME YOUR WORKSPACE" — native self-serve, post-verify (Option B, Stage 1) =====
+    // Shown after a magic-link sign-in when the user is authenticated but has no profile yet
+    // (brand-new standalone owner). Collects the company name AFTER email verification, then
+    // provisions the tenant+franchise via crewlogic-signup. Built on the fly (like authErrorScreen)
+    // so we don't touch the static markup.
+    function showNameWorkspaceScreen(email) {
+      const loginScreen = document.getElementById('loginScreen');
+      if (loginScreen) loginScreen.style.display = 'none';
+      let scr = document.getElementById('nameWorkspaceScreen');
+      if (!scr) {
+        scr = document.createElement('div');
+        scr.id = 'nameWorkspaceScreen';
+        scr.style.cssText = 'min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:linear-gradient(160deg,#0f1923 0%,#1a2736 50%,#0f2818 100%);';
+        document.body.appendChild(scr);
+      }
+      scr.innerHTML =
+        '<div style="width:100%;max-width:340px;">' +
+          '<div class="login-logo">CrewLogicAI</div>' +
+          '<div class="login-subtitle" style="margin-bottom:28px;">Field Ops</div>' +
+          '<div style="font-size:18px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Name your workspace</div>' +
+          '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5;">Signed in as ' + (email || 'your email') + '. What\'s your company called?</div>' +
+          '<input type="text" id="nwCompany" class="form-input" placeholder="Acme Junk Removal" autocomplete="organization" onkeydown="if(event.key===\'Enter\')submitNameWorkspace()">' +
+          '<input type="text" id="nwName" class="form-input" placeholder="Your name (optional)" autocomplete="name" style="margin-top:10px;">' +
+          '<button id="nwSubmitBtn" onclick="submitNameWorkspace()" style="width:100%;margin-top:14px;padding:12px 20px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-size:15px;font-weight:700;cursor:pointer;">Create workspace</button>' +
+          '<div id="nwStatus" style="font-size:13px;color:var(--text-muted);text-align:center;min-height:18px;margin-top:12px;"></div>' +
+          '<button onclick="signOut()" style="width:100%;margin-top:4px;background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;">Cancel</button>' +
+        '</div>';
+      scr.style.display = 'flex';
+      setTimeout(() => { const c = document.getElementById('nwCompany'); if (c) c.focus(); }, 50);
+    }
+    async function submitNameWorkspace() {
+      const company = (document.getElementById('nwCompany')?.value || '').trim();
+      const name = (document.getElementById('nwName')?.value || '').trim();
+      const st = document.getElementById('nwStatus');
+      const btn = document.getElementById('nwSubmitBtn');
+      const fail = (m) => { if (st) { st.textContent = m; st.style.color = '#ef4444'; } if (btn) { btn.disabled = false; btn.style.opacity = '1'; } };
+      if (!company) return fail('Enter a company name.');
+      if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+      if (st) { st.textContent = 'Creating your workspace…'; st.style.color = '#94a3b8'; }
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        if (!session) return fail('Session expired — please sign in again.');
+        const res = await fetch(EDGE_BASE + '/crewlogic-signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': EDGE_ANON_KEY, 'Authorization': 'Bearer ' + session.access_token },
+          body: JSON.stringify({ companyName: company, ownerName: name || undefined })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!data || !data.success) return fail((data && data.error) || 'Could not create workspace. Try again.');
+        const built = await buildSessionFromSupabaseAuth(session.user.email);
+        if (!built) return fail('Workspace created, but sign-in failed — reload to continue.');
+        currentUser = built;
+        storage.set(SESSION_KEY, JSON.stringify(currentUser));
+        const scr = document.getElementById('nameWorkspaceScreen'); if (scr) scr.style.display = 'none';
+        history.replaceState(null, '', window.location.pathname);
+        showApp();
+      } catch (e) { fail('Could not create workspace: ' + (e.message || 'error')); }
     }
 
     async function checkInviteToken() {
