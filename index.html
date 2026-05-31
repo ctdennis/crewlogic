@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.16.2 | 2026-05-31">
+  <meta name="crewlogic-version" content="v5.17.0 | 2026-05-31">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3863,7 +3863,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       wrap.innerHTML =
         '<div id="loginV2Picker">' +
           '<div class="form-label" style="margin-bottom:10px;">How would you like to sign in?</div>' +
-          '<button onclick="loginV2Choose(\'google\')" style="' + cardCss + 'margin-bottom:12px;">' +
+          '<button onclick="loginV2Google()" style="' + cardCss + 'margin-bottom:12px;">' +
             '<span style="flex-shrink:0;width:22px;display:flex;justify-content:center;">' + gIco + '</span>' +
             '<span style="flex:1;line-height:1.35;"><span style="display:block;font-size:15px;font-weight:600;">Continue with Google</span><span style="display:block;font-size:11px;font-weight:500;color:var(--text-muted);">Fastest — uses your Google name &amp; email</span></span>' +
             '<span style="color:var(--text-muted);font-size:20px;">›</span>' +
@@ -3926,6 +3926,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (error) throw error;
         if (st) { st.textContent = '✓ Check your email for a sign-in link to finish.'; st.style.color = '#4ade80'; }
       } catch (e) { fail('Could not send link: ' + (e.message || 'error')); }
+    }
+    // Stage 2: native Supabase Google OAuth (dev). Any Google account → a real Supabase Auth
+    // session, so it converges on the SAME post-sign-in routing as the magic link: a returning
+    // user (incl. a Junkluggers owner) resolves to their existing profile via initAuth, while a
+    // brand-new non-junkluggers user lands on the Name-your-workspace step. No hd restriction; no
+    // company collected up front (Option B). The custom crewlogic-oauth-callback is bypassed here.
+    async function loginV2Google() {
+      try {
+        const { error } = await supabaseClient.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
+        if (error) throw error;
+      } catch (e) {
+        alert('Could not start Google sign-in: ' + (e.message || 'error'));
+      }
     }
 
     // ===== SELF-SERVE WORKSPACE SIGNUP (Phase 2) =====
