@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.18.0 | 2026-05-31">
+  <meta name="crewlogic-version" content="v5.18.1 | 2026-05-31">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4181,6 +4181,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     // Supabase JS client (for Storage signed URLs)
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    // Storage uses a SEPARATE, session-less ANON client so photo/logo signing + uploads never
+    // depend on the interactive auth session. Native/Google sign-ins now attach a Supabase Auth
+    // session to supabaseClient; routing Storage through that made createSignedUrl return 400
+    // ("object not found") under estimate-photos bucket RLS (the authenticated role isn't granted
+    // SELECT, only anon is). This keeps Storage on the exact anon identity it used pre-migration.
+    const storageClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
 
     // Signed URL cache — avoids regenerating on every render
     const signedUrlCache = new Map(); // path -> { url, expires }
@@ -4199,7 +4205,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         signedUrlCache.delete(path); // expired — regenerate
       }
       try {
-        const { data, error } = await supabaseClient.storage
+        const { data, error } = await storageClient.storage
           .from('estimate-photos')
           .createSignedUrl(path, SIGNED_URL_TTL);
         if (error || !data?.signedUrl) return null;
@@ -4227,7 +4233,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const ext = mime === 'image/png' ? 'png' : 'jpg';
       const timestamp = Date.now();
       const path = currentUser.franchiseID + '/' + estimateID + '/' + timestamp + '_' + label + '.' + ext;
-      const { data, error } = await supabaseClient.storage
+      const { data, error } = await storageClient.storage
         .from('estimate-photos')
         .upload(path, blob, { contentType: mime, upsert: false });
       if (error) throw new Error('Supabase upload failed: ' + error.message);
@@ -7424,7 +7430,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       let objects = [];
       try {
-        const { data, error } = await supabaseClient.storage.from('estimate-photos').list(folder, { limit: 1000 });
+        const { data, error } = await storageClient.storage.from('estimate-photos').list(folder, { limit: 1000 });
         if (error) throw error;
         objects = data || [];
       } catch (e) {
@@ -12209,7 +12215,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             const blob = await res.blob();
             const filename = oldPath.split('/').pop().replace(/^\d+_/, '');
             const newPath = franchiseID + '/' + newEstID + '/' + Date.now() + '_' + filename;
-            const { error: upErr } = await supabaseClient.storage
+            const { error: upErr } = await storageClient.storage
               .from('estimate-photos').upload(newPath, blob, { contentType: 'image/jpeg', upsert: false });
             if (!upErr) {
               copied++;
@@ -16529,7 +16535,7 @@ Please review the estimate below. If you have any questions or would like to adj
         const path = 'franchise-logos/' + currentUser.franchiseID + '/logo.' + ext;
         feedbackEl.textContent = 'Uploading…';
 
-        const { error: uploadErr } = await supabaseClient.storage
+        const { error: uploadErr } = await storageClient.storage
           .from('estimate-photos')
           .upload(path, resizedBlob, {
             contentType: file.type,
@@ -16601,7 +16607,7 @@ Please review the estimate below. If you have any questions or would like to adj
       // Async: best-effort storage cleanup. Failures are non-fatal — sweep job
       // could later catch any leftover files.
       if (oldPath) {
-        supabaseClient.storage.from('estimate-photos').remove([oldPath]).catch(e => {
+        storageClient.storage.from('estimate-photos').remove([oldPath]).catch(e => {
           console.warn('Logo storage cleanup failed (non-fatal):', e);
         });
       }
@@ -16618,7 +16624,7 @@ Please review the estimate below. If you have any questions or would like to adj
       if (!path) { _cachedLogoUrl = null; _cachedLogoUrlForPath = null; return null; }
       if (_cachedLogoUrlForPath === path && _cachedLogoUrl) return _cachedLogoUrl;
       try {
-        const { data, error } = await supabaseClient.storage
+        const { data, error } = await storageClient.storage
           .from('estimate-photos')
           .createSignedUrl(path, 60 * 60 * 24); // 24h
         if (error) throw error;
@@ -18226,7 +18232,7 @@ Please review the estimate below. If you have any questions or would like to adj
       // Lazy-load photo via signed URL
       if (sign.photo_path) {
         try {
-          const { data } = await supabaseClient.storage.from('estimate-photos').createSignedUrl(sign.photo_path, 12 * 3600);
+          const { data } = await storageClient.storage.from('estimate-photos').createSignedUrl(sign.photo_path, 12 * 3600);
           if (data && data.signedUrl) {
             const el = document.getElementById('signActionPhoto');
             if (el) el.src = data.signedUrl;
@@ -18464,7 +18470,7 @@ Please review the estimate below. If you have any questions or would like to adj
           await supabaseFetch('/rest/v1/sign_status_events?sign_id=eq.' + sign.id, { method: 'DELETE' });
           await supabaseFetch('/rest/v1/yard_signs?id=eq.' + sign.id, { method: 'DELETE' });
           if (sign.photo_path) {
-            try { await supabaseClient.storage.from('estimate-photos').remove([sign.photo_path]); } catch(e) {}
+            try { await storageClient.storage.from('estimate-photos').remove([sign.photo_path]); } catch(e) {}
           }
         } catch(e) { console.warn('Cancel: failed to clean up sign', sign.id, e); }
       }
@@ -18728,7 +18734,7 @@ Please review the estimate below. If you have any questions or would like to adj
         const franchiseUUID = await getFranchiseUUID();
         const ts = Date.now();
         const path = franchiseUUID + '/signs/' + _signsCurrentSession.id + '/' + ts + '.jpg';
-        const { error: upErr } = await supabaseClient.storage.from('estimate-photos').upload(path, blob, { contentType: 'image/jpeg', upsert: false });
+        const { error: upErr } = await storageClient.storage.from('estimate-photos').upload(path, blob, { contentType: 'image/jpeg', upsert: false });
         if (upErr) throw upErr;
         console.log('[Signs] Photo uploaded:', path);
 
@@ -18871,7 +18877,7 @@ Please review the estimate below. If you have any questions or would like to adj
         await supabaseFetch('/rest/v1/yard_signs?id=eq.' + last.id, { method: 'DELETE' });
         // Delete photo
         if (last.photo_path) {
-          try { await supabaseClient.storage.from('estimate-photos').remove([last.photo_path]); } catch(e) {}
+          try { await storageClient.storage.from('estimate-photos').remove([last.photo_path]); } catch(e) {}
         }
       } catch(e) { console.warn('Undo error:', e); }
       document.getElementById('signsSessionCount').textContent = _signsSessionSigns.length;
