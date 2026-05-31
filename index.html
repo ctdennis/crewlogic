@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.16.0 | 2026-05-31">
+  <meta name="crewlogic-version" content="v5.16.1 | 2026-05-31">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3709,6 +3709,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         }
       }
 
+      // A live Supabase Auth session (magic-link / native sign-in) is authoritative: if one is
+      // present for a DIFFERENT email than the cached session (or there's no cache), it must win —
+      // a freshly-clicked sign-in link must never be shadowed by a stale cached session. (Google
+      // returnees carry no Supabase Auth session, so this is a no-op for them and they fall through
+      // to the fast cached restore below.)
+      try {
+        const { data: { session: _sbAuth } } = await supabaseClient.auth.getSession();
+        const _authEmail = _sbAuth && _sbAuth.user && _sbAuth.user.email ? _sbAuth.user.email.toLowerCase() : null;
+        if (_authEmail) {
+          let _savedEmail = null;
+          try { const _r = storage.get(SESSION_KEY); _savedEmail = _r ? (JSON.parse(_r).email || '').toLowerCase() : null; } catch (e) {}
+          if (_authEmail !== _savedEmail && await resumeNativeSession()) return;
+        }
+      } catch (e) {}
+
       // Check for existing valid session in storage
       const saved = storage.get(SESSION_KEY);
       if (saved) {
@@ -5456,8 +5471,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         showLogin();
       }
     }
-    function signOut() {
+    async function signOut() {
       storage.remove(SESSION_KEY);
+      // Also tear down any Supabase Auth session (native magic-link / OTP), or initAuth would
+      // silently restore it on the next load and re-sign-in the user.
+      try { await supabaseClient.auth.signOut(); } catch (e) {}
       currentUser = null;
       document.getElementById('paywallScreen').style.display = 'none';
       showLogin();
