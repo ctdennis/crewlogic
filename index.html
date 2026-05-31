@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.17.0 | 2026-05-31">
+  <meta name="crewlogic-version" content="v5.18.0 | 2026-05-31">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3824,27 +3824,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function showLogin() {
       document.getElementById('loginScreen').style.display = 'flex';
       document.getElementById('appShell').classList.remove('active');
-      if (IS_DEV_ENV) {
-        // Dev build → clean two-card login (Stage 1 of the native-auth UX). Hide the legacy
-        // Google-first markup and its older Phase-2 sub-panels; loginV2 supersedes them.
-        const legacy = document.querySelector('#loginScreen .login-google-wrap');
-        if (legacy) legacy.style.display = 'none';
-        // Generic subtitle for the multi-tenant front gate (standalone owners see this too).
-        // Prod stays "Junkluggers Field Ops" until Phase 2 promotes.
-        const sub = document.querySelector('#loginScreen .login-subtitle');
-        if (sub) sub.textContent = 'Field Ops';
-        buildLoginV2();
-        const v2 = document.getElementById('loginV2');
-        if (v2) v2.style.display = 'flex';
-        loginV2Reset();
-        injectDevSignIn();
-        return;
-      }
-      injectDevSignIn();
-      hideSignup();
+      // Clean two-card native-auth login for ALL environments (promoted to prod, v5.18.0). Hide
+      // the legacy Google-first markup and its older Phase-2 sub-panels; loginV2 supersedes them.
+      const legacy = document.querySelector('#loginScreen .login-google-wrap');
+      if (legacy) legacy.style.display = 'none';
+      // Generic subtitle for the multi-tenant front gate (standalone owners see this too).
+      const sub = document.querySelector('#loginScreen .login-subtitle');
+      if (sub) sub.textContent = 'Field Ops';
+      buildLoginV2();
+      const v2 = document.getElementById('loginV2');
+      if (v2) v2.style.display = 'flex';
+      loginV2Reset();
+      injectDevSignIn();  // self-gates to dev hosts; the 🔧 dev sign-in buttons stay dev-only
     }
 
-    // ===== NATIVE-AUTH LOGIN V2 (Stage 1, dev-gated) =====
+    // ===== NATIVE-AUTH LOGIN V2 (two-card front gate; live in all envs as of v5.18.0) =====
     // A clean two-card picker (Continue with Google / Continue with email) built on the fly so
     // prod markup stays byte-identical. The email card is "Option B": it collects ONLY the email,
     // sends a magic link, and defers the company name to the post-verify "Name your workspace"
