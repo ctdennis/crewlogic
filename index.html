@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.19.0 | 2026-05-31">
+  <meta name="crewlogic-version" content="v5.19.1 | 2026-06-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -5234,9 +5234,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       errScreen.style.display = 'flex';
     }
 
-    function retryAuthAfterError() {
+    async function retryAuthAfterError() {
+      // Clear any cached Supabase Auth session FIRST. Otherwise a session with no profile (or a
+      // @junkluggers.com email, which routes to no_account by design) re-resolves to this same
+      // screen on reload — an inescapable loop. Signing out drops the cached session so the reload
+      // lands on the login screen for a genuinely different account.
+      try { await supabaseClient.auth.signOut(); } catch (e) {}
       // Strip the auth_error param and reload to start fresh.
-      // The reload sends the user back to the login screen.
       const url = new URL(window.location.href);
       url.searchParams.delete('auth_error');
       url.searchParams.delete('email');
