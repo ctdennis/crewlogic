@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.18.2 | 2026-05-31">
+  <meta name="crewlogic-version" content="v5.19.0 | 2026-05-31">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1232,6 +1232,8 @@
             <img id="homeBrandLogo" alt="" />
           </div>
         </div>
+
+        <div id="trialBanner" class="fade-in" style="display:none;"></div>
 
         <div class="module-grid">
           <div class="module-card fade-in fade-in-delay-2" onclick="openModule('estimates')">
@@ -3494,6 +3496,57 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     const SESSION_KEY = 'cl_session_v2';
 
+    // ── Trial clock ────────────────────────────────────────────────────────────
+    // Native self-serve workspaces are stamped tenants.trial_ends_at at provisioning
+    // (TRIAL_DAYS from creation, in _shared/provisionNative.ts). trialState() computes live state
+    // from that timestamp + now on EVERY showApp call, so the countdown banner and the (flag-gated)
+    // access check always agree and re-evaluate on each load — sidestepping the cached-status issue.
+    //
+    // Two exemption levers, both automatic:
+    //   • NULL trial_ends_at → {applies:false}: every pre-feature workspace (incl. current testers)
+    //     is grandfathered and never counted down or blocked.
+    //   • subscriptionStatus !== 'trialing' (tester/active/pro/enterprise) → {applies:false}: paid
+    //     and tester accounts are exempt regardless of dates.
+    // So flipping ENFORCE_TRIAL=true enforces ONLY workspaces created after this shipped — exactly
+    // "enforce new users, grandfather existing testers" — with no migration or allow-list.
+    const TRIAL_DAYS = 14;
+    const ENFORCE_TRIAL = false; // false = countdown banner only, never blocks. Flip to enforce.
+    function trialState(user) {
+      const u = user || currentUser;
+      if (!u || u.subscriptionStatus !== 'trialing' || !u.trialEndsAt) return { applies: false };
+      const end = new Date(u.trialEndsAt).getTime();
+      if (isNaN(end)) return { applies: false };
+      const msLeft = end - Date.now();
+      return { applies: true, daysLeft: Math.ceil(msLeft / 86400000), expired: msLeft <= 0, endsAt: end };
+    }
+
+    // Render the home-screen trial countdown. Hidden for anyone not on the clock (trialState
+    // returns applies:false). Amber normally; red in the final stretch / when expired. Copy reflects
+    // ENFORCE_TRIAL: while false, an expired trial still says access continues (we don't block yet).
+    function renderTrialBanner() {
+      const el = document.getElementById('trialBanner');
+      if (!el) return;
+      const t = trialState(currentUser);
+      if (!t.applies) { el.style.display = 'none'; return; }
+      let label;
+      if (t.expired) {
+        label = ENFORCE_TRIAL
+          ? '⚠️ Your free trial has ended.'
+          : '⚠️ Your free trial has ended — full access continues for now.';
+      } else if (t.daysLeft <= 1) {
+        label = '⏳ Last day of your free trial.';
+      } else {
+        label = `⏳ ${t.daysLeft} days left in your free trial.`;
+      }
+      const urgent = t.expired || t.daysLeft <= 3;
+      const accent = urgent ? '#ef4444' : '#f59e0b';
+      const tint = urgent ? 'rgba(239,68,68,0.10)' : 'rgba(245,158,11,0.10)';
+      el.textContent = label;
+      el.style.cssText = 'margin:0 0 16px;padding:10px 14px;border-radius:var(--radius-sm,8px);'
+        + 'font-size:14px;font-weight:600;text-align:center;'
+        + `color:${accent};background:${tint};border:1px solid ${accent};`;
+    }
+
     // Helper for Edge Function calls — POST JSON, returns parsed JSON.
     async function edgeFunctionCall(name, body) {
       const res = await fetch(EDGE_BASE + '/' + name, {
@@ -4035,7 +4088,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // a Supabase-Auth-authenticated email, by reading profile→franchise→tenant (incl. the
     // per-capability provider flags). Returns null if no profile exists for that email.
     async function buildSessionFromSupabaseAuth(email) {
-      const rows = await supabaseFetch('/rest/v1/profiles?select=role,franchise_id,name,franchises(external_id,franchise_name,cost_settings,subscription_tier,vonigo_configured,tenants(id,subscription_status,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(email));
+      const rows = await supabaseFetch('/rest/v1/profiles?select=role,franchise_id,name,franchises(external_id,franchise_name,cost_settings,subscription_tier,vonigo_configured,tenants(id,subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(email));
       const p = rows && rows[0];
       if (!p) return null;
       const f = p.franchises || {};
@@ -4054,6 +4107,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         submissionTarget: t.submission_target || 'vonigo',
         subscriptionStatus: f.subscription_tier || t.subscription_status || 'trialing',
         subscriptionTier: f.subscription_tier || null,
+        trialEndsAt: t.trial_ends_at || null,
         vonigoConfigured: f.vonigo_configured || false,
         costSettings: cs,
         phone: cs.phone || '', website: cs.website || '',
@@ -5505,11 +5559,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       // Check subscription status
       const status = currentUser.subscriptionStatus || 'trialing';
-      const hasAccess = ['active', 'trialing', 'tester', 'pro', 'enterprise'].includes(status);
+      let hasAccess = ['active', 'trialing', 'tester', 'pro', 'enterprise'].includes(status);
+      // Trial enforcement — gated by ENFORCE_TRIAL (false today → never blocks). Only bites a
+      // workspace actually on the clock: status 'trialing' WITH a stamped trial_ends_at that has
+      // passed. NULL-dated (grandfathered) / tester / paid accounts return applies:false and are
+      // never affected. trialState() recomputes from the timestamp on each load.
+      const _trial = trialState(currentUser);
+      const _trialExpired = ENFORCE_TRIAL && _trial.applies && _trial.expired;
+      if (_trialExpired) hasAccess = false;
       if (!hasAccess) {
         document.getElementById('paywallScreen').style.display = 'flex';
         if (document.getElementById('paywallEmail')) document.getElementById('paywallEmail').textContent = currentUser.email || '';
-        const msg = status === 'past_due'
+        const msg = _trialExpired
+          ? 'Your free trial has ended. Subscribe to keep using CrewLogicAI.'
+          : status === 'past_due'
           ? 'Your payment is past due. Please update your billing to continue.'
           : status === 'canceled'
           ? 'Your subscription has been canceled. Subscribe to regain access.'
@@ -5531,6 +5594,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
       document.getElementById('homeGreeting').textContent = `${greeting}, ${firstName}!`;
       document.getElementById('homeDate').textContent = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
+      // Trial countdown banner (native trialing workspaces only; no-op for everyone else)
+      renderTrialBanner();
 
       // Show setup badge on Price Lookup if Vonigo not configured
       updatePriceLookupCardState();
