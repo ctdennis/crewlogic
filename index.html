@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.19.1 | 2026-06-01">
+  <meta name="crewlogic-version" content="v5.19.2 | 2026-06-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3785,7 +3785,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           if (session && session.email) {
             currentUser = session;
             // Refresh costSettings + role + tier from Supabase in background (may have changed since cache)
-            supabaseFetch('/rest/v1/profiles?select=role,franchises(id,external_id,franchise_name,subscription_tier,cost_settings,tenant_id)&email=eq.' + encodeURIComponent(session.email))
+            supabaseFetch('/rest/v1/profiles?select=role,franchises(id,external_id,franchise_name,subscription_tier,cost_settings,tenant_id,tenants(trial_ends_at))&email=eq.' + encodeURIComponent(session.email))
               .then(rows => {
                 if (rows && rows[0]) {
                   if (rows[0].role) currentUser.role = rows[0].role;
@@ -3794,6 +3794,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                     if (rows[0].franchises.external_id) currentUser.franchiseID = rows[0].franchises.external_id;
                     if (rows[0].franchises.franchise_name) currentUser.franchiseName = rows[0].franchises.franchise_name;
                     if (rows[0].franchises.tenant_id) currentUser.tenantID = rows[0].franchises.tenant_id;
+                    // Keep the trial date fresh so the countdown reflects server-side changes
+                    // (extensions, manual adjustments) without forcing a re-login.
+                    if (rows[0].franchises.tenants) currentUser.trialEndsAt = rows[0].franchises.tenants.trial_ends_at || null;
                   }
                   if (rows[0].franchises?.subscription_tier) {
                     currentUser.subscriptionTier = rows[0].franchises.subscription_tier;
