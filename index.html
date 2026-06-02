@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.21.0 | 2026-06-02">
+  <meta name="crewlogic-version" content="v5.22.0 | 2026-06-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1288,12 +1288,29 @@
       <!-- PRICE LOOKUP -->
       <div class="price-lookup-section" id="priceLookupScreen">
         <div class="section-title fade-in">Price Lookup</div>
-        <div class="section-desc fade-in fade-in-delay-1">Enter a ZIP code to retrieve pricing for that service zone.</div>
+        <div class="section-desc fade-in fade-in-delay-1">Enter a ZIP code or town name to retrieve pricing for that service zone.</div>
 
-        <div class="zip-lookup-row fade-in fade-in-delay-2">
+        <!-- ZIP | Town mode toggle (CL-SPEC-002) -->
+        <div class="fade-in fade-in-delay-2" style="display:flex;gap:6px;margin-bottom:10px;">
+          <button type="button" id="priceModeZipBtn" onclick="setPriceLookupMode('zip')"
+            style="flex:0 0 auto;padding:6px 16px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--accent-green);color:#000;font-weight:600;cursor:pointer;">ZIP</button>
+          <button type="button" id="priceModeTownBtn" onclick="setPriceLookupMode('town')"
+            style="flex:0 0 auto;padding:6px 16px;border-radius:var(--radius-sm);border:1px solid var(--border);background:transparent;color:var(--text-muted);font-weight:600;cursor:pointer;">Town</button>
+        </div>
+
+        <div class="zip-lookup-row fade-in fade-in-delay-2" id="priceZipRow">
           <input type="text" class="form-input" id="priceZipInput" maxlength="5"
             inputmode="numeric" placeholder="ZIP" />
           <button class="zip-lookup-btn" id="priceLookupBtn" onclick="doZipLookup()">
+            <div class="spinner"></div>
+            <span class="btn-text">Look up</span>
+          </button>
+        </div>
+
+        <div class="zip-lookup-row" id="priceTownRow" style="display:none;">
+          <input type="text" class="form-input" id="priceTownInput" placeholder="Town / city" style="flex:1 1 auto;" />
+          <select class="form-input" id="priceStateSelect" style="flex:0 0 auto;max-width:84px;"></select>
+          <button class="zip-lookup-btn" id="priceTownLookupBtn" onclick="doTownLookup()">
             <div class="spinner"></div>
             <span class="btn-text">Look up</span>
           </button>
@@ -6432,6 +6449,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         zipInput.addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, ''); });
         zipInput.addEventListener('keydown', e => { if (e.key === 'Enter') doZipLookup(); });
       }
+      const townInput = document.getElementById('priceTownInput');
+      if (townInput) {
+        townInput.addEventListener('keydown', e => { if (e.key === 'Enter') doTownLookup(); });
+      }
     });
 
     async function doZipLookup() {
@@ -6476,6 +6497,110 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
 
       btn.classList.remove('loading');
+    }
+
+    // ── Town-name price lookup (CL-SPEC-002) ──────────────────────────────
+    // Town + state → ZIP via Zippopotam.us (free, no API key), then reuse doZipLookup().
+    const PL_US_STATES = [
+      ['AL','Alabama'],['AK','Alaska'],['AZ','Arizona'],['AR','Arkansas'],['CA','California'],
+      ['CO','Colorado'],['CT','Connecticut'],['DE','Delaware'],['DC','District of Columbia'],
+      ['FL','Florida'],['GA','Georgia'],['HI','Hawaii'],['ID','Idaho'],['IL','Illinois'],
+      ['IN','Indiana'],['IA','Iowa'],['KS','Kansas'],['KY','Kentucky'],['LA','Louisiana'],
+      ['ME','Maine'],['MD','Maryland'],['MA','Massachusetts'],['MI','Michigan'],['MN','Minnesota'],
+      ['MS','Mississippi'],['MO','Missouri'],['MT','Montana'],['NE','Nebraska'],['NV','Nevada'],
+      ['NH','New Hampshire'],['NJ','New Jersey'],['NM','New Mexico'],['NY','New York'],
+      ['NC','North Carolina'],['ND','North Dakota'],['OH','Ohio'],['OK','Oklahoma'],['OR','Oregon'],
+      ['PA','Pennsylvania'],['RI','Rhode Island'],['SC','South Carolina'],['SD','South Dakota'],
+      ['TN','Tennessee'],['TX','Texas'],['UT','Utah'],['VT','Vermont'],['VA','Virginia'],
+      ['WA','Washington'],['WV','West Virginia'],['WI','Wisconsin'],['WY','Wyoming']
+    ];
+
+    let _plStatesInit = false;
+    function initPriceLookupStates() {
+      const sel = document.getElementById('priceStateSelect');
+      if (!sel || _plStatesInit) return;
+      sel.innerHTML = PL_US_STATES.map(s => '<option value="' + s[0] + '">' + s[0] + '</option>').join('');
+      // Default to the franchise's home state (Settings → Office State) when set.
+      const home = ((currentUser && currentUser.officeState) || '').trim().toUpperCase();
+      if (home && PL_US_STATES.some(s => s[0] === home)) sel.value = home;
+      _plStatesInit = true;
+    }
+
+    function setPriceLookupMode(mode) {
+      const isTown = mode === 'town';
+      const zipRow = document.getElementById('priceZipRow');
+      const townRow = document.getElementById('priceTownRow');
+      if (zipRow) zipRow.style.display = isTown ? 'none' : '';
+      if (townRow) townRow.style.display = isTown ? '' : 'none';
+      const zipBtn = document.getElementById('priceModeZipBtn');
+      const townBtn = document.getElementById('priceModeTownBtn');
+      [[zipBtn, !isTown], [townBtn, isTown]].forEach(function(pair) {
+        const b = pair[0], on = pair[1];
+        if (!b) return;
+        b.style.background = on ? 'var(--accent-green)' : 'transparent';
+        b.style.color = on ? '#000' : 'var(--text-muted)';
+      });
+      if (isTown) initPriceLookupStates();
+    }
+
+    // Resolve a town + state to a primary ZIP. Picks the lowest-numbered post code —
+    // pricing is townwide-uniform, so the pick only affects which ZIP is displayed (CL-SPEC-002 §3).
+    async function resolveTownToZip(city, state) {
+      const c = (city || '').trim();
+      const s = (state || '').trim();
+      if (!c || !s) return null;
+      const url = 'https://api.zippopotam.us/us/' + encodeURIComponent(s.toLowerCase()) + '/' + encodeURIComponent(c.toLowerCase());
+      const res = await fetch(url);
+      if (res.status === 404) return null;            // town not found for that state
+      if (!res.ok) throw new Error('zippopotam ' + res.status);
+      const data = await res.json();
+      const places = Array.isArray(data.places) ? data.places : [];
+      const zips = places.map(function(p) { return (p['post code'] || '').trim(); })
+                         .filter(function(z) { return /^\d{5}$/.test(z); });
+      if (!zips.length) return null;
+      zips.sort();                                     // lexicographic === numeric for 5-digit ZIPs
+      return zips[0];
+    }
+
+    async function doTownLookup() {
+      const town = document.getElementById('priceTownInput').value.trim();
+      const state = document.getElementById('priceStateSelect').value;
+      const errorEl = document.getElementById('priceLookupError');
+      const resultsEl = document.getElementById('priceLookupResults');
+      const btn = document.getElementById('priceTownLookupBtn');
+
+      errorEl.style.display = 'none';
+      errorEl.textContent = '';
+
+      if (!town) { errorEl.textContent = 'Enter a town or city name.'; errorEl.style.display = 'block'; return; }
+      if (!state) { errorEl.textContent = 'Select a state.'; errorEl.style.display = 'block'; return; }
+
+      btn.classList.add('loading');
+      resultsEl.innerHTML = '<div class="price-loading"><span class="spinner-inline"></span>Finding ' + town + ', ' + state + '...</div>';
+
+      let zip;
+      try {
+        zip = await resolveTownToZip(town, state);
+      } catch (e) {
+        resultsEl.innerHTML = '';
+        errorEl.textContent = 'Couldn’t look up that town right now — try entering the ZIP instead.';
+        errorEl.style.display = 'block';
+        btn.classList.remove('loading');
+        return;
+      }
+
+      if (!zip) {
+        resultsEl.innerHTML = '';
+        errorEl.textContent = 'Town not found — check the spelling and state, or enter the ZIP.';
+        errorEl.style.display = 'block';
+        btn.classList.remove('loading');
+        return;
+      }
+
+      // Hand the resolved ZIP to the existing lookup (backend untouched).
+      document.getElementById('priceZipInput').value = zip;
+      btn.classList.remove('loading');
+      await doZipLookup();
     }
 
     function togglePriceBlock(blockID) {

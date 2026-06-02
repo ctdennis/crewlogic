@@ -1,7 +1,11 @@
 # CL-SPEC-002 — Town-name Price Lookup (town → ZIP → price)
 
-Status: **Documented, not yet built** (2026-05-29). Enhancement to the home-page Price Lookup.
-Provider-agnostic: works for both Vonigo and native (no-CRM) tenants for free (see §5).
+Status: **Built** (2026-06-02; spec'd 2026-05-29). Enhancement to the home-page Price Lookup.
+Provider-agnostic: works for both Vonigo and native (no-CRM) tenants for free (see §5). Shipped in
+v5.22.0: ZIP|Town toggle on `#priceLookupScreen`, `resolveTownToZip()` (Zippopotam.us, no key),
+state selector defaulting to `currentUser.officeState`. Resolver + error paths verified against the
+live API (New Bedford MA → 02740; unknown town → 404 → "not found"). End-to-end in-browser verify on
+a real Vonigo + native tenant still pending (see checklist).
 
 ## 1. Goal
 Today the home-page Price Lookup takes a 5-digit **ZIP** (`#priceZipInput` → `doZipLookup()` →
@@ -69,9 +73,9 @@ so a resolved ZIP always returns a price for native tenants too.
 - ZIP resolves but isn't in the franchise's service zone (Vonigo) → existing "not in service zone" message.
 - Network/Zippopotam down → fall back to the existing ZIP entry.
 
-## 7. Build checklist (later)
-- [ ] UI: town input + state selector (default home state); keep ZIP entry (toggle or both).
-- [ ] `resolveTownToZip(city, state)` → Zippopotam fetch → lowest-numbered `post code`.
-- [ ] Wire into `doZipLookup()` (pre-fill ZIP + run existing lookup) — no backend change.
-- [ ] Errors: town-not-found, network fallback.
-- [ ] Verify on a Vonigo tenant (New Bedford → 02740 → price) and a native dev tenant.
+## 7. Build checklist
+- [x] UI: town input + state selector (default home state via `currentUser.officeState`); ZIP entry kept, ZIP|Town toggle. (`#priceModeZipBtn`/`#priceModeTownBtn`, `#priceTownRow`, `setPriceLookupMode()`.)
+- [x] `resolveTownToZip(city, state)` → Zippopotam fetch → lowest-numbered `post code`.
+- [x] Wire into `doZipLookup()` via `doTownLookup()` (resolves ZIP → pre-fills `#priceZipInput` → calls existing `doZipLookup()`) — no backend change.
+- [x] Errors: town-not-found (404 → message), network fallback (fetch throw → "try the ZIP").
+- [ ] Verify on a Vonigo tenant (New Bedford → 02740 → price) and a native dev tenant. _(Resolver + error paths verified against the live API 2026-06-02; full in-browser end-to-end on each tenant type still to do.)_
