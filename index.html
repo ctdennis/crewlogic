@@ -13301,6 +13301,47 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (hasCplDiscount) doc.text('VIP Price', col.vip, y - 1, { align: 'right' });
       y += 10;
 
+      // ── Summary-page pagination guard ──────────────────────────────────────
+      // The summary draws every row with a growing `y`, but the fine-print footer
+      // is pinned at H-20. For tall estimates (many areas/charges) the bottom rows
+      // used to collide with that footer. Before drawing a block, ensureSummaryRoom
+      // starts a fresh page (with a continuation header) if the block won't fit above
+      // the footer zone. No-op when the content already fits — short estimates are
+      // rendered exactly as before.
+      const FOOTER_ZONE = H - 44; // reserve room for the footer rule (H-32) + text (H-20)
+      const drawSummaryTableHeader = (hy) => {
+        doc.setFillColor(...dark);
+        doc.rect(margin, hy - 14, W - 2 * margin, 20, 'F');
+        doc.setTextColor(...white);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.text('Area (includes labor, disposal & recycling)', col.area, hy - 1);
+        doc.text('CY', col.cy, hy - 1, { align: 'right' });
+        doc.text('Trucks', col.trucks, hy - 1, { align: 'right' });
+        doc.text('Price / Truck', col.price, hy - 1, { align: 'right' });
+        doc.text('Total', col.total, hy - 1, { align: 'right' });
+        if (hasCplDiscount) doc.text('Discount', col.discount, hy - 1, { align: 'right' });
+        if (hasCplDiscount) doc.text('VIP Price', col.vip, hy - 1, { align: 'right' });
+      };
+      const ensureSummaryRoom = (need) => {
+        if (y + need <= FOOTER_ZONE) return;
+        doc.addPage([960, 540], 'landscape');
+        doc.setFillColor(...dark);
+        doc.rect(0, 0, W, 40, 'F');
+        doc.setFillColor(...green);
+        doc.rect(0, 40, W, 3, 'F');
+        doc.setTextColor(...white);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.text('ESTIMATE PROPOSAL (cont.)', margin, 26);
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.text(clientName, W - margin, 26, { align: 'right' });
+        y = 72;
+        drawSummaryTableHeader(y);
+        y += 10;
+      };
+
       // Group volume charges by area
       const areaTotals = {};
       (est.charges || []).filter(c => c.type === 'volume').forEach(r => {
@@ -13347,6 +13388,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       let rowIdx = 0;
       areaRows.forEach(([area, trucks]) => {
+        ensureSummaryRoom(20);
         if (rowIdx % 2 === 0) {
           doc.setFillColor(...offwhite);
           doc.rect(margin, y - 2, W - 2 * margin, 18, 'F');
@@ -13374,6 +13416,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         doc.line(margin, y, W - margin, y);
         y += 6;
         pdfVolumeLines.forEach((line, i) => {
+          ensureSummaryRoom(20);
           if (rowIdx % 2 === 0) { doc.setFillColor(...offwhite); doc.rect(margin, y - 2, W - 2 * margin, 18, 'F'); }
           doc.setTextColor(...dark);
           doc.setFont('helvetica', 'normal');
@@ -13388,6 +13431,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
 
       // Total Volume row — always shown, now always AFTER detail rows
+      ensureSummaryRoom(24);
       doc.setFillColor(...dark);
       doc.rect(margin, y - 2, W - 2 * margin, 22, 'F');
       doc.setTextColor(...white);
@@ -13470,6 +13514,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           ? doc.splitTextToSize(c.description.trim(), col.price - col.area - 6)
           : [];
         const rowH = hasDesc ? (14 + descLines.length * descLineH) : 18;
+        ensureSummaryRoom(rowH + (hasDesc ? 6 : 2));
         if (i % 2 === 0) {
           doc.setFillColor(...offwhite);
           doc.rect(margin, y - 2, W - 2 * margin, rowH, 'F');
@@ -13528,6 +13573,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       // Section header for surcharges
       if (surchargeCharges.length > 0) {
+        ensureSummaryRoom(28);
         y += 4;
         doc.setFillColor(30, 45, 55);
         doc.rect(margin, y, W - 2 * margin, 20, 'F');
@@ -13549,6 +13595,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const pdfSubTotal = pdfVolumePrice + pdfSurchargeSum;
 
       if (discountCharges.length > 0) {
+        ensureSummaryRoom(30);
         y += 4;
         doc.setFillColor(...dark);
         doc.rect(margin, y, W - 2 * margin, 22, 'F');
@@ -13572,6 +13619,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             ? doc.splitTextToSize(c.description.trim(), col.price - col.area - 12)
             : [];
           const rowH = hasDesc ? (14 + descLines.length * descLineH) : 18;
+          ensureSummaryRoom(rowH + (hasDesc ? 6 : 2));
           if (i % 2 === 0) {
             doc.setFillColor(...offwhite);
             doc.rect(margin, y - 2, W - 2 * margin, rowH, 'F');
@@ -13644,6 +13692,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       // CPL summary row — ★ Name — Negotiated Rate  |  Total Saved  |  Net Total
       if (pdfCustomerDiscount > 0) {
+        ensureSummaryRoom(32);
         y += 4;
         doc.setFillColor(20, 35, 48);
         doc.rect(margin, y, W - 2 * margin, 22, 'F');
@@ -13661,6 +13710,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         y += 28;
       }
 
+      ensureSummaryRoom(40);
       y += 6;
       doc.setFillColor(...green);
       doc.rect(margin, y, W - 2 * margin, 28, 'F');
