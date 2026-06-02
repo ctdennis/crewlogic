@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.19.2 | 2026-06-01">
+  <meta name="crewlogic-version" content="v5.20.0 | 2026-06-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1187,7 +1187,7 @@
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:nowrap;">
             <button class="est-add-btn" id="photoRoomBtn" onclick="startPhotoCapture()">📷 Photo</button>
             <button class="est-add-btn voice-room-btn" id="voiceRoomBtn" onclick="startRoomVoice()">🎤 Describe</button>
-            <button class="est-add-btn" id="addChargeBtn" onclick="showAddCharge()">✏️ Manual</button>
+            <button class="est-add-btn" id="addChargeBtn" onclick="toggleManualMenu(event)">✏️ Manual ▾</button>
             <button class="est-add-btn" onclick="toggleWizardMenu(event)" id="wizardMenuBtnHeader">⚡ More ▾</button>
             <button class="est-add-btn" data-save-btn onclick="saveEstimateDraft()" style="background:transparent;color:var(--accent-green);border:1px solid var(--accent-green);">Save Draft</button>
           </div>
@@ -1217,6 +1217,16 @@
       <button onclick="closeWizardMenu();showMattressWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🛏️ Mattress</button>
       <button onclick="closeWizardMenu();showPalletWizard();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🪵 Pallets</button>
       <button onclick="closeWizardMenu();openPhotoReconciler();" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;">🩹 Recover photos</button>
+    </div>
+
+    <!-- Manual add-type menu — mirrors the More menu. JS positions it under the Manual button.
+         Each option opens the Add Area modal pre-set to that charge type. -->
+    <div id="manualTypeMenu" style="display:none;position:fixed;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);z-index:200;min-width:160px;box-shadow:var(--shadow);">
+      <button onclick="closeManualMenu();showAddCharge('volume');" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">📦 Volume</button>
+      <button onclick="closeManualMenu();showAddCharge('surcharge');" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">➕ Surcharge</button>
+      <button onclick="closeManualMenu();showAddCharge('labor');" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🧰 Labor</button>
+      <button onclick="closeManualMenu();showAddCharge('singleitem');" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;border-bottom:1px solid var(--border);">🪑 Single Item</button>
+      <button onclick="closeManualMenu();showAddCharge('discount');" style="display:block;width:100%;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:13px;text-align:left;cursor:pointer;">🏷️ Discount</button>
     </div>
 
     <div class="app-content">
@@ -2809,7 +2819,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               </div>
             </div>
             <div class="form-group" id="priced-desc-row" style="display:none;">
-              <div class="form-label">Description <span style="font-size:11px;color:var(--text-muted);font-weight:400;">(e.g. Jane Smith, Coldwell Banker)</span></div>
+              <div class="form-label">Description <span id="priced-desc-hint" style="font-size:11px;color:var(--text-muted);font-weight:400;">(e.g. Jane Smith, Coldwell Banker)</span></div>
               <input type="text" class="form-input" id="priced-desc" placeholder="Referral name & company">
             </div>
             <div class="form-group" id="priced-area-row" style="display:none;">
@@ -8614,7 +8624,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Populate item dropdown based on type
         populatePricedItems(type);
         document.getElementById('priced-qty-row').style.display = 'none';
-        document.getElementById('priced-desc-row').style.display = type === 'discount' ? 'block' : 'none';
+        // Description applies to every priced type now (surcharge, labor, single item,
+        // discount) — it was previously discount-only. Tailor the hint/placeholder.
+        document.getElementById('priced-desc-row').style.display = 'block';
+        const descHint = document.getElementById('priced-desc-hint');
+        const descInput = document.getElementById('priced-desc');
+        if (type === 'discount') {
+          if (descHint) descHint.textContent = '(e.g. Jane Smith, Coldwell Banker)';
+          if (descInput) descInput.placeholder = 'Referral name & company';
+        } else {
+          if (descHint) descHint.textContent = '(optional)';
+          if (descInput) descInput.placeholder = 'Details shown on the charge row';
+        }
         document.getElementById('priced-area-row').style.display = type !== 'discount' ? 'block' : 'none';
         // Populate area dropdown
         const areaEl = document.getElementById('priced-area');
@@ -10005,7 +10026,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
     }
 
-    function showAddCharge() {
+    function showAddCharge(type) {
       // Reset modal state
       currentChargeType = null;
       ['volume','surcharge','labor','singleitem','discount'].forEach(t => {
@@ -10035,6 +10056,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const pricedDesc = document.getElementById('priced-desc'); if (pricedDesc) pricedDesc.value = '';
 
       document.getElementById('addChargeModal').style.display = 'flex';
+
+      // When opened from the Manual dropdown, jump straight to the chosen type.
+      if (type) selectChargeType(type);
     }
 
     function closeAddCharge() {
@@ -13439,7 +13463,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const unit = parseFloat(c.unitPrice) || 0;
         const lineTotal = qty * unit;
         const hasDesc = !!(c.description && c.description.trim());
-        const rowH = hasDesc ? 28 : 18;
+        const descLineH = 9;
+        // Wrap the description and reserve height for EVERY wrapped line, so it can't
+        // overflow into the next row.
+        const descLines = hasDesc
+          ? doc.splitTextToSize(c.description.trim(), col.price - col.area - 6)
+          : [];
+        const rowH = hasDesc ? (14 + descLines.length * descLineH) : 18;
         if (i % 2 === 0) {
           doc.setFillColor(...offwhite);
           doc.rect(margin, y - 2, W - 2 * margin, rowH, 'F');
@@ -13449,13 +13479,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         doc.setFontSize(9);
         const label = (c.name || '') + (qty !== 1 ? ' × ' + qty : '');
         doc.text(label, col.area, y + 10);
-        // Description line in gray italic below name
+        // Description in gray italic below name — render ALL wrapped lines
         if (hasDesc) {
           doc.setFont('helvetica', 'italic');
           doc.setFontSize(7.5);
           doc.setTextColor(...gray);
-          const descText = doc.splitTextToSize(c.description.trim(), col.price - col.area - 4);
-          doc.text(descText[0], col.area + 2, y + 20); // show first line only
+          descLines.forEach((ln, li) => doc.text(ln, col.area + 2, y + 20 + li * descLineH));
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(9);
         }
@@ -13494,7 +13523,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             doc.setFont('helvetica', 'normal');
           }
         }
-        y += hasDesc ? 32 : 20;
+        y += rowH + (hasDesc ? 6 : 2);
       };
 
       // Section header for surcharges
@@ -13535,26 +13564,34 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const qty = parseFloat(c.qty) || 0;
           const unit = parseFloat(c.unitPrice) || 0;
           const lineTotal = qty * unit;
+          const hasDesc = !!(c.description && c.description.trim());
+          const descLineH = 9;
+          // Wrap to the area BEFORE the amount column and reserve height for every line
+          // so a long discount note can't overlap the next row.
+          const descLines = hasDesc
+            ? doc.splitTextToSize(c.description.trim(), col.price - col.area - 12)
+            : [];
+          const rowH = hasDesc ? (14 + descLines.length * descLineH) : 18;
           if (i % 2 === 0) {
             doc.setFillColor(...offwhite);
-            doc.rect(margin, y - 2, W - 2 * margin, c.description ? 24 : 18, 'F');
+            doc.rect(margin, y - 2, W - 2 * margin, rowH, 'F');
           }
           doc.setTextColor(...dark);
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(9);
           const label = (c.name || '') + (qty !== 1 ? ' × ' + qty : '');
           doc.text(label, col.area, y + 10);
-          if (c.description) {
+          if (hasDesc) {
             doc.setFontSize(8);
             doc.setTextColor(...gray);
-            doc.text(c.description, col.area + 8, y + 20);
+            descLines.forEach((ln, li) => doc.text(ln, col.area + 8, y + 20 + li * descLineH));
             doc.setFontSize(9);
           }
           doc.setTextColor(30, 80, 180);  // bold dark blue for discount
           doc.setFont('helvetica', 'bold');
           doc.text(fmtMoney(lineTotal), col.total, y + 10, { align: 'right' });
           doc.setFont('helvetica', 'normal');
-          y += c.description ? 26 : 20;
+          y += rowH + (hasDesc ? 6 : 2);
         });
       }
 
@@ -17483,6 +17520,7 @@ Please review the estimate below. If you have any questions or would like to adj
     // ===== SPECIALTY WIZARD DROPDOWN =====
     function toggleWizardMenu(e) {
       e.stopPropagation();
+      closeManualMenu();
       const menu = document.getElementById('wizardMenuHeader');
       if (!menu) return;
       if (menu.style.display !== 'none' && menu.style.display !== '') {
@@ -17511,6 +17549,35 @@ Please review the estimate below. If you have any questions or would like to adj
 
     // Close menu when tapping anywhere else
     document.addEventListener('click', function() { closeWizardMenu(); });
+
+    // Manual add-type menu — same behavior as the More/wizard menu
+    function toggleManualMenu(e) {
+      e.stopPropagation();
+      closeWizardMenu();
+      const menu = document.getElementById('manualTypeMenu');
+      if (!menu) return;
+      if (menu.style.display !== 'none' && menu.style.display !== '') {
+        menu.style.display = 'none';
+        return;
+      }
+      const btn = e.currentTarget;
+      const rect = btn.getBoundingClientRect();
+      menu.style.top = (rect.bottom + 4) + 'px';
+      const menuWidth = 160;
+      const viewportWidth = window.innerWidth;
+      let left = rect.left;
+      if (left + menuWidth > viewportWidth - 8) {
+        left = viewportWidth - menuWidth - 8;
+      }
+      menu.style.left = left + 'px';
+      menu.style.display = 'block';
+    }
+
+    function closeManualMenu() {
+      const menu = document.getElementById('manualTypeMenu');
+      if (menu) menu.style.display = 'none';
+    }
+    document.addEventListener('click', function() { closeManualMenu(); });
 
     // ===== SHED WIZARD =====
     let shedCalcData = null;
