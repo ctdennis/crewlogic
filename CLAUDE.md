@@ -25,6 +25,15 @@ Approvals in `.claude/settings.local.json` match by **exact command prefix, one 
 
 CrewLogicAI is a single-page web app for The Junkluggers franchise crews/owners: AI-assisted junk-removal estimating, pricing, job planning, route/truck-load math, and a "yard signs" tracking/rewards game. **The entire application lives in one file: `index.html` (~18.4k lines).** There is no build step, no package manager, no test suite, and no framework — it is vanilla HTML/CSS/JS with CDN-loaded libraries.
 
+## Project status — read `docs/STATUS.md` first
+
+**`docs/STATUS.md` is the single source of truth for project / build / production-rollout status.** For any "where are we / what's done / what's shipped" question, **read that file instead of re-deriving status from the code** — re-analyzing `index.html` + the edge functions is expensive and was only necessary because the docs had drifted. Feature specs live in `docs/Feature-StandaloneMode/` and STATUS.md links to them.
+
+Keep it current with the **check → update → recheck** protocol (also stated at the top of STATUS.md):
+1. **Check** the relevant row *before* starting a change.
+2. **Update** the row (Build / Prod / Version / Open items) *in the same commit* as the change — never let the tracker lag the code.
+3. **Recheck** after the change landed and stamp **Last verified** with the date. If a field (e.g. prod-tenant usage) couldn't be verified, say so in Notes rather than guessing. Trust entries with a recent *Last verified*; re-verify stale ones.
+
 ## Architecture
 
 `index.html` is structured as three sequential blocks:
