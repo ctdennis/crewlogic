@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.22.0 | 2026-06-02">
+  <meta name="crewlogic-version" content="v5.22.1 | 2026-06-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -5871,7 +5871,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (module === 'settings') { populateSettings(); if (currentUser && currentUser.role === 'owner') loadTeamMembers(); }
       if (module === 'priceLookup') {
         const isEstimatorRole = (currentUser.role || 'estimator') !== 'owner';
-        if (!currentUser.vonigoConfigured && !isEstimatorRole) {
+        if (!currentUser.vonigoConfigured && !isEstimatorRole && currentUser.pricingSource !== 'native') {
           document.getElementById('priceLookupError').textContent = 'Vonigo credentials not configured. Go to Settings to set them up.';
           document.getElementById('priceLookupError').style.display = 'block';
           document.getElementById('priceLookupBtn').disabled = true;
@@ -5879,6 +5879,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           document.getElementById('priceLookupError').style.display = 'none';
           document.getElementById('priceLookupBtn').disabled = false;
         }
+        // Refresh the Town sub-UI each entry so the state dropdown / autocomplete reflect current
+        // settings (e.g. serviceStates just edited). Preserve whichever mode is active.
+        const _tr = document.getElementById('priceTownRow');
+        setPriceLookupMode(_tr && _tr.style.display !== 'none' ? 'town' : 'zip');
       }
       if (module === 'jobPlan') { initJobPlan(); }
     }
