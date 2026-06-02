@@ -69,6 +69,13 @@ Source lives in `supabase/functions/<name>/index.ts` (see "Supabase CLI" below).
 - `crewlogic-todays-workorders` — fetches today's work orders (Vonigo).
 - `crewlogic-price-lookup` — pricing lookups.
 - `crewlogic-estimate` — estimate save (`save` upserts to the `estimates` table) and `calcDistances` (Google Maps Distance Matrix lookup for cost-analysis routing). Replaces the n8n `save` + `calcDistances` webhook equivalents. Note: `delete` and `searchClients` actions still live in n8n (they require Vonigo OAuth).
+- `crewlogic-pricing` — native price-book lookup for `crm_provider='none'` franchises (reads `price_lists` / `price_list_zips`). Returns the **same JSON shape** as `crewlogic-price-lookup` so the frontend estimating engine is unchanged — only the data source swaps. The client picks between them via `currentUser.pricingSource === 'native'` (~line 3615).
+- `crewlogic-job-lookup` — looks up a single Vonigo job by `jobID` and returns the client/contact/location IDs + display info needed to hydrate an estimate. MD5 `/security/login/` auth (no Vonigo OAuth). Replaces the n8n `crewlogic-job-lookup` webhook.
+- `crewlogic-trucks` — returns current truck GPS locations from Motive (gomotive.com); used by the Route Optimizer truck-distance display. Requires the `MOTIVE_API_KEY` secret. (The large route-optimization engine still lives in n8n.)
+- `crewlogic-signup` — native self-provisioning: creates the tenant + franchise + profile for the native (non-Vonigo) signup flow. Junkluggers `@junkluggers.com` emails do **not** self-provision natively.
+- `crewlogic-accept-invite` — provisions a profile from a pending invite token (service role); used by the invite-link flow (~line 3881).
+- `crewlogic-photo-sweep` — **daily pg_cron job** (via pg_net). Permanently deletes soft-deleted estimate photos whose `deletedAt` is >30 days old, prunes the matching `estimates.payload.charges[*].deletedPhotos` JSONB entries (via SQL helpers `sweep_find_expired_photos()` / `sweep_prune_expired_photos()`), and removes the files from the `estimate-photos` Storage bucket. Idempotent; safe to call manually.
+- `crewlogic-signs-lifecycle` — **daily pg_cron job** (via pg_net). Ages yard signs `active → gray` (after `graySignDays`, default 15) and `gray → hidden` (after `hiddenSignDays`, default 60) per-franchise via the SQL function `signs_daily_lifecycle()`; logs transitions to `sign_status_events` and posts a Slack summary if `SLACK_SIGNS_WEBHOOK` is set. Idempotent.
 
 ### Auth & multi-tenancy
 Google OAuth uses `hd=junkluggers.com` for direct sign-ins. Today all owner accounts in production happen to have `@junkluggers.com` Google addresses. The invite-link flow exists and bypasses the `hd=` restriction (intended for inviting estimators with non-junkluggers email accounts), but currently no non-junkluggers.com accounts have actually used it. Adding email/password and magic-link auth for non-Google estimators is on the roadmap.
@@ -100,9 +107,9 @@ Common commands (run from repo root):
 
 ## Edge Function source code
 
-Each Edge Function now has a folder under `supabase/functions/<name>/` (created when the project was linked to the Supabase CLI). **The `index.ts` files are currently placeholder stubs** — the deployed source is being migrated in. Until then it still lives in past Claude.ai chat outputs / the Supabase dashboard.
+Each Edge Function has a folder under `supabase/functions/<name>/` with its real `index.ts` committed to the repo (shared helpers live in `supabase/functions/_shared/`). As of 2026-06-02 all 14 deployed functions' source is under management here and verified byte-for-byte against prod, so they are editable directly via Claude Code.
 
-To bring a function under management: paste its deployed source from the dashboard (Edge Functions → `<name>`) over the stub `index.ts`, then deploy with `supabase functions deploy <name>`. Once a stub is replaced, that function is editable directly via Claude Code.
+Workflow: edit `supabase/functions/<name>/index.ts`, then deploy with `supabase functions deploy <name>` (prod deploys with the `ozfkpxyachigfpcmvekz` ref stay gated — see the approval discipline section). To re-verify a function against prod without deploying, download it read-only (`supabase functions download <name> --project-ref ozfkpxyachigfpcmvekz --workdir /tmp/fn-<name> --use-api`) and `diff` against the repo copy.
 
 ## Environments
 
