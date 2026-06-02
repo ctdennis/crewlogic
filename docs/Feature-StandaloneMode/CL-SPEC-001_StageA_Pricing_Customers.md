@@ -1,7 +1,13 @@
 # CL-SPEC-001 — Stage A: Native Pricing + Customers (no-CRM)
 
-Status: **Approved to build** (2026-05-27). Builds on `CL-BRD-002` (provider abstraction) and
-`D0-findings` (price-lookup response shape). Implemented + tested on the dev `none` tenant first.
+Status: **Built & verified** (verified 2026-06-02; approved to build 2026-05-27). Builds on
+`CL-BRD-002` (provider abstraction) and `D0-findings` (price-lookup response shape). Implemented +
+tested on the dev `none` tenant first. Schema shipped as migrations `0002`/`0003`/`0004`; native
+pricing via the `crewlogic-pricing` edge fn; price-book editor, customers UI + CSV import, and the
+per-capability provider seam (`pricing_source`/`customer_source`/`submission_target`) all live.
+Remaining nits (non-blocking): (1) native send uses the existing "Generate PDF" path, not a renamed
+"Finalize & Send" button; (2) four Route-Optimizer/Storage quick-select buttons still hardcode `16`
+cy (cosmetic — pricing/PDF/cost-analysis all use `truckCapacityCY()`).
 
 ## 1. Scope
 Make a no-CRM company able to **configure its own pricing** and **produce priced AI estimates +

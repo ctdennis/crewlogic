@@ -1,6 +1,11 @@
 # CL-SPEC-003 — Phase 2: Native Auth Front Gate (Supabase Auth, invite-first)
 
-Status: **Planned, not started** (2026-05-29). Follows Phase 1 (provider hydration, shipped v5.11.4).
+Status: **Built & shipped** (login V2 shipped v5.18.0; verified complete 2026-06-02; spec'd 2026-05-29).
+Follows Phase 1 (provider hydration, shipped v5.11.4). All deliverables live: Supabase Auth magic-link
+(`signInWithOtp`) on the V2 login + invite screens, client session builder `buildSessionFromSupabaseAuth()`,
+and native provisioning via `_shared/provisionNative.ts` (shared by `crewlogic-signup`, `-accept-invite`,
+`-oauth-callback`). Google flow untouched; `@junkluggers.com` gated to Google. Magic-link only (no
+password auth) by design. Next: Phase 3 (RLS/SEC-1).
 Decisions (owner, 2026-05-29): **(1) foundation = Supabase Auth** for native owners (email/password +
 magic-link); **(2) provisioning = invite-first** (extend the existing invite flow; public self-serve
 signup is a later step toward the end state). End state = self-provisioning + subscription + trial.

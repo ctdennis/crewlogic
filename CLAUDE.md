@@ -113,11 +113,11 @@ Workflow: edit `supabase/functions/<name>/index.ts`, then deploy with `supabase 
 
 ## Environments
 
-Currently single-environment (production only). Dev/prod separation is planned but not yet implemented.
+Two Supabase projects: **prod** (`ozfkpxyachigfpcmvekz`) and **dev/`crewlogic-dev`** (`bagkimfwmpwjfhfhmsrb`). The dev project is used to build & verify features before promotion (see the dev tooling in the approval-discipline section: `dev-sql.sh`, `prod-readonly-sql.sh`). The frontend is still single-deploy (one `index.html` → Cloudflare Pages); dev/prod separation exists at the Supabase layer, with frontend/deploy separation still on the roadmap.
 
 ## SQL migrations
 
-SQL is currently run ad-hoc via the Supabase SQL Editor in the dashboard, copied from Claude.ai chats. There is no `migrations/` folder yet. Establishing one is part of the planned dev/prod separation work.
+Migrations live in `supabase/migrations/` (sequential `NNNN_description.sql`; e.g. `0002_standalone_pricing_customers.sql`, `0004_tenant_provider_capabilities.sql`). Apply to dev first via the dev tooling, then promote to prod. Some older/ad-hoc SQL was historically run directly in the dashboard SQL Editor; new schema changes should be added as a numbered migration here.
 
 ## Branding
 
