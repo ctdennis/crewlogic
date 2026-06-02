@@ -48,10 +48,19 @@ Build `{city, state, zip}` from the franchise's `price_list_zips`; dedupe by `ci
 **lowest ZIP** (townwide-uniform pricing). The autocomplete offers "City, ST"; selection resolves to that
 ZIP. A town that spans several ZIPs is therefore one entry → its lowest ZIP.
 
-**Rejected alternatives** (unchanged from discovery, still apply): Google Geocoding (client key is
-referrer-restricted, can't call Geocoding API); PO-box filtering via serviceability (disproven — Vonigo
-prices PO-box ZIPs identically). Hosting a city dataset for fuzzy Vonigo matching = the maintenance we're
-avoiding; Vonigo stays exact-match with a clear "not found" message.
+**Rejected alternatives** (unchanged from discovery, still apply): PO-box filtering via serviceability
+(disproven — Vonigo prices PO-box ZIPs identically). Hosting a city dataset for fuzzy Vonigo matching =
+the maintenance we're avoiding; Vonigo stays exact-match.
+
+**Google Geocoding — re-evaluated 2026-06-02, deferred.** Google *does* resolve what Zippopotam can't:
+administrative town names (e.g. **Bourne, MA** — which USPS files only under village names like Buzzards
+Bay 02532, so Zippopotam returns empty), typo correction ("Borne"→"Bourne"), and **full street
+addresses** → exact ZIP. The original blocker (client `STREET_VIEW_KEY`/`SIGNS_MAPS_KEY` are
+referrer-restricted → `REQUEST_DENIED`) is solvable via the existing server-side `GOOGLE_GEOCODING_API_KEY`
+edge-fn hop (already used for signs reverse-geocoding). **Decision:** keep Zippopotam for now — avoid the
+per-lookup Google billing + edge hop — and instead make the Vonigo "not found" message guide the user to
+the postal/village name (e.g. Bourne → Buzzards Bay) or the ZIP. Revisit if town lookup needs to accept
+full street addresses or admin town names broadly.
 
 ## 4. Served states (Vonigo) — `cost_settings.serviceStates`
 - Stored as a JSON array of 2-letter codes in the existing `cost_settings` blob (next to `officeState`).
