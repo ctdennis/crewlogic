@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.20.0 | 2026-06-02">
+  <meta name="crewlogic-version" content="v5.21.0 | 2026-06-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -2112,8 +2112,32 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               <span id="specialTermsChevron" style="font-size:11px;color:var(--text-muted);">▸ Expand</span>
             </button>
             <div id="specialTermsBody" style="display:none;padding:14px;background:var(--bg-secondary);">
-              <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Optional. Appears on the customer PDF after the standard Terms &amp; Conditions.</div>
-              <textarea class="form-input" id="estSpecialTerms" rows="4" maxlength="500" placeholder="e.g. 25% deposit due at booking. Final balance due upon completion. Pricing valid for 30 days." style="resize:none;" oninput="updateSpecialTermsCount();autoSaveDraft()"></textarea>
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">Optional. The down payment &amp; term below appear as a payment schedule on the customer PDF cover page. Notes appear after the standard Terms &amp; Conditions.</div>
+              <!-- Structured payment terms — carried to the PDF cover page -->
+              <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                <div style="flex:1;min-width:150px;">
+                  <label style="display:block;font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Down payment</label>
+                  <div style="display:flex;gap:6px;">
+                    <select class="form-input" id="estSpecialTermsDepositType" style="flex:0 0 60px;padding:8px;" onchange="updateSpecialTermsDepositUI();autoSaveDraft()">
+                      <option value="percent">%</option>
+                      <option value="dollar">$</option>
+                    </select>
+                    <input class="form-input" id="estSpecialTermsDepositValue" type="number" min="0" step="any" inputmode="decimal" placeholder="0" style="flex:1;min-width:0;" oninput="updateSpecialTermsDepositUI();autoSaveDraft()">
+                  </div>
+                </div>
+                <div style="flex:1;min-width:150px;">
+                  <label style="display:block;font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Balance due within</label>
+                  <select class="form-input" id="estSpecialTermsTermDays" style="padding:8px;" onchange="updateSpecialTermsDepositUI();autoSaveDraft()">
+                    <option value="">— No term —</option>
+                    <option value="30">30 days</option>
+                    <option value="60">60 days</option>
+                    <option value="90">90 days</option>
+                  </select>
+                </div>
+              </div>
+              <div id="specialTermsDepositPreview" style="display:none;font-size:12px;color:var(--text-primary);margin-bottom:12px;padding:9px 11px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);line-height:1.5;"></div>
+              <label style="display:block;font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Other terms &amp; notes</label>
+              <textarea class="form-input" id="estSpecialTerms" rows="4" maxlength="500" placeholder="e.g. Pricing valid for 30 days. Customer to clear access path before crew arrival." style="resize:none;" oninput="updateSpecialTermsCount();autoSaveDraft()"></textarea>
               <div style="display:flex;justify-content:flex-end;align-items:center;margin-top:6px;font-size:11px;color:var(--text-muted);">
                 <span id="specialTermsCount">0 / 500</span>
               </div>
@@ -5944,13 +5968,56 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       counter.style.color = len >= 480 ? 'var(--accent-red)' : 'var(--text-muted)';
     }
 
+    // Compute the deposit/balance payment schedule from the structured Special Terms
+    // fields. Returns null when no down payment is configured (or no total yet).
+    // Shared by the editor preview and the PDF cover page so the math is identical.
+    function computeDepositBreakdown(src, total) {
+      const type = (src.specialTermsDepositType === 'dollar') ? 'dollar' : 'percent';
+      const rawVal = parseFloat(src.specialTermsDepositValue);
+      const days = parseInt(src.specialTermsTermDays, 10);
+      if (!rawVal || rawVal <= 0 || !(total > 0)) return null;
+      let deposit = (type === 'dollar') ? Math.min(rawVal, total) : total * (rawVal / 100);
+      deposit = Math.round(deposit * 100) / 100;
+      const balance = Math.round((total - deposit) * 100) / 100;
+      return { type, value: rawVal, deposit, balance, days: (days > 0 ? days : null) };
+    }
+
+    // Live preview under the Special Terms deposit fields, mirroring the PDF cover.
+    function updateSpecialTermsDepositUI() {
+      const typeEl = document.getElementById('estSpecialTermsDepositType');
+      const valEl  = document.getElementById('estSpecialTermsDepositValue');
+      const daysEl = document.getElementById('estSpecialTermsTermDays');
+      const preview = document.getElementById('specialTermsDepositPreview');
+      if (!preview) return;
+      const total = parseFloat(currentEstimate && currentEstimate.totalPrice) || 0;
+      const bd = computeDepositBreakdown({
+        specialTermsDepositType:  typeEl ? typeEl.value : 'percent',
+        specialTermsDepositValue: valEl ? valEl.value : '',
+        specialTermsTermDays:     daysEl ? daysEl.value : ''
+      }, total);
+      if (!bd) {
+        preview.style.display = 'none';
+        preview.textContent = '';
+        return;
+      }
+      const depLabel = bd.type === 'dollar' ? fmtMoney(bd.value) : (bd.value + '%');
+      let txt = 'Due now (' + depLabel + ' deposit): ' + fmtMoney(bd.deposit)
+              + '   •   Balance: ' + fmtMoney(bd.balance);
+      if (bd.days) txt += ' due in ' + bd.days + ' days';
+      if (!(total > 0)) txt += '  (add charges to compute amounts)';
+      preview.textContent = txt;
+      preview.style.display = 'block';
+    }
+
     // Auto-expand the card when the loaded estimate already has special terms,
     // so the user sees existing content without having to expand manually.
     function maybeExpandSpecialTermsIfPresent() {
       const ta = document.getElementById('estSpecialTerms');
       const body = document.getElementById('specialTermsBody');
       if (!ta || !body) return;
-      if (ta.value && ta.value.trim().length > 0 && body.style.display === 'none') {
+      const hasNotes = ta.value && ta.value.trim().length > 0;
+      const hasDeposit = parseFloat(currentEstimate && currentEstimate.specialTermsDepositValue) > 0;
+      if ((hasNotes || hasDeposit) && body.style.display === 'none') {
         toggleSpecialTerms();
       }
     }
@@ -7672,6 +7739,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (Array.isArray(currentEstimate.charges) && currentEstimate.charges.length > 0) return true;
       if (currentEstimate.notes && currentEstimate.notes.trim().length > 0) return true;
       if (currentEstimate.specialTerms && currentEstimate.specialTerms.trim().length > 0) return true;
+      if (parseFloat(currentEstimate.specialTermsDepositValue) > 0) return true;
       return false;
     }
 
@@ -8213,8 +8281,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (stEl) {
         stEl.value = currentEstimate.specialTerms || '';
         updateSpecialTermsCount();
-        maybeExpandSpecialTermsIfPresent();
       }
+      // Structured payment terms (carried to the PDF cover page)
+      const stTypeEl = document.getElementById('estSpecialTermsDepositType');
+      const stValEl  = document.getElementById('estSpecialTermsDepositValue');
+      const stDaysEl = document.getElementById('estSpecialTermsTermDays');
+      if (stTypeEl) stTypeEl.value = (currentEstimate.specialTermsDepositType === 'dollar') ? 'dollar' : 'percent';
+      if (stValEl)  stValEl.value  = (currentEstimate.specialTermsDepositValue != null && currentEstimate.specialTermsDepositValue !== '') ? currentEstimate.specialTermsDepositValue : '';
+      if (stDaysEl) stDaysEl.value = currentEstimate.specialTermsTermDays ? String(currentEstimate.specialTermsTermDays) : '';
+      updateSpecialTermsDepositUI();
+      if (stEl) maybeExpandSpecialTermsIfPresent();
       _suppressAutoSave = false; // re-enable autoSaveDraft after population
       // Show pending photo badge if any photos are queued
       updatePendingPhotoBadge();
@@ -11394,6 +11470,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (stSaveEl) {
         currentEstimate.specialTerms = stSaveEl.value.trim();
       }
+      // Save structured payment terms (down payment + balance term → PDF cover page)
+      const stTypeSave = document.getElementById('estSpecialTermsDepositType');
+      const stValSave  = document.getElementById('estSpecialTermsDepositValue');
+      const stDaysSave = document.getElementById('estSpecialTermsTermDays');
+      if (stTypeSave) currentEstimate.specialTermsDepositType = stTypeSave.value;
+      if (stValSave) {
+        const v = parseFloat(stValSave.value);
+        currentEstimate.specialTermsDepositValue = (v > 0) ? v : '';
+      }
+      if (stDaysSave) {
+        const d = parseInt(stDaysSave.value, 10);
+        currentEstimate.specialTermsTermDays = (d > 0) ? d : '';
+      }
       currentEstimate.updatedAt = new Date().toISOString();
       isDirty = true; // mark unsaved changes on any mutation
       saveLocalEstimate(currentEstimate);
@@ -13027,82 +13116,33 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         areas.forEach(area => { doc.text('• ' + area, lx, scopeY); scopeY += 15; });
       }
 
-      // Photo inset below scope
-      const photoY = scopeY + 12;
+      // Left-column content width (the cover photo now lives in the right column).
       const photoW = rCol - lx - 20;
-      const photoH = Math.min(180, H - photoY - 110);
 
-      if (est.coverPhoto && photoH > 60) {
-        // If coverPhoto is a Drive URL, fetch and convert to base64 for jsPDF
-        let coverPhotoData = est.coverPhoto;
-        if (!coverPhotoData.startsWith('data:')) {
-          try {
-            coverPhotoData = await loadImageAsBase64(coverPhotoData);
-          } catch(e) {
-            console.warn('Cover photo fetch failed for PDF:', e);
-            coverPhotoData = null;
-          }
-        }
-        if (coverPhotoData) {
-          // Load image to get true dimensions before placing in PDF
-          const [imgW, imgH] = await new Promise(res => {
-            const tmp = new Image();
-            tmp.onload = () => res([tmp.naturalWidth || 480, tmp.naturalHeight || 300]);
-            tmp.onerror = () => res([480, 300]);
-            tmp.src = coverPhotoData;
-          });
-          const scale = Math.min(photoW / imgW, photoH / imgH);
-          const drawW = imgW * scale;
-          const drawH = imgH * scale;
-          doc.setFillColor(0, 0, 0);
-          doc.rect(lx, photoY, photoW, photoH, 'F');
-          doc.addImage(coverPhotoData, 'JPEG', lx + (photoW - drawW) / 2, photoY + (photoH - drawH) / 2, drawW, drawH);
-        }
-      } else if (est._useLogoAsCover && photoH > 60) {
-        // Logo fallback — Street View had no imagery so we render the company
-        // logo centered on a black background, letterboxed to preserve aspect.
-        let logoData = null;
-        try {
-          const logoUrl = await getBrandLogoUrl();
-          if (logoUrl) logoData = await loadImageAsBase64(logoUrl);
-        } catch (e) {
-          console.warn('Logo fetch failed for PDF:', e);
-        }
-        if (logoData) {
-          const [imgW, imgH] = await new Promise(res => {
-            const tmp = new Image();
-            tmp.onload = () => res([tmp.naturalWidth || 480, tmp.naturalHeight || 300]);
-            tmp.onerror = () => res([480, 300]);
-            tmp.src = logoData;
-          });
-          const scale = Math.min(photoW / imgW, photoH / imgH);
-          const drawW = imgW * scale;
-          const drawH = imgH * scale;
-          doc.setFillColor(0, 0, 0);
-          doc.rect(lx, photoY, photoW, photoH, 'F');
-          // jsPDF needs the format hint — PNG-safe path since logos often have transparency
-          doc.addImage(logoData, 'PNG', lx + (photoW - drawW) / 2, photoY + (photoH - drawH) / 2, drawW, drawH);
-        } else {
-          // Logo missing — fall through to placeholder
-          doc.setFillColor(0, 0, 0);
-          doc.rect(lx, photoY, photoW, photoH, 'F');
-          doc.setDrawColor(30, 55, 70);
-          doc.setLineWidth(0.5);
-          for (let gx = lx; gx < lx + photoW; gx += 40) doc.line(gx, photoY, gx, photoY + photoH);
-          for (let gy = photoY; gy < photoY + photoH; gy += 40) doc.line(lx, gy, lx + photoW, gy);
-        }
-      } else if (!est.coverPhoto) {
-        doc.setFillColor(0, 0, 0);
-        doc.rect(lx, photoY, photoW, photoH, 'F');
-        doc.setDrawColor(30, 55, 70);
-        doc.setLineWidth(0.5);
-        for (let gx = lx; gx < lx + photoW; gx += 40) doc.line(gx, photoY, gx, photoY + photoH);
-        for (let gy = photoY; gy < photoY + photoH; gy += 40) doc.line(lx, gy, lx + photoW, gy);
-      }
-
-      // Total box
+      // Total box + optional payment schedule (from structured Special Terms)
       const totalPrice = parseFloat(est.totalPrice) || 0;
       if (totalPrice > 0) {
+        const bd = computeDepositBreakdown(est, totalPrice);
+        if (bd) {
+          // Payment schedule lines, rendered just above the green total box.
+          const schedTop = H - 152;
+          const lineRight = rCol - 20; // right edge of the left column
+          doc.setTextColor(150, 180, 160);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(8);
+          doc.text('PAYMENT SCHEDULE', lx, schedTop);
+          const depLabel = bd.type === 'dollar' ? fmtMoney(bd.value) : (bd.value + '%');
+          doc.setTextColor(...white);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(10);
+          doc.text('Due now (' + depLabel + ' deposit)', lx, schedTop + 18);
+          doc.setFont('helvetica', 'bold');
+          doc.text(fmtMoney(bd.deposit), lineRight, schedTop + 18, { align: 'right' });
+          doc.setFont('helvetica', 'normal');
+          doc.text('Balance' + (bd.days ? ' (due in ' + bd.days + ' days)' : ''), lx, schedTop + 34);
+          doc.setFont('helvetica', 'bold');
+          doc.text(fmtMoney(bd.balance), lineRight, schedTop + 34, { align: 'right' });
+        }
         doc.setFillColor(...green);
         doc.roundedRect(lx, H - 90, photoW, 50, 4, 4, 'F');
         doc.setTextColor(...dark);
@@ -13190,25 +13230,54 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         doc.text(doc.splitTextToSize(webShort, rxW), rx + 10, webY + 12);
       }
 
-      // Logo image in right column — positioned below all contact fields
-      const logoAreaY = ry2 + (website ? 28 : 10);
-      const logoAreaH = H - 40 - logoAreaY;
-      const logoW = rxW;
-      const logoH = Math.round(logoW / 1.71); // maintain 2971:1738 ratio
-      const logoFitH = Math.min(logoH, logoAreaH);
-      const logoFitW = Math.round(logoFitH * 1.71);
-      const logoX = rx + 10 + (logoW - logoFitW) / 2;
-      const logoY = logoAreaY + (logoAreaH - logoFitH) / 2;
-      try {
-        // Use franchise's brand logo if uploaded, otherwise fall back to default Junkluggers logo
-        const brandLogoUrl = await getBrandLogoUrl();
-        const logoImg = brandLogoUrl
-          ? await loadImageFromUrl(brandLogoUrl)
-          : await loadImageFromUrl('/assets/logo1.png');
-        // jsPDF accepts image/bitmap directly; format hint helps
-        doc.addImage(logoImg, 'PNG', logoX, logoY, logoFitW, logoFitH);
-      } catch(e) {
-        // silent fallback — text logo already shown on left
+      // Cover photo in right column — large, fills the area below the contact
+      // fields. Falls back to the brand logo when there's no cover photo
+      // (e.g. Street View had no imagery, or none was added).
+      const mediaY = ry2 + (website ? 28 : 10);
+      const mediaH = H - 40 - mediaY;
+      const mediaW = rxW;
+      const mediaX = rx + 10;
+      let coverDrawn = false;
+      if (est.coverPhoto && mediaH > 60) {
+        let coverPhotoData = est.coverPhoto;
+        if (!coverPhotoData.startsWith('data:')) {
+          try {
+            coverPhotoData = await loadImageAsBase64(coverPhotoData);
+          } catch(e) {
+            console.warn('Cover photo fetch failed for PDF:', e);
+            coverPhotoData = null;
+          }
+        }
+        if (coverPhotoData) {
+          const [imgW, imgH] = await new Promise(res => {
+            const tmp = new Image();
+            tmp.onload = () => res([tmp.naturalWidth || 480, tmp.naturalHeight || 300]);
+            tmp.onerror = () => res([480, 300]);
+            tmp.src = coverPhotoData;
+          });
+          const scale = Math.min(mediaW / imgW, mediaH / imgH);
+          const drawW = imgW * scale;
+          const drawH = imgH * scale;
+          doc.addImage(coverPhotoData, 'JPEG', mediaX + (mediaW - drawW) / 2, mediaY + (mediaH - drawH) / 2, drawW, drawH);
+          coverDrawn = true;
+        }
+      }
+      if (!coverDrawn) {
+        // Logo fallback — letterboxed, centered in the same area
+        const logoH = Math.round(mediaW / 1.71); // maintain 2971:1738 ratio
+        const logoFitH = Math.min(logoH, mediaH);
+        const logoFitW = Math.round(logoFitH * 1.71);
+        const logoX = mediaX + (mediaW - logoFitW) / 2;
+        const logoY = mediaY + (mediaH - logoFitH) / 2;
+        try {
+          const brandLogoUrl = await getBrandLogoUrl();
+          const logoImg = brandLogoUrl
+            ? await loadImageFromUrl(brandLogoUrl)
+            : await loadImageFromUrl('/assets/logo1.png');
+          doc.addImage(logoImg, 'PNG', logoX, logoY, logoFitW, logoFitH);
+        } catch(e) {
+          // silent fallback — text logo already shown on left
+        }
       }
 
       // No JL bar — background extends to bottom
@@ -14383,12 +14452,24 @@ RECYCLING & DONATION
         // Terms & Conditions. Rendered in a single-column band spanning the
         // full content width, visually distinct from the two-column boilerplate.
         const specialTerms = (currentEstimate.specialTerms || '').trim();
-        if (specialTerms) {
+        // Structured payment schedule sentence (from the down payment + term fields),
+        // so the formal Terms page is self-contained alongside the cover-page summary.
+        const stTotal = parseFloat(currentEstimate.totalPrice) || 0;
+        const stBd = computeDepositBreakdown(currentEstimate, stTotal);
+        let paymentLine = '';
+        if (stBd) {
+          const depLabel = stBd.type === 'dollar' ? fmtMoney(stBd.value) : (stBd.value + '%');
+          paymentLine = 'Payment schedule: a ' + depLabel + ' deposit of ' + fmtMoney(stBd.deposit)
+            + ' is due now. The remaining balance of ' + fmtMoney(stBd.balance) + ' is due '
+            + (stBd.days ? 'within ' + stBd.days + ' days of job completion' : 'upon completion of the job') + '.';
+        }
+        if (specialTerms || paymentLine) {
           // Start below the lower of the two columns, with a divider above.
           const fullW = W - 2 * margin;
           let stY = Math.max(ty1, ty2) + 18;
           // Estimate space needed; if not enough room, start a fresh page.
-          const estimatedHeight = 30 + Math.ceil(specialTerms.length / 90) * 13;
+          const bodyChars = (paymentLine ? paymentLine.length : 0) + (specialTerms ? specialTerms.length : 0);
+          const estimatedHeight = 40 + Math.ceil(bodyChars / 90) * 13;
           if (stY + estimatedHeight > H - margin) {
             doc.addPage([W, H], 'landscape');
             doc.setFillColor(...dark);
@@ -14431,8 +14512,15 @@ RECYCLING & DONATION
           doc.setTextColor(...white);
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(9);
-          const stLines = doc.splitTextToSize(specialTerms, fullW);
-          doc.text(stLines, margin, stY);
+          if (paymentLine) {
+            const plLines = doc.splitTextToSize(paymentLine, fullW);
+            doc.text(plLines, margin, stY);
+            stY += plLines.length * 12 + 8;
+          }
+          if (specialTerms) {
+            const stLines = doc.splitTextToSize(specialTerms, fullW);
+            doc.text(stLines, margin, stY);
+          }
         }
 
         // Output merged doc
