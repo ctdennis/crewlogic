@@ -25,7 +25,7 @@ use by a prod tenant"; keep those distinct.
 
 | Project | Spec | Build | Prod rollout | Version | Last verified | Open items |
 |---|---|---|---|---|---|---|
-| Stage A: Native Pricing + Customers | [CL-SPEC-001](Feature-StandaloneMode/CL-SPEC-001_StageA_Pricing_Customers.md) | **Done** | Deployed (`crewlogic-pricing` ACTIVE; native-tenant usage in prod not confirmed) | — | 2026-06-02 | (1) native send uses "Generate PDF", not a "Finalize & Send" button; (2) 4 Route-Optimizer/Storage quick-select buttons hardcode `16` cy (cosmetic) |
+| Stage A: Native Pricing + Customers | [CL-SPEC-001](Feature-StandaloneMode/CL-SPEC-001_StageA_Pricing_Customers.md) | **Done** | Deployed (`crewlogic-pricing` ACTIVE; **no native tenants in prod yet** — owner-confirmed 2026-06-02, so prod is code-ready and awaiting first native user) | — | 2026-06-02 | (1) native send uses "Generate PDF", not a "Finalize & Send" button; (2) 4 Route-Optimizer/Storage quick-select buttons hardcode `16` cy (cosmetic) |
 | Town Price Lookup | [CL-SPEC-002](Feature-StandaloneMode/CL-SPEC-002_TownPriceLookup.md) | **Not started** | n/a | — | 2026-06-02 | Frontend-only: town+state UI, `resolveTownToZip()` (Zippopotam), wire into `doZipLookup()`, error handling, verify on Vonigo + native tenant |
 | Phase 2: Native Auth (Supabase Auth, invite-first) | [CL-SPEC-003](Feature-StandaloneMode/CL-SPEC-003_Phase2_NativeAuth.md) | **Done** | **Live** (login V2 shipped v5.18.0) | v5.18.0 | 2026-06-02 | Magic-link only by design (no password auth). Next: Phase 3 RLS |
 | Phase 3: RLS / SEC-1 | _(spec not yet written)_ | **Not started** | n/a | — | 2026-06-02 | Native `auth.users` is the subject; plan RLS policies `auth.uid()` ↔ profile ↔ tenant. Gates go-live |
