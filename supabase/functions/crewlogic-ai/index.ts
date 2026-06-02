@@ -1,4 +1,4 @@
-// Supabase Edge Function: crewlogic-ai (v3.9)
+// Supabase Edge Function: crewlogic-ai (v4.1)
 // Generic AI/utility router for CrewLogic backend calls
 // Deploy: supabase functions deploy crewlogic-ai
 //
@@ -327,7 +327,11 @@ async function handleAnalyzeEstimate(payload: Record<string, unknown>): Promise<
   const result = await callAnthropic({
     system: buildEstimateSystemPrompt(areas, truckCY),
     userContent,
-    maxTokens: 800,
+    // v4.1: bumped 800 -> 4096. Content-heavy rooms (e.g. a packed basement) produce a
+    // charge array longer than 800 output tokens; the response was being truncated mid-JSON,
+    // the bracket-matcher found no closing ']', JSON.parse threw, and the UI showed
+    // "Analysis failed — please try again". 4096 gives ample headroom for large estimates.
+    maxTokens: 4096,
     label: 'analyzeEstimate',
   });
 
