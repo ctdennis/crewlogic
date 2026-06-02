@@ -26,7 +26,7 @@ use by a prod tenant"; keep those distinct.
 | Project | Spec | Build | Prod rollout | Version | Last verified | Open items |
 |---|---|---|---|---|---|---|
 | Stage A: Native Pricing + Customers | [CL-SPEC-001](Feature-StandaloneMode/CL-SPEC-001_StageA_Pricing_Customers.md) | **Done** | Deployed (`crewlogic-pricing` ACTIVE; **no native tenants in prod yet** — owner-confirmed 2026-06-02, so prod is code-ready and awaiting first native user) | — | 2026-06-02 | (1) native send uses "Generate PDF", not a "Finalize & Send" button; (2) 4 Route-Optimizer/Storage quick-select buttons hardcode `16` cy (cosmetic) |
-| Town Price Lookup | [CL-SPEC-002](Feature-StandaloneMode/CL-SPEC-002_TownPriceLookup.md) | **Done** (frontend-only; resolver + error paths verified vs live Zippopotam API) | Not yet pushed (in v5.22.0, local commit) | v5.22.0 | 2026-06-02 | Full in-browser end-to-end verify on a real Vonigo + native dev tenant still to do |
+| Town Price Lookup | [CL-SPEC-002](Feature-StandaloneMode/CL-SPEC-002_TownPriceLookup.md) | **Built** (dual-track); dev: schema + API data verified, in-browser end-to-end pending | Not pushed | v5.22.0 | 2026-06-02 | Migration 0005 applied to dev (`price_list_zips` + `city`/`state`). Native = `<datalist>` autocomplete from enriched zips; Vonigo = town + state dropdown scoped to `cost_settings.serviceStates`, default `officeState`. Enrichment `enrichZipTowns()` on zip-save + lazy. **To do:** in-browser verify (native autocomplete + Vonigo dropdown). Parked: per-estimator default state |
 | Phase 2: Native Auth (Supabase Auth, invite-first) | [CL-SPEC-003](Feature-StandaloneMode/CL-SPEC-003_Phase2_NativeAuth.md) | **Done** | **Live** (login V2 shipped v5.18.0) | v5.18.0 | 2026-06-02 | Magic-link only by design (no password auth). Next: Phase 3 RLS |
 | Phase 3: RLS / SEC-1 | _(spec not yet written)_ | **Not started** | n/a | — | 2026-06-02 | Native `auth.users` is the subject; plan RLS policies `auth.uid()` ↔ profile ↔ tenant. Gates go-live |
 
@@ -39,6 +39,7 @@ use by a prod tenant"; keep those distinct.
 | Edge function source under git | **Done** | Live | 2026-06-02 | All 14 functions committed & verified byte-identical to prod |
 | n8n → Edge Functions migration | **In progress** | Mixed | 2026-06-02 | Still in n8n: estimate `delete` + `searchClients` (need Vonigo OAuth), large route-optimization engine |
 | Deploy workflow → Claude Code direct | **In progress** | — | 2026-06-02 | Repo moved to `~/code/crewlogic`; now committing/pushing from Claude Code (was Downloads→GitHub Desktop) |
+| Onboarding process | **Not started** | n/a | 2026-06-02 | New todo. At signup / Vonigo provisioning, capture franchise `serviceStates` (the multi-state handful) + a per-estimator default state. Estimators (magic-link) may work in a different state than the office (e.g. estimator in CA, office in AZ) → estimator default state falls back to franchise `officeState`. `serviceStates` also owner-editable in Settings. Feeds Town Price Lookup (Vonigo track) |
 
 ---
 

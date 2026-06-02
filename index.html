@@ -1308,7 +1308,8 @@
         </div>
 
         <div class="zip-lookup-row" id="priceTownRow" style="display:none;">
-          <input type="text" class="form-input" id="priceTownInput" placeholder="Town / city" style="flex:1 1 auto;" />
+          <input type="text" class="form-input" id="priceTownInput" placeholder="Town / city" style="flex:1 1 auto;" list="priceTownList" autocomplete="off" />
+          <datalist id="priceTownList"></datalist>
           <select class="form-input" id="priceStateSelect" style="flex:0 0 auto;max-width:84px;"></select>
           <button class="zip-lookup-btn" id="priceTownLookupBtn" onclick="doTownLookup()">
             <div class="spinner"></div>
@@ -1487,6 +1488,10 @@
                 <label class="settings-input-label">Zip</label>
                 <input type="text" class="form-input" id="settingsOfficeZip" placeholder="00000" maxlength="5" inputmode="numeric" autocomplete="off" style="text-align:center;">
               </div>
+            </div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">States served <span style="color:var(--text-muted);font-weight:400;">— for town price lookup; comma-separated (e.g. MA, RI). Defaults to your office state.</span></label>
+              <input type="text" class="form-input" id="settingsServiceStates" placeholder="MA, RI" autocomplete="off">
             </div>
             <div class="settings-input-group">
               <label class="settings-input-label">Website URL</label>
@@ -6499,8 +6504,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       btn.classList.remove('loading');
     }
 
-    // ── Town-name price lookup (CL-SPEC-002) ──────────────────────────────
-    // Town + state → ZIP via Zippopotam.us (free, no API key), then reuse doZipLookup().
+    // ── Town-name price lookup (CL-SPEC-002, dual-track) ──────────────────
+    // Native (pricingSource==='native'): autocomplete from the franchise's enriched price_list_zips.
+    // Vonigo (else): town + state dropdown scoped to served states, live Zippopotam forward lookup.
+    // Both resolve to a ZIP, pre-fill #priceZipInput, and reuse doZipLookup() — backend untouched.
     const PL_US_STATES = [
       ['AL','Alabama'],['AK','Alaska'],['AZ','Arizona'],['AR','Arkansas'],['CA','California'],
       ['CO','Colorado'],['CT','Connecticut'],['DE','Delaware'],['DC','District of Columbia'],
@@ -6515,18 +6522,72 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       ['WA','Washington'],['WV','West Virginia'],['WI','Wisconsin'],['WY','Wyoming']
     ];
 
-    let _plStatesInit = false;
-    function initPriceLookupStates() {
+    function _plIsNative() { return !!(currentUser && currentUser.pricingSource === 'native'); }
+
+    // Vonigo: populate the state dropdown from the franchise's served states
+    // (cost_settings.serviceStates), falling back to [officeState], then all states. Default = officeState.
+    function initPriceStateSelect() {
       const sel = document.getElementById('priceStateSelect');
-      if (!sel || _plStatesInit) return;
-      sel.innerHTML = PL_US_STATES.map(s => '<option value="' + s[0] + '">' + s[0] + '</option>').join('');
-      // Default to the franchise's home state (Settings → Office State) when set.
-      const home = ((currentUser && currentUser.officeState) || '').trim().toUpperCase();
-      if (home && PL_US_STATES.some(s => s[0] === home)) sel.value = home;
-      _plStatesInit = true;
+      if (!sel) return;
+      const cs = (currentUser && currentUser.costSettings) || {};
+      const home = (((currentUser && currentUser.officeState) || cs.officeState) || '').trim().toUpperCase();
+      let served = Array.isArray(cs.serviceStates)
+        ? cs.serviceStates.map(s => String(s).trim().toUpperCase()).filter(Boolean) : [];
+      if (home && !served.includes(home)) served = [home].concat(served);
+      const list = served.length ? PL_US_STATES.filter(s => served.includes(s[0])) : PL_US_STATES;
+      sel.innerHTML = list.map(s => '<option value="' + s[0] + '">' + s[0] + '</option>').join('');
+      if (home && list.some(s => s[0] === home)) sel.value = home;
     }
 
-    function setPriceLookupMode(mode) {
+    // Native: town index built from the franchise's price_list_zips, deduped by city+state → lowest ZIP.
+    let _plTownIndex = null;
+
+    async function buildNativeTownIndex(force) {
+      if (_plTownIndex && !force) return _plTownIndex;
+      const fid = currentUser.franchiseInternalID;
+      const sel = '&select=zip,city,state&order=zip.asc';
+      let rows = await supabaseFetch('/rest/v1/price_list_zips?franchise_id=eq.' + fid + sel) || [];
+      if (rows.some(r => !r.city)) {                 // lazily backfill pre-existing rows
+        await enrichZipTowns(fid);
+        rows = await supabaseFetch('/rest/v1/price_list_zips?franchise_id=eq.' + fid + sel) || [];
+      }
+      const byCity = {};
+      rows.forEach(r => {
+        if (!r.city) return;
+        const key = (r.city + '|' + (r.state || '')).toLowerCase();
+        if (!byCity[key] || r.zip < byCity[key].zip) {
+          byCity[key] = { city: r.city, state: r.state || '', zip: r.zip,
+                          label: r.city + (r.state ? ', ' + r.state : '') };
+        }
+      });
+      _plTownIndex = Object.values(byCity).sort((a, b) => a.label.localeCompare(b.label));
+      return _plTownIndex;
+    }
+
+    // Reverse-resolve any ZIPs missing city/state via Zippopotam (/us/<zip>) and persist. Idempotent
+    // (only touches city-is-null rows). Best-effort: a failed ZIP is skipped, not fatal.
+    async function enrichZipTowns(fid) {
+      try {
+        const rows = await supabaseFetch('/rest/v1/price_list_zips?franchise_id=eq.' + fid + '&city=is.null&select=zip') || [];
+        for (const r of rows) {
+          try {
+            const res = await fetch('https://api.zippopotam.us/us/' + encodeURIComponent(r.zip));
+            if (!res.ok) continue;
+            const d = await res.json();
+            const p = (d.places && d.places[0]) || null;
+            const city = p && (p['place name'] || '');
+            const state = p && (p['state abbreviation'] || '');
+            if (!city) continue;
+            await supabaseFetch('/rest/v1/price_list_zips?franchise_id=eq.' + fid + '&zip=eq.' + r.zip, {
+              method: 'PATCH', headers: { 'Prefer': 'return=minimal' },
+              body: JSON.stringify({ city: city, state: state })
+            });
+          } catch (e) { /* skip this zip */ }
+        }
+      } catch (e) { /* enrichment is best-effort */ }
+    }
+
+    async function setPriceLookupMode(mode) {
       const isTown = mode === 'town';
       const zipRow = document.getElementById('priceZipRow');
       const townRow = document.getElementById('priceTownRow');
@@ -6540,13 +6601,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         b.style.background = on ? 'var(--accent-green)' : 'transparent';
         b.style.color = on ? '#000' : 'var(--text-muted)';
       });
-      if (isTown) initPriceLookupStates();
+      if (!isTown) return;
+      const sel = document.getElementById('priceStateSelect');
+      const input = document.getElementById('priceTownInput');
+      const dl = document.getElementById('priceTownList');
+      if (_plIsNative()) {
+        if (sel) sel.style.display = 'none';                 // state comes from our own data
+        if (input) input.placeholder = 'Start typing a town…';
+        try {
+          const idx = await buildNativeTownIndex(false);
+          if (dl) dl.innerHTML = idx.map(t => '<option value="' + t.label.replace(/"/g, '&quot;') + '"></option>').join('');
+        } catch (e) { if (dl) dl.innerHTML = ''; }
+      } else {
+        if (dl) dl.innerHTML = '';
+        if (sel) sel.style.display = '';
+        if (input) input.placeholder = 'Town / city';
+        initPriceStateSelect();
+      }
     }
 
-    // Resolve a town + state to a primary ZIP. Picks the lowest-numbered post code —
-    // pricing is townwide-uniform, so the pick only affects which ZIP is displayed (CL-SPEC-002 §3).
+    // Vonigo: forward town + state → lowest ZIP via Zippopotam. Lowest = main/central ZIP;
+    // pricing is townwide-uniform so the pick only affects the displayed ZIP (CL-SPEC-002 §3).
     async function resolveTownToZip(city, state) {
-      const c = (city || '').trim();
+      const c = (city || '').trim().replace(/\s+/g, ' ');
       const s = (state || '').trim();
       if (!c || !s) return null;
       const url = 'https://api.zippopotam.us/us/' + encodeURIComponent(s.toLowerCase()) + '/' + encodeURIComponent(c.toLowerCase());
@@ -6555,46 +6632,72 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!res.ok) throw new Error('zippopotam ' + res.status);
       const data = await res.json();
       const places = Array.isArray(data.places) ? data.places : [];
-      const zips = places.map(function(p) { return (p['post code'] || '').trim(); })
-                         .filter(function(z) { return /^\d{5}$/.test(z); });
+      const zips = places.map(p => (p['post code'] || '').trim()).filter(z => /^\d{5}$/.test(z));
       if (!zips.length) return null;
       zips.sort();                                     // lexicographic === numeric for 5-digit ZIPs
       return zips[0];
     }
 
     async function doTownLookup() {
-      const town = document.getElementById('priceTownInput').value.trim();
-      const state = document.getElementById('priceStateSelect').value;
       const errorEl = document.getElementById('priceLookupError');
       const resultsEl = document.getElementById('priceLookupResults');
       const btn = document.getElementById('priceTownLookupBtn');
+      const town = (document.getElementById('priceTownInput').value || '').trim().replace(/\s+/g, ' ');
 
       errorEl.style.display = 'none';
       errorEl.textContent = '';
-
       if (!town) { errorEl.textContent = 'Enter a town or city name.'; errorEl.style.display = 'block'; return; }
-      if (!state) { errorEl.textContent = 'Select a state.'; errorEl.style.display = 'block'; return; }
 
       btn.classList.add('loading');
-      resultsEl.innerHTML = '<div class="price-loading"><span class="spinner-inline"></span>Finding ' + town + ', ' + state + '...</div>';
+      let zip = null;
 
-      let zip;
-      try {
-        zip = await resolveTownToZip(town, state);
-      } catch (e) {
-        resultsEl.innerHTML = '';
-        errorEl.textContent = 'Couldn’t look up that town right now — try entering the ZIP instead.';
-        errorEl.style.display = 'block';
-        btn.classList.remove('loading');
-        return;
-      }
-
-      if (!zip) {
-        resultsEl.innerHTML = '';
-        errorEl.textContent = 'Town not found — check the spelling and state, or enter the ZIP.';
-        errorEl.style.display = 'block';
-        btn.classList.remove('loading');
-        return;
+      if (_plIsNative()) {
+        // Resolve against the franchise's own enriched towns (fuzzy: label, exact, prefix, contains).
+        resultsEl.innerHTML = '<div class="price-loading"><span class="spinner-inline"></span>Finding ' + town + '…</div>';
+        try {
+          const idx = await buildNativeTownIndex(false);
+          const norm = town.toLowerCase();
+          const hit = idx.find(t => t.label.toLowerCase() === norm)
+                   || idx.find(t => t.city.toLowerCase() === norm)
+                   || idx.find(t => t.city.toLowerCase().startsWith(norm))
+                   || idx.find(t => t.city.toLowerCase().includes(norm));
+          zip = hit ? hit.zip : null;
+          if (!zip) {
+            resultsEl.innerHTML = '';
+            errorEl.textContent = idx.length
+              ? 'Town not found in your service area — try the ZIP.'
+              : 'No service ZIPs yet — add them in Price Book to use town lookup.';
+            errorEl.style.display = 'block';
+            btn.classList.remove('loading');
+            return;
+          }
+        } catch (e) {
+          resultsEl.innerHTML = '';
+          errorEl.textContent = 'Could not load your towns — try entering the ZIP.';
+          errorEl.style.display = 'block';
+          btn.classList.remove('loading');
+          return;
+        }
+      } else {
+        const state = document.getElementById('priceStateSelect').value;
+        if (!state) { errorEl.textContent = 'Select a state.'; errorEl.style.display = 'block'; btn.classList.remove('loading'); return; }
+        resultsEl.innerHTML = '<div class="price-loading"><span class="spinner-inline"></span>Finding ' + town + ', ' + state + '…</div>';
+        try {
+          zip = await resolveTownToZip(town, state);
+        } catch (e) {
+          resultsEl.innerHTML = '';
+          errorEl.textContent = 'Couldn’t look up that town right now — try entering the ZIP instead.';
+          errorEl.style.display = 'block';
+          btn.classList.remove('loading');
+          return;
+        }
+        if (!zip) {
+          resultsEl.innerHTML = '';
+          errorEl.textContent = 'Town not found — check the spelling and state, or enter the ZIP.';
+          errorEl.style.display = 'block';
+          btn.classList.remove('loading');
+          return;
+        }
       }
 
       // Hand the resolved ZIP to the existing lookup (backend untouched).
@@ -7267,6 +7370,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const officeStateVal   = document.getElementById('settingsOfficeState').value.trim();
       const officeZipVal     = document.getElementById('settingsOfficeZip').value.trim();
       const websiteVal       = document.getElementById('settingsWebsite').value.trim();
+      // Served states (town lookup) → normalized array of 2-letter codes, deduped.
+      const serviceStatesArr = [...new Set(
+        (document.getElementById('settingsServiceStates').value || '')
+          .split(/[,\s]+/).map(s => s.trim().toUpperCase()).filter(s => /^[A-Z]{2}$/.test(s))
+      )];
       // Merge into costSettings so it survives cost-tab saves and is in one source of truth
       if (!currentUser.costSettings) currentUser.costSettings = {};
       currentUser.costSettings.phone         = phoneVal;
@@ -7275,6 +7383,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       currentUser.costSettings.officeState   = officeStateVal;
       currentUser.costSettings.officeZip     = officeZipVal;
       currentUser.costSettings.website       = websiteVal;
+      currentUser.costSettings.serviceStates = serviceStatesArr;
       try {
         const data = await edgeFunctionCall('crewlogic-settings', {
           action: 'saveFranchiseInfo',
@@ -7320,6 +7429,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (currentUser.officeCity) document.getElementById('settingsOfficeCity').value = currentUser.officeCity;
       if (currentUser.officeState) document.getElementById('settingsOfficeState').value = currentUser.officeState;
       if (currentUser.officeZip) document.getElementById('settingsOfficeZip').value = currentUser.officeZip;
+      const _ss = (currentUser.costSettings && currentUser.costSettings.serviceStates) || [];
+      if (Array.isArray(_ss) && _ss.length) document.getElementById('settingsServiceStates').value = _ss.join(', ');
       if (currentUser.website) document.getElementById('settingsWebsite').value = currentUser.website;
       // Vonigo username pre-filled from session (form is hidden when configured)
       if (currentUser.vonigoUsername) document.getElementById('settingsVonigoUser').value = currentUser.vonigoUsername;
@@ -16629,6 +16740,7 @@ RECYCLING & DONATION
           headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
           body: JSON.stringify(zips.map(z => ({ franchise_id: fid, zip: z, price_list_id: ed.listId })))
         });
+        enrichZipTowns(fid).then(() => { _plTownIndex = null; }); // fill city/state for town lookup (best-effort, async)
         editPriceListZips(ed.listId); // refresh
       } catch (e) { _pbZipFeedback('Could not assign zips.', false); }
     }
