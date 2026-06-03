@@ -160,7 +160,7 @@ Two proven test techniques:
 - [x] §6 `supabaseFetch` sends user JWT (dev), 2026-06-03; no-op while policies open.
 - [x] **§10 dev test-session** — RESOLVED 2026-06-03: dev bypass mints a real session (`DEV_AUTH.md`).
 - [~] §4 Pre-auth carve-outs (dev): **invites + feedback done (migration 0009)**; `vonigo_credentials`/`_audit` already deny-all. Profiles bootstrap read covered when profiles is scoped (next, with Google auth).
-- [~] §7 Per-table scoped policies replacing `using(true)`, table-by-table (dev). **Done in dev: customers (0007) + 15 franchise-data tables (0008), reads verified 2026-06-03.** Remaining: profiles, franchises, tenants, invites/feedback (carve-outs), vonigo_credentials/_audit.
+- [x] §7 Per-table scoped policies replacing `using(true)` — **ALL tables done in dev**: customers (0007), 15 franchise-data tables (0008), invites/feedback carve-outs (0009), profiles/franchises/tenants (0010, email-fallback helpers for pre-link bootstrap), vonigo_credentials/_audit already deny-all. Reads + cross-tenant isolation verified (stranger sees 0). 2026-06-03.
 - [ ] §8 `estimate-photos` storage policies.
 - [ ] §10 Cross-tenant denial tests + per-role regression.
 - [ ] §9.6 Gated prod promotion (policies + client JWT in lockstep).
