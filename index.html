@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.24.1 | 2026-06-03">
+  <meta name="crewlogic-version" content="v5.24.2 | 2026-06-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -5865,8 +5865,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function openModule(module) {
       // If in estimate editor with unsaved changes OR a discardable throwaway draft, prompt
       // first (same condition as promptSaveBeforeLeaving, so both exit paths behave alike).
+      // One-shot bypass: when saveAndLeave/leaveWithoutSaving call back in to complete the nav, skip
+      // the guard — otherwise an empty/discardable draft re-triggers the prompt forever (infinite loop).
+      const _skip = _skipLeaveGuard; _skipLeaveGuard = false;
       const editorScreen = document.getElementById('estimateEditorScreen');
-      if (editorScreen && editorScreen.classList.contains('active') && (isDirty || isDiscardableDraft())) {
+      if (!_skip && editorScreen && editorScreen.classList.contains('active') && (isDirty || isDiscardableDraft())) {
         pendingNavModule = module;
         promptSaveBeforeLeaving();
         return;
@@ -8017,6 +8020,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let autoSaveTimer = null;
     let isDirty = false;
     let pendingNavModule = null; // set when navigating away from dirty estimate
+    let _skipLeaveGuard = false; // one-shot: lets saveAndLeave/leaveWithoutSaving complete the nav without re-prompting
 
     // Heuristic: did the user actually do anything meaningful with this estimate?
     // Lookup auto-populates label/clientName/address/clientEmail/clientPhone (and may
@@ -8860,6 +8864,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (pendingNavModule) {
         const mod = pendingNavModule;
         pendingNavModule = null;
+        _skipLeaveGuard = true;   // we've already saved/discarded — don't let the guard re-prompt
         openModule(mod);
       } else {
         backToEstimatesList();
@@ -8895,6 +8900,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (pendingNavModule) {
         const mod = pendingNavModule;
         pendingNavModule = null;
+        _skipLeaveGuard = true;   // we've already saved/discarded — don't let the guard re-prompt
         openModule(mod);
       } else {
         backToEstimatesList();
