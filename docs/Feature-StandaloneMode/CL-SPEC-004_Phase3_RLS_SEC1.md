@@ -10,8 +10,11 @@ verified — `dev-owner` (auth.uid → franchise `22222222`) sees its 81 custome
 are invisible. First table live under scoped RLS in dev. **Then migration 0008** scoped the bulk franchise-data tables
 (estimates, price_lists/blocks/items/zips, customer_price_lists, job_plans, crew_members, tools, campaigns,
 yard_signs + sign_*) — 15 tables — applied to dev; dev-owner reads verified (incl. join-based
-price_blocks/items; estimates filtered 13 of 15 total = scoping confirmed). Remaining: profiles, franchises,
-tenants, invites/feedback carve-outs, vonigo_credentials/_audit.
+price_blocks/items; estimates filtered 13 of 15 total = scoping confirmed). Then **0009** added the pre-auth carve-outs (`invites` — open SELECT for the token path, writes
+owner-scoped; `feedback` — open INSERT, reads franchise-scoped); verified anon can still read invites.
+Found `vonigo_credentials`/`_audit` already deny-all (RLS on, 0 policies = service-role/edge-fn only) —
+correct, no change. **Remaining: profiles, franchises, tenants** — scoped together with the
+Google→Supabase Auth cutover (they're read in the prod pre-auth Google path).
 
 ## 1. Problem — current security posture (verified 2026-06-02)
 - **Every RLS policy is `using (true)`** across all ~20 public tables (estimates, customers, profiles,
@@ -149,7 +152,7 @@ Two proven test techniques:
 - [x] §5 Scope-resolver SQL helpers (dev) — migration 0006, applied & verified 2026-06-03.
 - [x] §6 `supabaseFetch` sends user JWT (dev), 2026-06-03; no-op while policies open.
 - [x] **§10 dev test-session** — RESOLVED 2026-06-03: dev bypass mints a real session (`DEV_AUTH.md`).
-- [ ] §4 Pre-auth carve-outs implemented (invites by-token; profiles bootstrap via JWT/edge fn; feedback insert).
+- [~] §4 Pre-auth carve-outs (dev): **invites + feedback done (migration 0009)**; `vonigo_credentials`/`_audit` already deny-all. Profiles bootstrap read covered when profiles is scoped (next, with Google auth).
 - [~] §7 Per-table scoped policies replacing `using(true)`, table-by-table (dev). **Done in dev: customers (0007) + 15 franchise-data tables (0008), reads verified 2026-06-03.** Remaining: profiles, franchises, tenants, invites/feedback (carve-outs), vonigo_credentials/_audit.
 - [ ] §8 `estimate-photos` storage policies.
 - [ ] §10 Cross-tenant denial tests + per-role regression.
