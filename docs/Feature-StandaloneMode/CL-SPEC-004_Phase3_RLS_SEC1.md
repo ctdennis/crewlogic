@@ -3,7 +3,10 @@
 Status: **In progress — started 2026-06-03** (spec'd 2026-06-02). The security go-live gate. Follows
 Phase 2 (Native Auth, CL-SPEC-003, shipped). Replaces the current wide-open RLS with tenant/franchise-
 scoped policies enforced by a per-user Supabase JWT. Pre-auth flows audited 2026-06-02 (§4).
-**Progress:** scope-resolver helpers built in dev (migration 0006, 2026-06-03).
+**Progress (2026-06-03):** scope-resolver helpers in dev (migration 0006); client JWT in `supabaseFetch`
+(§6); franchise-scoping **pattern proven** via a rolled-back impersonation test (authed user saw only its
+own franchise's `customers`, none of another's); `customers` policy template written (migration 0007,
+**not yet applied** — see §10 dev-session blocker).
 
 ## 1. Problem — current security posture (verified 2026-06-02)
 - **Every RLS policy is `using (true)`** across all ~20 public tables (estimates, customers, profiles,
@@ -60,8 +63,11 @@ Centralize scope resolution from `auth.uid()` (and avoid recursive RLS on `profi
 All `STABLE SECURITY DEFINER` with a fixed `search_path`; execute granted to `authenticated`/`anon`
 (they return NULL outside an authenticated context, which scoped policies treat as "matches nothing").
 
-## 6. Client change — send the user JWT
-`supabaseFetch` must attach the Supabase access token for logged-in users so PostgREST sees `auth.uid()`:
+## 6. Client change — send the user JWT — ✅ built in dev (2026-06-03)
+`supabaseFetch` now attaches the Supabase access token for logged-in users so PostgREST sees `auth.uid()`
+(`_supabaseUserToken()` reads `getSession()`, refreshes a near-expiry token, falls back to the anon key).
+Accepts an optional `opts.jwt` override for bootstrap reads. No-op while policies are open; verified the
+app still works. Original requirement:
 - Cache the access token (from `supabaseClient.auth.getSession()`) and send it as `Authorization: Bearer
   <jwt>` instead of the anon key when a session exists; keep `apikey: SUPABASE_ANON_KEY`.
 - Accept an optional per-call JWT override for the bootstrap reads (e.g. `buildSessionFromSupabaseAuth`,
@@ -100,6 +106,17 @@ Add bucket policies scoping object paths to the caller's franchise; confirm `upl
 6. **Promote to prod** — gated, in lockstep (policies + client JWT must land together per table/cutover).
 
 ## 10. Testing strategy
+**Dev-session blocker (found 2026-06-03):** the dev sign-in **bypass** (`devSignIn`) sets `currentUser`
+directly *without* a Supabase Auth session, so those accounts have **no `auth.uid()`** and can't satisfy
+scoped policies (they'd see zero rows). Also, dev's data is lopsided: the only `auth_user_id`-linked
+profile (`tpass2008`) is on franchise `5d59edb4` (0 customers), while all 81 customers sit on the
+bypass franchise `22222222` (no auth link). **Decision needed (§12):** either (a) upgrade the dev bypass
+to mint a real Supabase session, or (b) test RLS via SQL impersonation + a real magic-link login, not the
+bypass. Until resolved, policy migrations (0007+) are written but **not applied** to dev.
+Two proven test techniques:
+- **SQL impersonation** (no browser): `begin; … set local role authenticated; select
+  set_config('request.jwt.claims','{"sub":"<auth_user_id>"}',true); <queries>; rollback;` — used to prove
+  the customers pattern 2026-06-03.
 - For each table × role: with a scoped JWT, assert (a) own-franchise access works, (b) **cross-franchise
   and cross-tenant access is denied** (SELECT returns 0 rows; write 403). Script these (SQL or a small
   harness that mints two tenants' JWTs and probes each table).
@@ -120,13 +137,16 @@ Add bucket policies scoping object paths to the caller's franchise; confirm `upl
 - `profiles` visibility: own-only vs whole-franchise (owners need the team list → likely franchise-scoped for owners).
 - Google migration: in-place link (`auth.users` ↔ existing profile by email) vs re-provision.
 - Feedback + invites: anon policy vs edge-fn (lean anon for both; they're low-risk).
+- **Dev test-session (§10):** upgrade `devSignIn` to mint a real Supabase session **(recommended)** vs.
+  test RLS only via SQL impersonation + magic-link. Gates applying policy migrations to dev.
 
 ## 13. Checklist
 - [ ] §3 Universal `auth.uid()`: Google→Supabase Auth; backfill `profiles.auth_user_id`; all logins yield a JWT.
 - [x] §5 Scope-resolver SQL helpers (dev) — migration 0006, applied & verified 2026-06-03.
-- [ ] §6 `supabaseFetch` sends user JWT (dev); all flows still pass with policies still open.
+- [x] §6 `supabaseFetch` sends user JWT (dev), 2026-06-03; no-op while policies open.
+- [ ] **§10 dev test-session decision** (upgrade `devSignIn` to a real session vs SQL-impersonation+magic-link) — gates applying policy migrations to dev.
 - [ ] §4 Pre-auth carve-outs implemented (invites by-token; profiles bootstrap via JWT/edge fn; feedback insert).
-- [ ] §7 Per-table scoped policies replacing `using(true)`, table-by-table (dev).
+- [ ] §7 Per-table scoped policies replacing `using(true)`, table-by-table (dev). `customers` template ready (migration 0007, not yet applied); pattern proven 2026-06-03.
 - [ ] §8 `estimate-photos` storage policies.
 - [ ] §10 Cross-tenant denial tests + per-role regression.
 - [ ] §9.6 Gated prod promotion (policies + client JWT in lockstep).

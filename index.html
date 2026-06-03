@@ -4357,15 +4357,35 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     const STREET_VIEW_KEY = 'AIzaSyDZGtQKeH8LKs_rpO2zti8oAkJNkgfhCgM';
 
+    // SEC-1 (CL-SPEC-004): when a Supabase Auth session exists (native/magic-link users), send the
+    // user's JWT so PostgREST sees auth.uid() and RLS applies. Google (custom session) and the dev
+    // sign-in bypass have no Supabase session → fall back to the anon key (current behavior).
+    // No-op while policies remain wide-open; required once they're scoped. Refreshes a near-expiry
+    // token so we never send a stale JWT (which would 401 regardless of policy).
+    async function _supabaseUserToken() {
+      try {
+        const { data } = await supabaseClient.auth.getSession();
+        const s = data && data.session;
+        if (!s || !s.access_token) return null;
+        if (s.expires_at && (s.expires_at * 1000 - Date.now() < 60000)) {
+          const r = await supabaseClient.auth.refreshSession();
+          return (r && r.data && r.data.session && r.data.session.access_token) || null;
+        }
+        return s.access_token;
+      } catch (e) { return null; }
+    }
+
     async function supabaseFetch(path, opts = {}) {
+      const { jwt: _jwtOverride, ...fetchOpts } = opts;
+      const userToken = _jwtOverride || await _supabaseUserToken();
       const res = await fetch(SUPABASE_URL + path, {
-        ...opts,
+        ...fetchOpts,
         headers: {
           'apikey': SUPABASE_ANON_KEY,
-          'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+          'Authorization': 'Bearer ' + (userToken || SUPABASE_ANON_KEY),
           'Content-Type': 'application/json',
           'Prefer': 'return=representation',
-          ...(opts.headers || {})
+          ...(fetchOpts.headers || {})
         }
       });
       // Tolerate empty bodies (e.g. 204 No Content from Prefer: return=minimal,
