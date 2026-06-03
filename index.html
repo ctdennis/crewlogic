@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.23.3 | 2026-06-03">
+  <meta name="crewlogic-version" content="v5.24.0 | 2026-06-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -16476,7 +16476,7 @@ RECYCLING & DONATION
             + (l.is_default ? '' : '<button onclick="editPriceListZips(\'' + l.id + '\')" style="' + b + '">Zips</button>')
             + (l.is_default ? '' : '<button onclick="setDefaultPriceList(\'' + l.id + '\')" style="' + b + '">Make default</button>')
             + '<button onclick="renamePriceList(\'' + l.id + '\')" style="' + b + '" title="Rename">✎</button>'
-            + (l.is_default ? '' : '<button onclick="deletePriceList(\'' + l.id + '\')" style="' + b + 'color:#ef4444;" title="Delete">✕</button>')
+            + '<button onclick="deletePriceList(\'' + l.id + '\')" style="' + b + 'color:#ef4444;" title="Delete">✕</button>'
             + '</div>';
         });
         el.innerHTML = html;
@@ -16514,9 +16514,38 @@ RECYCLING & DONATION
     }
 
     async function deletePriceList(id) {
-      if (!confirm('Delete this price list and all its items + zip assignments? (The Default list can’t be deleted.)')) return;
       try {
+        const fid = currentUser.franchiseInternalID;
+        const meRows = await supabaseFetch('/rest/v1/price_lists?id=eq.' + id + '&select=name,is_default');
+        const me = meRows && meRows[0];
+        if (!me) { _pbFeedback('Price list not found.', false); return; }
+        const all = await supabaseFetch('/rest/v1/price_lists?franchise_id=eq.' + fid + '&select=id') || [];
+        const others = all.filter(l => l.id !== id).length;
+
+        // Can't delete the Default while other lists exist — those lists' unassigned zips rely on it.
+        // Make another list the Default first (explicit, so the owner chooses which).
+        if (me.is_default && others > 0) {
+          alert('“' + me.name + '” is the Default price list. Make another list the Default first (use “Make default”), then delete this one.');
+          return;
+        }
+
+        // Contextual confirm. Deleting cascades the list's tiers/items and its zip assignments;
+        // those zips fall back to the Default. Estimates that used this list keep their saved prices
+        // (the price book is snapshotted into each estimate — there's no live FK), so we confirm, not block.
+        const zips = await supabaseFetch('/rest/v1/price_list_zips?price_list_id=eq.' + id + '&select=zip') || [];
+        const n = zips.length;
+        let msg;
+        if (me.is_default) {
+          msg = 'Delete “' + me.name + '”? It’s your only price list — your franchise will have NO pricing until you create a new one. (Past estimates keep their saved prices.)';
+        } else {
+          msg = 'Delete “' + me.name + '”? Its tiers and items are removed'
+              + (n ? ', and its ' + n + ' assigned zip' + (n === 1 ? '' : 's') + ' move back to the Default list' : '')
+              + '. (Past estimates keep their saved prices.)';
+        }
+        if (!confirm(msg)) return;
+
         await supabaseFetch('/rest/v1/price_lists?id=eq.' + id, { method: 'DELETE' });
+        _pbFeedback('Deleted “' + me.name + '”.', true);
         renderPriceBookTab();
       } catch (e) { _pbFeedback('Delete failed.', false); }
     }
