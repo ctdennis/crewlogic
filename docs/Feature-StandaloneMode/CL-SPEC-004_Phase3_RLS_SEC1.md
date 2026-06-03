@@ -104,10 +104,23 @@ Per table × command × role. Sketch (refine during build):
 - **vonigo_credentials / vonigo_credential_audit**: tightest — **owner-only**, franchise-scoped; never
   anon; ideally only touched via edge fn.
 
-## 8. Storage RLS
-The `estimate-photos` bucket holds franchise data (currently 12h signed URLs via `supabaseClient`).
-Add bucket policies scoping object paths to the caller's franchise; confirm `uploadPhotoToSupabase` /
-`resolvePhotoUrl` still work under them.
+## 8. Storage RLS — separable follow-up (NOT in the table cutover)
+**Current state (verified 2026-06-03):** `estimate-photos` is private but its policies let **anon
+read/upload/delete any object** in the bucket (no path scoping). Object paths ARE already
+franchise-scoped: `<franchiseID>/<estimateID>/<ts>_<label>.ext` (`uploadPhotoToSupabase`, ~4369;
+`franchiseID` = external id). BUT storage runs through a **separate anon client** (`storageClient`,
+`persistSession:false`, ~4305) — chosen because routing storage through the authed `supabaseClient`
+returned 400 ("authenticated role isn't granted", ~4317). So a policy keyed on `auth.uid()` would
+**break uploads/signed-URLs**.
+
+**This is its own mini-project**, not a quick policy add — and risky to rush (touches photo upload +
+display app-wide). Approach when we do it: (a) move storage ops onto the authenticated client (fix the
+grants so the `authenticated` role can use `storage.objects`), (b) add a path-scoped policy
+`(storage.foldername(name))[1] = current_franchise_external_id()` with a new helper returning the
+caller's `franchises.external_id`, (c) verify upload / `resolvePhotoUrl` / sweep still work.
+**Decision (2026-06-03):** defer storage scoping to a dedicated follow-up; ship the table-RLS cutover
+first. Until then the bucket stays at its current anon-access behavior (private bucket, semi-guessable
+paths) — a known, bounded gap.
 
 ## 9. Build sequence (dev-first, table-by-table, gated)
 1. **Universal auth (§3):** Google→Supabase Auth; backfill `profiles.auth_user_id`; verify every login
@@ -161,6 +174,6 @@ Two proven test techniques:
 - [x] **§10 dev test-session** — RESOLVED 2026-06-03: dev bypass mints a real session (`DEV_AUTH.md`).
 - [~] §4 Pre-auth carve-outs (dev): **invites + feedback done (migration 0009)**; `vonigo_credentials`/`_audit` already deny-all. Profiles bootstrap read covered when profiles is scoped (next, with Google auth).
 - [x] §7 Per-table scoped policies replacing `using(true)` — **ALL tables done in dev**: customers (0007), 15 franchise-data tables (0008), invites/feedback carve-outs (0009), profiles/franchises/tenants (0010, email-fallback helpers for pre-link bootstrap), vonigo_credentials/_audit already deny-all. Reads + cross-tenant isolation verified (stranger sees 0). 2026-06-03.
-- [ ] §8 `estimate-photos` storage policies.
+- [→] §8 `estimate-photos` storage policies — **deferred to a dedicated follow-up** (needs storage moved off the anon client + grants + path-scoped policy; not in the table cutover). Current: anon bucket access (bounded gap).
 - [ ] §10 Cross-tenant denial tests + per-role regression.
 - [ ] §9.6 Gated prod promotion (policies + client JWT in lockstep).
