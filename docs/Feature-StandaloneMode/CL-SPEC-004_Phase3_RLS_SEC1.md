@@ -1,8 +1,11 @@
 # CL-SPEC-004 — Phase 3: Row-Level Security / SEC-1
 
-Status: **In progress — started 2026-06-03** (spec'd 2026-06-02). The security go-live gate. Follows
-Phase 2 (Native Auth, CL-SPEC-003, shipped). Replaces the current wide-open RLS with tenant/franchise-
+Status: **Built & shipped to prod — cutover 2026-06-03** (spec'd 2026-06-02). The security go-live gate.
+Follows Phase 2 (Native Auth, CL-SPEC-003, shipped). Replaced the wide-open RLS with tenant/franchise-
 scoped policies enforced by a per-user Supabase JWT. Pre-auth flows audited 2026-06-02 (§4).
+**Cutover done (§14):** link-identity deployed to prod → mark backfilled (gustavo auto-links next login)
+→ client v5.23.2 live → migrations 0006–0010 applied. Verified: charles.dennis reads 48 estimates under
+RLS; stranger sees 0. **Follow-ups:** §8 storage scoping (deferred); fuller cross-tenant test suite (§10).
 **Progress (2026-06-03):** scope helpers (migration 0006); client JWT in `supabaseFetch` (§6); dev
 sign-in bypass upgraded to a **real Supabase session** (`signInWithPassword`; dev `auth.users` created +
 linked — see `supabase/dev-setup/DEV_AUTH.md`); **`customers` RLS applied to dev** (migration 0007) and
@@ -176,7 +179,7 @@ Two proven test techniques:
 - [x] §7 Per-table scoped policies replacing `using(true)` — **ALL tables done in dev**: customers (0007), 15 franchise-data tables (0008), invites/feedback carve-outs (0009), profiles/franchises/tenants (0010, email-fallback helpers for pre-link bootstrap), vonigo_credentials/_audit already deny-all. Reads + cross-tenant isolation verified (stranger sees 0). 2026-06-03.
 - [→] §8 `estimate-photos` storage policies — **deferred to a dedicated follow-up** (needs storage moved off the anon client + grants + path-scoped policy; not in the table cutover). Current: anon bucket access (bounded gap).
 - [ ] §10 Cross-tenant denial tests + per-role regression.
-- [ ] §9.6 Gated prod promotion (policies + client JWT in lockstep) — see §14 runbook.
+- [x] §9.6 Gated prod promotion — **DONE 2026-06-03** (see §14): link-identity deployed → mark backfilled → client v5.23.2 live → migrations 0006–0010 applied. charles.dennis reads 48 estimates under RLS; stranger sees 0.
 
 ## 14. Prod cutover runbook (gated; not yet executed)
 **Order is critical** — client (sends user JWT) must precede policies, or the old anon-only client hits
