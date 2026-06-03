@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.24.3 | 2026-06-03">
+  <meta name="crewlogic-version" content="v5.24.4 | 2026-06-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -5836,6 +5836,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         el.style.cursor = ready ? 'pointer' : 'not-allowed';
         el.title = ready ? '' : (isNative ? 'Select a customer to load pricing — or set up a price book first (Settings → Price Book)' : 'Look up a Vonigo job first');
       });
+      // Pricing is loaded → the franchise has a price book, so the "no price book" notice must not
+      // linger (it's set on a failed load and only cleared in autoRefetchPriceBlocks' success path,
+      // which a re-opened estimate may skip). Readiness is the source of truth: ready ⇒ hide it.
+      if (ready) _toggleNoPriceBookNotice(false);
     }
     window.updateEditorToolbarState = updateEditorToolbarState;
 
