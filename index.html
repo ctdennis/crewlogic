@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.23.0 | 2026-06-03">
+  <meta name="crewlogic-version" content="v5.23.1 | 2026-06-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3921,6 +3921,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             return true;
           }
         }
+        // SEC-1 (CL-SPEC-004): ensure this profile is linked to the Supabase Auth user so RLS scope
+        // helpers (current_franchise_id, etc.) resolve. Idempotent server-side; only fires when unlinked.
+        if (built && !built.authUserId) {
+          try {
+            await fetch(EDGE_BASE + '/crewlogic-link-identity', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'apikey': EDGE_ANON_KEY, 'Authorization': 'Bearer ' + sbSession.access_token }
+            });
+            built.authUserId = sbSession.user.id;
+          } catch (e) { /* non-fatal; RLS-scoped tables may read empty until linked */ }
+        }
         if (built) {
           currentUser = built;
           storage.set(SESSION_KEY, JSON.stringify(currentUser));
@@ -4147,7 +4158,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // a Supabase-Auth-authenticated email, by reading profile→franchise→tenant (incl. the
     // per-capability provider flags). Returns null if no profile exists for that email.
     async function buildSessionFromSupabaseAuth(email) {
-      const rows = await supabaseFetch('/rest/v1/profiles?select=role,franchise_id,name,franchises(external_id,franchise_name,cost_settings,subscription_tier,vonigo_configured,tenants(id,subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(email));
+      const rows = await supabaseFetch('/rest/v1/profiles?select=role,franchise_id,name,auth_user_id,franchises(external_id,franchise_name,cost_settings,subscription_tier,vonigo_configured,tenants(id,subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(email));
       const p = rows && rows[0];
       if (!p) return null;
       const f = p.franchises || {};
@@ -4159,6 +4170,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         role: p.role || 'owner',
         franchiseID: f.external_id || null,
         franchiseInternalID: p.franchise_id || null,
+        authUserId: p.auth_user_id || null,
         tenantID: t.id || null,
         franchiseName: f.franchise_name || null,
         pricingSource: t.pricing_source || 'vonigo',

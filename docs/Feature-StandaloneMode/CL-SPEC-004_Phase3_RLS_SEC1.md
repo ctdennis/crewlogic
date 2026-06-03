@@ -155,7 +155,7 @@ Two proven test techniques:
   test RLS only via SQL impersonation + magic-link. Gates applying policy migrations to dev.
 
 ## 13. Checklist
-- [ ] §3 Universal `auth.uid()`: Google→Supabase Auth; backfill `profiles.auth_user_id`; all logins yield a JWT.
+- [~] §3 Universal `auth.uid()`: Google OAuth already live in prod (verified). **Auto-linking edge fn `crewlogic-link-identity` built, deployed to dev, wired into `resumeNativeSession`, verified end-to-end** (re-links by email, idempotent; v5.23.1). Remaining: backfill 2 unlinked prod owners at cutover.
 - [x] §5 Scope-resolver SQL helpers (dev) — migration 0006, applied & verified 2026-06-03.
 - [x] §6 `supabaseFetch` sends user JWT (dev), 2026-06-03; no-op while policies open.
 - [x] **§10 dev test-session** — RESOLVED 2026-06-03: dev bypass mints a real session (`DEV_AUTH.md`).
