@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.24.4 | 2026-06-03">
+  <meta name="crewlogic-version" content="v5.24.5 | 2026-06-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8415,17 +8415,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const plDisplay = document.getElementById('estPriceListDisplay');
           if (plDisplay) plDisplay.textContent = priceListName;
           _toggleNoPriceBookNotice(false);
-          // Re-render charge rows so dropdowns populate
+          // Re-render charge rows so dropdowns populate, and enable the toolbar (pricing is loaded).
           renderChargeRows();
+          updateEditorToolbarState();
         } else {
-          // Native: a failed/empty pricing load almost always means the franchise has no price book
-          // (crewlogic-pricing 404s with no default list). Surface a clear, actionable message instead
-          // of leaving the toolbar buttons silently disabled.
-          if (currentUser && currentUser.pricingSource === 'native') _toggleNoPriceBookNotice(true);
+          // Native: only surface the "no price book" notice when we genuinely have NO pricing loaded.
+          // A transient or racing refresh failure must NOT claim "no price book" while a price book is
+          // already loaded (priceBlocks present) — that caused a stale notice to pop in on re-open.
+          if (currentUser && currentUser.pricingSource === 'native' && !(priceBlocks && priceBlocks.length)) _toggleNoPriceBookNotice(true);
           else if (statusEl) { statusEl.textContent = 'Could not reload prices — use Load Pricing button'; statusEl.className = 'zip-status error'; }
         }
       } catch(e) {
-        if (currentUser && currentUser.pricingSource === 'native') _toggleNoPriceBookNotice(true);
+        if (currentUser && currentUser.pricingSource === 'native' && !(priceBlocks && priceBlocks.length)) _toggleNoPriceBookNotice(true);
         else if (statusEl) { statusEl.textContent = 'Could not reload prices — use Load Pricing button'; statusEl.className = 'zip-status error'; }
       }
     }
