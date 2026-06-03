@@ -7,7 +7,11 @@ scoped policies enforced by a per-user Supabase JWT. Pre-auth flows audited 2026
 sign-in bypass upgraded to a **real Supabase session** (`signInWithPassword`; dev `auth.users` created +
 linked — see `supabase/dev-setup/DEV_AUTH.md`); **`customers` RLS applied to dev** (migration 0007) and
 verified — `dev-owner` (auth.uid → franchise `22222222`) sees its 81 customers, another franchise's rows
-are invisible. First table is live under scoped RLS in dev.
+are invisible. First table live under scoped RLS in dev. **Then migration 0008** scoped the bulk franchise-data tables
+(estimates, price_lists/blocks/items/zips, customer_price_lists, job_plans, crew_members, tools, campaigns,
+yard_signs + sign_*) — 15 tables — applied to dev; dev-owner reads verified (incl. join-based
+price_blocks/items; estimates filtered 13 of 15 total = scoping confirmed). Remaining: profiles, franchises,
+tenants, invites/feedback carve-outs, vonigo_credentials/_audit.
 
 ## 1. Problem — current security posture (verified 2026-06-02)
 - **Every RLS policy is `using (true)`** across all ~20 public tables (estimates, customers, profiles,
@@ -146,7 +150,7 @@ Two proven test techniques:
 - [x] §6 `supabaseFetch` sends user JWT (dev), 2026-06-03; no-op while policies open.
 - [x] **§10 dev test-session** — RESOLVED 2026-06-03: dev bypass mints a real session (`DEV_AUTH.md`).
 - [ ] §4 Pre-auth carve-outs implemented (invites by-token; profiles bootstrap via JWT/edge fn; feedback insert).
-- [~] §7 Per-table scoped policies replacing `using(true)`, table-by-table (dev). **`customers` applied to dev + verified (migration 0007, 2026-06-03).** Remaining tables pending.
+- [~] §7 Per-table scoped policies replacing `using(true)`, table-by-table (dev). **Done in dev: customers (0007) + 15 franchise-data tables (0008), reads verified 2026-06-03.** Remaining: profiles, franchises, tenants, invites/feedback (carve-outs), vonigo_credentials/_audit.
 - [ ] §8 `estimate-photos` storage policies.
 - [ ] §10 Cross-tenant denial tests + per-role regression.
 - [ ] §9.6 Gated prod promotion (policies + client JWT in lockstep).
