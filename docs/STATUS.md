@@ -48,6 +48,7 @@ use by a prod tenant"; keep those distinct.
 | Vonigo deep-link from estimate | **Not started** (2026-06-03) | Make the `Vonigo #<id>` reference clickable → opens that estimate/work-order directly in Vonigo. Appears on the post-submit screen ("Submitted to Vonigo — Estimate #678497") and the estimates-list card. Need the Vonigo estimate-URL pattern |
 | Show estimate IDs on the estimate editor view | **Not started** (2026-06-03) | On the estimate detail/editor (the contact/Street-View/Notes view), surface the **Vonigo estimate #** + **CrewLogic estimate ID**, matching the estimates-list card (`✓ Vonigo #678497  ID:1780322856756`). Pairs with the deep-link above (the Vonigo # there should also be clickable) |
 | Native "set up your price book" prompt | **Not started** (2026-06-03) | The home Price Lookup "Setup needed" badge is Vonigo-only and is now suppressed for native tenants (v5.23.2). A brand-new native tenant with **no price book** should instead see a native setup prompt (→ Price Book tab). Tie into onboarding |
+| Native service-area boundary (decision) | **Not started** (2026-06-03) | `crewlogic-pricing` falls back to the **Default** list for any unassigned ZIP (SPEC-001 by design), so every ZIP returns a price. Owner expects "not in service area" for ZIPs not on any list (Vonigo-zone behavior). Decision: keep catch-all vs. enforce a service-area boundary (unassigned ZIP → error). Would also make the ZIP box consistent with the town autocomplete (already bounded to `price_list_zips`). Affects `crewlogic-pricing` + town lookup |
 
 ---
 
