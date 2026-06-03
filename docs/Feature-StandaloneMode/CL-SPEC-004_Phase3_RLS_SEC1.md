@@ -1,8 +1,9 @@
 # CL-SPEC-004 — Phase 3: Row-Level Security / SEC-1
 
-Status: **Not started — spec'd 2026-06-02.** The security go-live gate. Follows Phase 2 (Native Auth,
-CL-SPEC-003, shipped). Replaces the current wide-open RLS with tenant/franchise-scoped policies enforced
-by a per-user Supabase JWT. Pre-auth flows audited 2026-06-02 (§4).
+Status: **In progress — started 2026-06-03** (spec'd 2026-06-02). The security go-live gate. Follows
+Phase 2 (Native Auth, CL-SPEC-003, shipped). Replaces the current wide-open RLS with tenant/franchise-
+scoped policies enforced by a per-user Supabase JWT. Pre-auth flows audited 2026-06-02 (§4).
+**Progress:** scope-resolver helpers built in dev (migration 0006, 2026-06-03).
 
 ## 1. Problem — current security posture (verified 2026-06-02)
 - **Every RLS policy is `using (true)`** across all ~20 public tables (estimates, customers, profiles,
@@ -51,13 +52,13 @@ tighten, via a **narrow anon policy** or by **moving to a service-role edge func
 (no DB read). Provisioning (`crewlogic-oauth-callback`, `crewlogic-signup`, `crewlogic-accept-invite`)
 uses service-role and is RLS-exempt.
 
-## 5. Scope-resolver helpers (SQL, `SECURITY DEFINER`)
+## 5. Scope-resolver helpers (SQL, `SECURITY DEFINER`) — ✅ built in dev (migration 0006, 2026-06-03)
 Centralize scope resolution from `auth.uid()` (and avoid recursive RLS on `profiles`):
-- `auth_profile()` → the caller's `profiles` row (by `auth_user_id = auth.uid()`).
 - `current_franchise_id()` → caller's `franchise_id`.
 - `current_tenant_id()` → caller's tenant (via franchise→tenant).
-- `current_role()` → `'owner'` | `'crew'`.
-Mark `STABLE`/`SECURITY DEFINER`, grant execute to `authenticated`.
+- `current_user_role()` → `'owner'` | `'crew'`. *(Not `current_role()` — that's a reserved Postgres function.)*
+All `STABLE SECURITY DEFINER` with a fixed `search_path`; execute granted to `authenticated`/`anon`
+(they return NULL outside an authenticated context, which scoped policies treat as "matches nothing").
 
 ## 6. Client change — send the user JWT
 `supabaseFetch` must attach the Supabase access token for logged-in users so PostgREST sees `auth.uid()`:
@@ -122,7 +123,7 @@ Add bucket policies scoping object paths to the caller's franchise; confirm `upl
 
 ## 13. Checklist
 - [ ] §3 Universal `auth.uid()`: Google→Supabase Auth; backfill `profiles.auth_user_id`; all logins yield a JWT.
-- [ ] §5 Scope-resolver SQL helpers (dev).
+- [x] §5 Scope-resolver SQL helpers (dev) — migration 0006, applied & verified 2026-06-03.
 - [ ] §6 `supabaseFetch` sends user JWT (dev); all flows still pass with policies still open.
 - [ ] §4 Pre-auth carve-outs implemented (invites by-token; profiles bootstrap via JWT/edge fn; feedback insert).
 - [ ] §7 Per-table scoped policies replacing `using(true)`, table-by-table (dev).
