@@ -1,8 +1,10 @@
 # CL-SPEC-002 — Town-name Price Lookup (town → ZIP → price)
 
-Status: **In progress — dual-track build** (design locked 2026-06-02; spec'd 2026-05-29). A basic
-single-track version (50-state dropdown + live forward lookup) shipped to a **local, unpushed**
-commit as v5.22.0; it is being superseded by the dual-track design below before anything is pushed.
+Status: **Built & shipped to prod** (v5.22.2, promoted 2026-06-02; design locked 2026-06-02; spec'd
+2026-05-29). Dual-track town lookup is live: **native** = autocomplete from enriched `price_list_zips`;
+**Vonigo** = town + state dropdown scoped to `cost_settings.serviceStates` (default `officeState`).
+Verified in-browser on dev (native: Dennis → Waterford price; Vonigo: MA/RI dropdown + village-name
+not-found message). Migration 0005 applied to **dev and prod**.
 
 ## 1. Goal
 The home-page Price Lookup takes a 5-digit **ZIP** (`#priceZipInput` → `doZipLookup()` →
@@ -101,4 +103,4 @@ routes native (`crewlogic-pricing`) vs Vonigo (`crewlogic-price-lookup`). Backen
 - [x] Provider-aware town UI: native autocomplete (`<datalist>`) from `price_list_zips`; Vonigo town + scoped state dropdown (default `officeState`). `setPriceLookupMode()` branches on `_plIsNative()`.
 - [x] Wire both into existing `doZipLookup()` (pre-fill `#priceZipInput`) — no backend change.
 - [x] Errors: town-not-found (native index miss / Vonigo 404), network fallback, no-ZIPs-yet (native).
-- [~] Verify in dev: **partial** — schema applied, all 14 dev ZIPs reverse-resolve correctly (New Bedford spans 02744/45/46 → dedupes to 02744), HTML parses clean. **Still pending:** in-browser end-to-end (native autocomplete + lazy enrich writing to dev; Vonigo scoped dropdown) on the running app.
+- [x] Verify in dev: schema applied, 14 dev ZIPs reverse-resolve (New Bedford 02744/45/46 → dedupes to 02744), HTML parses clean, **in-browser end-to-end confirmed** on dev v5.22.2 — native autocomplete (Dennis → Waterford price) + Vonigo scoped MA/RI dropdown + village-name not-found message. Migration 0005 applied to **prod**; promoted prod 2026-06-02.
