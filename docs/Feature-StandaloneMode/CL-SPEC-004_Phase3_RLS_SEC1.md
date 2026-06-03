@@ -3,10 +3,11 @@
 Status: **In progress — started 2026-06-03** (spec'd 2026-06-02). The security go-live gate. Follows
 Phase 2 (Native Auth, CL-SPEC-003, shipped). Replaces the current wide-open RLS with tenant/franchise-
 scoped policies enforced by a per-user Supabase JWT. Pre-auth flows audited 2026-06-02 (§4).
-**Progress (2026-06-03):** scope-resolver helpers in dev (migration 0006); client JWT in `supabaseFetch`
-(§6); franchise-scoping **pattern proven** via a rolled-back impersonation test (authed user saw only its
-own franchise's `customers`, none of another's); `customers` policy template written (migration 0007,
-**not yet applied** — see §10 dev-session blocker).
+**Progress (2026-06-03):** scope helpers (migration 0006); client JWT in `supabaseFetch` (§6); dev
+sign-in bypass upgraded to a **real Supabase session** (`signInWithPassword`; dev `auth.users` created +
+linked — see `supabase/dev-setup/DEV_AUTH.md`); **`customers` RLS applied to dev** (migration 0007) and
+verified — `dev-owner` (auth.uid → franchise `22222222`) sees its 81 customers, another franchise's rows
+are invisible. First table is live under scoped RLS in dev.
 
 ## 1. Problem — current security posture (verified 2026-06-02)
 - **Every RLS policy is `using (true)`** across all ~20 public tables (estimates, customers, profiles,
@@ -106,13 +107,12 @@ Add bucket policies scoping object paths to the caller's franchise; confirm `upl
 6. **Promote to prod** — gated, in lockstep (policies + client JWT must land together per table/cutover).
 
 ## 10. Testing strategy
-**Dev-session blocker (found 2026-06-03):** the dev sign-in **bypass** (`devSignIn`) sets `currentUser`
-directly *without* a Supabase Auth session, so those accounts have **no `auth.uid()`** and can't satisfy
-scoped policies (they'd see zero rows). Also, dev's data is lopsided: the only `auth_user_id`-linked
-profile (`tpass2008`) is on franchise `5d59edb4` (0 customers), while all 81 customers sit on the
-bypass franchise `22222222` (no auth link). **Decision needed (§12):** either (a) upgrade the dev bypass
-to mint a real Supabase session, or (b) test RLS via SQL impersonation + a real magic-link login, not the
-bypass. Until resolved, policy migrations (0007+) are written but **not applied** to dev.
+**Dev-session blocker — RESOLVED 2026-06-03 (option a).** The dev sign-in bypass now mints a real
+Supabase session (`devSignIn` → `signInWithPassword`); dev `auth.users` were created for
+`dev-owner`/`dev-vonigo` and linked to their `profiles.auth_user_id` (setup + recreate steps in
+`supabase/dev-setup/DEV_AUTH.md`). So scoped policies are now testable in-browser as those accounts, and
+policy migrations can be applied to dev. (Original lopsided-data note: all 81 customers are on
+`dev-owner`'s franchise `22222222`, which is now auth-linked — so `dev-owner` is the natural RLS test.)
 Two proven test techniques:
 - **SQL impersonation** (no browser): `begin; … set local role authenticated; select
   set_config('request.jwt.claims','{"sub":"<auth_user_id>"}',true); <queries>; rollback;` — used to prove
@@ -144,9 +144,9 @@ Two proven test techniques:
 - [ ] §3 Universal `auth.uid()`: Google→Supabase Auth; backfill `profiles.auth_user_id`; all logins yield a JWT.
 - [x] §5 Scope-resolver SQL helpers (dev) — migration 0006, applied & verified 2026-06-03.
 - [x] §6 `supabaseFetch` sends user JWT (dev), 2026-06-03; no-op while policies open.
-- [ ] **§10 dev test-session decision** (upgrade `devSignIn` to a real session vs SQL-impersonation+magic-link) — gates applying policy migrations to dev.
+- [x] **§10 dev test-session** — RESOLVED 2026-06-03: dev bypass mints a real session (`DEV_AUTH.md`).
 - [ ] §4 Pre-auth carve-outs implemented (invites by-token; profiles bootstrap via JWT/edge fn; feedback insert).
-- [ ] §7 Per-table scoped policies replacing `using(true)`, table-by-table (dev). `customers` template ready (migration 0007, not yet applied); pattern proven 2026-06-03.
+- [~] §7 Per-table scoped policies replacing `using(true)`, table-by-table (dev). **`customers` applied to dev + verified (migration 0007, 2026-06-03).** Remaining tables pending.
 - [ ] §8 `estimate-photos` storage policies.
 - [ ] §10 Cross-tenant denial tests + per-role regression.
 - [ ] §9.6 Gated prod promotion (policies + client JWT in lockstep).

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.22.2 | 2026-06-02">
+  <meta name="crewlogic-version" content="v5.23.0 | 2026-06-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4199,7 +4199,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     // Dev synthetic login. mode 'none' = standalone tenant (DEV1, no CRM);
     // mode 'vonigo' = Vonigo-provider tenant (external_id 90; enter #90 creds in Settings).
-    function devSignIn(mode) {
+    const DEV_BYPASS_PASSWORD = 'CrewlogicDev!2026'; // dev-only test credential; devSignIn is injected only on IS_DEV_ENV
+    async function devSignIn(mode) {
       if (mode === 'vonigo') {
         currentUser = {
           email: 'dev-vonigo@crewlogic.test',
@@ -4234,6 +4235,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           costSettings: {}
         };
       }
+      try {
+        // SEC-1 (CL-SPEC-004) dev testing: establish a REAL Supabase Auth session so auth.uid() works
+        // and scoped RLS is exercisable in-browser. The linked dev profiles carry this auth_user_id.
+        await supabaseClient.auth.signInWithPassword({ email: currentUser.email, password: DEV_BYPASS_PASSWORD });
+      } catch (e) { console.warn('[dev] signInWithPassword failed — RLS-scoped tables may read empty:', e && e.message); }
       storage.set(SESSION_KEY, JSON.stringify(currentUser));
       showApp();
     }
