@@ -176,4 +176,14 @@ Two proven test techniques:
 - [x] §7 Per-table scoped policies replacing `using(true)` — **ALL tables done in dev**: customers (0007), 15 franchise-data tables (0008), invites/feedback carve-outs (0009), profiles/franchises/tenants (0010, email-fallback helpers for pre-link bootstrap), vonigo_credentials/_audit already deny-all. Reads + cross-tenant isolation verified (stranger sees 0). 2026-06-03.
 - [→] §8 `estimate-photos` storage policies — **deferred to a dedicated follow-up** (needs storage moved off the anon client + grants + path-scoped policy; not in the table cutover). Current: anon bucket access (bounded gap).
 - [ ] §10 Cross-tenant denial tests + per-role regression.
-- [ ] §9.6 Gated prod promotion (policies + client JWT in lockstep).
+- [ ] §9.6 Gated prod promotion (policies + client JWT in lockstep) — see §14 runbook.
+
+## 14. Prod cutover runbook (gated; not yet executed)
+**Order is critical** — client (sends user JWT) must precede policies, or the old anon-only client hits
+scoped policies → prod outage. Each step gated + reversible:
+1. **Deploy `crewlogic-link-identity` to prod** (`supabase functions deploy --project-ref ozfkpxyachigfpcmvekz crewlogic-link-identity --use-api --no-verify-jwt`). Harmless until called.
+2. **Backfill the 2 unlinked owners** — `update public.profiles p set auth_user_id = u.id from auth.users u where u.email = p.email and p.email in ('gustavo.mesa@junkluggers.com','mark.harrington@junkluggers.com') and p.auth_user_id is null`. All 8 linked.
+3. **Push client v5.23.2 to prod** (`git push origin main` → Cloudflare). Sends the user JWT (no-op while policies open) + auto-links on login.
+4. **Apply migrations to prod, in order** (linked to prod: `supabase db query --linked -f supabase/migrations/000N_*.sql`): 0006 → 0007 → 0008 → 0009 → 0010. Policies enforce; safe because step 3 made the client send JWTs and everyone's linked.
+
+**Risk:** a user whose Supabase session expired (but cached `cl_session_v2` valid) sends anon after step 4 → no data until re-login (re-establishes session + auto-links). Low-activity prod (8 users) → acceptable; prefer a quiet window. **Revert:** re-open a table = restore `using(true)`; `git revert` the client; unset `auth_user_id`.
