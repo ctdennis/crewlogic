@@ -5,7 +5,8 @@ Follows Phase 2 (Native Auth, CL-SPEC-003, shipped). Replaced the wide-open RLS 
 scoped policies enforced by a per-user Supabase JWT. Pre-auth flows audited 2026-06-02 (§4).
 **Cutover done (§14):** link-identity deployed to prod → mark backfilled (gustavo auto-links next login)
 → client v5.23.2 live → migrations 0006–0010 applied. Verified: charles.dennis reads 48 estimates under
-RLS; stranger sees 0. **Follow-ups:** §8 storage scoping (deferred); fuller cross-tenant test suite (§10).
+RLS; stranger sees 0; **owner live-verified in prod** (estimate creation, cover-photo retrieval, volume
+estimate, price lookup — junkluggers.com login). **Follow-ups:** §8 storage scoping (deferred); fuller cross-tenant test suite (§10).
 **Progress (2026-06-03):** scope helpers (migration 0006); client JWT in `supabaseFetch` (§6); dev
 sign-in bypass upgraded to a **real Supabase session** (`signInWithPassword`; dev `auth.users` created +
 linked — see `supabase/dev-setup/DEV_AUTH.md`); **`customers` RLS applied to dev** (migration 0007) and
