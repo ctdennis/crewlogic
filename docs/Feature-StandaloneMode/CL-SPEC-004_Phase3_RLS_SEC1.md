@@ -34,17 +34,24 @@ franchise/tenant, scoped by role (owner vs crew/estimator) — via `auth.uid()`-
 per-user JWT on every authenticated request. Edge functions (service-role) remain the trusted path for
 provisioning and cross-cutting writes.
 
-## 3. The gating dependency — universal `auth.uid()`
-RLS keys off `auth.uid()`, which requires a Supabase Auth identity (`auth.users` row) for every user.
-- **Native users:** ✅ have it (CL-SPEC-003; `profiles.auth_user_id` set by `crewlogic-signup` / `crewlogic-accept-invite`).
-- **Google owners (current prod users):** ❌ custom JSON session, **no `auth.users`**. The
-  `loginV2Google` Supabase-native Google OAuth path is the seed to build on.
-- **Crew / estimators:** ❌ need identities (magic-link invite).
+## 3. The gating dependency — universal `auth.uid()` — MOSTLY ALREADY DONE (verified prod 2026-06-03)
+RLS keys off `auth.uid()`. **The earlier "Google owners have no `auth.users`" assumption was stale.**
+Verified against prod 2026-06-03:
+- **Supabase-native Google OAuth is already the LIVE prod path.** The "Continue with Google" card users
+  see (`buildLoginV2` → `loginV2Google` → `signInWithOAuth({provider:'google'})`, shipped with login V2
+  v5.18.0) is Supabase Auth; the legacy custom `crewlogic-oauth-callback` is hidden. Prod has **9
+  `auth.users`, all `provider=google`**.
+- **6 of 8 prod profiles already have `auth_user_id` linked.** Unlinked: 2 owners (`gustavo.mesa@`,
+  `mark.harrington@`) — haven't logged in via the Supabase path since linking, or the link didn't take.
+  (9 google `auth.users` vs 6 linked profiles ⇒ linking is **not** reliably automatic today.)
 
-**SEC-1 cannot enforce until all users have `auth.uid()` and every `profiles` row has a populated
-`auth_user_id`.** Sub-tasks: migrate Google sign-in onto Supabase Auth (or link `auth.users` to existing
-Google profiles); backfill `auth_user_id` for all existing profiles; keep the custom-session shape
-(`currentUser` / `cl_session_v2`) unchanged downstream (same approach as Phase 2).
+So **there is no auth-method switch to build.** Remaining work is just:
+1. **Reliable auto-linking on login** — ensure every Supabase login (Google or magic-link) sets
+   `profiles.auth_user_id = auth.uid()` by matching email when not already linked. Best via a small
+   service-role edge function called from `resumeNativeSession` (idempotent — only when `auth_user_id`
+   is null). Closes the gap that left 2 owners unlinked.
+2. **Backfill** the unlinked profiles (`profiles.email` → `auth.users.email`).
+3. Then scope `profiles`/`franchises`/`tenants`, run cross-tenant tests, coordinated prod cutover.
 
 ## 4. Pre-auth carve-outs (audited 2026-06-02)
 Accesses that happen before an authenticated session exists — these must stay reachable when policies
