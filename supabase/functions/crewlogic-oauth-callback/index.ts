@@ -32,6 +32,11 @@ const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET") || "";
 // Fallbacks keep prod byte-identical to the previous hardcoded behavior.
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "https://ozfkpxyachigfpcmvekz.supabase.co";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96ZmtweHlhY2hpZ2ZwY212ZWt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0MjM0ODcsImV4cCI6MjA5MDk5OTQ4N30.tRwucg1ndO8l0h4vhvBpUFG7UONeqqFPE-iktH8fYX8";
+// Service role — auto-injected into every Edge Function. Provisioning here (profile/invite reads
+// + writes) is trusted server-side work and MUST bypass RLS; the anon key below subjected the
+// profile INSERT to the Phase-3 RLS cutover and broke it (profile_create_failed → "Something went
+// wrong" on invite/signup via the custom Google callback). No hardcoded fallback — never commit it.
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
 const APP_BASE = Deno.env.get("APP_BASE") || "https://crewlogicai.com";
 
@@ -40,9 +45,12 @@ const APP_BASE = Deno.env.get("APP_BASE") || "https://crewlogicai.com";
 // → APIs & Services → Credentials → OAuth 2.0 Client IDs → Authorized redirect URIs.
 const OAUTH_REDIRECT_URI = `${SUPABASE_URL}/functions/v1/crewlogic-oauth-callback`;
 
+// Service-role headers for all PostgREST calls in this callback (profile lookup, provisioning
+// insert, invite mark). Service role so RLS is bypassed — see SUPABASE_SERVICE_ROLE_KEY note above.
+// (signIntoSupabase still uses the anon key against the auth endpoint, which is correct.)
 const SB_HEADERS = {
-  "apikey": SUPABASE_ANON_KEY,
-  "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+  "apikey": SUPABASE_SERVICE_ROLE_KEY,
+  "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
   "Content-Type": "application/json",
 };
 
