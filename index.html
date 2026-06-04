@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.24.6 | 2026-06-03">
+  <meta name="crewlogic-version" content="v5.25.0 | 2026-06-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1195,9 +1195,9 @@
           <div id="editorToolbarHint" style="display:none;font-size:10px;color:var(--text-muted);text-align:center;padding:0 0 2px;">↑ Tap a button above to add your first item</div>
           <!-- Native: shown when pricing can't load because the franchise has no price book yet -->
           <div id="estNoPriceBookNotice" style="display:none;margin-top:8px;padding:12px 14px;background:rgba(251,146,60,0.12);border:1px solid var(--accent-orange);border-radius:var(--radius-sm);text-align:left;">
-            <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px;">⚠️ No price book set up yet</div>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">You need a price book before you can build an estimate. Set up your pricing, then come back to this estimate.</div>
-            <button onclick="_pendingSettingsTab='pricebook';openModule('settings');" style="padding:8px 14px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;">Set up Price Book →</button>
+            <div id="estNoPriceBookTitle" style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px;">⚠️ No price book set up yet</div>
+            <div id="estNoPriceBookMsg" style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">You need a price book before you can build an estimate. Set up your pricing, then come back to this estimate.</div>
+            <button id="estNoPriceBookCta" onclick="_pendingSettingsTab='pricebook';openModule('settings');" style="padding:8px 14px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;">Set up Price Book →</button>
           </div>
         </div>
         <!-- Estimates List toolbar -->
@@ -1324,6 +1324,12 @@
         </div>
 
         <div id="priceLookupError" style="display:none;" class="price-error"></div>
+        <!-- Native: friendly "no price book / empty default list" notice (parallels the estimate editor's). -->
+        <div id="priceLookupNoPriceBookNotice" style="display:none;margin-top:8px;padding:12px 14px;background:rgba(251,146,60,0.12);border:1px solid var(--accent-orange);border-radius:var(--radius-sm);text-align:left;">
+          <div id="plNoPriceBookTitle" style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:4px;">⚠️ No price book set up yet</div>
+          <div id="plNoPriceBookMsg" style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">There’s no pricing to look up yet. Set up a price book with a default list and priced items.</div>
+          <button id="plNoPriceBookCta" onclick="_pendingSettingsTab='pricebook';openModule('settings');" style="padding:8px 14px;background:var(--accent-green);color:#000;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;">Set up Price Book →</button>
+        </div>
         <div id="priceLookupResults"></div>
       </div>
 
@@ -2157,6 +2163,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                   <label style="display:block;font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:4px;">Balance due within</label>
                   <select class="form-input" id="estSpecialTermsTermDays" style="padding:8px;" onchange="updateSpecialTermsDepositUI();autoSaveDraft()">
                     <option value="">— No term —</option>
+                    <option value="completion">Upon Completion</option>
                     <option value="30">30 days</option>
                     <option value="60">60 days</option>
                     <option value="90">90 days</option>
@@ -4262,54 +4269,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       showApp();
     }
 
-    function triggerGoogleSignIn(inviteToken) {
+    // Rerouted (2026-06-04, #59) from the custom crewlogic-oauth-callback to Supabase-native Google
+    // OAuth. The custom callback established only a "custom" session (no Supabase JWT), so after the
+    // Phase-3 RLS cutover those users couldn't read/write their own data (invited estimators saw 0
+    // customers, saves were denied). signInWithOAuth establishes a REAL Supabase session; the invite/
+    // signup intent rides in localStorage (already set by the callers: pending_invite_token /
+    // pending_signup), and resumeNativeSession() accepts/provisions on return — the exact path the
+    // email magic-link already uses. (The custom callback stays deployed but is no longer used for
+    // browser logins.)
+    async function triggerGoogleSignIn(inviteToken) {
       const btn = document.getElementById('googleSignInBtn');
       const statusEl = document.getElementById('loginStatus');
       if (btn) { btn.style.opacity = '0.6'; btn.style.pointerEvents = 'none'; }
       if (statusEl) { statusEl.textContent = 'Redirecting to Google...'; statusEl.style.color = '#94a3b8'; }
-
-      const oauthParams = {
-        client_id: GOOGLE_CLIENT_ID,
-        redirect_uri: OAUTH_REDIRECT,
-        response_type: 'code',
-        scope: 'openid email profile',
-        access_type: 'online',
-        prompt: 'select_account'
-      };
-
-      // Restrict to junkluggers.com ONLY for the plain (non-invite, non-signup) sign-in. Both the
-      // invite-accept and self-serve native-signup flows must accept any Google domain.
-      const pendingToken = inviteToken || storage.get('pending_invite_token');
-      const isSignup = !pendingToken && storage.get('pending_signup') === '1';
-      if (!pendingToken && !isSignup) {
-        oauthParams.hd = 'junkluggers.com';
+      // When an invite token is passed explicitly, ensure it's in storage so the post-redirect
+      // resumeNativeSession() can accept it (checkInviteToken normally sets this already).
+      if (inviteToken && !storage.get('pending_invite_token')) storage.set('pending_invite_token', inviteToken);
+      try {
+        const { error } = await supabaseClient.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
+        if (error) throw error;
+      } catch (e) {
+        if (statusEl) { statusEl.textContent = 'Could not start Google sign-in: ' + (e.message || 'error'); statusEl.style.color = '#ef4444'; }
+        if (btn) { btn.style.opacity = '1'; btn.style.pointerEvents = ''; }
       }
-
-      // Pass intent through the OAuth state parameter so it survives the redirect (the callback
-      // can't read localStorage):
-      //   "invite:<token>"        team-member / existing-franchise invite
-      //   "inviteN:<b64url{t,c,n}>" new native workspace via invite (company name)
-      //   "signupN:<b64url{c,n}>"   self-serve native signup, no invite (company name)
-      const _b64url = (obj) => btoa(unescape(encodeURIComponent(JSON.stringify(obj))))
-        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-      if (pendingToken) {
-        const co = (storage.get('pending_invite_company') || '').trim();
-        if (co) {
-          const nm = (storage.get('pending_invite_name') || '').trim();
-          oauthParams.state = 'inviteN:' + _b64url({ t: pendingToken, c: co, n: nm || undefined });
-        } else {
-          oauthParams.state = 'invite:' + pendingToken;
-        }
-      } else if (isSignup) {
-        const co = (storage.get('pending_signup_company') || '').trim();
-        const nm = (storage.get('pending_signup_name') || '').trim();
-        oauthParams.state = 'signupN:' + _b64url({ c: co, n: nm || undefined });
-      }
-
-      const params = new URLSearchParams(oauthParams);
-
-      // Full page redirect — avoids COOP popup restrictions
-      window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
     }
 
     // ===== TEAM / INVITE SYSTEM =====
@@ -5645,11 +5627,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
     }
 
-    function handleLogout() {
+    async function handleLogout() {
+      // Delegate to signOut() for the FULL teardown. Clearing only SESSION_KEY here left any
+      // Supabase Auth session (Google via signInWithOAuth, or magic-link) alive, so initAuth
+      // silently restored it on the next refresh — a "sign out" that didn't actually sign you out.
       if (confirm('Sign out of CrewLogic?')) {
-        storage.remove(SESSION_KEY);
-        currentUser = null;
-        showLogin();
+        await signOut();
       }
     }
     async function signOut() {
@@ -6061,12 +6044,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function computeDepositBreakdown(src, total) {
       const type = (src.specialTermsDepositType === 'dollar') ? 'dollar' : 'percent';
       const rawVal = parseFloat(src.specialTermsDepositValue);
+      const completion = (src.specialTermsTermDays === 'completion'); // non-numeric "Upon Completion" term
       const days = parseInt(src.specialTermsTermDays, 10);
       if (!rawVal || rawVal <= 0 || !(total > 0)) return null;
       let deposit = (type === 'dollar') ? Math.min(rawVal, total) : total * (rawVal / 100);
       deposit = Math.round(deposit * 100) / 100;
       const balance = Math.round((total - deposit) * 100) / 100;
-      return { type, value: rawVal, deposit, balance, days: (days > 0 ? days : null) };
+      return { type, value: rawVal, deposit, balance, days: (days > 0 ? days : null), completion };
     }
 
     // Live preview under the Special Terms deposit fields, mirroring the PDF cover.
@@ -6090,7 +6074,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const depLabel = bd.type === 'dollar' ? fmtMoney(bd.value) : (bd.value + '%');
       let txt = 'Due now (' + depLabel + ' deposit): ' + fmtMoney(bd.deposit)
               + '   •   Balance: ' + fmtMoney(bd.balance);
-      if (bd.days) txt += ' due in ' + bd.days + ' days';
+      if (bd.completion) txt += ' due upon completion';
+      else if (bd.days) txt += ' due in ' + bd.days + ' days';
       if (!(total > 0)) txt += '  (add charges to compute amounts)';
       preview.textContent = txt;
       preview.style.display = 'block';
@@ -6525,6 +6510,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
     });
 
+    // Friendly "no price book / empty default list" notice for the Price Lookup screen.
+    // Role-aware (owners get the Set-up CTA; estimators get an "ask your owner" message).
+    function _setPriceLookupNoPriceBookNotice(show) {
+      const n = document.getElementById('priceLookupNoPriceBookNotice');
+      if (!n) return;
+      if (show) {
+        const isOwner = !!(currentUser && currentUser.role === 'owner');
+        const title = document.getElementById('plNoPriceBookTitle');
+        const msg = document.getElementById('plNoPriceBookMsg');
+        const cta = document.getElementById('plNoPriceBookCta');
+        if (isOwner) {
+          if (title) title.textContent = '⚠️ No price book set up yet';
+          if (msg) msg.textContent = 'There’s no pricing to look up yet. Set up your price book — a default list with priced items covers every ZIP.';
+          if (cta) cta.style.display = '';
+        } else {
+          if (title) title.textContent = '⚠️ Pricing isn’t set up yet';
+          if (msg) msg.textContent = 'Pricing isn’t set up yet. Ask your owner or admin to finish the price book.';
+          if (cta) cta.style.display = 'none';
+        }
+      }
+      n.style.display = show ? 'block' : 'none';
+    }
+
     async function doZipLookup() {
       const zip = document.getElementById('priceZipInput').value.trim();
       const errorEl = document.getElementById('priceLookupError');
@@ -6533,6 +6541,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       errorEl.style.display = 'none';
       errorEl.textContent = '';
+      _setPriceLookupNoPriceBookNotice(false);
 
       if (!zip || zip.length !== 5) {
         errorEl.textContent = 'Enter a valid 5-digit ZIP code.';
@@ -6548,7 +6557,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
         const data = await res.json();
 
-        if (!data.success) {
+        const isNative = !!(currentUser && currentUser.pricingSource === 'native');
+        const noPricing = !data.success || !data.blocks || data.blocks.length === 0;
+        if (isNative && noPricing) {
+          // Native always falls back to the default list, so a no-pricing result means either no
+          // default list exists OR the resolved (default) list has no priced items — not a "ZIP not
+          // covered" situation. Show the friendly set-up notice instead of a raw edge-fn error.
+          resultsEl.innerHTML = '';
+          _setPriceLookupNoPriceBookNotice(true);
+        } else if (!data.success) {
           resultsEl.innerHTML = '';
           errorEl.textContent = data.error || 'ZIP code not found in any service zone.';
           errorEl.style.display = 'block';
@@ -6653,6 +6670,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     async function setPriceLookupMode(mode) {
+      _setPriceLookupNoPriceBookNotice(false); // clear any stale no-price-book notice on mode switch
       const isTown = mode === 'town';
       const zipRow = document.getElementById('priceZipRow');
       const townRow = document.getElementById('priceTownRow');
@@ -6711,6 +6729,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       errorEl.style.display = 'none';
       errorEl.textContent = '';
+      _setPriceLookupNoPriceBookNotice(false);
       if (!town) { errorEl.textContent = 'Enter a town or city name.'; errorEl.style.display = 'block'; return; }
 
       btn.classList.add('loading');
@@ -8432,9 +8451,27 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // Show/hide the "no price book yet" notice in the estimate editor (native tenants).
+    // Role-aware: owners get the "Set up Price Book" CTA; estimators (who can't set up pricing)
+    // get a "ask your owner" message with no CTA — never a dead-end link into owner-only setup.
     function _toggleNoPriceBookNotice(show) {
       const n = document.getElementById('estNoPriceBookNotice');
-      if (n) n.style.display = show ? 'block' : 'none';
+      if (!n) return;
+      if (show) {
+        const isOwner = !!(currentUser && currentUser.role === 'owner');
+        const title = document.getElementById('estNoPriceBookTitle');
+        const msg = document.getElementById('estNoPriceBookMsg');
+        const cta = document.getElementById('estNoPriceBookCta');
+        if (isOwner) {
+          if (title) title.textContent = '⚠️ No price book set up yet';
+          if (msg) msg.textContent = 'You need a price book before you can build an estimate. Set up your pricing, then come back to this estimate.';
+          if (cta) cta.style.display = '';
+        } else {
+          if (title) title.textContent = '⚠️ Pricing isn’t set up yet';
+          if (msg) msg.textContent = 'Pricing for this area isn’t set up yet. Ask your owner or admin to finish the price book, then reopen this estimate.';
+          if (cta) cta.style.display = 'none';
+        }
+      }
+      n.style.display = show ? 'block' : 'none';
     }
 
     // No-CRM "Load Prices": capture free-text customer + ZIP, then load native pricing.
@@ -11798,8 +11835,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         currentEstimate.specialTermsDepositValue = (v > 0) ? v : '';
       }
       if (stDaysSave) {
-        const d = parseInt(stDaysSave.value, 10);
-        currentEstimate.specialTermsTermDays = (d > 0) ? d : '';
+        const v = stDaysSave.value;
+        const d = parseInt(v, 10);
+        // Preserve the non-numeric "completion" sentinel; otherwise store the day count (or '').
+        currentEstimate.specialTermsTermDays = (v === 'completion') ? 'completion' : ((d > 0) ? d : '');
       }
       currentEstimate.updatedAt = new Date().toISOString();
       isDirty = true; // mark unsaved changes on any mutation
@@ -13466,7 +13505,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           doc.setFont('helvetica', 'bold');
           doc.text(fmtMoney(bd.deposit), lineRight, schedTop + 18, { align: 'right' });
           doc.setFont('helvetica', 'normal');
-          doc.text('Balance' + (bd.days ? ' (due in ' + bd.days + ' days)' : ''), lx, schedTop + 34);
+          doc.text('Balance' + (bd.completion ? ' (due upon completion)' : (bd.days ? ' (due in ' + bd.days + ' days)' : '')), lx, schedTop + 34);
           doc.setFont('helvetica', 'bold');
           doc.text(fmtMoney(bd.balance), lineRight, schedTop + 34, { align: 'right' });
         }
@@ -15950,6 +15989,12 @@ RECYCLING & DONATION
 
     // ===== SETTINGS TABS =====
     function showSettingsTab(tab) {
+      // Defense-in-depth: owner-only tabs are never reachable by a non-owner, even via a deep-link
+      // (e.g. a stale _pendingSettingsTab='pricebook'). Estimators get redirected to their Account tab.
+      const OWNER_ONLY = ['pricebook','pricing','franchise','cost','proposal'];
+      if (OWNER_ONLY.indexOf(tab) !== -1 && !(currentUser && currentUser.role === 'owner')) {
+        tab = 'account';
+      }
       ['franchise','cost','proposal','account','pricing','pricebook','customers','signs','tools'].forEach(t => {
         const el = document.getElementById('stab-content-' + t);
         if (el) el.style.display = t === tab ? 'block' : 'none';
@@ -16493,13 +16538,41 @@ RECYCLING & DONATION
           el.innerHTML = '<div style="padding:8px 0;">No price lists yet. Tap <b>+ Add Price List</b> to create your first — it becomes the Default so every zip is priced.</div>';
           return;
         }
+        // Best-effort per-list item counts (drives the per-list "(N items)" label + the empty-Default
+        // warning). Kept as a separate, fail-soft query so a counting hiccup can never block the list.
+        let countByList = {};
+        try {
+          const cnt = await supabaseFetch('/rest/v1/price_lists?franchise_id=eq.' + fid + '&select=id,price_blocks(price_items(count))');
+          (cnt || []).forEach(l => {
+            countByList[l.id] = (l.price_blocks || []).reduce((s, blk) =>
+              s + ((blk.price_items && blk.price_items[0] && blk.price_items[0].count) || 0), 0);
+          });
+        } catch (e) { countByList = {}; }
+        const hasCounts = Object.keys(countByList).length > 0;
         const esc = s => String(s == null ? '' : s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
         const b = 'padding:5px 9px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input);color:var(--text-secondary);font-size:12px;cursor:pointer;flex-shrink:0;';
+        let banner = '';
+        // Empty-Default warning: the Default list is the catch-all for every unmapped ZIP, so if it
+        // has no priced items, estimates/price-lookups for those ZIPs can't price (the bug that blocked
+        // the tpass2008 test). Only surfaced when counts are known.
+        const def = lists.find(l => l.is_default);
+        if (hasCounts && def && (countByList[def.id] || 0) === 0) {
+          const anyPopulated = lists.some(l => !l.is_default && (countByList[l.id] || 0) > 0);
+          banner += '<div style="margin-bottom:10px;padding:10px 12px;background:rgba(251,146,60,0.12);border:1px solid var(--accent-orange);border-radius:var(--radius-sm);font-size:12px;color:var(--text-primary);line-height:1.5;">⚠️ Your <b>Default</b> list (“' + esc(def.name) + '”) has <b>no priced items</b>. The Default is the catch-all for every unmapped ZIP, so estimates and price lookups won’t price until it has items'
+            + (anyPopulated ? ' — add items to it, or use <b>“Make default”</b> on a list that already has prices.' : ' — open <b>Items</b> and add your pricing.') + '</div>';
+        }
+        // Single-list hint: clarifies that one list is the catch-all (no ZIP UI needed yet).
+        if (lists.length === 1) {
+          banner += '<div style="margin-bottom:10px;padding:8px 11px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;color:var(--text-muted);line-height:1.5;">A single list is your <b>Default</b> — it prices every ZIP, so there’s nothing to assign yet. Add a second list to route specific ZIPs to different pricing (you’ll assign ZIPs on the additional list).</div>';
+        }
         let html = '';
         lists.forEach(l => {
+          const n = hasCounts ? (countByList[l.id] || 0) : null;
+          const countLabel = (n === null) ? '' :
+            ' <span style="font-size:11px;color:' + (n === 0 ? 'var(--accent-orange)' : 'var(--text-muted)') + ';">(' + n + ' item' + (n === 1 ? '' : 's') + ')</span>';
           html += '<div style="display:flex;align-items:center;gap:6px;padding:10px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;">'
             + '<div style="flex:1;min-width:120px;"><span style="font-weight:600;color:var(--text-primary);">' + esc(l.name) + '</span>'
-            + (l.is_default ? ' <span style="font-size:10px;background:var(--accent-green);color:#000;padding:1px 6px;border-radius:8px;font-weight:700;">DEFAULT</span>' : '') + '</div>'
+            + (l.is_default ? ' <span style="font-size:10px;background:var(--accent-green);color:#000;padding:1px 6px;border-radius:8px;font-weight:700;">DEFAULT</span>' : '') + countLabel + '</div>'
             + '<button onclick="editPriceListItems(\'' + l.id + '\')" style="' + b + '">Items</button>'
             + '<button onclick="copyPriceList(\'' + l.id + '\')" style="' + b + '">Copy</button>'
             + (l.is_default ? '' : '<button onclick="editPriceListZips(\'' + l.id + '\')" style="' + b + '">Zips</button>')
@@ -16508,7 +16581,7 @@ RECYCLING & DONATION
             + '<button onclick="deletePriceList(\'' + l.id + '\')" style="' + b + 'color:#ef4444;" title="Delete">✕</button>'
             + '</div>';
         });
-        el.innerHTML = html;
+        el.innerHTML = banner + html;
       } catch (e) {
         el.innerHTML = '<div class="price-error">Could not load price lists.</div>';
       }
