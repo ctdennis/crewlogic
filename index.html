@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.24.5 | 2026-06-03">
+  <meta name="crewlogic-version" content="v5.24.6 | 2026-06-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11823,6 +11823,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
       feedbackEl.textContent = 'Saving...';
       feedbackEl.className = 'settings-feedback loading';
+      // Optimistically clear the dirty flag now: the user explicitly chose to save and the
+      // working copy was already persisted locally (autoSaveDraft → saveLocalEstimate above),
+      // so the editor is no longer "dirty." Clearing it here — rather than only after the async
+      // round-trip — stops the exit guard from falsely prompting "save before leaving?" if the
+      // user taps the back arrow while this save is still in flight. Re-set to true below only if
+      // the backend save fails, so genuinely-unsaved changes still warn on exit.
+      isDirty = false;
       // Disable any save buttons during the in-flight save
       setSaveButtonsState('saving');
       try {
@@ -11891,11 +11898,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           feedbackEl.className = 'settings-feedback ok';
           setSaveButtonsState('saved');
         } else {
+          isDirty = true; // backend rejected the save — changes are still unsaved
           feedbackEl.textContent = 'Save failed: ' + (data.error || 'unknown');
           feedbackEl.className = 'settings-feedback error';
           setSaveButtonsState('idle');
         }
       } catch(e) {
+        isDirty = true; // network error — backend copy is stale, keep warning on exit
         feedbackEl.textContent = 'Connection error — saved locally only. Check network.';
         feedbackEl.className = 'settings-feedback error';
         setSaveButtonsState('idle');
