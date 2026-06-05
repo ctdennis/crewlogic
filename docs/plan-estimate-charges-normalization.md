@@ -1,6 +1,10 @@
 # Plan — Normalize estimate charges (out of the JSON blob, into tables)
 
-**Status:** Proposed (2026-06-05) · **Owner ask:** move line items from the `payload` JSON blob into real relational tables, to permanently end the class of bug where a partial/stale save blanks an estimate.
+**Status:** In progress — **Phases 1–2 done on dev** (2026-06-05). Owner-approved. Move line items from the `payload` JSON blob into a real relational table, to permanently end the class of bug where a partial/stale save blanks an estimate.
+
+> **Implemented design (simpler than the illustrative schema in §2 below):** ONE table, `estimate_charges`, one row per charge. Each row stores the **complete original charge object** in a `data jsonb` column (lossless — the frontend gets back exactly what it wrote: `photos[]`, Vonigo `priceItemID`/`taxID`, AI analysis, etc.) **plus promoted columns** for reporting/indexing (`type, area, room, name, description, qty, unit_price, truck_volume, sequence`). **No separate photos table** — photo paths stay inside each charge's `data` (the Storage files are unchanged). Source of truth = migration **`0012_estimate_charges.sql`**; backfill = **`0013_backfill_estimate_charges.sql`**.
+>
+> **Dev progress:** 0012 (table + franchise-scoped RLS mirroring `estimates`) and 0013 (backfill) applied to dev. Verified: 38 charge rows = 38 blob charges, **0 estimates mismatched**.
 
 > **Braces already shipped (v5.26.1 / v5.26.2)** keep the *current* app safe while this happens — they are stop-gaps, not the fix:
 > - status changes (Won/Lost/Reopen) now PATCH only the `status` column (never re-save the body);
@@ -57,8 +61,8 @@ create table public.estimate_charge_photos (
 ## 3. Phased rollout (each phase is independently shippable, verifiable, reversible)
 
 - **Phase 0 — Braces.** ✅ Done (v5.26.1/.2). The app can't lose charges in the meantime.
-- **Phase 1 — Schema.** Add the two tables + RLS as a numbered migration (`00NN_estimate_charges.sql`), dev → prod. No behavior change yet.
-- **Phase 2 — Backfill.** One-time, idempotent script: for every estimate, parse `payload.charges[]` → insert `estimate_charges` (+ photos) rows. Verify: row counts match `jsonb_array_length(payload->'charges')` per estimate.
+- **Phase 1 — Schema.** ✅ **Done on dev** — `0012_estimate_charges.sql` (table + franchise-scoped RLS). No behavior change. (Prod apply gated, at cut-over.)
+- **Phase 2 — Backfill.** ✅ **Done on dev** — `0013_backfill_estimate_charges.sql` (idempotent: rebuild rows from `payload.charges[]`). Verified 38=38, 0 mismatches. (Prod apply gated, once, right before dual-write.)
 - **Phase 3 — Dual-write.** Saves write charges to BOTH the blob (unchanged) AND the tables. Reads still use the blob. The tables stay perfectly in sync with zero user-visible risk; we can diff blob-vs-table to prove correctness.
 - **Phase 4 — Cut over reads.** `openEstimate` + the renderers read charges from the tables (JOIN) instead of the blob. Dual-write stays on as a safety net. This is the phase that retires the blob fragility.
 - **Phase 5 — Retire blob charges.** Stop writing `charges` into the blob (optionally keep a small denormalized snapshot for the PDF/Vonigo submit if convenient). Remove blob-charge dependencies.
