@@ -154,6 +154,30 @@ async function handleSave(body: Record<string, unknown>): Promise<Response> {
     return jsonResponse({ success: false, error: "payload.estimateID required" }, 400);
   }
 
+  // DATA-LOSS GUARD: a legitimate editor save always sends a `charges` ARRAY (even an empty []),
+  // because the in-editor estimate has one. A payload with NO charges array is the signature of a
+  // partial/stale save (e.g. the status-button bug that re-saved a lightweight list object). Refuse
+  // to overwrite an estimate that already HAS line items with such a payload — this can never blank a
+  // record, and it protects against older client builds still open in browsers. Returns 409 so the
+  // client surfaces an error instead of silently losing data. (Explicit "deleted everything" still
+  // works: that arrives as charges:[] — an array — and passes.)
+  if (!Array.isArray((payload as Record<string, unknown>).charges)) {
+    const existing = await supabaseGet(
+      `/rest/v1/estimates?estimate_id=eq.${encodeURIComponent(String(payload.estimateID))}&select=payload`
+    ) as Array<Record<string, unknown>>;
+    const existingCharges = existing && existing[0] &&
+      ((existing[0].payload as Record<string, unknown>) || {}).charges;
+    const existingCount = Array.isArray(existingCharges) ? existingCharges.length : 0;
+    if (existingCount > 0) {
+      console.error(`[save] BLOCKED charge-wipe for estimate ${payload.estimateID}: incoming payload has no charges array but the stored row has ${existingCount} line item(s).`);
+      return jsonResponse({
+        success: false,
+        error: "charge_wipe_blocked",
+        detail: `Refused to overwrite ${existingCount} existing line item(s) with a payload that has no charges. Reopen the estimate and save again.`,
+      }, 409);
+    }
+  }
+
   // 1. Look up the franchise UUID via external_id
   const franchiseRows = await supabaseGet(
     `/rest/v1/franchises?external_id=eq.${encodeURIComponent(franchiseExternalId)}&select=id,tenant_id`

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.26.1 | 2026-06-05">
+  <meta name="crewlogic-version" content="v5.26.2 | 2026-06-05">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8157,6 +8157,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '&select=estimate_id,owner_email,label,status,client_name,address,zip,total_price,total_trucks,split_pricing,vonigo_quote_id,job_id,cover_photo,cloned_from,created_at,updated_at,customer_price_list'
         );
         if (rows && Array.isArray(rows)) {
+          // Guard: an empty result is what RLS returns when the session/JWT has lapsed — it does NOT
+          // mean the estimates are gone. Don't overwrite the local cache with [], and show a real
+          // "sign in again" message instead of a blank that reads as "everything was deleted."
+          if (rows.length === 0) {
+            const cached = getLocalEstimates();
+            let hasSession = false;
+            try { hasSession = !!((await supabaseClient.auth.getSession()).data.session); } catch (e) {}
+            if (!hasSession || cached.length > 0) {
+              document.getElementById('estimatesList').innerHTML =
+                '<div class="estimates-empty">Couldn’t load your estimates — your session may have expired.<br>Open <b>⚙ Settings → Sign out</b>, then sign back in. Your estimates are safe.</div>';
+              return; // preserve the local cache; do not blank it
+            }
+            // Logged in, nothing cached → genuinely a new/empty account; fall through to normal empty state.
+          }
           const estimates = rows.map(r => ({
             estimateID:       r.estimate_id,
             ownerEmail:       r.owner_email,
@@ -8182,8 +8196,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         }
       } catch(e) { console.error('Supabase list error:', e); }
 
-      // Fallback to local only
-      renderEstimatesList(getLocalEstimates());
+      // Fallback to the local cache. If nothing's cached either, show a clear error rather than a
+      // blank list (which reads as "everything was deleted").
+      const local = getLocalEstimates();
+      if (!local.length) {
+        document.getElementById('estimatesList').innerHTML =
+          '<div class="estimates-empty">Couldn’t load your estimates right now.<br>Check your connection, or sign out and back in. Your estimates are safe.</div>';
+        return;
+      }
+      renderEstimatesList(local);
     }
 
     function renderEstimatesList(estimates) {
