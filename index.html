@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.26.2 | 2026-06-05">
+  <meta name="crewlogic-version" content="v5.26.3 | 2026-06-05">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3707,17 +3707,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // ===== ANALYZE VOICE — direct Supabase Edge Function call =====
-    async function callAnalyzeVoice({ transcript, areas, photos }) {
+    // A REAL, wired timeout lives here so EVERY analyze caller is protected. (Callers used to create
+    // their own AbortController but never pass its signal to the fetch — so the abort did nothing and
+    // a slow/stuck AI call hung the analyze UI for minutes on iPhone until a refresh.) On abort this
+    // throws a DOMException named 'AbortError', which the callers' catch blocks already handle.
+    async function callAnalyzeVoice({ transcript, areas, photos }, opts = {}) {
       const SUPABASE_ANON_KEY = EDGE_ANON_KEY;
-      const res = await fetch(EDGE_BASE + '/crewlogic-ai', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
-          'apikey': SUPABASE_ANON_KEY
-        },
-        body: JSON.stringify({ action: 'analyzeEstimate', transcript, areas, photos, truckCY: truckCapacityCY() })
-      });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), opts.timeoutMs || 60000); // 60s hard cap
+      let res;
+      try {
+        res = await fetch(EDGE_BASE + '/crewlogic-ai', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+            'apikey': SUPABASE_ANON_KEY
+          },
+          body: JSON.stringify({ action: 'analyzeEstimate', transcript, areas, photos, truckCY: truckCapacityCY() }),
+          signal: controller.signal
+        });
+      } finally {
+        clearTimeout(timer);
+      }
       if (!res.ok) throw new Error('crewlogic-ai: HTTP ' + res.status);
       return res.json();
     }
@@ -15798,7 +15810,7 @@ RECYCLING & DONATION
         if (e.message === 'SESSION_REFRESH_NEEDED') {
           statusEl.textContent = '⚠️ Session expired — please sign out and back in to use AI analysis.';
         } else if (e.name === 'AbortError') {
-          statusEl.textContent = '⚠️ Timed out after 45s. Check connection and try again.';
+          statusEl.textContent = '⚠️ Analysis timed out. Check your connection and tap Analyze again.';
         } else {
           statusEl.textContent = '⚠️ Connection error. Please try again.';
         }
