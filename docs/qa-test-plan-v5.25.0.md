@@ -27,7 +27,7 @@
 3. Open the Console (`F12` → Console tab).
 4. Look for a green badge log line near the top.
 - **Expected:** it reads **`CrewLogic v5.25.0 | 2026-06-04`**. If it still says v5.24.x, wait 60s, hard-refresh again.
-- ☐ Pass ☐ Fail — Notes: ____________
+- x Pass ☐ Fail — Notes: ____________
 
 ---
 
@@ -38,7 +38,7 @@
 3. In the Google account chooser, click **`charles.dennis@junkluggers.com`**. Complete Google if prompted.
 4. Wait for the app to load.
 - **Expected:** You land on the **Home** screen ("Good [morning/afternoon], …"). Tap **Estimates** → the estimates list loads with existing estimates (not empty, no error).
-- ☐ Pass ☐ Fail — Notes: ____________
+- x Pass ☐ Fail — Notes: ____________
 
 ---
 
@@ -53,7 +53,7 @@
 - **Expected A:** A list of customer names appears (there are 81 customers on this workspace). *Before the fix this returned nothing.*
 7. Pick any customer from the list (or if you prefer, complete a quick estimate). Add one item: tap **Manual ▾ → add a line** (any item), then tap **Save Draft**.
 - **Expected B:** It saves — the feedback shows saved (no error), and the draft appears in the Estimates list when you go back.
-- ☐ Pass ☐ Fail — Notes: ____________
+- x Pass ☐ Fail — Notes: I pulled up a zip that hadn't been set up yet and the error message said to speak with my administrator vs defaulting to the default price list. was this expected behavior?
 
 > If Test 1 or Test 2 fails (Google login dead-ends, "Something went wrong," or still no customers): **stop and report.** Fallback that still works: sign in with **Continue with email** instead (see Test 2-ALT).
 
@@ -63,7 +63,7 @@
 3. Open the `crewlogictest@gmail.com` inbox, find the CrewLogic sign-in email, **copy** the link.
 4. Switch back to the incognito window, paste the link into the **address bar**, press Enter.
 - **Expected:** Lands in the app as the estimator; customer search and Save work (same as Test 2).
-- ☐ Pass ☐ Fail — Notes: ____________
+- ☐ Pass ☐ Fail — Notes: didn't need to test this
 
 ---
 
@@ -74,7 +74,7 @@
 - **Expected:** You return to the login screen.
 3. Now **refresh the page** (`Cmd+R` / `Ctrl+R`).
 - **Expected:** You **stay on the login screen** (you are NOT silently logged back in). *Before the fix, refresh logged you back in.*
-- ☐ Pass ☐ Fail — Notes: ____________
+- x Pass ☐ Fail — Notes: ____________
 
 ---
 
@@ -87,7 +87,7 @@
 - **Expected A:** It reads **"Pricing isn't set up yet … Ask your owner or admin to finish the price book…"** and there is **NO "Set up Price Book" button**.
 4. Tap **⚙ Settings**.
 - **Expected B:** You see only the **Account** view. There is **no Price Book tab**, and you cannot reach a price-book setup screen.
-- ☐ Pass ☐ Fail — Notes: ____________
+- x Pass ☐ Fail — Notes: ____________
 
 ---
 
@@ -98,7 +98,7 @@
 - **Expected A:** Each list shows an item count, e.g. **"Tpass Price List 1 … (0 items)"** and **"Tpass Price List 2 … (58 items)"** (counts may differ if you've edited them).
 - **Expected B:** If the list marked **DEFAULT** has **0 items**, an **orange warning banner** appears above the lists saying the Default list has no priced items and won't price ZIPs until you add items (or "Make default" on a list that has prices).
 - **Expected C (single list only):** If there is exactly **one** list, a grey hint appears saying a single list is the catch-all for every ZIP.
-- ☐ Pass ☐ Fail — Notes: ____________
+- x Pass ☐ Fail — Notes: need the ability to copy a price list. add to status.md
 
 ---
 
@@ -107,7 +107,7 @@
 1. From Home, tap **Price Lookup**.
 2. Make sure the **ZIP** toggle is selected (not Town). In the ZIP field type a 5-digit ZIP that is **not** in the price book, e.g. **`02726`** → tap **Look up**.
 - **Expected:** An **orange "No price book set up yet / Set up Price Book"** notice appears (with a **Set up Price Book** button, because you're an owner). You do **NOT** see the raw text *"No default price list configured for this franchise."*
-- ☐ Pass ☐ Fail — Notes: ____________
+- ☐ Pass x Fail — Notes: the default price list still has no zips assigned. when I type the town that is not associated with a zip, I get an error message: Town not found in your service area — try the ZIP. The whole point of the town lookup is that I don't know the zip. I thought this was going to lookup the town and pull the default price list?
 
 ---
 
@@ -122,7 +122,7 @@
 - **Expected B (PDF):** On the cover page, the **PAYMENT SCHEDULE** shows the deposit line and **"Balance (due upon completion)."**
 6. Tap **Save Draft**, leave the estimate, reopen it, expand Special Terms.
 - **Expected C (persistence):** "Balance due within" still shows **Upon Completion**.
-- ☐ Pass ☐ Fail — Notes: ____________
+- x Pass ☐ Fail — Notes: 
 
 ---
 
@@ -135,7 +135,7 @@
 - **Expected:** A "You've been invited to join a team" screen with **Continue with Google** / **Continue with email**.
 4. Click **Continue with Google** → choose the brand-new Gmail account.
 - **Expected:** It signs in and lands in **tpass2008's** workspace as an **estimator** (same customers/price book), **not** a new workspace, and customer search + Save work.
-- ☐ Pass ☐ Fail — Notes: ____________
+- x Pass ☐ Fail — Notes: ____________
 
 ---
 
