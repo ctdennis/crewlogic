@@ -114,6 +114,17 @@ Common commands (run from repo root):
 - **Versioning:** **single source of truth** — bump the `<meta name="crewlogic-version">` tag (line 5) on each release. Everything else derives from it at runtime: the console startup banner and `_FEEDBACK_APP_VERSION` both read the meta tag (`document.querySelector('meta[name="crewlogic-version"]').content`). Do **not** reintroduce hardcoded version strings elsewhere. Current: `5.9.81`. (Historical note: the console banner had silently drifted to 5.9.75 because it was a separate hardcoded string; the derive-from-meta refactor in 5.9.81 fixed that.)
 - **Deploy:** Current workflow: `index.html` is downloaded from a Claude.ai chat session to `~/Downloads`, manually copied into `~/Documents/GitHub/crewlogic`, then committed to `main` via GitHub Desktop. Cloudflare Pages auto-deploys from `main` to `crewlogicai.com` (custom domain on the Cloudflare Pages project). The `crewlogic.pages.dev` URL still resolves as a transition fallback. Migrating this workflow to use Claude Code directly is in progress.
 
+## Writing test plans / QA scripts
+
+Write every test plan so **someone with zero context can execute it cold** — never assume the reader knows the app, the accounts, or "what you meant." Be explicit at every step: exact environment/URL → exact screen to navigate to → exact field → exact value to type → exact button/control to tap → an explicit **Expected** result, with a Pass/Fail + Notes slot per test. Do **not** collapse steps ("log in and make an estimate") — spell out each click.
+
+A good plan includes, up front:
+- An **accounts table**: which login to use, how each one signs in (Google vs. email magic-link), and its role/workspace.
+- A **conventions block** that states the fiddly, repeated actions ONCE: how to open a *fresh* incognito window, how to read the version banner in the Console (F12), and the magic-link rule — *copy the link from the email and paste it into the address bar of the same window; do not click it* (clicking opens the default browser, not the incognito window).
+- **Per-test preconditions** (which account is signed in, required data state) and a clear **why** line.
+
+Order tests by risk (the change most likely to break first). Save reusable plans under `docs/` as `docs/qa-test-plan-<version>.md`. Reference example: `docs/qa-test-plan-v5.25.0.md`.
+
 ## Edge Function source code
 
 Each Edge Function has a folder under `supabase/functions/<name>/` with its real `index.ts` committed to the repo (shared helpers live in `supabase/functions/_shared/`). As of 2026-06-02 all 14 deployed functions' source is under management here and verified byte-for-byte against prod, so they are editable directly via Claude Code.
