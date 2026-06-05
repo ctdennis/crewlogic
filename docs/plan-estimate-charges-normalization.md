@@ -63,7 +63,7 @@ create table public.estimate_charge_photos (
 - **Phase 0 — Braces.** ✅ Done (v5.26.1/.2). The app can't lose charges in the meantime.
 - **Phase 1 — Schema.** ✅ **Done on dev** — `0012_estimate_charges.sql` (table + franchise-scoped RLS). No behavior change. (Prod apply gated, at cut-over.)
 - **Phase 2 — Backfill.** ✅ **Done on dev** — `0013_backfill_estimate_charges.sql` (idempotent: rebuild rows from `payload.charges[]`). Verified 38=38, 0 mismatches. (Prod apply gated, once, right before dual-write.)
-- **Phase 3 — Dual-write.** Saves write charges to BOTH the blob (unchanged) AND the tables. Reads still use the blob. The tables stay perfectly in sync with zero user-visible risk; we can diff blob-vs-table to prove correctness.
+- **Phase 3 — Dual-write.** ✅ **Done on dev** — `crewlogic-estimate` save best-effort mirrors charges into `estimate_charges` (delete-then-insert, after the estimates upsert; failures logged, never block the save). Deployed to dev + tested (save→2 rows, re-save with 1→replaced cleanly, delete estimate→cascade). Reads still use the blob → zero user-visible risk. (Prod deploy gated, coordinated with the 0012/0013 prod apply.)
 - **Phase 4 — Cut over reads.** `openEstimate` + the renderers read charges from the tables (JOIN) instead of the blob. Dual-write stays on as a safety net. This is the phase that retires the blob fragility.
 - **Phase 5 — Retire blob charges.** Stop writing `charges` into the blob (optionally keep a small denormalized snapshot for the PDF/Vonigo submit if convenient). Remove blob-charge dependencies.
 

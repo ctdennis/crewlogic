@@ -258,6 +258,51 @@ async function handleSave(body: Record<string, unknown>): Promise<Response> {
     );
   }
 
+  // Phase 3 (dual-write): mirror the line items into the estimate_charges table so it stays in sync
+  // with the blob, ahead of the read cut-over. BEST-EFFORT — any failure here is logged and ignored;
+  // it must NEVER block the save (the blob remains the source of truth until cut-over). Delete-then-
+  // insert is the simplest correct sync for an estimate's full charge set. (The charge-wipe guard
+  // above already rejected payloads missing the charges array, so we only get here with a real set.)
+  try {
+    const chargesArr = Array.isArray((payload as Record<string, unknown>).charges)
+      ? ((payload as Record<string, unknown>).charges as Array<Record<string, unknown>>)
+      : [];
+    const numOrNull = (v: unknown) =>
+      (v === null || v === undefined || v === "" ) ? null
+      : (typeof v === "number" ? v : (isNaN(Number(v)) ? null : Number(v)));
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/estimate_charges?estimate_id=eq.${encodeURIComponent(String(payload.estimateID))}`,
+      { method: "DELETE", headers: { apikey: SERVICE_KEY, Authorization: "Bearer " + SERVICE_KEY, Prefer: "return=minimal" } }
+    );
+    if (chargesArr.length) {
+      const rows = chargesArr.map((c, i) => ({
+        estimate_id: payload.estimateID,
+        franchise_id: franchiseUUID,
+        sequence: i,
+        type: (c.type as string) ?? null,
+        area: (c.area as string) ?? null,
+        room: (c.room as string) ?? null,
+        name: (c.name as string) ?? null,
+        description: (c.description as string) ?? null,
+        qty: numOrNull(c.qty),
+        unit_price: numOrNull(c.unitPrice),
+        truck_volume: numOrNull(c.truckVolume),
+        data: c,
+      }));
+      const insRes = await fetch(`${SUPABASE_URL}/rest/v1/estimate_charges`, {
+        method: "POST",
+        headers: { apikey: SERVICE_KEY, Authorization: "Bearer " + SERVICE_KEY, "Content-Type": "application/json", Prefer: "return=minimal" },
+        body: JSON.stringify(rows),
+      });
+      if (!insRes.ok) {
+        const t = await insRes.text().catch(() => "");
+        console.error(`[save] estimate_charges dual-write insert failed (non-fatal): ${insRes.status} ${t.slice(0, 300)}`);
+      }
+    }
+  } catch (e) {
+    console.error("[save] estimate_charges dual-write failed (non-fatal):", (e as Error).message);
+  }
+
   return jsonResponse({
     success: true,
     estimateID: payload.estimateID,
