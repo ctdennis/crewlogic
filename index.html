@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.26.0 | 2026-06-05">
+  <meta name="crewlogic-version" content="v5.26.1 | 2026-06-05">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12588,31 +12588,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       est.updatedAt = new Date().toISOString();
       saveLocalEstimate(est);
 
-      // Save to Edge Function (was n8n in prior versions)
+      // CRITICAL DATA-LOSS FIX: update ONLY the status column on the backend. `est` here comes from
+      // the list/local cache, which carries only lightweight fields (NO `charges` payload), so the
+      // old approach — re-saving the whole payload via crewlogic-estimate 'save' — silently WIPED the
+      // estimate's line items every time Won/Lost/Reopen was clicked from the list. A targeted PATCH
+      // touches only status + updated_at and leaves the saved charges/photos untouched. (Worst case it
+      // 401s under RLS → status simply doesn't change; it can never blank the estimate.)
       try {
-        const SUPABASE_ANON_KEY = EDGE_ANON_KEY;
-        await fetch(EDGE_BASE + '/crewlogic-estimate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
-            'apikey': SUPABASE_ANON_KEY
-          },
-          body: JSON.stringify({
-            action: 'save',
-            email: currentUser.email,
-            franchiseID: currentUser.franchiseID,
-            payload: (function() {
-              const p = Object.assign({}, est);
-              delete p.priceBlocks; delete p.coverPhoto;
-              delete p.payload; delete p.priceBook;
-              delete p.row_number; delete p.costAnalysis;
-              return p;
-            })(),
-            priceBook: est.priceBlocks || [],
-            coverPhoto: est.coverPhoto || '',
-            costAnalysis: est.costAnalysis || {}
-          })
+        await supabaseFetch('/rest/v1/estimates?estimate_id=eq.' + encodeURIComponent(estimateID), {
+          method: 'PATCH',
+          headers: { 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ status: newStatus, updated_at: new Date().toISOString() })
         });
         if (activeBtn) {
           activeBtn.textContent = '✓ Saved';
