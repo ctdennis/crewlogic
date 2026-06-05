@@ -152,3 +152,55 @@
 | 6 — Price Lookup notice | ☐ | |
 | 7 — Upon Completion | ☐ | |
 | 8 — Fresh Google invite (optional) | ☐ | |
+
+---
+
+# v5.26.0 addendum — Explicit + optional catch-all pricing model
+
+**Build under test:** `v5.26.0` (confirm via the Console banner — same as Test 0). Uses the **accounts** and **conventions** from the top of this doc. Signed in as **Owner-Native** (`tpass2008@gmail.com`) unless a step says otherwise.
+
+> New model: a ZIP must be **assigned to a price list**, OR a list must be marked **"covers all other ZIPs"** (the catch-all). An unassigned ZIP with no catch-all → "not set up."
+
+## TEST 26-A — A new price list is NOT auto-catch-all
+1. Sign in as Owner-Native → tap **⚙ Settings** → tap the **Price Book** tab.
+2. Tap **+ Add Price List**, type `ZZ Test`, press OK.
+- **Expected:** "ZZ Test" appears with **no CATCH-ALL badge**, shows **(0 items, 0 ZIPs)**, and has a **"Covers all ZIPs"** button (not "Make default").
+- ☐ Pass ☐ Fail — Notes: ____________
+
+## TEST 26-B — Toggle a list to catch-all and back
+1. On the "ZZ Test" row, tap **Covers all ZIPs**.
+- **Expected:** "ZZ Test" gets a green **CATCH-ALL** badge, its button becomes **✓ Catch-all**, and its **Zips** button disappears. Any list that was previously catch-all loses its badge.
+2. Tap **✓ Catch-all** again.
+- **Expected:** The badge is removed and the **Zips** button reappears.
+- ☐ Pass ☐ Fail — Notes: ____________
+
+## TEST 26-C — Assign ZIPs to a list
+1. On a non-catch-all list, tap **Zips** → in the add box type `02726` → add it → close the popup.
+- **Expected:** That list's count updates to include the ZIP, e.g. "(… , 1 ZIP)."
+- ☐ Pass ☐ Fail — Notes: ____________
+
+## TEST 26-D — The two warning banners
+1. Mark a list that has **0 items** as the catch-all (e.g. your empty "Tpass Price List 1" → tap **Covers all ZIPs**).
+- **Expected A:** An orange banner above the lists: *"Your catch-all list (…) has no priced items…"*.
+2. Tap **✓ Catch-all** to turn it off, and make sure **no** list has any ZIPs assigned (remove them if needed).
+- **Expected B:** An orange banner: *"Nothing will price yet. Assign the towns/ZIPs you serve…"*.
+- ☐ Pass ☐ Fail — Notes: ____________
+
+## TEST 26-E — Unassigned-ZIP message: owner vs estimator
+**Precondition:** no catch-all set, and ZIP `02726` not assigned to any list.
+1. As **Owner-Native**: tap **Estimates → + New** → search/select a customer in ZIP `02726`.
+- **Expected (owner):** Orange notice *"This area isn't priced yet … assign this ZIP to a price list — or mark a list 'covers all other ZIPs'"*, **with** a **Set up Price Book** button.
+2. Open a fresh Incognito, sign in as **Estimator** (`crewlogictest@gmail.com`), open the same kind of unpriced estimate.
+- **Expected (estimator):** *"This area isn't priced yet — ask your owner or admin,"* with **no** button.
+- ☐ Pass ☐ Fail — Notes: ____________
+
+## TEST 26-F — Town lookup for an unassigned town
+1. As Owner-Native → Home → **Price Lookup** → tap the **Town** toggle → type a town whose ZIP you have **not** assigned → **Look up**.
+- **Expected (owner):** *"That town isn't assigned to a price list yet. Add it in Settings → Price Book…"* (and it does **not** say "try the ZIP").
+- ☐ Pass ☐ Fail — Notes: ____________
+
+## TEST 26-G — Happy path: set it up, it prices
+1. As Owner-Native: either mark **"Tpass Price List 2"** (58 items) as the **catch-all**, or assign your service ZIPs to it (the Zips button).
+2. Tap **Estimates → + New** → select any customer → look at the toolbar + quote.
+- **Expected:** Pricing loads (no warning banner), the Photo/Describe/Manual/More buttons are active, and the quote prices normally. Re-run Price Lookup / Town for one of those ZIPs/towns and confirm it returns prices.
+- ☐ Pass ☐ Fail — Notes: ____________

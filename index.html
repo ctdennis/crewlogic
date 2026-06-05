@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.25.0 | 2026-06-04">
+  <meta name="crewlogic-version" content="v5.26.0 | 2026-06-05">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -6521,12 +6521,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const msg = document.getElementById('plNoPriceBookMsg');
         const cta = document.getElementById('plNoPriceBookCta');
         if (isOwner) {
-          if (title) title.textContent = '⚠️ No price book set up yet';
-          if (msg) msg.textContent = 'There’s no pricing to look up yet. Set up your price book — a default list with priced items covers every ZIP.';
+          if (title) title.textContent = '⚠️ This ZIP isn’t priced yet';
+          if (msg) msg.textContent = 'No price list covers this ZIP. In Settings → Price Book, assign it to a price list — or mark a list “covers all other ZIPs.”';
           if (cta) cta.style.display = '';
         } else {
-          if (title) title.textContent = '⚠️ Pricing isn’t set up yet';
-          if (msg) msg.textContent = 'Pricing isn’t set up yet. Ask your owner or admin to finish the price book.';
+          if (title) title.textContent = '⚠️ This ZIP isn’t priced yet';
+          if (msg) msg.textContent = 'Pricing for this ZIP isn’t set up yet. Ask your owner or admin to set it up.';
           if (cta) cta.style.display = 'none';
         }
       }
@@ -6748,9 +6748,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           zip = hit ? hit.zip : null;
           if (!zip) {
             resultsEl.innerHTML = '';
-            errorEl.textContent = idx.length
-              ? 'Town not found in your service area — try the ZIP.'
-              : 'No service ZIPs yet — add them in Price Book to use town lookup.';
+            const isOwner = !!(currentUser && currentUser.role === 'owner');
+            errorEl.textContent = isOwner
+              ? 'That town isn’t assigned to a price list yet. Add it in Settings → Price Book (the Zips button), or mark a list “covers all other ZIPs.”'
+              : 'That town isn’t set up yet — ask your owner or admin to add it.';
             errorEl.style.display = 'block';
             btn.classList.remove('loading');
             return;
@@ -8462,12 +8463,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const msg = document.getElementById('estNoPriceBookMsg');
         const cta = document.getElementById('estNoPriceBookCta');
         if (isOwner) {
-          if (title) title.textContent = '⚠️ No price book set up yet';
-          if (msg) msg.textContent = 'You need a price book before you can build an estimate. Set up your pricing, then come back to this estimate.';
+          if (title) title.textContent = '⚠️ This area isn’t priced yet';
+          if (msg) msg.textContent = 'No price list covers this ZIP yet. In Settings → Price Book, assign this ZIP to a price list — or mark a list “covers all other ZIPs.”';
           if (cta) cta.style.display = '';
         } else {
-          if (title) title.textContent = '⚠️ Pricing isn’t set up yet';
-          if (msg) msg.textContent = 'Pricing for this area isn’t set up yet. Ask your owner or admin to finish the price book, then reopen this estimate.';
+          if (title) title.textContent = '⚠️ This area isn’t priced yet';
+          if (msg) msg.textContent = 'Pricing for this area isn’t set up yet. Ask your owner or admin to set it up, then reopen this estimate.';
           if (cta) cta.style.display = 'none';
         }
       }
@@ -16535,48 +16536,50 @@ RECYCLING & DONATION
         const fid = currentUser.franchiseInternalID;
         const lists = await supabaseFetch('/rest/v1/price_lists?franchise_id=eq.' + fid + '&select=id,name,is_default,num_id&order=is_default.desc,name.asc');
         if (!lists || !lists.length) {
-          el.innerHTML = '<div style="padding:8px 0;">No price lists yet. Tap <b>+ Add Price List</b> to create your first — it becomes the Default so every zip is priced.</div>';
+          el.innerHTML = '<div style="padding:8px 0;line-height:1.5;">No price lists yet. Tap <b>+ Add Price List</b>, add your prices, then assign the towns/ZIPs you serve to it (the <b>Zips</b> button) — or mark it <b>“covers all other ZIPs”</b> if you price everywhere the same.</div>';
           return;
         }
-        // Best-effort per-list item counts (drives the per-list "(N items)" label + the empty-Default
-        // warning). Kept as a separate, fail-soft query so a counting hiccup can never block the list.
-        let countByList = {};
+        // Best-effort per-list item + ZIP counts (drive the labels + the coverage warnings). Separate,
+        // fail-soft query so a counting hiccup can never block the list itself.
+        let itemCnt = {}, zipCnt = {};
         try {
-          const cnt = await supabaseFetch('/rest/v1/price_lists?franchise_id=eq.' + fid + '&select=id,price_blocks(price_items(count))');
+          const cnt = await supabaseFetch('/rest/v1/price_lists?franchise_id=eq.' + fid + '&select=id,price_blocks(price_items(count)),price_list_zips(count)');
           (cnt || []).forEach(l => {
-            countByList[l.id] = (l.price_blocks || []).reduce((s, blk) =>
+            itemCnt[l.id] = (l.price_blocks || []).reduce((s, blk) =>
               s + ((blk.price_items && blk.price_items[0] && blk.price_items[0].count) || 0), 0);
+            zipCnt[l.id] = (l.price_list_zips && l.price_list_zips[0] && l.price_list_zips[0].count) || 0;
           });
-        } catch (e) { countByList = {}; }
-        const hasCounts = Object.keys(countByList).length > 0;
+        } catch (e) { itemCnt = {}; zipCnt = {}; }
+        const hasCounts = Object.keys(itemCnt).length > 0;
         const esc = s => String(s == null ? '' : s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
         const b = 'padding:5px 9px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input);color:var(--text-secondary);font-size:12px;cursor:pointer;flex-shrink:0;';
+        const warn = (msg) => '<div style="margin-bottom:10px;padding:10px 12px;background:rgba(251,146,60,0.12);border:1px solid var(--accent-orange);border-radius:var(--radius-sm);font-size:12px;color:var(--text-primary);line-height:1.5;">' + msg + '</div>';
         let banner = '';
-        // Empty-Default warning: the Default list is the catch-all for every unmapped ZIP, so if it
-        // has no priced items, estimates/price-lookups for those ZIPs can't price (the bug that blocked
-        // the tpass2008 test). Only surfaced when counts are known.
-        const def = lists.find(l => l.is_default);
-        if (hasCounts && def && (countByList[def.id] || 0) === 0) {
-          const anyPopulated = lists.some(l => !l.is_default && (countByList[l.id] || 0) > 0);
-          banner += '<div style="margin-bottom:10px;padding:10px 12px;background:rgba(251,146,60,0.12);border:1px solid var(--accent-orange);border-radius:var(--radius-sm);font-size:12px;color:var(--text-primary);line-height:1.5;">⚠️ Your <b>Default</b> list (“' + esc(def.name) + '”) has <b>no priced items</b>. The Default is the catch-all for every unmapped ZIP, so estimates and price lookups won’t price until it has items'
-            + (anyPopulated ? ' — add items to it, or use <b>“Make default”</b> on a list that already has prices.' : ' — open <b>Items</b> and add your pricing.') + '</div>';
-        }
-        // Single-list hint: clarifies that one list is the catch-all (no ZIP UI needed yet).
-        if (lists.length === 1) {
-          banner += '<div style="margin-bottom:10px;padding:8px 11px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;color:var(--text-muted);line-height:1.5;">A single list is your <b>Default</b> — it prices every ZIP, so there’s nothing to assign yet. Add a second list to route specific ZIPs to different pricing (you’ll assign ZIPs on the additional list).</div>';
+        const catchAll = lists.find(l => l.is_default);
+        if (hasCounts && catchAll && (itemCnt[catchAll.id] || 0) === 0) {
+          // Catch-all is set but empty → the ZIPs it's meant to cover won't price.
+          banner += warn('⚠️ Your catch-all list (“' + esc(catchAll.name) + '”) has <b>no priced items</b>, so every ZIP it’s meant to cover won’t price. Add items to it, or turn off its catch-all and assign ZIPs to a priced list.');
+        } else if (hasCounts && !catchAll && !lists.some(l => (zipCnt[l.id] || 0) > 0)) {
+          // No catch-all AND no list has any ZIPs → nothing prices at all.
+          banner += warn('⚠️ <b>Nothing will price yet.</b> Assign the towns/ZIPs you serve to a price list (the <b>Zips</b> button), or mark a list <b>“covers all other ZIPs”</b>.');
         }
         let html = '';
         lists.forEach(l => {
-          const n = hasCounts ? (countByList[l.id] || 0) : null;
-          const countLabel = (n === null) ? '' :
-            ' <span style="font-size:11px;color:' + (n === 0 ? 'var(--accent-orange)' : 'var(--text-muted)') + ';">(' + n + ' item' + (n === 1 ? '' : 's') + ')</span>';
+          const ni = hasCounts ? (itemCnt[l.id] || 0) : null;
+          const nz = hasCounts ? (zipCnt[l.id] || 0) : null;
+          const labels = (ni === null) ? '' :
+            ' <span style="font-size:11px;color:' + (ni === 0 ? 'var(--accent-orange)' : 'var(--text-muted)') + ';">(' + ni + ' item' + (ni === 1 ? '' : 's')
+              + (l.is_default ? '' : ', ' + nz + ' ZIP' + (nz === 1 ? '' : 's')) + ')</span>';
+          const catchBtn = l.is_default
+            ? '<button onclick="toggleCatchAll(\'' + l.id + '\', false)" style="' + b + 'border-color:var(--accent-green);color:var(--accent-green);" title="This list covers every ZIP not assigned to another list. Click to turn off.">✓ Catch-all</button>'
+            : '<button onclick="toggleCatchAll(\'' + l.id + '\', true)" style="' + b + '" title="Make this list cover every ZIP you have not assigned to another list">Covers all ZIPs</button>';
           html += '<div style="display:flex;align-items:center;gap:6px;padding:10px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;">'
             + '<div style="flex:1;min-width:120px;"><span style="font-weight:600;color:var(--text-primary);">' + esc(l.name) + '</span>'
-            + (l.is_default ? ' <span style="font-size:10px;background:var(--accent-green);color:#000;padding:1px 6px;border-radius:8px;font-weight:700;">DEFAULT</span>' : '') + countLabel + '</div>'
+            + (l.is_default ? ' <span style="font-size:10px;background:var(--accent-green);color:#000;padding:1px 6px;border-radius:8px;font-weight:700;">CATCH-ALL</span>' : '') + labels + '</div>'
             + '<button onclick="editPriceListItems(\'' + l.id + '\')" style="' + b + '">Items</button>'
-            + '<button onclick="copyPriceList(\'' + l.id + '\')" style="' + b + '">Copy</button>'
             + (l.is_default ? '' : '<button onclick="editPriceListZips(\'' + l.id + '\')" style="' + b + '">Zips</button>')
-            + (l.is_default ? '' : '<button onclick="setDefaultPriceList(\'' + l.id + '\')" style="' + b + '">Make default</button>')
+            + '<button onclick="copyPriceList(\'' + l.id + '\')" style="' + b + '">Copy</button>'
+            + catchBtn
             + '<button onclick="renamePriceList(\'' + l.id + '\')" style="' + b + '" title="Rename">✎</button>'
             + '<button onclick="deletePriceList(\'' + l.id + '\')" style="' + b + 'color:#ef4444;" title="Delete">✕</button>'
             + '</div>';
@@ -16592,13 +16595,13 @@ RECYCLING & DONATION
       if (!name) return;
       try {
         const fid = currentUser.franchiseInternalID;
-        const existing = await supabaseFetch('/rest/v1/price_lists?franchise_id=eq.' + fid + '&select=id');
-        const isFirst = !existing || existing.length === 0;   // first list auto-becomes the default
+        // Explicit-coverage model: a new list is NOT the catch-all. The owner adds prices, then
+        // assigns the towns/ZIPs it covers — or marks it "covers all other ZIPs" to make it the catch-all.
         await supabaseFetch('/rest/v1/price_lists', {
           method: 'POST',
-          body: JSON.stringify({ franchise_id: fid, name: name, is_default: isFirst })
+          body: JSON.stringify({ franchise_id: fid, name: name, is_default: false })
         });
-        _pbFeedback('Created.', true);
+        _pbFeedback('Created. Add prices, then assign its ZIPs (or mark it “covers all other ZIPs”).', true);
         renderPriceBookTab();
       } catch (e) { _pbFeedback('Create failed.', false); }
     }
@@ -16621,27 +16624,18 @@ RECYCLING & DONATION
         const meRows = await supabaseFetch('/rest/v1/price_lists?id=eq.' + id + '&select=name,is_default');
         const me = meRows && meRows[0];
         if (!me) { _pbFeedback('Price list not found.', false); return; }
-        const all = await supabaseFetch('/rest/v1/price_lists?franchise_id=eq.' + fid + '&select=id') || [];
-        const others = all.filter(l => l.id !== id).length;
-
-        // Can't delete the Default while other lists exist — those lists' unassigned zips rely on it.
-        // Make another list the Default first (explicit, so the owner chooses which).
-        if (me.is_default && others > 0) {
-          alert('“' + me.name + '” is the Default price list. Make another list the Default first (use “Make default”), then delete this one.');
-          return;
-        }
-
-        // Contextual confirm. Deleting cascades the list's tiers/items and its zip assignments;
-        // those zips fall back to the Default. Estimates that used this list keep their saved prices
-        // (the price book is snapshotted into each estimate — there's no live FK), so we confirm, not block.
+        // Explicit-coverage model: the catch-all is optional, so deleting ANY list is allowed —
+        // deleting the catch-all just leaves the franchise with no catch-all (unassigned ZIPs then
+        // show "not set up"). Deleting cascades the list's tiers/items + ZIP assignments (FK ON DELETE
+        // CASCADE); estimates keep their snapshotted prices (no live FK), so we confirm, not block.
         const zips = await supabaseFetch('/rest/v1/price_list_zips?price_list_id=eq.' + id + '&select=zip') || [];
         const n = zips.length;
         let msg;
         if (me.is_default) {
-          msg = 'Delete “' + me.name + '”? It’s your only price list — your franchise will have NO pricing until you create a new one. (Past estimates keep their saved prices.)';
+          msg = 'Delete the catch-all “' + me.name + '”? It covers every ZIP not assigned to another list — after deleting, those ZIPs won’t price until you set another catch-all or assign them. (Past estimates keep their saved prices.)';
         } else {
           msg = 'Delete “' + me.name + '”? Its tiers and items are removed'
-              + (n ? ', and its ' + n + ' assigned zip' + (n === 1 ? '' : 's') + ' move back to the Default list' : '')
+              + (n ? ', and its ' + n + ' assigned ZIP' + (n === 1 ? '' : 's') + ' become unassigned (they’ll price via your catch-all if set, otherwise show “not set up”)' : '')
               + '. (Past estimates keep their saved prices.)';
         }
         if (!confirm(msg)) return;
@@ -16652,19 +16646,22 @@ RECYCLING & DONATION
       } catch (e) { _pbFeedback('Delete failed.', false); }
     }
 
-    async function setDefaultPriceList(id) {
+    // Mark a list as the catch-all ("covers all other ZIPs"), or turn it off. Zero or one catch-all
+    // per franchise — a partial unique index allows only one is_default, so clear any existing first.
+    async function toggleCatchAll(id, turnOn) {
       try {
         const fid = currentUser.franchiseInternalID;
-        // Unset the current default first — a partial unique index allows only one per franchise.
         await supabaseFetch('/rest/v1/price_lists?franchise_id=eq.' + fid + '&is_default=eq.true', {
           method: 'PATCH', body: JSON.stringify({ is_default: false })
         });
-        await supabaseFetch('/rest/v1/price_lists?id=eq.' + id, {
-          method: 'PATCH', body: JSON.stringify({ is_default: true })
-        });
-        _pbFeedback('Default updated.', true);
+        if (turnOn) {
+          await supabaseFetch('/rest/v1/price_lists?id=eq.' + id, {
+            method: 'PATCH', body: JSON.stringify({ is_default: true })
+          });
+        }
+        _pbFeedback(turnOn ? 'Set as catch-all — it now covers every unassigned ZIP.' : 'Catch-all turned off.', true);
         renderPriceBookTab();
-      } catch (e) { _pbFeedback('Could not set default.', false); }
+      } catch (e) { _pbFeedback('Could not update catch-all.', false); }
     }
 
     async function copyPriceList(id) {
@@ -16878,7 +16875,7 @@ RECYCLING & DONATION
       modal.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius,12px);max-width:520px;width:100%;max-height:85vh;overflow:auto;padding:18px;">'
         + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><div style="font-size:15px;font-weight:700;color:var(--text-primary);">Zips → ' + esc(name) + '</div>'
         + '<button onclick="document.getElementById(\'pbZipModal\').remove()" style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;line-height:1;">✕</button></div>'
-        + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.5;">Zips here are priced by this list (and removed from any other). Unassigned zips stay on the Default list.</div>'
+        + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.5;">ZIPs here are priced by this list (and removed from any other). A ZIP not assigned to any list falls to your <b>catch-all</b> list if you’ve set one — otherwise it shows “not set up.”</div>'
         + '<div style="font-weight:700;font-size:12px;color:var(--text-primary);margin-bottom:4px;">Assigned (' + zips.length + ')</div>'
         + '<div id="pbZipChips" style="margin-bottom:12px;">' + chips + '</div>'
         + '<div class="form-label">Add zips — space / comma / newline separated; ranges (02718-02748) and prefixes (028*) OK</div>'
