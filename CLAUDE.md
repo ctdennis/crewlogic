@@ -91,6 +91,16 @@ Google OAuth uses `hd=junkluggers.com` for direct sign-ins. Today all owner acco
 
 After callback, `currentUser` holds `role` (`'owner'` | `'crew'`), `franchiseID` (external), `franchiseInternalID`, `tenantID`, `franchiseName`. **Most queries are scoped by `currentUser.franchiseID` / tenant — preserve this scoping when writing new queries.** Access is gated in `showApp` by subscription `status` (`active`/`trialing`/`tester`/`pro`/`enterprise`); otherwise `#paywallScreen` shows.
 
+### Guest / tester access — never lock testers out
+**Guest and tester accounts MUST keep working app access throughout the development process. A tester losing access mid-development is a regression — treat it like a P1 bug.**
+
+How access is decided: `buildSessionFromSupabaseAuth` (index.html ~4185) computes the gate value as `franchise.subscription_tier || tenant.subscription_status || 'trialing'`, and `showApp` grants entry only if that value is in `active | trialing | tester | pro | enterprise` (otherwise `#paywallScreen`). **The trap:** the **franchise-level `subscription_tier` overrides the tenant status**, and new franchises default to **`free`** (NOT an access value) — so a tester whose franchise is `free` hits the paywall even though their tenant is `tester`. This locked out testers **#54 (Thomas Baldwin) and #31** on 2026-06-05.
+
+Rules:
+- **When provisioning/creating a tester or guest franchise, set `franchises.subscription_tier = 'tester'`** (an access value). Never leave a tester franchise on `free`.
+- **Before AND after** any change to auth, the access gate, RLS, provisioning, or `buildSessionFromSupabaseAuth`/`showApp`: confirm a tester can still sign in and reach the app (not the paywall). Enumerate the current testers with `select f.external_id from franchises f join tenants t on t.id=f.tenant_id where t.subscription_status='tester'` (read-only) and check none are about to be blocked.
+- **If you touch the access-gate logic:** grant when EITHER the franchise tier OR the tenant status is an access value — a non-access franchise tier (`free`) must never override an access-granting tenant. (The current `||` short-circuit does exactly that; fixing it is an open follow-up.)
+
 ### Legacy n8n
 `N8N_BASE` (n8n.cloud webhook) and `apiFetch` still appear in some paths but are being migrated to Supabase Edge Functions. Prefer Edge Functions for new work.
 
