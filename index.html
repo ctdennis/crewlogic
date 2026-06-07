@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.27.1 | 2026-06-07">
+  <meta name="crewlogic-version" content="v5.27.2 | 2026-06-07">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -2020,6 +2020,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                 <a id="estEmailDisplay" style="font-size:13px;line-height:1.3;padding:7px 12px;border:1px solid var(--border);border-radius:18px;background:var(--bg-input);color:var(--accent-green);text-decoration:none;display:none;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:top;"></a>
                 <a id="estVonigoDisplay" target="_blank" style="font-size:13px;line-height:1.3;padding:7px 12px;border:1px solid var(--accent-orange);border-radius:18px;background:var(--bg-input);color:var(--accent-orange);text-decoration:none;display:none;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:top;"></a>
               </div>
+              <div id="estIdDisplay" style="font-size:10px;color:var(--text-muted);font-family:monospace;margin-top:5px;display:none;"></div>
             </div>
             <button onclick="toggleClientInfoExpanded()" style="background:none;border:1px solid var(--border);color:var(--text-muted);font-size:11px;cursor:pointer;flex-shrink:0;padding:5px 10px;border-radius:4px;">edit</button>
           </div>
@@ -4204,7 +4205,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         pricingSource: t.pricing_source || 'vonigo',
         customerSource: t.customer_source || 'vonigo',
         submissionTarget: t.submission_target || 'vonigo',
-        subscriptionStatus: f.subscription_tier || t.subscription_status || 'trialing',
+        // Access-gate value. A non-access franchise tier (e.g. 'free' — the default
+        // for newly provisioned franchises) must NOT override an access-granting tenant
+        // status (tester/trialing/active/pro/enterprise), or testers get paywalled even
+        // though their tenant grants access. Prefer whichever IS an access value;
+        // otherwise keep the real status so the paywall can still message past_due/canceled.
+        subscriptionStatus: (function () {
+          var ACCESS = ['active', 'trialing', 'tester', 'pro', 'enterprise'];
+          var ft = f.subscription_tier, ts = t.subscription_status;
+          if (ACCESS.indexOf(ft) !== -1) return ft;
+          if (ACCESS.indexOf(ts) !== -1) return ts;
+          return ft || ts || 'trialing';
+        })(),
         subscriptionTier: f.subscription_tier || null,
         trialEndsAt: t.trial_ends_at || null,
         vonigoConfigured: f.vonigo_configured || false,
@@ -8290,7 +8302,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         html += '<span style="font-size:12px;color:var(--text-secondary);">🚛 <strong style="color:var(--accent-green);font-family:\'Space Mono\',monospace;">' + trucks.toFixed(2) + '</strong></span>';
         html += '<span style="font-size:12px;color:var(--text-secondary);">💰 <strong style="color:var(--accent-green);font-family:\'Space Mono\',monospace;">$' + price.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0}) + '</strong></span>';
         if (est.customerPriceList || (est.payload && est.payload.customerPriceList)) html += '<span style="font-size:11px;font-weight:700;color:#f59e0b;letter-spacing:0.3px;">★ VIP</span>';
-        if (est.vonigoQuoteID && !est.clonedFrom) html += '<span style="font-size:11px;color:var(--accent-green);">✓ Vonigo #' + est.vonigoQuoteID + '</span>';
+        if (est.vonigoQuoteID && !est.clonedFrom) html += '<a href="https://junkluggers.vonigo.com/Client/Quote/Quote_Main.aspx?quoteID=' + encodeURIComponent(est.vonigoQuoteID) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="font-size:11px;color:var(--accent-green);text-decoration:underline;">✓ Vonigo #' + est.vonigoQuoteID + '</a>';
         html += '<span style="font-size:10px;color:var(--text-muted);font-family:monospace;">ID:' + eid + '</span>';
         if (updated) html += '<span style="font-size:11px;color:var(--text-muted);margin-left:auto;">' + updated + '</span>';
         html += '</div>';
@@ -15122,6 +15134,14 @@ RECYCLING & DONATION
         vonigoEl.textContent = qid ? ('🔗 Vonigo #' + qid) : '';
         vonigoEl.href = qid ? ('https://junkluggers.vonigo.com/Client/Quote/Quote_Main.aspx?quoteID=' + encodeURIComponent(qid)) : '';
         vonigoEl.style.display = qid ? 'inline-block' : 'none';
+      }
+
+      // CrewLogic estimate ID — small reference line (matches the estimates-list card)
+      const idEl = document.getElementById('estIdDisplay');
+      if (idEl) {
+        const eid = (currentEstimate && currentEstimate.estimateID) ? String(currentEstimate.estimateID) : '';
+        idEl.textContent = eid ? ('ID: ' + eid) : '';
+        idEl.style.display = eid ? 'block' : 'none';
       }
 
       // Keep currentEstimate in sync
