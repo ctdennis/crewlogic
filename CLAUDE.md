@@ -122,7 +122,7 @@ Common commands (run from repo root):
 
 - **Run locally:** open `index.html` directly in a browser, or serve the folder (`python3 -m http.server`). No build.
 - **Versioning:** **single source of truth** — bump the `<meta name="crewlogic-version">` tag (line 5) on each release. Everything else derives from it at runtime: the console startup banner and `_FEEDBACK_APP_VERSION` both read the meta tag (`document.querySelector('meta[name="crewlogic-version"]').content`). Do **not** reintroduce hardcoded version strings elsewhere. Current: `5.9.81`. (Historical note: the console banner had silently drifted to 5.9.75 because it was a separate hardcoded string; the derive-from-meta refactor in 5.9.81 fixed that.)
-- **Deploy:** Current workflow: `index.html` is downloaded from a Claude.ai chat session to `~/Downloads`, manually copied into `~/Documents/GitHub/crewlogic`, then committed to `main` via GitHub Desktop. Cloudflare Pages auto-deploys from `main` to `crewlogicai.com` (custom domain on the Cloudflare Pages project). The `crewlogic.pages.dev` URL still resolves as a transition fallback. Migrating this workflow to use Claude Code directly is in progress.
+- **Deploy (dev-first, via Claude Code):** Edit `index.html` on the **`dev`** branch, bump the version meta, `bash supabase/dev-setup/check-html.sh`, commit, `git push origin dev`. Cloudflare Pages auto-builds the dev preview at **`dev.crewlogic.pages.dev`** (~1-2 min), which runs in dev mode against the **dev** Supabase — test there (sign in via the injected "🔧 Dev sign-in · Vonigo #90" button; seed the dev DB for data-dependent UI). **Promote** with `git checkout main && git merge --ff-only dev && git push origin main` (the `main` push is gated); Cloudflare auto-deploys `main` to `crewlogicai.com` (custom domain). The `crewlogic.pages.dev` URL still resolves as a transition fallback. (Legacy flow — downloading `index.html` from a Claude.ai chat → GitHub Desktop → `main` — is retired.)
 
 ## Writing test plans / QA scripts
 
@@ -143,7 +143,7 @@ Workflow: edit `supabase/functions/<name>/index.ts`, then deploy with `supabase 
 
 ## Environments
 
-Two Supabase projects: **prod** (`ozfkpxyachigfpcmvekz`) and **dev/`crewlogic-dev`** (`bagkimfwmpwjfhfhmsrb`). The dev project is used to build & verify features before promotion (see the dev tooling in the approval-discipline section: `dev-sql.sh`, `prod-readonly-sql.sh`). The frontend is still single-deploy (one `index.html` → Cloudflare Pages); dev/prod separation exists at the Supabase layer, with frontend/deploy separation still on the roadmap.
+Two Supabase projects: **prod** (`ozfkpxyachigfpcmvekz`) and **dev/`crewlogic-dev`** (`bagkimfwmpwjfhfhmsrb`). The dev project is used to build & verify features before promotion (see the dev tooling in the approval-discipline section: `dev-sql.sh`, `prod-readonly-sql.sh`). **The frontend now has a matching dev/prod split** (working since v5.27.1, 2026-06-07): it's still ONE `index.html`, which auto-detects its environment by hostname (`IS_DEV_ENV`, ~line 3525) and targets the **dev** Supabase on `dev.crewlogic.pages.dev` / `localhost` and **prod** elsewhere (`SUPABASE_URL`/`SUPABASE_ANON_KEY` ternaries ~3526). The **`dev` git branch** deploys to `dev.crewlogic.pages.dev`; promote to prod by merging `dev` → `main` (see the Deploy bullet above). Do **not** fork `index.html` into two files — use the branches.
 
 ## SQL migrations
 
