@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.27.8 | 2026-06-08">
+  <meta name="crewlogic-version" content="v5.27.9 | 2026-06-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -6676,23 +6676,30 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     // Reverse-resolve any ZIPs missing city/state via Zippopotam (/us/<zip>) and persist. Idempotent
     // (only touches city-is-null rows). Best-effort: a failed ZIP is skipped, not fatal.
-    async function enrichZipTowns(fid) {
+    async function enrichZipTowns(fid, onProgress) {
       try {
         const rows = await supabaseFetch('/rest/v1/price_list_zips?franchise_id=eq.' + fid + '&city=is.null&select=zip') || [];
+        const total = rows.length;
+        let done = 0;
+        if (typeof onProgress === 'function') onProgress(0, total);
         for (const r of rows) {
           try {
             const res = await fetch('https://api.zippopotam.us/us/' + encodeURIComponent(r.zip));
-            if (!res.ok) continue;
-            const d = await res.json();
-            const p = (d.places && d.places[0]) || null;
-            const city = p && (p['place name'] || '');
-            const state = p && (p['state abbreviation'] || '');
-            if (!city) continue;
-            await supabaseFetch('/rest/v1/price_list_zips?franchise_id=eq.' + fid + '&zip=eq.' + r.zip, {
-              method: 'PATCH', headers: { 'Prefer': 'return=minimal' },
-              body: JSON.stringify({ city: city, state: state })
-            });
+            if (res.ok) {
+              const d = await res.json();
+              const p = (d.places && d.places[0]) || null;
+              const city = p && (p['place name'] || '');
+              const state = p && (p['state abbreviation'] || '');
+              if (city) {
+                await supabaseFetch('/rest/v1/price_list_zips?franchise_id=eq.' + fid + '&zip=eq.' + r.zip, {
+                  method: 'PATCH', headers: { 'Prefer': 'return=minimal' },
+                  body: JSON.stringify({ city: city, state: state })
+                });
+              }
+            }
           } catch (e) { /* skip this zip */ }
+          done++;
+          if (typeof onProgress === 'function') onProgress(done, total);
         }
       } catch (e) { /* enrichment is best-effort */ }
     }
@@ -16931,12 +16938,19 @@ RECYCLING & DONATION
         // Backfill any missing town names once, in the background (so the modal opens fast),
         // then refresh the chips in place. Idempotent — only null-city rows hit the API.
         if (rows.some(r => !r.city)) {
-          enrichZipTowns(fid).then(async () => {
+          const onProg = (d, t) => {
+            const s = document.getElementById('pbZipEnrichStatus');
+            if (!s) return;
+            if (t > 0 && d < t) { s.style.display = 'block'; s.innerHTML = '<span class="spinner-inline"></span> Looking up town names… ' + d + ' / ' + t; }
+            else { s.style.display = 'none'; }
+          };
+          enrichZipTowns(fid, onProg).then(async () => {
             _plTownIndex = null;
             if (!document.getElementById('pbZipModal') || !_pbZipEditor || _pbZipEditor.listId !== listId) return;
             const fresh = await supabaseFetch('/rest/v1/price_list_zips?price_list_id=eq.' + listId + '&select=zip,city&order=zip.asc');
             const chipsEl = document.getElementById('pbZipChips');
             if (fresh && chipsEl) chipsEl.innerHTML = renderZipChips(fresh);
+            const s = document.getElementById('pbZipEnrichStatus'); if (s) s.style.display = 'none';
           });
         }
       } catch (e) { _pbFeedback('Could not open zip assignment.', false); }
@@ -16964,7 +16978,8 @@ RECYCLING & DONATION
         + '<button onclick="document.getElementById(\'pbZipModal\').remove()" style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;line-height:1;">✕</button></div>'
         + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.5;">ZIPs here are priced by this list (and removed from any other). A ZIP not assigned to any list falls to your <b>catch-all</b> list if you’ve set one — otherwise it shows “not set up.”</div>'
         + '<div style="font-weight:700;font-size:12px;color:var(--text-primary);margin-bottom:4px;">Assigned (' + rows.length + ')</div>'
-        + '<div id="pbZipChips" style="margin-bottom:12px;">' + chips + '</div>'
+        + '<div id="pbZipChips" style="margin-bottom:6px;">' + chips + '</div>'
+        + '<div id="pbZipEnrichStatus" style="font-size:11px;color:var(--accent-green);margin-bottom:10px;display:none;"><span class="spinner-inline"></span> </div>'
         + '<div class="form-label">Add zips — space / comma / newline separated; ranges (02718-02748) and prefixes (028*) OK</div>'
         + '<textarea id="pbZipInput" class="form-input" rows="3" placeholder="02718 02719 02720   or   02718-02748   or   028*" style="width:100%;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>'
         + '<div style="display:flex;gap:8px;margin-top:10px;"><button onclick="pbAddZips()" style="flex:1;padding:10px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;">Add zips</button>'
