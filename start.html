@@ -77,18 +77,16 @@
   .head h2{font-size:clamp(27px,4vw,40px);font-weight:800;letter-spacing:-0.8px;color:var(--ink);margin-top:9px;}
   .head p{margin-top:12px;color:var(--body);font-size:17px;}
 
-  /* How it works — numbered editorial steps */
-  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:30px;}
-  .step{position:relative;padding-top:8px;}
-  .step .n{font-family:var(--mono);font-size:54px;line-height:1;color:transparent;-webkit-text-stroke:1.5px rgba(0,231,133,0.55);}
-  .step h3{font-size:19px;font-weight:700;color:var(--ink);margin-top:12px;}
-  .step p{margin-top:8px;color:var(--body);font-size:15px;max-width:34ch;}
-  .step:not(:last-child)::after{content:'';position:absolute;top:30px;right:-16px;width:32px;height:1px;background:linear-gradient(90deg,rgba(0,231,133,0.4),transparent);}
+  /* How it works — step cards (match the feature cards) */
+  .cards3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
+  .num{width:46px;height:46px;border-radius:12px;background:var(--green-soft);border:1px solid rgba(0,231,133,0.3);color:var(--green);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:20px;font-weight:700;margin-bottom:14px;}
 
   /* Features — asymmetric grid w/ one wide highlight */
   .feats{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;}
   .feat{position:relative;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:24px;transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease;}
+  .feat::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;border-radius:var(--radius) var(--radius) 0 0;background:linear-gradient(90deg,var(--green),transparent);opacity:0;transition:opacity .15s ease;}
   .feat:hover{transform:translateY(-4px);border-color:#2f4a63;box-shadow:var(--shadow);}
+  .feat:hover::before{opacity:1;}
   .feat.wide{grid-column:span 2;}
   .feat.wide{background:linear-gradient(135deg,#16283a,#142031);}
   .feat .ico{width:50px;height:50px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:24px;background:var(--tile);box-shadow:inset 0 0 0 1px rgba(0,231,133,0.22);margin-bottom:14px;}
@@ -199,10 +197,10 @@
       <span class="eyebrow">How it works</span>
       <h2>From driveway to done in three steps.</h2>
     </div>
-    <div class="steps">
-      <div class="step"><div class="n">01</div><h3>Walk &amp; capture</h3><p>Snap a few photos or just talk the job through, room by room.</p></div>
-      <div class="step"><div class="n">02</div><h3>AI sizes &amp; prices</h3><p>The AI gauges the truckload volume and builds a priced, itemized estimate — no tape measure, no guesswork.</p></div>
-      <div class="step"><div class="n">03</div><h3>Send &amp; win</h3><p>Generate a branded proposal and send it before you've left the driveway.</p></div>
+    <div class="cards3">
+      <div class="feat"><div class="num">1</div><h3>Walk &amp; capture</h3><p>Snap a few photos or just talk the job through, room by room.</p></div>
+      <div class="feat"><div class="num">2</div><h3>AI sizes &amp; prices</h3><p>The AI gauges the truckload volume and builds a priced, itemized estimate — no tape measure, no guesswork.</p></div>
+      <div class="feat"><div class="num">3</div><h3>Send &amp; win</h3><p>Generate a branded proposal and send it before you've left the driveway.</p></div>
     </div>
   </div>
 </section>
@@ -260,21 +258,7 @@
           <div class="field"><label>Email Address <span class="req">*</span></label><input name="email" type="email" placeholder="jane@example.com" required></div>
           <div class="field"><label>Phone Number <span class="req">*</span></label><input name="phone" type="tel" placeholder="(555) 867-5309" required></div>
           <div class="field"><label>Business / Franchise Name <span class="req">*</span></label><input name="business" placeholder="Smith Junk Removal LLC" required></div>
-          <div class="field"><label>Franchise Brand <span class="req">*</span></label>
-            <select name="brand" required>
-              <option value="">Select…</option>
-              <option>The Junkluggers</option><option>Junk King</option><option>College Hunks</option>
-              <option>1-800-GOT-JUNK?</option><option>Other</option><option>I'm not a franchisee</option>
-            </select>
-          </div>
-          <div class="field"><label>Number of Trucks <span class="req">*</span></label>
-            <select name="trucks" required>
-              <option value="">Select…</option>
-              <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6–10</option><option>10+</option>
-            </select>
-          </div>
           <div class="field full"><label>City / Territory <span class="req">*</span></label><input name="territory" placeholder="Plymouth, MA" required></div>
-          <div class="field full"><label>What are you hoping CrewLogicAI helps with? (optional)</label><textarea name="goals" placeholder="Tell us a bit about your current pain points or goals…"></textarea></div>
         </div>
         <div class="err" id="formErr">Please fill in all required fields.</div>
         <div class="form-submit"><button type="submit" class="btn btn-green">Start My Free Trial</button></div>
@@ -305,7 +289,7 @@
     e.preventDefault();
     var form = e.target;
     var data = Object.fromEntries(new FormData(form).entries());
-    var required = ['fullName','email','phone','business','brand','trucks','territory'];
+    var required = ['fullName','email','phone','business','territory'];
     var missing = required.filter(function (k){ return !String(data[k]||'').trim(); });
     var errEl = document.getElementById('formErr');
     if (missing.length){ errEl.style.display='block'; return; }
