@@ -4,115 +4,152 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CrewLogicAI — AI estimating &amp; ops for junk-removal crews</title>
-<meta name="description" content="CrewLogicAI turns photos and voice notes into accurate junk-removal estimates in minutes — the AI sizes up the volume, prices the job, and builds the proposal.">
+<meta name="description" content="Photos and voice in, a priced estimate out. The AI sizes up the volume, prices the job, and builds the proposal — before you leave the driveway.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#0b131d;            /* page — darkest */
-    --bg-2:#0e1825;          /* alt section */
-    --card:#152230;          /* cards */
-    --tile:#1e2f40;          /* icon tiles — matches the app's card slate */
-    --ink:#eef4fa;           /* headings */
-    --body:#9fb1c2;          /* body text */
-    --muted:#6e8194;         /* muted meta */
-    --green:#00E785;         /* accent */
-    --green-ink:#04261a;     /* text on green */
-    --green-soft:rgba(0,231,133,0.12);
-    --border:#22354a;
-    --radius:16px;
-    --shadow:0 18px 40px rgba(0,0,0,0.35);
+    --bg:#0b131d; --bg-2:#0e1825; --card:#152230; --tile:#1e2f40;
+    --ink:#eef4fa; --body:#9fb1c2; --muted:#6e8194;
+    --green:#00E785; --green-ink:#04261a; --green-soft:rgba(0,231,133,0.12);
+    --border:#22354a; --radius:16px; --shadow:0 18px 44px rgba(0,0,0,0.4);
+    --mono:'Space Mono',ui-monospace,monospace;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
   html{scroll-behavior:smooth;}
   body{font-family:'DM Sans',system-ui,-apple-system,sans-serif;color:var(--body);background:var(--bg);line-height:1.55;-webkit-font-smoothing:antialiased;}
   a{color:inherit;text-decoration:none;}
-  .wrap{max-width:1140px;margin:0 auto;padding:0 24px;}
+  .wrap{max-width:1160px;margin:0 auto;padding:0 24px;}
   .eyebrow{display:inline-block;font-size:13px;font-weight:700;letter-spacing:1.7px;text-transform:uppercase;color:var(--green);}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:inherit;font-weight:700;border:none;border-radius:12px;cursor:pointer;transition:transform .06s ease,filter .15s ease;font-size:15px;}
+  .btn:active{transform:scale(0.97);}
+  .btn-green{background:var(--green);color:var(--green-ink);padding:15px 28px;font-size:16px;box-shadow:0 8px 24px rgba(0,231,133,0.22);}
+  .btn-green:hover{filter:brightness(1.06);}
+  .btn-outline{background:rgba(255,255,255,0.03);color:var(--ink);border:1px solid var(--border);padding:14px 24px;}
+  .btn-outline:hover{border-color:var(--green);}
+  .btn-ghost{background:transparent;color:var(--ink);border:1px solid var(--border);padding:9px 20px;font-size:14px;}
+  .btn-ghost:hover{border-color:var(--green);}
 
   /* Header */
-  header{position:sticky;top:0;z-index:50;background:rgba(11,19,29,0.72);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);}
+  header{position:sticky;top:0;z-index:50;background:rgba(11,19,29,0.74);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);}
   .nav{display:flex;align-items:center;justify-content:space-between;height:66px;}
   .logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:19px;color:var(--ink);letter-spacing:-0.4px;}
   .logo .dot{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9px;background:var(--green);color:var(--green-ink);font-size:16px;}
-  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:inherit;font-weight:700;border:none;border-radius:12px;cursor:pointer;transition:transform .06s ease,filter .15s ease,box-shadow .15s ease;font-size:15px;}
-  .btn:active{transform:scale(0.97);}
-  .btn-green{background:var(--green);color:var(--green-ink);padding:15px 30px;font-size:16px;box-shadow:0 8px 24px rgba(0,231,133,0.22);}
-  .btn-green:hover{filter:brightness(1.06);}
-  .btn-outline{background:rgba(255,255,255,0.04);color:var(--ink);border:1px solid var(--border);padding:10px 22px;}
-  .btn-outline:hover{border-color:var(--green);}
 
-  /* Hero */
-  .hero{position:relative;overflow:hidden;text-align:center;
-    background:
-      radial-gradient(760px 420px at 50% -8%,rgba(0,231,133,0.10),transparent 60%),
-      radial-gradient(700px 500px at 88% 10%,rgba(40,90,160,0.16),transparent 55%),
-      linear-gradient(180deg,var(--bg-2),var(--bg));
-    border-bottom:1px solid var(--border);
-  }
-  .hero::before{content:'';position:absolute;inset:0;
-    background-image:radial-gradient(rgba(255,255,255,0.035) 1px,transparent 1px);
-    background-size:26px 26px;mask-image:linear-gradient(180deg,#000,transparent 70%);}
-  .hero .inner{position:relative;z-index:1;padding:86px 0 96px;}
-  .hero .pill{border:1px solid rgba(0,231,133,0.32);background:var(--green-soft);border-radius:999px;padding:7px 18px;}
-  .hero h1{font-size:clamp(38px,6vw,68px);font-weight:800;line-height:1.04;letter-spacing:-1.6px;margin:22px auto 0;max-width:15ch;color:var(--ink);}
+  /* HERO — split, asymmetric */
+  .hero{position:relative;overflow:hidden;
+    background:radial-gradient(700px 460px at 12% -10%,rgba(0,231,133,0.10),transparent 60%),
+               radial-gradient(620px 520px at 92% 0%,rgba(40,90,160,0.16),transparent 55%),
+               linear-gradient(180deg,var(--bg-2),var(--bg));
+    border-bottom:1px solid var(--border);}
+  .hero::before{content:'';position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,0.03) 1px,transparent 1px);background-size:26px 26px;mask-image:linear-gradient(180deg,#000,transparent 75%);}
+  .hero-grid{position:relative;z-index:1;display:grid;grid-template-columns:1.05fr 0.95fr;gap:54px;align-items:center;padding:78px 0 84px;}
+  .hero h1{font-size:clamp(36px,5vw,58px);font-weight:800;line-height:1.05;letter-spacing:-1.4px;margin:20px 0 0;color:var(--ink);}
   .hero h1 .accent{color:var(--green);}
-  .hero p.sub{margin:22px auto 0;max-width:640px;font-size:clamp(16px,2.2vw,19px);color:var(--body);}
-  .hero .cta-row{margin-top:34px;}
-  .hero .reassure{margin-top:14px;font-size:13px;color:var(--muted);}
+  .hero .pill{border:1px solid rgba(0,231,133,0.32);background:var(--green-soft);border-radius:999px;padding:7px 16px;}
+  .hero p.sub{margin:20px 0 0;font-size:clamp(16px,2vw,19px);color:var(--body);max-width:44ch;}
+  .hero .cta-row{margin-top:30px;display:flex;gap:14px;flex-wrap:wrap;}
+  .hero .reassure{margin-top:16px;font-size:13px;color:var(--muted);}
+
+  /* Estimate mockup (signature visual) */
+  .mock{background:var(--card);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow);overflow:hidden;transform:rotate(0.5deg);}
+  .mock .top{background:var(--tile);padding:14px 18px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);}
+  .mock .top .ttl{font-size:11px;letter-spacing:1.5px;font-weight:700;color:var(--green);text-transform:uppercase;}
+  .mock .badge{font-size:10px;font-weight:700;letter-spacing:1px;color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:2px 7px;text-transform:uppercase;}
+  .mock .body{padding:16px 18px;}
+  .mock .client{font-weight:700;color:var(--ink);font-size:15px;}
+  .mock .client span{color:var(--muted);font-weight:400;font-size:13px;}
+  .mock .line{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px dashed var(--border);font-size:13.5px;}
+  .mock .line .lbl{color:var(--body);display:flex;gap:8px;align-items:center;}
+  .mock .line .amt{font-family:var(--mono);color:var(--ink);}
+  .mock .line .amt.neg{color:#fb7185;}
+  .mock .total{display:flex;align-items:flex-end;justify-content:space-between;padding-top:14px;}
+  .mock .total .tot-l{font-weight:700;color:var(--ink);font-size:15px;}
+  .mock .total .tot-l span{display:block;font-weight:400;color:var(--muted);font-size:12px;}
+  .mock .total .tot-r{font-family:var(--mono);font-size:26px;color:var(--green);line-height:1;}
+  .mock .send{margin-top:14px;background:var(--green);color:var(--green-ink);text-align:center;font-weight:700;font-size:14px;padding:11px;border-radius:10px;}
 
   /* Sections */
-  section{padding:88px 0;position:relative;}
+  section{padding:84px 0;}
   .sec-2{background:var(--bg-2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);}
-  .sec-head{text-align:center;max-width:760px;margin:0 auto 54px;}
-  .sec-head h2{font-size:clamp(28px,4.2vw,42px);font-weight:800;letter-spacing:-0.8px;color:var(--ink);margin-top:10px;}
-  .sec-head p{margin-top:14px;color:var(--body);font-size:17px;}
+  .head{max-width:680px;margin-bottom:46px;}
+  .head h2{font-size:clamp(27px,4vw,40px);font-weight:800;letter-spacing:-0.8px;color:var(--ink);margin-top:9px;}
+  .head p{margin-top:12px;color:var(--body);font-size:17px;}
 
-  /* Cards */
-  .grid{display:grid;gap:22px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));}
-  .card{position:relative;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:28px 24px;transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease;}
-  .card::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;border-radius:var(--radius) var(--radius) 0 0;background:linear-gradient(90deg,var(--green),transparent);opacity:0;transition:opacity .15s ease;}
-  .card:hover{transform:translateY(-4px);border-color:#2f4a63;box-shadow:var(--shadow);}
-  .card:hover::before{opacity:1;}
-  .card .ico{width:52px;height:52px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:25px;background:var(--tile);box-shadow:inset 0 0 0 1px rgba(0,231,133,0.22);margin-bottom:16px;}
-  .card h3{font-size:18px;font-weight:700;color:var(--ink);line-height:1.25;}
-  .card p{margin-top:9px;color:var(--body);font-size:15px;}
+  /* How it works — numbered editorial steps */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:30px;}
+  .step{position:relative;padding-top:8px;}
+  .step .n{font-family:var(--mono);font-size:54px;line-height:1;color:transparent;-webkit-text-stroke:1.5px rgba(0,231,133,0.55);}
+  .step h3{font-size:19px;font-weight:700;color:var(--ink);margin-top:12px;}
+  .step p{margin-top:8px;color:var(--body);font-size:15px;max-width:34ch;}
+  .step:not(:last-child)::after{content:'';position:absolute;top:30px;right:-16px;width:32px;height:1px;background:linear-gradient(90deg,rgba(0,231,133,0.4),transparent);}
 
-  /* Form */
-  .form-card{max-width:760px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:34px;}
-  .form-grid{display:grid;gap:18px 20px;grid-template-columns:1fr 1fr;}
+  /* Features — asymmetric grid w/ one wide highlight */
+  .feats{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;}
+  .feat{position:relative;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:24px;transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease;}
+  .feat:hover{transform:translateY(-4px);border-color:#2f4a63;box-shadow:var(--shadow);}
+  .feat.wide{grid-column:span 2;}
+  .feat.wide{background:linear-gradient(135deg,#16283a,#142031);}
+  .feat .ico{width:50px;height:50px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:24px;background:var(--tile);box-shadow:inset 0 0 0 1px rgba(0,231,133,0.22);margin-bottom:14px;}
+  .feat h3{font-size:17px;font-weight:700;color:var(--ink);line-height:1.25;}
+  .feat.wide h3{font-size:22px;}
+  .feat p{margin-top:8px;color:var(--body);font-size:14.5px;}
+
+  /* Trust band */
+  .trust{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;}
+  .trust .t{display:flex;gap:14px;align-items:flex-start;}
+  .trust .t .tk{flex:0 0 auto;width:40px;height:40px;border-radius:11px;background:var(--green-soft);display:flex;align-items:center;justify-content:center;font-size:19px;}
+  .trust .t h4{color:var(--ink);font-size:16px;font-weight:700;}
+  .trust .t p{color:var(--body);font-size:14px;margin-top:3px;}
+
+  /* Signup — split */
+  .signup{display:grid;grid-template-columns:0.85fr 1.15fr;gap:48px;align-items:center;}
+  .signup .pitch h2{font-size:clamp(26px,3.6vw,38px);font-weight:800;letter-spacing:-0.7px;color:var(--ink);}
+  .signup .pitch p{margin-top:12px;color:var(--body);font-size:16px;}
+  .signup .pitch ul{list-style:none;margin-top:20px;display:grid;gap:11px;}
+  .signup .pitch li{display:flex;gap:10px;align-items:center;color:var(--body);font-size:15px;}
+  .signup .pitch li::before{content:'✓';color:var(--green-ink);background:var(--green);width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex:0 0 auto;}
+  .form-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:30px;}
+  .form-grid{display:grid;gap:16px 18px;grid-template-columns:1fr 1fr;}
   .field.full{grid-column:1 / -1;}
-  label{display:block;font-size:13px;font-weight:700;color:var(--ink);margin-bottom:7px;}
+  label{display:block;font-size:13px;font-weight:700;color:var(--ink);margin-bottom:6px;}
   label .req{color:var(--green);}
-  input,select,textarea{width:100%;font-family:inherit;font-size:15px;color:var(--ink);background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;transition:border-color .12s ease,box-shadow .12s ease;}
+  input,select,textarea{width:100%;font-family:inherit;font-size:15px;color:var(--ink);background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:11px 13px;transition:border-color .12s ease,box-shadow .12s ease;}
   input::placeholder,textarea::placeholder{color:var(--muted);}
-  select{color:var(--ink);}
   input:focus,select:focus,textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft);}
-  textarea{resize:vertical;min-height:96px;}
-  .form-submit{margin-top:24px;}
-  .form-submit .btn{width:100%;padding:16px;font-size:16px;}
-  .form-note{text-align:center;color:var(--muted);font-size:13px;margin-top:12px;}
+  textarea{resize:vertical;min-height:84px;}
+  .form-submit{margin-top:20px;}
+  .form-submit .btn{width:100%;padding:15px;font-size:16px;}
+  .form-note{text-align:center;color:var(--muted);font-size:12.5px;margin-top:11px;}
   .err{color:#fb7185;font-size:13px;margin-top:10px;display:none;}
-  .thanks{display:none;text-align:center;padding:18px 0;}
-  .thanks .big{font-size:46px;}
-  .thanks h3{font-size:24px;font-weight:800;color:var(--ink);margin-top:8px;}
-  .thanks p{color:var(--body);margin-top:8px;font-size:16px;}
+  .thanks{display:none;text-align:center;padding:14px 0;}
+  .thanks .big{font-size:44px;}
+  .thanks h3{font-size:23px;font-weight:800;color:var(--ink);margin-top:8px;}
+  .thanks p{color:var(--body);margin-top:8px;}
 
   /* Footer */
-  footer{background:#08101a;color:var(--muted);padding:34px 0;border-top:1px solid var(--border);}
+  footer{background:#08101a;color:var(--muted);padding:32px 0;border-top:1px solid var(--border);}
   .foot{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;font-size:14px;}
-  .foot a{color:var(--body);}
-  .foot a:hover{color:var(--ink);}
+  .foot a{color:var(--body);} .foot a:hover{color:var(--ink);}
   .foot .links{display:flex;gap:22px;flex-wrap:wrap;}
   .foot .login{color:var(--green);font-weight:700;}
 
-  @media(max-width:680px){
-    section{padding:62px 0;}
-    .form-card{padding:24px 18px;}
+  @media(max-width:920px){
+    .hero-grid{grid-template-columns:1fr;gap:40px;padding:60px 0 64px;}
+    .mock{max-width:440px;}
+    .feats{grid-template-columns:repeat(2,1fr);}
+    .feat.wide{grid-column:span 2;}
+    .steps{grid-template-columns:1fr;gap:26px;}
+    .step:not(:last-child)::after{display:none;}
+    .trust{grid-template-columns:1fr;gap:20px;}
+    .signup{grid-template-columns:1fr;gap:30px;}
+  }
+  @media(max-width:560px){
+    section{padding:58px 0;}
+    .feats{grid-template-columns:1fr;}
+    .feat.wide{grid-column:span 1;}
     .form-grid{grid-template-columns:1fr;}
-    .hero .inner{padding:66px 0 74px;}
-    .foot{justify-content:center;text-align:center;}
   }
 </style>
 </head>
@@ -121,88 +158,100 @@
 <header>
   <div class="wrap nav">
     <a class="logo" href="#top"><span class="dot">⚡</span> CrewLogic<span style="color:var(--green);">AI</span></a>
-    <a href="/" class="btn btn-outline">Login</a>
+    <a href="/" class="btn btn-ghost">Login</a>
   </div>
 </header>
 
 <a id="top"></a>
 <section class="hero" style="padding:0;">
-  <div class="wrap inner">
-    <span class="eyebrow pill">AI estimating &amp; ops for junk-removal crews</span>
-    <h1>Price the job before you <span class="accent">leave the driveway.</span></h1>
-    <p class="sub">CrewLogicAI turns photos and voice notes into accurate junk-removal estimates in minutes — the AI sizes up the volume, prices the job, and builds the proposal. Everything your crew needs, in one app.</p>
-    <div class="cta-row">
-      <a href="#trial" class="btn btn-green">Start Free Trial</a>
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <span class="eyebrow pill">AI estimating &amp; ops for junk-removal crews</span>
+      <h1>Price the job before you <span class="accent">leave the driveway.</span></h1>
+      <p class="sub">Photos and voice in — a priced estimate out. The AI sizes up the truckload volume, prices the job, and builds the proposal. Everything your crew needs, in one app.</p>
+      <div class="cta-row">
+        <a href="#trial" class="btn btn-green">Start Free Trial</a>
+        <a href="#how" class="btn btn-outline">See how it works</a>
+      </div>
+      <div class="reassure">Free trial for owners &amp; operators. No credit card required.</div>
     </div>
-    <div class="reassure">Free trial for owners &amp; operators. No credit card required.</div>
+    <div class="mock" aria-hidden="true">
+      <div class="top"><span class="ttl">Estimate</span><span class="badge">Draft</span></div>
+      <div class="body">
+        <div class="client">Turner <span>· Halifax, MA</span></div>
+        <div style="margin-top:10px;">
+          <div class="line"><span class="lbl">🛋 Living room — ½ truck</span><span class="amt">$760</span></div>
+          <div class="line"><span class="lbl">🛏 Mattresses ×2</span><span class="amt">$120</span></div>
+          <div class="line"><span class="lbl">🧰 Garage cleanout — 1 truck</span><span class="amt">$1,520</span></div>
+          <div class="line"><span class="lbl">♻️ Recycling &amp; donations</span><span class="amt neg">−$100</span></div>
+        </div>
+        <div class="total"><div class="tot-l">Total<span>5 trucks · 5.4 yd³</span></div><div class="tot-r">$4,608</div></div>
+        <div class="send">✓ Send proposal</div>
+      </div>
+    </div>
   </div>
 </section>
 
-<!-- WHY -->
-<section class="sec-2">
+<!-- HOW IT WORKS -->
+<section class="sec-2" id="how">
   <div class="wrap">
-    <div class="sec-head">
-      <span class="eyebrow">Why CrewLogicAI</span>
-      <h2>Built by the Crew, for the Crew.</h2>
+    <div class="head">
+      <span class="eyebrow">How it works</span>
+      <h2>From driveway to done in three steps.</h2>
     </div>
-    <div class="grid">
-      <div class="card">
-        <div class="ico">📸</div>
-        <h3>The AI sizes up the volume</h3>
-        <p>Snap a few photos or just talk the job through — the AI gauges the truckload volume and turns it into a priced, itemized estimate on the spot. No tape measure, no guesswork.</p>
-      </div>
-      <div class="card">
-        <div class="ico">🔒</div>
-        <h3>Multi-tenant from day one</h3>
-        <p>Franchise or independent operator — every business gets its own private workspace. Your customers, pricing, and jobs stay yours, isolated and secure.</p>
-      </div>
-      <div class="card">
-        <div class="ico">📱</div>
-        <h3>Made for the field &amp; the office</h3>
-        <p>Crews work from a phone on site. Owners get the dashboards. One app instead of three.</p>
-      </div>
+    <div class="steps">
+      <div class="step"><div class="n">01</div><h3>Walk &amp; capture</h3><p>Snap a few photos or just talk the job through, room by room.</p></div>
+      <div class="step"><div class="n">02</div><h3>AI sizes &amp; prices</h3><p>The AI gauges the truckload volume and builds a priced, itemized estimate — no tape measure, no guesswork.</p></div>
+      <div class="step"><div class="n">03</div><h3>Send &amp; win</h3><p>Generate a branded proposal and send it before you've left the driveway.</p></div>
     </div>
   </div>
 </section>
 
-<!-- FEATURES -->
+<!-- FEATURES (asymmetric) -->
 <section>
   <div class="wrap">
-    <div class="sec-head">
-      <h2>Features</h2>
-      <p>Everything you need to estimate, price, and plan — in one place.</p>
+    <div class="head">
+      <span class="eyebrow">The platform</span>
+      <h2>Everything you need, in one app.</h2>
     </div>
-    <div class="grid">
-      <div class="card"><div class="ico">🤖</div><h3>AI Estimating</h3><p>Photos and voice notes become an itemized, priced estimate in minutes — the AI gauges the volume so nothing gets missed.</p></div>
-      <div class="card"><div class="ico">🏷️</div><h3>Pricing &amp; Price Book</h3><p>ZIP-mapped price lists with optional catch-all coverage — run it native, or synced live with your CRM.</p></div>
-      <div class="card"><div class="ico">🗺️</div><h3>Job Planning &amp; Routes</h3><p>Per-stop route briefs with truck-load and volume math, so the crew knows the plan before they roll.</p></div>
-      <div class="card"><div class="ico">📄</div><h3>Proposals &amp; PDFs</h3><p>Branded — your logo, your colors. Customer-ready proposals generated straight from the estimate.</p></div>
+    <div class="feats">
+      <div class="feat wide">
+        <div class="ico">🤖</div>
+        <h3>AI Estimating</h3>
+        <p>Photos and voice notes become an itemized, priced estimate in minutes. The AI gauges the truckload volume so nothing gets missed and nothing gets under-priced — the win that pays for itself on the first job.</p>
+      </div>
+      <div class="feat"><div class="ico">🏷️</div><h3>Pricing &amp; Price Book</h3><p>ZIP-mapped price lists with catch-all coverage — native, or synced live with your CRM.</p></div>
+      <div class="feat"><div class="ico">🗺️</div><h3>Job Planning &amp; Routes</h3><p>Per-stop route briefs with truck-load and volume math.</p></div>
+      <div class="feat"><div class="ico">📄</div><h3>Proposals &amp; PDFs</h3><p>Branded — your logo, your colors. Customer-ready, straight from the estimate.</p></div>
+      <div class="feat"><div class="ico">🪧</div><h3>Yard Signs</h3><p>Track sign placements in the field with a crew rewards game.</p></div>
+      <div class="feat"><div class="ico">👥</div><h3>Roles &amp; Access</h3><p>Owners, estimators, and crew each see exactly what they need.</p></div>
+      <div class="feat"><div class="ico">🔗</div><h3>CRM Integration</h3><p>Pull live pricing and push quotes into your CRM.</p></div>
     </div>
   </div>
 </section>
 
-<!-- MORE INSIDE -->
+<!-- TRUST -->
 <section class="sec-2">
   <div class="wrap">
-    <div class="sec-head">
-      <h2>And there's more inside.</h2>
-      <p>Deeper tools for the ops-minded owner.</p>
-    </div>
-    <div class="grid">
-      <div class="card"><div class="ico">🪧</div><h3>Yard Signs</h3><p>Track sign placements in the field with a rewards game that keeps the crew dropping them.</p></div>
-      <div class="card"><div class="ico">👥</div><h3>Roles &amp; Access</h3><p>Owners, estimators, and crew each see exactly what they need — permissions enforced at the data layer.</p></div>
-      <div class="card"><div class="ico">🔗</div><h3>CRM Integration</h3><p>Pull live pricing and push quotes straight into your CRM for teams that already run on one.</p></div>
-      <div class="card"><div class="ico">📊</div><h3>Won / Lost Tracking</h3><p>Mark jobs won or lost and keep a clean history of every estimate your team sends.</p></div>
+    <div class="trust">
+      <div class="t"><div class="tk">🔒</div><div><h4>Multi-tenant from day one</h4><p>Franchise or independent — every business gets its own private, isolated workspace.</p></div></div>
+      <div class="t"><div class="tk">📱</div><div><h4>Made for the field &amp; the office</h4><p>Crews work from a phone on site; owners get the dashboards. One app, not three.</p></div></div>
+      <div class="t"><div class="tk">📊</div><div><h4>Won/Lost &amp; audit trails</h4><p>Track every estimate, mark jobs won or lost, and keep a clean history your team can trust.</p></div></div>
     </div>
   </div>
 </section>
 
-<!-- TRIAL FORM -->
+<!-- SIGNUP -->
 <section id="trial">
-  <div class="wrap">
-    <div class="sec-head">
+  <div class="wrap signup">
+    <div class="pitch">
       <h2>Ready to get started?</h2>
       <p>Tell us a little about your business and we'll get your free trial set up.</p>
+      <ul>
+        <li>Free trial — no credit card</li>
+        <li>Set up in minutes, not weeks</li>
+        <li>Works whether you're 1 truck or 20</li>
+      </ul>
     </div>
     <div class="form-card">
       <form id="trialForm" novalidate>
@@ -214,23 +263,18 @@
           <div class="field"><label>Franchise Brand <span class="req">*</span></label>
             <select name="brand" required>
               <option value="">Select…</option>
-              <option>The Junkluggers</option>
-              <option>Junk King</option>
-              <option>College Hunks</option>
-              <option>1-800-GOT-JUNK?</option>
-              <option>Other</option>
-              <option>I'm not a franchisee</option>
+              <option>The Junkluggers</option><option>Junk King</option><option>College Hunks</option>
+              <option>1-800-GOT-JUNK?</option><option>Other</option><option>I'm not a franchisee</option>
             </select>
           </div>
           <div class="field"><label>Number of Trucks <span class="req">*</span></label>
             <select name="trucks" required>
               <option value="">Select…</option>
-              <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
-              <option>6–10</option><option>10+</option>
+              <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6–10</option><option>10+</option>
             </select>
           </div>
           <div class="field full"><label>City / Territory <span class="req">*</span></label><input name="territory" placeholder="Plymouth, MA" required></div>
-          <div class="field full"><label>What are you hoping CrewLogicAI helps you with? (optional)</label><textarea name="goals" placeholder="Tell us a bit about your current pain points or goals…"></textarea></div>
+          <div class="field full"><label>What are you hoping CrewLogicAI helps with? (optional)</label><textarea name="goals" placeholder="Tell us a bit about your current pain points or goals…"></textarea></div>
         </div>
         <div class="err" id="formErr">Please fill in all required fields.</div>
         <div class="form-submit"><button type="submit" class="btn btn-green">Start My Free Trial</button></div>
@@ -239,7 +283,7 @@
       <div class="thanks" id="thanks">
         <div class="big">✅</div>
         <h3>You're on the list!</h3>
-        <p>Thanks — we've got your details and we'll be in touch shortly to get your CrewLogicAI trial set up.</p>
+        <p>Thanks — we've got your details and we'll be in touch shortly to set up your CrewLogicAI trial.</p>
       </div>
     </div>
   </div>
@@ -249,31 +293,27 @@
   <div class="wrap foot">
     <div>© <span id="yr"></span> CrewLogicAI</div>
     <div class="links">
-      <a href="#">Privacy Policy</a>
-      <a href="#">Terms of Service</a>
-      <a href="#">Contact</a>
-      <a href="/" class="login">Login</a>
+      <a href="#">Privacy Policy</a><a href="#">Terms of Service</a><a href="#">Contact</a><a href="/" class="login">Login</a>
     </div>
   </div>
 </footer>
 
 <script>
   document.getElementById('yr').textContent = new Date().getFullYear();
-
-  // TODO: wire submit to the lead-capture backend (crewlogic-trial-signup edge fn → trial_requests table + notify).
+  // TODO: wire submit to lead-capture backend (crewlogic-trial-signup edge fn → trial_requests table + notify).
   document.getElementById('trialForm').addEventListener('submit', function (e) {
     e.preventDefault();
     var form = e.target;
     var data = Object.fromEntries(new FormData(form).entries());
-    var required = ['fullName', 'email', 'phone', 'business', 'brand', 'trucks', 'territory'];
-    var missing = required.filter(function (k) { return !String(data[k] || '').trim(); });
+    var required = ['fullName','email','phone','business','brand','trucks','territory'];
+    var missing = required.filter(function (k){ return !String(data[k]||'').trim(); });
     var errEl = document.getElementById('formErr');
-    if (missing.length) { errEl.style.display = 'block'; return; }
-    errEl.style.display = 'none';
+    if (missing.length){ errEl.style.display='block'; return; }
+    errEl.style.display='none';
     console.log('[trial signup] captured (not yet saved):', data);
-    form.style.display = 'none';
-    document.getElementById('thanks').style.display = 'block';
-    document.getElementById('thanks').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    form.style.display='none';
+    document.getElementById('thanks').style.display='block';
+    document.getElementById('thanks').scrollIntoView({behavior:'smooth',block:'center'});
   });
 </script>
 </body>
