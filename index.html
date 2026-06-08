@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.27.6 | 2026-06-07">
+  <meta name="crewlogic-version" content="v5.27.7 | 2026-06-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -6718,7 +6718,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const dl = document.getElementById('priceTownList');
       if (_plIsNative()) {
         if (sel) sel.style.display = 'none';                 // state comes from our own data
-        if (input) input.placeholder = 'Start typing a town…';
+        if (input) input.placeholder = 'Type any town in your service area…';
         try {
           const idx = await buildNativeTownIndex(false);
           if (dl) dl.innerHTML = idx.map(t => '<option value="' + t.label.replace(/"/g, '&quot;') + '"></option>').join('');
@@ -6764,25 +6764,40 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       let zip = null;
 
       if (_plIsNative()) {
-        // Resolve against the franchise's own enriched towns (fuzzy: label, exact, prefix, contains).
+        // Native town lookup. An EXACT match on an assigned town uses that town's own list.
+        // Anything else — an unassigned/catch-all town (e.g. "North Attleboro") or a spelling
+        // variant — is resolved town→ZIP via Zippopotam and handed to the normal ZIP lookup,
+        // so the catch-all prices it, mirroring ZIP lookup + the estimate editor. (Was a loose
+        // fuzzy match that could mis-route an unassigned town to an assigned neighbor.)
         resultsEl.innerHTML = '<div class="price-loading"><span class="spinner-inline"></span>Finding ' + town + '…</div>';
         try {
           const idx = await buildNativeTownIndex(false);
           const norm = town.toLowerCase();
           const hit = idx.find(t => t.label.toLowerCase() === norm)
-                   || idx.find(t => t.city.toLowerCase() === norm)
-                   || idx.find(t => t.city.toLowerCase().startsWith(norm))
-                   || idx.find(t => t.city.toLowerCase().includes(norm));
-          zip = hit ? hit.zip : null;
-          if (!zip) {
-            resultsEl.innerHTML = '';
-            const isOwner = !!(currentUser && currentUser.role === 'owner');
-            errorEl.textContent = isOwner
-              ? 'That town isn’t assigned to a price list yet. Add it in Settings → Price Book (the Zips button), or mark a list “covers all other ZIPs.”'
-              : 'That town isn’t set up yet — ask your owner or admin to add it.';
-            errorEl.style.display = 'block';
-            btn.classList.remove('loading');
-            return;
+                   || idx.find(t => t.city.toLowerCase() === norm);
+          if (hit) {
+            zip = hit.zip;                       // assigned town → its own list
+          } else {
+            // Not an assigned town → resolve via the franchise's state(s), derived from its
+            // assigned ZIPs (plus office state), then let the catch-all price it.
+            const states = Array.from(new Set(
+              idx.map(t => (t.state || '').toUpperCase()).filter(Boolean)
+                 .concat([(((currentUser && currentUser.officeState) || '').toUpperCase())].filter(Boolean))
+            ));
+            for (const st of states) {
+              try { zip = await resolveTownToZip(town, st); } catch (e) { zip = null; }
+              if (zip) break;
+            }
+            if (!zip) {
+              resultsEl.innerHTML = '';
+              const isOwner = !!(currentUser && currentUser.role === 'owner');
+              errorEl.textContent = isOwner
+                ? 'Couldn’t find “' + town + '” in your service area. Check the spelling, or enter the ZIP.'
+                : 'That town isn’t set up yet — ask your owner or admin, or enter the ZIP.';
+              errorEl.style.display = 'block';
+              btn.classList.remove('loading');
+              return;
+            }
           }
         } catch (e) {
           resultsEl.innerHTML = '';
