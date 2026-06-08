@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CrewLogicAI — AI estimating & ops for junk-removal crews</title>
+<meta name="description" content="CrewLogicAI turns photos and voice notes into accurate junk-removal estimates in minutes — with pricing, proposals, job planning, and route math built in.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#0e1b2e;          /* dark hero / footer */
+    --navy-2:#13243b;
+    --ink:#0f1c2e;           /* headline text on light */
+    --body:#46586c;          /* body text on light */
+    --green:#00D26A;         /* accent / CTA */
+    --green-ink:#062b16;     /* text on green buttons */
+    --light:#f6f8fb;         /* light section bg */
+    --light-2:#eef2f7;       /* alt light bg */
+    --card:#ffffff;
+    --border:#e3e9f1;
+    --shadow:0 10px 30px rgba(15,28,46,0.06);
+    --radius:16px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html{scroll-behavior:smooth;}
+  body{font-family:'DM Sans',system-ui,-apple-system,sans-serif;color:var(--ink);background:#fff;line-height:1.55;-webkit-font-smoothing:antialiased;}
+  a{color:inherit;text-decoration:none;}
+  .wrap{max-width:1140px;margin:0 auto;padding:0 24px;}
+  .eyebrow{display:inline-block;font-size:13px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:var(--green);}
+
+  /* Header */
+  header{position:sticky;top:0;z-index:50;background:rgba(255,255,255,0.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);}
+  .nav{display:flex;align-items:center;justify-content:space-between;height:64px;}
+  .logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:19px;color:var(--ink);letter-spacing:-0.4px;}
+  .logo .dot{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9px;background:var(--green);color:var(--green-ink);font-size:16px;}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:inherit;font-weight:700;border:none;border-radius:12px;cursor:pointer;transition:transform .06s ease,filter .15s ease;font-size:15px;}
+  .btn:active{transform:scale(0.97);}
+  .btn-green{background:var(--green);color:var(--green-ink);padding:14px 28px;font-size:16px;}
+  .btn-green:hover{filter:brightness(1.05);}
+  .btn-navy{background:var(--navy);color:#fff;padding:11px 22px;}
+  .btn-ghost{background:transparent;color:#fff;border:1.5px solid rgba(255,255,255,0.4);padding:9px 20px;}
+
+  /* Hero */
+  .hero{position:relative;overflow:hidden;background:radial-gradient(1200px 600px at 80% -10%,#1c3a5e 0%,transparent 60%),linear-gradient(160deg,var(--navy) 0%,var(--navy-2) 100%);color:#fff;text-align:center;}
+  .hero::before,.hero::after{content:'';position:absolute;border-radius:50%;background:rgba(255,255,255,0.04);}
+  .hero::before{width:520px;height:520px;right:-120px;top:-80px;}
+  .hero::after{width:420px;height:420px;left:-160px;bottom:-180px;}
+  .hero .inner{position:relative;z-index:1;padding:84px 0 96px;}
+  .hero .pill{border:1px solid rgba(0,210,106,0.35);background:rgba(0,210,106,0.08);border-radius:999px;padding:7px 18px;}
+  .hero h1{font-size:clamp(38px,6vw,68px);font-weight:800;line-height:1.04;letter-spacing:-1.5px;margin:22px auto 0;max-width:14ch;}
+  .hero p.sub{margin:22px auto 0;max-width:620px;font-size:clamp(16px,2.2vw,19px);color:#c4d0de;}
+  .hero .cta-row{margin-top:34px;}
+  .hero .reassure{margin-top:14px;font-size:13px;color:#8ea0b5;}
+
+  /* Section scaffolding */
+  section{padding:84px 0;}
+  .sec-light{background:var(--light);}
+  .sec-alt{background:var(--light-2);}
+  .sec-head{text-align:center;max-width:760px;margin:0 auto 52px;}
+  .sec-head h2{font-size:clamp(28px,4.2vw,42px);font-weight:800;letter-spacing:-0.8px;color:var(--ink);margin-top:10px;}
+  .sec-head p{margin-top:14px;color:var(--body);font-size:17px;}
+
+  /* Cards */
+  .grid{display:grid;gap:22px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:28px 24px;box-shadow:var(--shadow);}
+  .card .ico{width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:23px;background:rgba(0,210,106,0.12);margin-bottom:16px;}
+  .card h3{font-size:18px;font-weight:700;color:var(--ink);line-height:1.25;}
+  .card p{margin-top:9px;color:var(--body);font-size:15px;}
+
+  /* Form */
+  .form-card{max-width:760px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:34px;}
+  .form-grid{display:grid;gap:18px 20px;grid-template-columns:1fr 1fr;}
+  .field.full{grid-column:1 / -1;}
+  label{display:block;font-size:13px;font-weight:700;color:var(--ink);margin-bottom:7px;}
+  label .req{color:var(--green);}
+  input,select,textarea{width:100%;font-family:inherit;font-size:15px;color:var(--ink);background:#fff;border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;transition:border-color .12s ease,box-shadow .12s ease;}
+  input::placeholder,textarea::placeholder{color:#9aa8b8;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(0,210,106,0.15);}
+  textarea{resize:vertical;min-height:96px;}
+  .form-submit{margin-top:24px;}
+  .form-submit .btn{width:100%;padding:16px;font-size:16px;}
+  .form-note{text-align:center;color:var(--body);font-size:13px;margin-top:12px;}
+  .err{color:#dc2626;font-size:13px;margin-top:10px;display:none;}
+  .thanks{display:none;text-align:center;padding:18px 0;}
+  .thanks .big{font-size:46px;}
+  .thanks h3{font-size:24px;font-weight:800;color:var(--ink);margin-top:8px;}
+  .thanks p{color:var(--body);margin-top:8px;font-size:16px;}
+
+  /* Footer */
+  footer{background:var(--navy);color:#9fb0c4;padding:34px 0;}
+  .foot{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;font-size:14px;}
+  .foot a{color:#c4d0de;}
+  .foot a:hover{color:#fff;}
+  .foot .links{display:flex;gap:22px;flex-wrap:wrap;}
+  .foot .login{color:var(--green);font-weight:700;}
+
+  @media(max-width:680px){
+    section{padding:60px 0;}
+    .form-card{padding:24px 18px;}
+    .form-grid{grid-template-columns:1fr;}
+    .hero .inner{padding:64px 0 72px;}
+    .foot{justify-content:center;text-align:center;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="logo" href="#top"><span class="dot">⚡</span> CrewLogic<span style="color:var(--green);">AI</span></a>
+    <a href="/" class="btn btn-navy">Login</a>
+  </div>
+</header>
+
+<a id="top"></a>
+<section class="hero" style="padding:0;">
+  <div class="wrap inner">
+    <span class="eyebrow pill">AI estimating &amp; ops for junk-removal crews</span>
+    <h1>Price the job before you leave the driveway.</h1>
+    <p class="sub">CrewLogicAI turns photos and voice notes into accurate junk-removal estimates in minutes — with pricing, branded proposals, job planning, and route math built in. Everything your crew needs, in one app.</p>
+    <div class="cta-row">
+      <a href="#trial" class="btn btn-green">Start Free Trial</a>
+    </div>
+    <div class="reassure">Free trial for franchise owners &amp; operators. No credit card required.</div>
+  </div>
+</section>
+
+<!-- WHY -->
+<section class="sec-light">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Why CrewLogicAI</span>
+      <h2>Built by people who actually run the routes</h2>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <div class="ico">📸</div>
+        <h3>Estimates from photos &amp; voice</h3>
+        <p>Walk the job, snap a few photos or just talk it through — the AI builds a priced, itemized estimate you can send on the spot.</p>
+      </div>
+      <div class="card">
+        <div class="ico">🔒</div>
+        <h3>Multi-tenant from day one</h3>
+        <p>Every franchise gets its own private workspace. Your customers, pricing, and jobs stay yours — isolated and secure.</p>
+      </div>
+      <div class="card">
+        <div class="ico">📱</div>
+        <h3>Made for the field, not just the office</h3>
+        <p>Crews work from a phone on site. Owners get the dashboards. One app instead of three.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>Features</h2>
+      <p>Everything you need to estimate, price, and plan — in one place.</p>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="ico">🤖</div><h3>AI Estimating</h3><p>Photos and voice notes become an itemized, priced estimate in minutes. No guesswork, no missed items.</p></div>
+      <div class="card"><div class="ico">🏷️</div><h3>Pricing &amp; Price Book</h3><p>ZIP-mapped price lists with optional catch-all coverage — run it native, or synced live with Vonigo.</p></div>
+      <div class="card"><div class="ico">🗺️</div><h3>Job Planning &amp; Routes</h3><p>Per-stop route briefs with truck-load and volume math, so the crew knows the plan before they roll.</p></div>
+      <div class="card"><div class="ico">📄</div><h3>Proposals &amp; PDFs</h3><p>Branded, customer-ready proposals generated straight from the estimate — your logo, your colors.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- MORE INSIDE -->
+<section class="sec-alt">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>And there's more inside.</h2>
+      <p>Deeper tools for the ops-minded owner.</p>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="ico">🪧</div><h3>Yard Signs</h3><p>Track sign placements in the field with a rewards game that keeps the crew dropping them.</p></div>
+      <div class="card"><div class="ico">👥</div><h3>Roles &amp; Access</h3><p>Owners, estimators, and crew each see exactly what they need — permissions enforced at the data layer.</p></div>
+      <div class="card"><div class="ico">🔗</div><h3>Vonigo Integration</h3><p>Pull live pricing and push quotes straight into Vonigo for franchises that run on it.</p></div>
+      <div class="card"><div class="ico">📊</div><h3>Won / Lost Tracking</h3><p>Mark jobs won or lost and keep a clean history of every estimate your team sends.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- TRIAL FORM -->
+<section class="sec-light" id="trial">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>Ready to get started?</h2>
+      <p>Tell us a little about your business and we'll get your free trial set up.</p>
+    </div>
+    <div class="form-card">
+      <form id="trialForm" novalidate>
+        <div class="form-grid">
+          <div class="field"><label>Full Name <span class="req">*</span></label><input name="fullName" placeholder="Jane Smith" required></div>
+          <div class="field"><label>Email Address <span class="req">*</span></label><input name="email" type="email" placeholder="jane@example.com" required></div>
+          <div class="field"><label>Phone Number <span class="req">*</span></label><input name="phone" type="tel" placeholder="(555) 867-5309" required></div>
+          <div class="field"><label>Business / Franchise Name <span class="req">*</span></label><input name="business" placeholder="Smith Junk Removal LLC" required></div>
+          <div class="field"><label>Franchise Brand <span class="req">*</span></label>
+            <select name="brand" required>
+              <option value="">Select…</option>
+              <option>The Junkluggers</option>
+              <option>Junk King</option>
+              <option>College Hunks</option>
+              <option>1-800-GOT-JUNK?</option>
+              <option>Other</option>
+              <option>I'm not a franchisee</option>
+            </select>
+          </div>
+          <div class="field"><label>Number of Trucks <span class="req">*</span></label>
+            <select name="trucks" required>
+              <option value="">Select…</option>
+              <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
+              <option>6–10</option><option>10+</option>
+            </select>
+          </div>
+          <div class="field full"><label>City / Territory <span class="req">*</span></label><input name="territory" placeholder="Plymouth, MA" required></div>
+          <div class="field full"><label>What are you hoping CrewLogicAI helps you with? (optional)</label><textarea name="goals" placeholder="Tell us a bit about your current pain points or goals…"></textarea></div>
+        </div>
+        <div class="err" id="formErr">Please fill in all required fields.</div>
+        <div class="form-submit"><button type="submit" class="btn btn-green">Start My Free Trial</button></div>
+        <div class="form-note">No credit card required. We'll reach out to finish setting up your workspace.</div>
+      </form>
+      <div class="thanks" id="thanks">
+        <div class="big">✅</div>
+        <h3>You're on the list!</h3>
+        <p>Thanks — we've got your details and we'll be in touch shortly to get your CrewLogicAI trial set up.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot">
+    <div>© <span id="yr"></span> CrewLogicAI</div>
+    <div class="links">
+      <a href="#">Privacy Policy</a>
+      <a href="#">Terms of Service</a>
+      <a href="#">Contact</a>
+      <a href="/" class="login">Login</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  document.getElementById('yr').textContent = new Date().getFullYear();
+
+  // TODO: wire submit to the lead-capture backend (crewlogic-trial-signup edge fn → trial_requests table + notify).
+  // For now: validate required fields and show the thank-you state.
+  document.getElementById('trialForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var form = e.target;
+    var data = Object.fromEntries(new FormData(form).entries());
+    var required = ['fullName', 'email', 'phone', 'business', 'brand', 'trucks', 'territory'];
+    var missing = required.filter(function (k) { return !String(data[k] || '').trim(); });
+    var errEl = document.getElementById('formErr');
+    if (missing.length) { errEl.style.display = 'block'; return; }
+    errEl.style.display = 'none';
+    console.log('[trial signup] captured (not yet saved):', data);
+    form.style.display = 'none';
+    document.getElementById('thanks').style.display = 'block';
+    document.getElementById('thanks').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+</script>
+</body>
+</html>
