@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CrewLogicAI — AI estimating &amp; ops for junk-removal crews</title>
+<meta name="description" content="Photos and voice in, a priced estimate out. The AI sizes up the volume, shows your cost and margin, and builds the proposal — before you leave the driveway.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --bg:#0b131d; --bg-2:#0e1825; --card:#152230; --tile:#1e2f40;
+    --ink:#eef4fa; --body:#9fb1c2; --muted:#6e8194;
+    --green:#00E785; --green-ink:#04261a; --green-soft:rgba(0,231,133,0.12);
+    --border:#22354a; --radius:16px; --shadow:0 18px 44px rgba(0,0,0,0.4);
+    --mono:'Space Mono',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html{scroll-behavior:smooth;}
+  body{font-family:'DM Sans',system-ui,-apple-system,sans-serif;color:var(--body);background:var(--bg);line-height:1.55;-webkit-font-smoothing:antialiased;}
+  a{color:inherit;text-decoration:none;}
+  .wrap{max-width:1160px;margin:0 auto;padding:0 24px;}
+  .eyebrow{display:inline-block;font-size:13px;font-weight:700;letter-spacing:1.7px;text-transform:uppercase;color:var(--green);}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:inherit;font-weight:700;border:none;border-radius:12px;cursor:pointer;transition:transform .06s ease,filter .15s ease;font-size:15px;}
+  .btn:active{transform:scale(0.97);}
+  .btn-green{background:var(--green);color:var(--green-ink);padding:15px 28px;font-size:16px;box-shadow:0 8px 24px rgba(0,231,133,0.22);}
+  .btn-green:hover{filter:brightness(1.06);}
+  .btn-outline{background:rgba(255,255,255,0.03);color:var(--ink);border:1px solid var(--border);padding:14px 24px;}
+  .btn-outline:hover{border-color:var(--green);}
+  .btn-ghost{background:transparent;color:var(--ink);border:1px solid var(--border);padding:9px 20px;font-size:14px;}
+  .btn-ghost:hover{border-color:var(--green);}
+
+  header{position:sticky;top:0;z-index:50;background:rgba(11,19,29,0.74);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);}
+  .nav{display:flex;align-items:center;justify-content:space-between;height:66px;}
+  .logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:19px;color:var(--ink);letter-spacing:-0.4px;}
+  .logo .ai-box{display:inline-flex;align-items:center;justify-content:center;background:var(--green);color:#000;font-weight:800;font-size:15px;line-height:1;letter-spacing:0.5px;border-radius:8px;padding:4px 8px;}
+
+  /* HERO — split: copy + the 3-step methodology panel */
+  .hero{position:relative;overflow:hidden;
+    background:radial-gradient(700px 460px at 12% -10%,rgba(0,231,133,0.10),transparent 60%),
+               radial-gradient(620px 520px at 92% 0%,rgba(40,90,160,0.16),transparent 55%),
+               linear-gradient(180deg,var(--bg-2),var(--bg));
+    border-bottom:1px solid var(--border);}
+  .hero::before{content:'';position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,0.03) 1px,transparent 1px);background-size:26px 26px;mask-image:linear-gradient(180deg,#000,transparent 75%);}
+  .hero-grid{position:relative;z-index:1;display:grid;grid-template-columns:1.05fr 0.95fr;gap:54px;align-items:center;padding:78px 0 84px;}
+  .hero h1{font-size:clamp(36px,5vw,58px);font-weight:800;line-height:1.05;letter-spacing:-1.4px;margin:20px 0 0;color:var(--ink);}
+  .hero h1 .accent{color:var(--green);}
+  .hero .pill{border:1px solid rgba(0,231,133,0.32);background:var(--green-soft);border-radius:999px;padding:7px 16px;}
+  .hero-logo{margin-bottom:24px;}
+  .hero-logo .wm{display:inline-flex;align-items:center;font-size:clamp(34px,4.6vw,46px);font-weight:800;letter-spacing:-1.8px;color:#fff;line-height:1;}
+  .hero-logo .wm .ai-box{display:inline-flex;align-items:center;justify-content:center;background:var(--green);color:#000;border-radius:10px;padding:3px 13px;margin-left:12px;font-size:0.72em;letter-spacing:0.5px;}
+  .hero-logo .tag{margin-top:10px;font-size:14px;font-weight:700;letter-spacing:3px;color:var(--body);}
+  .hero-logo .tag b{color:var(--green);font-weight:700;}
+  .hero p.sub{margin:20px 0 0;font-size:clamp(16px,2vw,19px);color:var(--body);max-width:46ch;}
+  .hero .cta-row{margin-top:30px;display:flex;gap:14px;flex-wrap:wrap;}
+  .hero .reassure{margin-top:16px;font-size:13px;color:var(--muted);}
+
+  /* How-it-works panel (lives in the hero) */
+  .how{background:var(--card);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow);padding:24px 26px 8px;}
+  .how .lab{font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--green);}
+  .how .step{display:flex;gap:15px;padding:16px 0;}
+  .how .step:not(:last-child){border-bottom:1px solid var(--border);}
+  .how .num{flex:0 0 auto;width:42px;height:42px;border-radius:12px;background:var(--green-soft);border:1px solid rgba(0,231,133,0.3);color:var(--green);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:18px;font-weight:700;}
+  .how h4{color:var(--ink);font-size:16px;font-weight:700;}
+  .how p{color:var(--body);font-size:14px;margin-top:3px;}
+
+  section{padding:84px 0;}
+  .sec-2{background:var(--bg-2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);}
+  .head{max-width:680px;margin-bottom:46px;}
+  .head h2{font-size:clamp(27px,4vw,40px);font-weight:800;letter-spacing:-0.8px;color:var(--ink);margin-top:9px;}
+  .head p{margin-top:12px;color:var(--body);font-size:17px;}
+
+  /* Features — asymmetric grid w/ one wide highlight + accent hover */
+  .feats{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;}
+  .feat{position:relative;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:24px;transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease;}
+  .feat::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;border-radius:var(--radius) var(--radius) 0 0;background:linear-gradient(90deg,var(--green),transparent);opacity:0;transition:opacity .15s ease;}
+  .feat:hover{transform:translateY(-4px);border-color:#2f4a63;box-shadow:var(--shadow);}
+  .feat:hover::before{opacity:1;}
+  .feat.wide{grid-column:span 2;background:linear-gradient(135deg,#16283a,#142031);}
+  .feat .ico{width:50px;height:50px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:24px;background:var(--tile);box-shadow:inset 0 0 0 1px rgba(0,231,133,0.22);margin-bottom:14px;}
+  .feat h3{font-size:17px;font-weight:700;color:var(--ink);line-height:1.25;}
+  .feat.wide h3{font-size:22px;}
+  .feat p{margin-top:8px;color:var(--body);font-size:14.5px;}
+
+  /* Trust band */
+  .trust{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;}
+  .trust .t{display:flex;gap:14px;align-items:flex-start;}
+  .trust .t .tk{flex:0 0 auto;width:40px;height:40px;border-radius:11px;background:var(--green-soft);display:flex;align-items:center;justify-content:center;font-size:19px;}
+  .trust .t h4{color:var(--ink);font-size:16px;font-weight:700;}
+  .trust .t p{color:var(--body);font-size:14px;margin-top:3px;}
+
+  /* Signup — split */
+  .signup{display:grid;grid-template-columns:0.85fr 1.15fr;gap:48px;align-items:center;}
+  .signup .pitch h2{font-size:clamp(26px,3.6vw,38px);font-weight:800;letter-spacing:-0.7px;color:var(--ink);}
+  .signup .pitch p{margin-top:12px;color:var(--body);font-size:16px;}
+  .signup .pitch ul{list-style:none;margin-top:20px;display:grid;gap:11px;}
+  .signup .pitch li{display:flex;gap:10px;align-items:center;color:var(--body);font-size:15px;}
+  .signup .pitch li::before{content:'✓';color:var(--green-ink);background:var(--green);width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex:0 0 auto;}
+  .form-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:30px;}
+  .form-grid{display:grid;gap:16px 18px;grid-template-columns:1fr 1fr;}
+  .field.full{grid-column:1 / -1;}
+  label{display:block;font-size:13px;font-weight:700;color:var(--ink);margin-bottom:6px;}
+  label .req{color:var(--green);}
+  input,textarea{width:100%;font-family:inherit;font-size:15px;color:var(--ink);background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:11px 13px;transition:border-color .12s ease,box-shadow .12s ease;}
+  input::placeholder,textarea::placeholder{color:var(--muted);}
+  input:focus,textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft);}
+  .form-submit{margin-top:20px;}
+  .form-submit .btn{width:100%;padding:15px;font-size:16px;}
+  .form-note{text-align:center;color:var(--muted);font-size:12.5px;margin-top:11px;}
+  .err{color:#fb7185;font-size:13px;margin-top:10px;display:none;}
+  .thanks{display:none;text-align:center;padding:14px 0;}
+  .thanks .big{font-size:44px;}
+  .thanks h3{font-size:23px;font-weight:800;color:var(--ink);margin-top:8px;}
+  .thanks p{color:var(--body);margin-top:8px;}
+
+  footer{background:#08101a;color:var(--muted);padding:32px 0;border-top:1px solid var(--border);}
+  .foot{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;font-size:14px;}
+  .foot a{color:var(--body);} .foot a:hover{color:var(--ink);}
+  .foot .links{display:flex;gap:22px;flex-wrap:wrap;}
+  .foot .login{color:var(--green);font-weight:700;}
+
+  @media(max-width:920px){
+    .hero-grid{grid-template-columns:1fr;gap:36px;padding:58px 0 62px;}
+    .feats{grid-template-columns:repeat(2,1fr);}
+    .feat.wide{grid-column:span 2;}
+    .trust{grid-template-columns:1fr;gap:20px;}
+    .signup{grid-template-columns:1fr;gap:30px;}
+  }
+  @media(max-width:560px){
+    section{padding:58px 0;}
+    .feats{grid-template-columns:1fr;}
+    .feat.wide{grid-column:span 1;}
+    .form-grid{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="logo" href="#top">CrewLogic<span class="ai-box">AI</span></a>
+    <a href="/" class="btn btn-ghost">Login</a>
+  </div>
+</header>
+
+<a id="top"></a>
+<section class="hero" style="padding:0;">
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <div class="hero-logo">
+        <div class="wm">CrewLogic<span class="ai-box">AI</span></div>
+        <div class="tag">OPTIMIZE <b>&#8226;</b> ESTIMATE <b>&#8226;</b> PLAN</div>
+      </div>
+      <span class="eyebrow pill">AI estimating &amp; ops for junk-removal crews</span>
+      <h1>Price the job before you <span class="accent">leave the driveway.</span></h1>
+      <p class="sub">Photos and voice in — a priced estimate out. The AI sizes up the truckload volume, shows your cost and margin, and builds the proposal. Everything your crew needs, in one app.</p>
+      <div class="cta-row">
+        <a href="#trial" class="btn btn-green">Start Free Trial</a>
+        <a href="#features" class="btn btn-outline">Explore features</a>
+      </div>
+      <div class="reassure">Free trial for owners &amp; operators. No credit card required.</div>
+    </div>
+    <div class="how">
+      <div class="lab">How it works</div>
+      <div class="step"><div class="num">1</div><div><h4>Capture &amp; price</h4><p>Snap photos or talk the job through — the AI sizes the truckload volume and builds a priced, itemized estimate. No tape measure, no guesswork.</p></div></div>
+      <div class="step"><div class="num">2</div><div><h4>See cost &amp; margin</h4><p>Labor, disposal, and fuel roll into a live margin on every job — so you never underbid and always know your profit.</p></div></div>
+      <div class="step"><div class="num">3</div><div><h4>Send &amp; win</h4><p>Send a detailed, branded proposal — room-by-room descriptions and photos — before you've left the driveway.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section id="features">
+  <div class="wrap">
+    <div class="head">
+      <span class="eyebrow">The platform</span>
+      <h2>Everything you need, in one app.</h2>
+    </div>
+    <div class="feats">
+      <div class="feat wide">
+        <div class="ico">🤖</div>
+        <h3>AI Estimating</h3>
+        <p>Photos and voice notes become an itemized, priced estimate in minutes. The AI gauges the truckload volume so nothing gets missed and nothing gets under-priced — the win that pays for itself on the first job.</p>
+      </div>
+      <div class="feat"><div class="ico">💵</div><h3>Cost &amp; Margin</h3><p>Labor, disposal, and fuel roll up into a live profit margin on every estimate.</p></div>
+      <div class="feat"><div class="ico">🏷️</div><h3>Pricing &amp; Price Book</h3><p>ZIP-mapped price lists with catch-all coverage — native, or synced with your CRM.</p></div>
+      <div class="feat"><div class="ico">🗺️</div><h3>Job Planning &amp; Routes</h3><p>Per-stop route briefs with truck-load and volume math.</p></div>
+      <div class="feat"><div class="ico">📄</div><h3>Proposals &amp; PDFs</h3><p>Branded — your logo, your colors. Customer-ready, straight from the estimate.</p></div>
+      <div class="feat"><div class="ico">🪧</div><h3>Yard Signs</h3><p>Track sign placements in the field with a crew rewards game.</p></div>
+      <div class="feat"><div class="ico">🔗</div><h3>CRM Integration</h3><p>Pull live pricing and push quotes into your CRM.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- TRUST -->
+<section class="sec-2">
+  <div class="wrap">
+    <div class="trust">
+      <div class="t"><div class="tk">🔒</div><div><h4>Multi-tenant from day one</h4><p>Franchise or independent — every business gets its own private, isolated workspace.</p></div></div>
+      <div class="t"><div class="tk">📱</div><div><h4>Made for the field &amp; the office</h4><p>Crews work from a phone on site; owners get the dashboards. One app, not three.</p></div></div>
+      <div class="t"><div class="tk">📊</div><div><h4>Won/Lost &amp; audit trails</h4><p>Track every estimate, mark jobs won or lost, and keep a clean history your team can trust.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- SIGNUP -->
+<section id="trial">
+  <div class="wrap signup">
+    <div class="pitch">
+      <h2>Ready to get started?</h2>
+      <p>Tell us a little about your business and we'll get your free trial set up.</p>
+      <ul>
+        <li>Free trial — no credit card</li>
+        <li>Set up in minutes, not weeks</li>
+        <li>Works whether you're 1 truck or 20</li>
+      </ul>
+    </div>
+    <div class="form-card">
+      <form id="trialForm" novalidate>
+        <div class="form-grid">
+          <div class="field"><label>Full Name <span class="req">*</span></label><input name="fullName" placeholder="Jane Smith" required></div>
+          <div class="field"><label>Email Address <span class="req">*</span></label><input name="email" type="email" placeholder="jane@example.com" required></div>
+          <div class="field"><label>Phone Number <span class="req">*</span></label><input name="phone" type="tel" placeholder="(555) 867-5309" required></div>
+          <div class="field"><label>Business / Franchise Name <span class="req">*</span></label><input name="business" placeholder="Smith Junk Removal LLC" required></div>
+          <div class="field full"><label>City / Territory <span class="req">*</span></label><input name="territory" placeholder="Plymouth, MA" required></div>
+        </div>
+        <div class="err" id="formErr">Please fill in all required fields.</div>
+        <div class="form-submit"><button type="submit" class="btn btn-green">Start My Free Trial</button></div>
+        <div class="form-note">No credit card required. We'll reach out to finish setting up your workspace.</div>
+      </form>
+      <div class="thanks" id="thanks">
+        <div class="big">✉️</div>
+        <h3>Check your email</h3>
+        <p>We sent a secure sign-in link to <b id="thanksEmail" style="color:var(--ink);"></b>. Click it to start your CrewLogicAI trial.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot">
+    <div>© <span id="yr"></span> CrewLogicAI</div>
+    <div class="links">
+      <a href="#">Privacy Policy</a><a href="#">Terms of Service</a><a href="#">Contact</a><a href="/" class="login">Login</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  document.getElementById('yr').textContent = new Date().getFullYear();
+
+  // ===== Trial signup =====
+  // Fire a Supabase magic link carrying the form info as user metadata; the link lands on the
+  // APP (separate subdomain), where the native-signup flow provisions a trialing workspace.
+  // Marketing and app are now separate Cloudflare Pages projects on separate domains:
+  //   crewlogicai.com        → this marketing site (prod)
+  //   app.crewlogicai.com    → the app (prod)
+  // Anything that ISN'T the production marketing domain is treated as DEV (localhost + any
+  // *.pages.dev preview), so unknown preview hostnames don't need to be enumerated.
+  var _PROD = location.hostname === 'crewlogicai.com' || location.hostname === 'www.crewlogicai.com';
+  var _DEV = !_PROD;
+  var SB_URL = _DEV ? 'https://bagkimfwmpwjfhfhmsrb.supabase.co' : 'https://ozfkpxyachigfpcmvekz.supabase.co';
+  var SB_ANON = _DEV ? 'sb_publishable_PNHsikZJAodAZAINaBJbxQ_m2USrJnW' : 'sb_publishable_Jcy2e2s2x12kY0Az6jGzUw_Jn3ikNpt';
+  // Where the magic link returns the user — the APP, never back to this marketing page.
+  var APP_URL = _DEV ? 'https://dev.crewlogic.pages.dev' : 'https://app.crewlogicai.com';
+  var _sb = null;
+  function _client(){ if(!_sb && window.supabase){ _sb = window.supabase.createClient(SB_URL, SB_ANON); } return _sb; }
+
+  document.getElementById('trialForm').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var form = e.target;
+    var data = Object.fromEntries(new FormData(form).entries());
+    var required = ['fullName','email','phone','business','territory'];
+    var errEl = document.getElementById('formErr');
+    if (required.filter(function (k){ return !String(data[k]||'').trim(); }).length){
+      errEl.textContent = 'Please fill in all required fields.'; errEl.style.display='block'; return;
+    }
+    errEl.style.display='none';
+    var client = _client();
+    if (!client){ errEl.textContent = 'Still loading — please try again in a moment.'; errEl.style.display='block'; return; }
+    var btn = form.querySelector('button[type=submit]');
+    var orig = btn.textContent; btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+      var res = await client.auth.signInWithOtp({
+        email: String(data.email).trim(),
+        options: {
+          emailRedirectTo: APP_URL,
+          data: { full_name: data.fullName, company: data.business, phone: data.phone, territory: data.territory }
+        }
+      });
+      if (res.error) throw res.error;
+      document.getElementById('thanksEmail').textContent = String(data.email).trim();
+      form.style.display='none';
+      document.getElementById('thanks').style.display='block';
+      document.getElementById('thanks').scrollIntoView({behavior:'smooth',block:'center'});
+    } catch (err) {
+      errEl.textContent = 'Sorry — couldn’t send your sign-in link. Please try again.';
+      errEl.style.display='block';
+      btn.disabled = false; btn.textContent = orig;
+    }
+  });
+</script>
+</body>
+</html>
