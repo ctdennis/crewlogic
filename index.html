@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.28.1 | 2026-06-09">
+  <meta name="crewlogic-version" content="v5.28.2 | 2026-06-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8939,11 +8939,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       isDirty = false; // estimate just loaded — no unsaved changes
 
-      // If cost analysis panel is open, repopulate it
+      // If cost analysis panel is open, repopulate it. Suppress auto-save so this
+      // programmatic restore can't mark a freshly-opened estimate as dirty (the false
+      // "save or leave?" prompt on open).
       if (document.getElementById('costAnalysisBody') &&
           document.getElementById('costAnalysisBody').style.display !== 'none') {
+        _suppressAutoSave = true;
         populateCostAnalysisFields();
         updateCostAnalysis();
+        _suppressAutoSave = false;
       }
     }
 
@@ -17635,7 +17639,12 @@ Please review the estimate below. If you have any questions or would like to adj
       ca.margin   = parseFloat(document.getElementById('caMargin').value) || 0;
       ca.cans     = parseFloat(document.getElementById('caCans').value) || 0;
       ca.canCost  = parseFloat(document.getElementById('caCanCost').value) || 0;
-      isDirty = true;
+      // Mark dirty only on genuine user edits — NOT during programmatic population/restore
+      // (_suppressAutoSave) and NEVER for terminal won/lost estimates. updateCostAnalysis()
+      // calls this to read fields into the model, so the display still recomputes regardless.
+      if (!_suppressAutoSave && currentEstimate.status !== 'won' && currentEstimate.status !== 'lost') {
+        isDirty = true;
+      }
     }
 
     function toggleContainerComparison() {
