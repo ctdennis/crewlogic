@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.28.2 | 2026-06-09">
+  <meta name="crewlogic-version" content="v5.29.0 | 2026-06-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3949,7 +3949,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             // provisions via crewlogic-signup. Junkluggers emails don't self-provision natively —
             // they belong on the Google/Vonigo path — so send them to the no-account screen.
             if (_isJunkluggersEmail(sbSession.user.email)) { showAuthErrorScreen('no_account'); return true; }
-            showNameWorkspaceScreen(sbSession.user.email);
+            // Pre-fill from the marketing trial form's metadata (company/full_name) so the
+            // new owner doesn't retype what they already entered on crewlogicai.com.
+            showNameWorkspaceScreen(sbSession.user.email, sbSession.user.user_metadata);
             return true;
           }
         }
@@ -5367,7 +5369,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // (brand-new standalone owner). Collects the company name AFTER email verification, then
     // provisions the tenant+franchise via crewlogic-signup. Built on the fly (like authErrorScreen)
     // so we don't touch the static markup.
-    function showNameWorkspaceScreen(email) {
+    function showNameWorkspaceScreen(email, meta) {
       const loginScreen = document.getElementById('loginScreen');
       if (loginScreen) loginScreen.style.display = 'none';
       let scr = document.getElementById('nameWorkspaceScreen');
@@ -5390,7 +5392,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '<button onclick="signOut()" style="width:100%;margin-top:4px;background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;">Cancel</button>' +
         '</div>';
       scr.style.display = 'flex';
-      setTimeout(() => { const c = document.getElementById('nwCompany'); if (c) c.focus(); }, 50);
+      // Pre-fill from trial-form metadata. Set .value via DOM (not innerHTML) so user-supplied
+      // company/name can't inject markup. Focus the company field unless it's already filled.
+      const _m = meta || {};
+      const cEl = document.getElementById('nwCompany'); if (cEl && _m.company) cEl.value = _m.company;
+      const nEl = document.getElementById('nwName'); if (nEl && _m.full_name) nEl.value = _m.full_name;
+      setTimeout(() => {
+        const c = document.getElementById('nwCompany');
+        if (c && !c.value) { c.focus(); }
+        else { const b = document.getElementById('nwSubmitBtn'); if (b) b.focus(); }
+      }, 50);
     }
     async function submitNameWorkspace() {
       const company = (document.getElementById('nwCompany')?.value || '').trim();

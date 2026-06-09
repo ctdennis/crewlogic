@@ -252,11 +252,19 @@
   document.getElementById('yr').textContent = new Date().getFullYear();
 
   // ===== Trial signup =====
-  // Fire a Supabase magic link carrying the form info as user metadata; the link returns
-  // to the app (/), where the existing native-signup flow provisions a trialing workspace.
-  var _DEV = ['localhost','127.0.0.1','dev.crewlogic.pages.dev'].indexOf(location.hostname) !== -1;
+  // Fire a Supabase magic link carrying the form info as user metadata; the link lands on the
+  // APP (separate subdomain), where the native-signup flow provisions a trialing workspace.
+  // Marketing and app are now separate Cloudflare Pages projects on separate domains:
+  //   crewlogicai.com        → this marketing site (prod)
+  //   app.crewlogicai.com    → the app (prod)
+  // Anything that ISN'T the production marketing domain is treated as DEV (localhost + any
+  // *.pages.dev preview), so unknown preview hostnames don't need to be enumerated.
+  var _PROD = location.hostname === 'crewlogicai.com' || location.hostname === 'www.crewlogicai.com';
+  var _DEV = !_PROD;
   var SB_URL = _DEV ? 'https://bagkimfwmpwjfhfhmsrb.supabase.co' : 'https://ozfkpxyachigfpcmvekz.supabase.co';
   var SB_ANON = _DEV ? 'sb_publishable_PNHsikZJAodAZAINaBJbxQ_m2USrJnW' : 'sb_publishable_Jcy2e2s2x12kY0Az6jGzUw_Jn3ikNpt';
+  // Where the magic link returns the user — the APP, never back to this marketing page.
+  var APP_URL = _DEV ? 'https://dev.crewlogic.pages.dev' : 'https://app.crewlogicai.com';
   var _sb = null;
   function _client(){ if(!_sb && window.supabase){ _sb = window.supabase.createClient(SB_URL, SB_ANON); } return _sb; }
 
@@ -278,7 +286,7 @@
       var res = await client.auth.signInWithOtp({
         email: String(data.email).trim(),
         options: {
-          emailRedirectTo: location.origin,
+          emailRedirectTo: APP_URL,
           data: { full_name: data.fullName, company: data.business, phone: data.phone, territory: data.territory }
         }
       });
