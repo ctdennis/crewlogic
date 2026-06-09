@@ -1,6 +1,13 @@
 # Marketing site + Trial signup + Onboarding — WORK IN PROGRESS
 
-**Status:** Paused 2026-06-09 mid-build (paused to make a prod change). All code is on the **`dev`** branch (committed + pushed to `origin/dev`). Nothing here is on `main`/prod yet.
+**Status:** **LIVE in prod (2026-06-09).** The two-URL split is built, promoted to `main`, and connected:
+`crewlogicai.com` + `www` serve the marketing site; `app.crewlogicai.com` serves the app (v5.29.0); the
+trial form fires a magic link at `app.crewlogicai.com` via prod Supabase (Site URL + redirect URLs set).
+Verified by read-only GET (each domain serves the right page) + served-page inspection (marketing targets
+the prod app + prod Supabase). Cloudflare = two Pages projects from one repo: **`crewlogic`** (app, output
+root, domain `app.crewlogicai.com`) and **`crewlogic-marketing`** (output dir `marketing`, domain
+`crewlogicai.com`+`www`). **Remaining:** Phase 2 onboarding wizard + a one-time human magic-link e2e test
+(creates a real prod trial workspace — use a disposable email + clean up after).
 
 ## What's built (on dev)
 - **`marketing/index.html`** (was `start.html`; moved 2026-06-09) — single-page marketing/landing site. Dark theme in the app palette (`#0b131d` bg, `#152230` cards, `#1e2f40` icon tiles), green accent `#39ED07`/`#00E785`. Sections: split hero (copy + 3-step "how it works" panel) → asymmetric features grid (one wide highlight + hover green-top-accent + lift) → inline trust band → split signup form → footer.
