@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.30.0 | 2026-06-09">
+  <meta name="crewlogic-version" content="v5.30.1 | 2026-06-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15609,7 +15609,8 @@ RECYCLING & DONATION
             '<button id="photoCaptureRetakeBtn" onclick="retakeLastRoomPhoto()" style="padding:14px 16px;background:var(--bg-input);border:1px solid var(--border);border-radius:12px;font-size:14px;color:var(--text-secondary);cursor:pointer;display:none;">🔄 Retake</button>' +
           '</div>' +
           '<button onclick="analyzeRoomPhotosFromOverlay()" id="photoCaptureAnalyzeBtn" style="width:100%;padding:12px;background:var(--accent-green);border:none;border-radius:12px;font-size:14px;font-weight:700;color:var(--accent-text);cursor:pointer;opacity:0.4;" disabled>🤖 Analyze</button>' +
-          '<button onclick="savePhotosAndCloseOverlay()" style="width:100%;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:12px;font-size:13px;color:var(--text-secondary);cursor:pointer;">💾 Save &amp; analyze later</button>';
+          '<button onclick="savePhotosAndCloseOverlay()" style="width:100%;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:12px;font-size:13px;color:var(--text-secondary);cursor:pointer;">💾 Save &amp; analyze later</button>' +
+          '<button onclick="cancelRoomPhotoCapture()" style="width:100%;padding:10px;background:none;border:none;color:var(--text-muted);font-size:13px;cursor:pointer;">Cancel</button>';
       } else {
         const charge = currentEstimate.charges[_photoCaptureIdx];
         const roomLabel = [charge.room, charge.area].filter(Boolean).join(' · ') || 'Photo';
@@ -15624,6 +15625,10 @@ RECYCLING & DONATION
 
       overlay.style.display = 'flex';
       window.scrollTo(0, 0);
+      // Reset the count + thumbnail strip to the (just-cleared) pending state so a photo from a
+      // PREVIOUS capture can't ghost into this one — e.g. when the camera is opened and dismissed
+      // without taking a shot. (Room mode only; charge mode manages its own thumbs.)
+      if (mode === 'room') _updateRoomCaptureOverlay();
     }
 
     function togglePhotoPanel() {
@@ -15800,6 +15805,7 @@ RECYCLING & DONATION
       const emptyEl = document.getElementById('photoCaptureEmpty');
       if (!wrap || !container) return;
       if (photos.length === 0) {
+        container.innerHTML = ''; // clear stale thumbs so an old photo can't ghost the next capture
         wrap.style.display = 'none';
         if (emptyEl) emptyEl.style.display = '';
         return;
@@ -15874,6 +15880,18 @@ RECYCLING & DONATION
     function savePhotosAndCloseOverlay() {
       document.getElementById('photoCaptureOverlay').style.display = 'none';
       closePhotoPanel(); // this saves pending photos as blank charge row
+    }
+
+    // Back out of room-photo capture without keeping anything: discard the pending photos AND their
+    // IndexedDB copies (so they don't linger/upload or ghost the next capture), and create NO charge.
+    function cancelRoomPhotoCapture() {
+      (photoRoomPending || []).forEach(p => { if (p && p.photoID) idbDelete(p.photoID).catch(() => {}); });
+      photoRoomPending = [];
+      const overlay = document.getElementById('photoCaptureOverlay');
+      if (overlay) overlay.style.display = 'none';
+      _photoCaptureIdx = null;
+      const thumbs = document.getElementById('photoCaptureThumbs'); if (thumbs) thumbs.innerHTML = '';
+      const wrap = document.getElementById('photoCaptureThumbsWrap'); if (wrap) wrap.style.display = 'none';
     }
 
     function renderPhotoRoomThumbs() {
