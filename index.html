@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.29.0 | 2026-06-09">
+  <meta name="crewlogic-version" content="v5.30.0 | 2026-06-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3755,6 +3755,33 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         return;
       }
 
+      // Phase B: password-reset landing — the reset link returns with a recovery token in the URL
+      // hash. Show the set-new-password screen instead of routing into the app. (The
+      // onAuthStateChange PASSWORD_RECOVERY handler covers the case where supabase-js clears the
+      // hash before we read it here.)
+      if (_isPasswordRecovery || (typeof window.location.hash === 'string' && window.location.hash.indexOf('type=recovery') !== -1)) {
+        showSetPasswordScreen();
+        return;
+      }
+
+      // Phase C: trial signup handoff from the marketing site (?signup=1&email=&company=&…).
+      // Show the app-hosted "Create your account" screen prefilled. signUp runs here so the session
+      // lands on the app origin. (If a real session already exists, fall through to normal routing.)
+      const _suParams = new URLSearchParams(window.location.search);
+      if (_suParams.get('signup') === '1') {
+        const _hasSession = await (async () => { try { return !!(await supabaseClient.auth.getSession()).data.session; } catch (e) { return false; } })();
+        if (!_hasSession) {
+          showSignupScreen({
+            email: _suParams.get('email') || '',
+            full_name: _suParams.get('full_name') || '',
+            company: _suParams.get('company') || '',
+            phone: _suParams.get('phone') || '',
+            territory: _suParams.get('territory') || ''
+          });
+          return;
+        }
+      }
+
       // Check for invite token first
       const hasInvite = await checkInviteToken();
       if (hasInvite) return;
@@ -4021,7 +4048,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '</button>' +
           '<button onclick="loginV2Choose(\'email\')" style="' + cardCss + '">' +
             '<span style="flex-shrink:0;width:22px;text-align:center;font-size:18px;">✉️</span>' +
-            '<span style="flex:1;line-height:1.35;"><span style="display:block;font-size:15px;font-weight:600;">Continue with email</span><span style="display:block;font-size:11px;font-weight:500;color:var(--text-muted);">We\'ll send you a secure sign-in link</span></span>' +
+            '<span style="flex:1;line-height:1.35;"><span style="display:block;font-size:15px;font-weight:600;">Continue with email</span><span style="display:block;font-size:11px;font-weight:500;color:var(--text-muted);">Sign in with your email &amp; password</span></span>' +
             '<span style="color:var(--text-muted);font-size:20px;">›</span>' +
           '</button>' +
         '</div>' +
@@ -4031,12 +4058,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '<button onclick="loginV2Back()" style="width:100%;margin-top:10px;background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;">← Back</button>' +
         '</div>' +
         '<div id="loginV2EmailForm" style="display:none;">' +
-          '<div class="form-label" style="margin-bottom:10px;">Continue with email</div>' +
-          '<input type="email" id="loginV2Email" class="form-input" placeholder="you@company.com" inputmode="email" autocomplete="email" oninput="loginV2Detect()" onkeydown="if(event.key===\'Enter\')loginV2SendLink()" style="text-align:center;">' +
+          '<div class="form-label" style="margin-bottom:10px;">Sign in with email</div>' +
+          '<input type="email" id="loginV2Email" class="form-input" placeholder="you@company.com" inputmode="email" autocomplete="email" oninput="loginV2Detect()" onkeydown="if(event.key===\'Enter\'){var p=document.getElementById(\'loginV2Password\');if(p)p.focus();}" style="text-align:center;">' +
           '<div id="loginV2JlHint" style="display:none;font-size:12px;line-height:1.5;text-align:center;color:var(--accent-yellow,#fbbf24);margin-top:8px;">Junkluggers account — use <strong>Continue with Google</strong> to access Vonigo.</div>' +
-          '<button id="loginV2SendBtn" onclick="loginV2SendLink()" style="width:100%;margin-top:10px;padding:12px 16px;background:var(--bg-card);color:var(--accent-green);border:1px solid var(--accent-green);border-radius:var(--radius-sm);font-size:14px;font-weight:600;cursor:pointer;">Email me a sign-in link</button>' +
-          '<button onclick="loginV2Back()" style="width:100%;margin-top:10px;background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;">← Back</button>' +
-          '<div id="loginV2Status" style="font-size:12px;color:var(--text-muted);text-align:center;min-height:18px;margin-top:8px;"></div>' +
+          '<input type="password" id="loginV2Password" class="form-input" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key===\'Enter\')loginV2PasswordSignIn()" style="text-align:center;margin-top:10px;">' +
+          '<button id="loginV2SignInBtn" onclick="loginV2PasswordSignIn()" style="width:100%;margin-top:12px;padding:12px 16px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:var(--radius-sm);font-size:15px;font-weight:700;cursor:pointer;">Sign in</button>' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;gap:8px;">' +
+            '<button onclick="loginV2Forgot()" style="background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;padding:0;">Forgot password?</button>' +
+            '<button onclick="loginV2SendLink()" style="background:none;border:none;color:var(--accent-green);font-size:12px;font-weight:600;cursor:pointer;padding:0;">Email me a link instead</button>' +
+          '</div>' +
+          '<div id="loginV2Status" style="font-size:12px;color:var(--text-muted);text-align:center;min-height:18px;margin-top:10px;"></div>' +
+          '<div style="text-align:center;font-size:12px;color:var(--text-muted);margin-top:8px;">New to CrewLogicAI? <a onclick="(function(){var v=document.getElementById(\'loginV2\');if(v)v.style.display=\'none\';showSignupScreen({});})()" style="color:var(--accent-green);font-weight:600;cursor:pointer;">Start a free trial</a></div>' +
+          '<button onclick="loginV2Back()" style="width:100%;margin-top:6px;background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;">← Back</button>' +
         '</div>';
       if (legacy) login.insertBefore(wrap, legacy); else login.appendChild(wrap);
     }
@@ -4049,9 +4082,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function loginV2Reset() {
       loginV2Show('loginV2Picker');
       const e = document.getElementById('loginV2Email'); if (e) e.value = '';
+      const p = document.getElementById('loginV2Password'); if (p) p.value = '';
       const h = document.getElementById('loginV2JlHint'); if (h) h.style.display = 'none';
-      const s = document.getElementById('loginV2Status'); if (s) s.textContent = '';
-      const b = document.getElementById('loginV2SendBtn'); if (b) b.textContent = 'Email me a sign-in link';
+      const s = document.getElementById('loginV2Status'); if (s) { s.textContent = ''; s.style.color = 'var(--text-muted)'; }
     }
     function loginV2Choose(method) {
       if (method === 'google') { loginV2Show('loginV2GoogleForm'); return; }
@@ -4063,7 +4096,45 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const email = (document.getElementById('loginV2Email')?.value || '').trim();
       const isJL = _isJunkluggersEmail(email);
       const h = document.getElementById('loginV2JlHint'); if (h) h.style.display = isJL ? 'block' : 'none';
-      const b = document.getElementById('loginV2SendBtn'); if (b) b.textContent = isJL ? 'Continue with Google →' : 'Email me a sign-in link';
+    }
+    function _loginV2Msg(m, c) {
+      const st = document.getElementById('loginV2Status');
+      if (st) { st.textContent = m; st.style.color = c || 'var(--text-muted)'; }
+    }
+    // Phase A: native email + password sign-in. Junkluggers emails are still routed to Google.
+    async function loginV2PasswordSignIn() {
+      const email = (document.getElementById('loginV2Email')?.value || '').trim();
+      const password = document.getElementById('loginV2Password')?.value || '';
+      if (!_validEmail(email)) return _loginV2Msg('Enter a valid email.', '#ef4444');
+      if (_isJunkluggersEmail(email)) { loginV2Choose('google'); return; }
+      if (!password) return _loginV2Msg('Enter your password.', '#ef4444');
+      _loginV2Msg('Signing in…', '#94a3b8');
+      try {
+        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        _loginV2Msg('✓ Signed in.', '#4ade80');
+        // A live Supabase session now exists; reload so initAuth resolves the profile and routes
+        // through the same path a magic-link landing uses.
+        window.location.reload();
+      } catch (e) {
+        const msg = (e && e.message || '').toLowerCase();
+        if (msg.includes('invalid login')) return _loginV2Msg('Email or password is incorrect.', '#ef4444');
+        if (msg.includes('email not confirmed')) return _loginV2Msg('Confirm your email first, or use “Email me a link instead.”', '#ef4444');
+        _loginV2Msg('Could not sign in: ' + (e.message || 'error'), '#ef4444');
+      }
+    }
+    // Phase B: send a password-reset link. Recovery is detected on return via the
+    // PASSWORD_RECOVERY auth event (see initAuth), so redirectTo is just the app origin.
+    async function loginV2Forgot() {
+      const email = (document.getElementById('loginV2Email')?.value || '').trim();
+      if (!_validEmail(email)) return _loginV2Msg('Enter your email above first.', '#ef4444');
+      if (_isJunkluggersEmail(email)) { loginV2Choose('google'); return; }
+      _loginV2Msg('Sending reset link…', '#94a3b8');
+      try {
+        const { error } = await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+        if (error) throw error;
+        _loginV2Msg('✓ Check your email for a password-reset link.', '#4ade80');
+      } catch (e) { _loginV2Msg('Could not send reset link: ' + (e.message || 'error'), '#ef4444'); }
     }
     async function loginV2SendLink() {
       const email = (document.getElementById('loginV2Email')?.value || '').trim();
@@ -4332,6 +4403,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     // Supabase JS client (for Storage signed URLs)
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    // Phase B: catch the password-reset return. supabase-js fires PASSWORD_RECOVERY when it
+    // processes the recovery token from the reset link's URL — show the set-new-password screen
+    // instead of routing into the app. (initAuth also checks the URL hash as a race-free fallback.)
+    let _isPasswordRecovery = false;
+    try {
+      supabaseClient.auth.onAuthStateChange((event) => {
+        if (event === 'PASSWORD_RECOVERY') { _isPasswordRecovery = true; showSetPasswordScreen(); }
+      });
+    } catch (e) { /* non-fatal */ }
     // Storage uses a SEPARATE, session-less ANON client so photo/logo signing + uploads never
     // depend on the interactive auth session. Native/Google sign-ins now attach a Supabase Auth
     // session to supabaseClient; routing Storage through that made createSignedUrl return 400
@@ -5362,6 +5442,138 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       url.searchParams.delete('auth_error');
       url.searchParams.delete('email');
       window.location.replace(url.toString());
+    }
+
+    // ===== "SET A NEW PASSWORD" — password-reset landing (Phase B) =====
+    // Shown when the user arrives via a password-reset link (PASSWORD_RECOVERY). Built on the fly.
+    function showSetPasswordScreen() {
+      const loginScreen = document.getElementById('loginScreen');
+      if (loginScreen) loginScreen.style.display = 'none';
+      let scr = document.getElementById('setPasswordScreen');
+      if (!scr) {
+        scr = document.createElement('div');
+        scr.id = 'setPasswordScreen';
+        scr.style.cssText = 'min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:linear-gradient(160deg,#0f1923 0%,#1a2736 50%,#0f2818 100%);';
+        document.body.appendChild(scr);
+      }
+      scr.innerHTML =
+        '<div style="width:100%;max-width:340px;">' +
+          '<div class="login-logo">CrewLogicAI</div>' +
+          '<div class="login-subtitle" style="margin-bottom:28px;">Field Ops</div>' +
+          '<div style="font-size:18px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Set a new password</div>' +
+          '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5;">Choose a new password for your account.</div>' +
+          '<input type="password" id="spNew" class="form-input" placeholder="New password (min 8 characters)" autocomplete="new-password" onkeydown="if(event.key===\'Enter\'){var c=document.getElementById(\'spConfirm\');if(c)c.focus();}">' +
+          '<input type="password" id="spConfirm" class="form-input" placeholder="Confirm new password" autocomplete="new-password" style="margin-top:10px;" onkeydown="if(event.key===\'Enter\')submitSetPassword()">' +
+          '<button id="spBtn" onclick="submitSetPassword()" style="width:100%;margin-top:14px;padding:12px 20px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:var(--radius-sm);font-size:15px;font-weight:700;cursor:pointer;">Update password</button>' +
+          '<div id="spStatus" style="font-size:13px;color:var(--text-muted);text-align:center;min-height:18px;margin-top:12px;"></div>' +
+          '<button onclick="signOut()" style="width:100%;margin-top:4px;background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;">Cancel</button>' +
+        '</div>';
+      scr.style.display = 'flex';
+      setTimeout(() => { const n = document.getElementById('spNew'); if (n) n.focus(); }, 50);
+    }
+    async function submitSetPassword() {
+      const pw = document.getElementById('spNew')?.value || '';
+      const cf = document.getElementById('spConfirm')?.value || '';
+      const st = document.getElementById('spStatus');
+      const btn = document.getElementById('spBtn');
+      const fail = (m) => { if (st) { st.textContent = m; st.style.color = '#ef4444'; } if (btn) { btn.disabled = false; btn.style.opacity = '1'; } };
+      if (pw.length < 8) return fail('Password must be at least 8 characters.');
+      if (pw !== cf) return fail('Passwords do not match.');
+      if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+      if (st) { st.textContent = 'Updating…'; st.style.color = '#94a3b8'; }
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        if (!session) return fail('Reset link expired — request a new one from the sign-in screen.');
+        const { error } = await supabaseClient.auth.updateUser({ password: pw });
+        if (error) throw error;
+        if (st) { st.textContent = '✓ Password updated.'; st.style.color = '#4ade80'; }
+        _isPasswordRecovery = false;
+        history.replaceState(null, '', window.location.pathname);
+        const scr = document.getElementById('setPasswordScreen'); if (scr) scr.style.display = 'none';
+        // Authenticated now — reload so initAuth resolves the profile and routes into the app.
+        window.location.reload();
+      } catch (e) { fail('Could not update password: ' + (e.message || 'error')); }
+    }
+
+    // ===== "CREATE YOUR ACCOUNT" — email+password signup (Phase C) =====
+    // The trial entry point. The marketing form hands off lead info via ?signup= params (the actual
+    // signUp must run on the APP origin so the session lands here, not back on the marketing domain).
+    // Collects a password + company, runs signUp (email confirmation is OFF → instant session), then
+    // provisions the workspace via crewlogic-signup — no inbox detour. Built on the fly.
+    function showSignupScreen(prefill) {
+      prefill = prefill || {};
+      window._signupMeta = { phone: prefill.phone || '', territory: prefill.territory || '' };
+      const loginScreen = document.getElementById('loginScreen'); if (loginScreen) loginScreen.style.display = 'none';
+      let scr = document.getElementById('signupScreen');
+      if (!scr) {
+        scr = document.createElement('div');
+        scr.id = 'signupScreen';
+        scr.style.cssText = 'min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:linear-gradient(160deg,#0f1923 0%,#1a2736 50%,#0f2818 100%);';
+        document.body.appendChild(scr);
+      }
+      scr.innerHTML =
+        '<div style="width:100%;max-width:340px;">' +
+          '<div class="login-logo">CrewLogicAI</div>' +
+          '<div class="login-subtitle" style="margin-bottom:22px;">Start your free trial</div>' +
+          '<div style="font-size:18px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Create your account</div>' +
+          '<div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">14-day free trial · no credit card.</div>' +
+          '<input type="text" id="suName" class="form-input" placeholder="Your name" autocomplete="name">' +
+          '<input type="text" id="suCompany" class="form-input" placeholder="Company name" autocomplete="organization" style="margin-top:10px;">' +
+          '<input type="email" id="suEmail" class="form-input" placeholder="you@company.com" inputmode="email" autocomplete="email" style="margin-top:10px;">' +
+          '<input type="password" id="suPassword" class="form-input" placeholder="Create a password (min 8 characters)" autocomplete="new-password" style="margin-top:10px;" onkeydown="if(event.key===\'Enter\')submitSignup()">' +
+          '<button id="suBtn" onclick="submitSignup()" style="width:100%;margin-top:14px;padding:12px 20px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:var(--radius-sm);font-size:15px;font-weight:700;cursor:pointer;">Start free trial</button>' +
+          '<div id="suStatus" style="font-size:13px;color:var(--text-muted);text-align:center;min-height:18px;margin-top:12px;"></div>' +
+          '<button onclick="(function(){var s=document.getElementById(\'signupScreen\');if(s)s.style.display=\'none\';showLogin();})()" style="width:100%;margin-top:2px;background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;">Already have an account? Sign in</button>' +
+        '</div>';
+      scr.style.display = 'flex';
+      const nEl = document.getElementById('suName'); if (nEl && prefill.full_name) nEl.value = prefill.full_name;
+      const cEl = document.getElementById('suCompany'); if (cEl && prefill.company) cEl.value = prefill.company;
+      const eEl = document.getElementById('suEmail'); if (eEl && prefill.email) eEl.value = prefill.email;
+      setTimeout(() => { const p = document.getElementById('suPassword'); const first = document.getElementById('suName'); if (p && cEl && cEl.value && eEl && eEl.value) p.focus(); else if (first) first.focus(); }, 50);
+    }
+    async function submitSignup() {
+      const name = (document.getElementById('suName')?.value || '').trim();
+      const company = (document.getElementById('suCompany')?.value || '').trim();
+      const email = (document.getElementById('suEmail')?.value || '').trim();
+      const pw = document.getElementById('suPassword')?.value || '';
+      const st = document.getElementById('suStatus');
+      const btn = document.getElementById('suBtn');
+      const fail = (m) => { if (st) { st.textContent = m; st.style.color = '#ef4444'; } if (btn) { btn.disabled = false; btn.style.opacity = '1'; } };
+      const info = (m) => { if (st) { st.textContent = m; st.style.color = '#94a3b8'; } };
+      if (!company) return fail('Enter your company name.');
+      if (!_validEmail(email)) return fail('Enter a valid email.');
+      if (_isJunkluggersEmail(email)) return fail('Junkluggers accounts sign in with Google.');
+      if (pw.length < 8) return fail('Password must be at least 8 characters.');
+      if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+      info('Creating your account…');
+      try {
+        const meta = { full_name: name, company: company, phone: (window._signupMeta && window._signupMeta.phone) || '', territory: (window._signupMeta && window._signupMeta.territory) || '' };
+        const { data, error } = await supabaseClient.auth.signUp({ email, password: pw, options: { data: meta } });
+        if (error) throw error;
+        let session = (data && data.session) || null;
+        if (!session) { const g = await supabaseClient.auth.getSession(); session = g.data.session; }
+        // With email confirmation OFF, signUp returns a session. If confirmation is ON, it won't.
+        if (!session) { if (st) { st.textContent = '✓ Account created — check your email to confirm, then sign in.'; st.style.color = '#4ade80'; } return; }
+        info('Setting up your workspace…');
+        const res = await fetch(EDGE_BASE + '/crewlogic-signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': EDGE_ANON_KEY, 'Authorization': 'Bearer ' + session.access_token },
+          body: JSON.stringify({ companyName: company, ownerName: name || undefined })
+        });
+        const pd = await res.json().catch(() => ({}));
+        if (!pd || !pd.success) return fail((pd && pd.error) || 'Could not create workspace. Try again.');
+        const built = await buildSessionFromSupabaseAuth(session.user.email);
+        if (!built) return fail('Workspace created, but sign-in failed — reload to continue.');
+        currentUser = built;
+        storage.set(SESSION_KEY, JSON.stringify(currentUser));
+        history.replaceState(null, '', window.location.pathname);
+        const scr = document.getElementById('signupScreen'); if (scr) scr.style.display = 'none';
+        showApp();
+      } catch (e) {
+        const m = (e && e.message || '').toLowerCase();
+        if (m.includes('already registered') || m.includes('already exists') || m.includes('user already')) return fail('That email already has an account — use “Already have an account? Sign in.”');
+        fail('Could not create account: ' + (e.message || 'error'));
+      }
     }
 
     // ===== "NAME YOUR WORKSPACE" — native self-serve, post-verify (Option B, Stage 1) =====
