@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.27.9 | 2026-06-08">
+  <meta name="crewlogic-version" content="v5.28.0 | 2026-06-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -2832,14 +2832,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                 <option value="">Select area...</option>
               </select>
             </div>
-            <div class="form-group">
-              <div class="form-label">Description</div>
-              <input type="text" class="form-input" id="vol-desc" placeholder="Items in this area">
-            </div>
-            <div class="form-group">
-              <div class="form-label">Not Included</div>
-              <input type="text" class="form-input" id="vol-excluded" placeholder="e.g. Curtains">
-            </div>
             <div class="form-row">
               <div class="form-group">
                 <div class="form-label">Volume</div>
@@ -2861,6 +2853,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                 <div class="form-label">Qty</div>
                 <input type="number" class="form-input" id="vol-qty" value="1" min="0.125" step="0.125" inputmode="decimal">
               </div>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Description</div>
+              <input type="text" class="form-input" id="vol-desc" placeholder="Items in this area">
+            </div>
+            <div class="form-group">
+              <div class="form-label">Not Included</div>
+              <input type="text" class="form-input" id="vol-excluded" placeholder="e.g. Curtains">
             </div>
           </div>
 
@@ -11219,10 +11219,39 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return (v && v > 0) ? v : 16;
     }
 
+    // Per-tier volume price override (mirrors Vonigo's editable tier price). Keyed by truck
+    // fraction as a string (1 = full truck, 0.5 = 1/2, …). Falls back to the price-book rate
+    // when unset/blank, so clearing an override restores the book price.
+    function volumeRateFor(fraction) {
+      const ov = currentEstimate && currentEstimate.volumeRateOverrides;
+      const key = String(fraction);
+      if (ov && ov[key] !== undefined && ov[key] !== null && ov[key] !== '') {
+        const v = parseFloat(ov[key]);
+        if (!isNaN(v) && v >= 0) return v;
+      }
+      const item = findVolumeItem(fraction);
+      return item ? parseFloat(item.value) : 0;
+    }
+
+    function updateVolumeRate(input) {
+      const fraction = input.getAttribute('data-fraction');
+      const raw = String(input.value).trim();
+      if (!currentEstimate.volumeRateOverrides) currentEstimate.volumeRateOverrides = {};
+      if (raw === '') { delete currentEstimate.volumeRateOverrides[fraction]; }
+      else { const v = parseFloat(raw); if (!isNaN(v) && v >= 0) currentEstimate.volumeRateOverrides[fraction] = v; }
+      updateTotals();
+      autoSaveDraft();
+    }
+
+    function resetVolumeRate(fraction) {
+      if (currentEstimate.volumeRateOverrides) delete currentEstimate.volumeRateOverrides[fraction];
+      updateTotals();
+      autoSaveDraft();
+    }
+
     function calcVolumePrice(totalTrucks) {
-      // Simple: totalTrucks * full truck rate
-      const fullItem = findVolumeItem(1.0);
-      const fullRate = fullItem ? parseFloat(fullItem.value) : 0;
+      // Volume billed as Full Truckload × totalTrucks at the (override-aware) full rate.
+      const fullRate = volumeRateFor(1.0);
       return { total: totalTrucks * fullRate, fullRate, lines: null };
     }
 
@@ -11244,14 +11273,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     function calcVolumePriceSplit(totalTrucks) {
       const fullItem = findVolumeItem(1.0);
-      const fullRate = fullItem ? parseFloat(fullItem.value) : 0;
+      const fullRate = volumeRateFor(1.0);
       const wholeTrucks = Math.floor(totalTrucks);
       const partial = Math.round((totalTrucks - wholeTrucks) * 1000) / 1000;
       // Round to nearest available tier (includes Minimum at 0.0625, not just eighths).
       // This prevents tiny partials like 0.063 from rounding up to 1/8.
       const roundedPartial = roundToNearestVolumeTier(partial);
       const partialItem = roundedPartial > 0 ? findVolumeItem(roundedPartial) : null;
-      const partialRate = partialItem ? parseFloat(partialItem.value) : 0;
+      const partialRate = roundedPartial > 0 ? volumeRateFor(roundedPartial) : 0;
       const fractionLabels = {0.0625:'Minimum', 0.125:'1/8',0.25:'1/4',0.375:'3/8',0.5:'1/2',0.625:'5/8',0.75:'3/4',0.875:'7/8',1.0:'Full'};
       const fracLabel = fractionLabels[roundedPartial] || String(roundedPartial);
       const total = (wholeTrucks * fullRate) + (roundedPartial > 0 ? partialRate : 0);
@@ -11293,23 +11322,30 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const volCalc = splitOn ? calcVolumePriceSplit(totalTrucks) : calcVolumePrice(totalTrucks);
       const volumeTotal = volCalc.total;
 
-      // Show/hide split breakdown
+      // Volume tier lines — editable Price per tier (mirrors Vonigo): Tier · ×Qty · $Price · Subtotal
       const breakdownEl = document.getElementById('splitPricingBreakdown');
       if (breakdownEl) {
+        const tierName = (f) => (({'0.0625':'Minimum','0.125':'1/8','0.25':'1/4','0.375':'3/8','0.5':'1/2','0.625':'5/8','0.75':'3/4','0.875':'7/8','1':'Full'})[String(f)] || String(f)) + ' Truckload';
+        let volLines = [];
         if (splitOn && volCalc.lines && volCalc.lines.length > 0) {
+          volLines = volCalc.lines.map(l => ({ fraction: l.fraction, qty: l.qty, rate: volumeRateFor(l.fraction), amount: l.amount }));
+        } else if (!splitOn && totalTrucks > 0) {
+          volLines = [{ fraction: 1.0, qty: totalTrucks, rate: volumeRateFor(1.0), amount: volumeTotal }];
+        }
+        if (volLines.length > 0) {
           breakdownEl.style.display = 'block';
-          breakdownEl.innerHTML = volCalc.lines.map(l =>
-            '<div style="display:flex;justify-content:space-between;"><span>' + l.label + '</span><span style="color:var(--accent-green)">$' + l.amount.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</span></div>'
-          ).join('');
-        } else if (!splitOn && volumeTotal > 0) {
-          // Show single line even when split is off
-          breakdownEl.style.display = 'block';
-          const item = findVolumeItem(roundToNearestEighth(totalTrucks <= 1 ? totalTrucks : 1.0));
-          const rate = item ? parseFloat(item.value) : 0;
-          const label = totalTrucks <= 1
-            ? (Object.entries({0.125:'1/8',0.25:'1/4',0.375:'3/8',0.5:'1/2',0.625:'5/8',0.75:'3/4',0.875:'7/8',1.0:'Full'})[Math.round(totalTrucks*8)-1] || ['',''])[1] + ' × $' + rate.toFixed(2)
-            : totalTrucks.toFixed(3) + ' × $' + rate.toFixed(2);
-          breakdownEl.innerHTML = '<div style="display:flex;justify-content:space-between;"><span>' + label + '</span><span style="color:var(--accent-green)">$' + volumeTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</span></div>';
+          breakdownEl.innerHTML = volLines.map(function (l) {
+            const ov = currentEstimate.volumeRateOverrides && currentEstimate.volumeRateOverrides[String(l.fraction)] != null;
+            const qtyTxt = Number.isInteger(l.qty) ? l.qty : parseFloat(l.qty).toFixed(2);
+            return '<div style="display:flex;align-items:center;gap:6px;padding:3px 0;">' +
+              '<span style="flex:1;min-width:0;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + tierName(l.fraction) + '</span>' +
+              '<span style="font-size:11px;color:var(--text-muted);font-family:monospace;">&times;' + qtyTxt + '</span>' +
+              '<span style="font-size:11px;color:var(--text-muted);">$</span>' +
+              '<input type="number" min="0" step="0.01" inputmode="decimal" value="' + (Math.round(l.rate * 100) / 100) + '" data-fraction="' + l.fraction + '" onchange="updateVolumeRate(this)" title="' + (ov ? 'Custom price — reset with the ↺' : 'Tier price — edit to override') + '" style="width:74px;padding:5px 6px;font-size:12px;text-align:right;background:var(--bg-input);border:1px solid ' + (ov ? 'var(--accent-green)' : 'var(--border)') + ';border-radius:6px;color:var(--text-primary);">' +
+              (ov ? '<span onclick="resetVolumeRate(\'' + l.fraction + '\')" title="Reset to tier price" style="color:var(--text-muted);cursor:pointer;font-size:13px;padding:0 2px;">&#8634;</span>' : '') +
+              '<span style="min-width:76px;text-align:right;font-family:monospace;color:var(--accent-green);">$' + l.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>' +
+              '</div>';
+          }).join('');
         } else {
           breakdownEl.style.display = 'none';
         }
@@ -12229,7 +12265,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const volLines = (currentEstimate._pendingVolumeLines || []).map(line => {
         const item = findVolumeItem(line.fraction);
         if (!item) return null;
-        const basePrice = parseFloat(item.value);
+        const basePrice = volumeRateFor(line.fraction);   // honor any per-tier price override
         const lineTotal = basePrice; // qty handled by Vonigo field 9288
         const discAmt = getVolLineDisc(item, lineTotal, line.fraction);
         const netPrice = lineTotal - discAmt;
