@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root{
     --bg:#0b131d; --bg-2:#0e1825; --card:#152230; --tile:#1e2f40;
@@ -230,9 +231,9 @@
         <div class="form-note">No credit card required. We'll reach out to finish setting up your workspace.</div>
       </form>
       <div class="thanks" id="thanks">
-        <div class="big">✅</div>
-        <h3>You're on the list!</h3>
-        <p>Thanks — we've got your details and we'll be in touch shortly to set up your CrewLogicAI trial.</p>
+        <div class="big">✉️</div>
+        <h3>Check your email</h3>
+        <p>We sent a secure sign-in link to <b id="thanksEmail" style="color:var(--ink);"></b>. Click it to start your CrewLogicAI trial.</p>
       </div>
     </div>
   </div>
@@ -249,20 +250,48 @@
 
 <script>
   document.getElementById('yr').textContent = new Date().getFullYear();
-  // TODO: wire submit to lead-capture backend (crewlogic-trial-signup edge fn → trial_requests table + notify).
-  document.getElementById('trialForm').addEventListener('submit', function (e) {
+
+  // ===== Trial signup =====
+  // Fire a Supabase magic link carrying the form info as user metadata; the link returns
+  // to the app (/), where the existing native-signup flow provisions a trialing workspace.
+  var _DEV = ['localhost','127.0.0.1','dev.crewlogic.pages.dev'].indexOf(location.hostname) !== -1;
+  var SB_URL = _DEV ? 'https://bagkimfwmpwjfhfhmsrb.supabase.co' : 'https://ozfkpxyachigfpcmvekz.supabase.co';
+  var SB_ANON = _DEV ? 'sb_publishable_PNHsikZJAodAZAINaBJbxQ_m2USrJnW' : 'sb_publishable_Jcy2e2s2x12kY0Az6jGzUw_Jn3ikNpt';
+  var _sb = null;
+  function _client(){ if(!_sb && window.supabase){ _sb = window.supabase.createClient(SB_URL, SB_ANON); } return _sb; }
+
+  document.getElementById('trialForm').addEventListener('submit', async function (e) {
     e.preventDefault();
     var form = e.target;
     var data = Object.fromEntries(new FormData(form).entries());
     var required = ['fullName','email','phone','business','territory'];
-    var missing = required.filter(function (k){ return !String(data[k]||'').trim(); });
     var errEl = document.getElementById('formErr');
-    if (missing.length){ errEl.style.display='block'; return; }
+    if (required.filter(function (k){ return !String(data[k]||'').trim(); }).length){
+      errEl.textContent = 'Please fill in all required fields.'; errEl.style.display='block'; return;
+    }
     errEl.style.display='none';
-    console.log('[trial signup] captured (not yet saved):', data);
-    form.style.display='none';
-    document.getElementById('thanks').style.display='block';
-    document.getElementById('thanks').scrollIntoView({behavior:'smooth',block:'center'});
+    var client = _client();
+    if (!client){ errEl.textContent = 'Still loading — please try again in a moment.'; errEl.style.display='block'; return; }
+    var btn = form.querySelector('button[type=submit]');
+    var orig = btn.textContent; btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+      var res = await client.auth.signInWithOtp({
+        email: String(data.email).trim(),
+        options: {
+          emailRedirectTo: location.origin,
+          data: { full_name: data.fullName, company: data.business, phone: data.phone, territory: data.territory }
+        }
+      });
+      if (res.error) throw res.error;
+      document.getElementById('thanksEmail').textContent = String(data.email).trim();
+      form.style.display='none';
+      document.getElementById('thanks').style.display='block';
+      document.getElementById('thanks').scrollIntoView({behavior:'smooth',block:'center'});
+    } catch (err) {
+      errEl.textContent = 'Sorry — couldn’t send your sign-in link. Please try again.';
+      errEl.style.display='block';
+      btn.disabled = false; btn.textContent = orig;
+    }
   });
 </script>
 </body>
