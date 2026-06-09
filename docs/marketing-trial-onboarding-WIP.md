@@ -6,8 +6,16 @@ trial form fires a magic link at `app.crewlogicai.com` via prod Supabase (Site U
 Verified by read-only GET (each domain serves the right page) + served-page inspection (marketing targets
 the prod app + prod Supabase). Cloudflare = two Pages projects from one repo: **`crewlogic`** (app, output
 root, domain `app.crewlogicai.com`) and **`crewlogic-marketing`** (output dir `marketing`, domain
-`crewlogicai.com`+`www`). **Remaining:** Phase 2 onboarding wizard + a one-time human magic-link e2e test
-(creates a real prod trial workspace — use a disposable email + clean up after).
+`crewlogicai.com`+`www`).
+
+**Full e2e VERIFIED in prod 2026-06-09:** real form submit (`tpass2008@gmail.com`, business "Ricky's Removal") → Resend email delivered **to inbox** → magic link → app.crewlogicai.com → "Name your workspace" **pre-filled with the form's company** → Create → provisioned a `trialing` native workspace → landed in app with the 14-day-trial banner (access gate OK). Earlier ctdennis run confirmed the same chain.
+
+**Custom SMTP DONE (2026-06-09):** Resend wired into Supabase Auth SMTP (`smtp.resend.com:465`, sender `noreply@crewlogicai.com`); domain `crewlogicai.com` verified (MX/SPF/DKIM on the `send` subdomain via Cloudflare). Replaced the built-in ~2/hour throttle that was blocking testing — and is **required for launch** (built-in email is not production-grade). Config lives in the Supabase dashboard (nothing in repo).
+
+**Remaining:**
+- **Email + password auth (next build, prioritized)** — the real fix for the magic-link friction. Agreed design: marketing form collects a password → `signUp` → instant session → workspace → app (no inbox detour to enter); **defer** email confirmation (let them in, confirm async; require before going past trial); add password sign-in + "forgot password" to the app login screen (Google + magic-link stay as options). See [[email-password-auth-roadmap]].
+- **Phase 2 onboarding wizard** — guide a new owner through brand color/logo, price-book ZIPs, customers, invite crew.
+- Test workspaces this generated are removed via `admin_delete_tenant` (migration 0015).
 
 ## What's built (on dev)
 - **`marketing/index.html`** (was `start.html`; moved 2026-06-09) — single-page marketing/landing site. Dark theme in the app palette (`#0b131d` bg, `#152230` cards, `#1e2f40` icon tiles), green accent `#39ED07`/`#00E785`. Sections: split hero (copy + 3-step "how it works" panel) → asymmetric features grid (one wide highlight + hover green-top-accent + lift) → inline trust band → split signup form → footer.
