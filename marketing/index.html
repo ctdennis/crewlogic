@@ -268,7 +268,7 @@
   var _sb = null;
   function _client(){ if(!_sb && window.supabase){ _sb = window.supabase.createClient(SB_URL, SB_ANON); } return _sb; }
 
-  document.getElementById('trialForm').addEventListener('submit', async function (e) {
+  document.getElementById('trialForm').addEventListener('submit', function (e) {
     e.preventDefault();
     var form = e.target;
     var data = Object.fromEntries(new FormData(form).entries());
@@ -278,28 +278,20 @@
       errEl.textContent = 'Please fill in all required fields.'; errEl.style.display='block'; return;
     }
     errEl.style.display='none';
-    var client = _client();
-    if (!client){ errEl.textContent = 'Still loading — please try again in a moment.'; errEl.style.display='block'; return; }
     var btn = form.querySelector('button[type=submit]');
-    var orig = btn.textContent; btn.disabled = true; btn.textContent = 'Sending…';
-    try {
-      var res = await client.auth.signInWithOtp({
-        email: String(data.email).trim(),
-        options: {
-          emailRedirectTo: APP_URL,
-          data: { full_name: data.fullName, company: data.business, phone: data.phone, territory: data.territory }
-        }
-      });
-      if (res.error) throw res.error;
-      document.getElementById('thanksEmail').textContent = String(data.email).trim();
-      form.style.display='none';
-      document.getElementById('thanks').style.display='block';
-      document.getElementById('thanks').scrollIntoView({behavior:'smooth',block:'center'});
-    } catch (err) {
-      errEl.textContent = 'Sorry — couldn’t send your sign-in link. Please try again.';
-      errEl.style.display='block';
-      btn.disabled = false; btn.textContent = orig;
-    }
+    btn.disabled = true; btn.textContent = 'Starting…';
+    // Hand the lead info off to the APP, which hosts the actual signUp — the session must land on
+    // the app origin (app.crewlogicai.com), not back here on the marketing domain. The user sets a
+    // password on the app's "Create your account" screen → instant trial, no inbox detour.
+    var params = new URLSearchParams({
+      signup: '1',
+      email: String(data.email).trim(),
+      full_name: String(data.fullName).trim(),
+      company: String(data.business).trim(),
+      phone: String(data.phone).trim(),
+      territory: String(data.territory).trim()
+    });
+    window.location.href = APP_URL + '/?' + params.toString();
   });
 </script>
 </body>
