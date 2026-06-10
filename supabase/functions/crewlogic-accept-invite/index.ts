@@ -61,13 +61,14 @@ Deno.serve(async (req: Request) => {
   // pre-provisioned franchise), use it. Otherwise this is a NEW native franchise — create the
   // tenant (native defaults via migration 0004) + franchise here (provisioning at accept time,
   // same model as the legacy guest flow). The owner supplies the company name on the accept
-  // screen. subscription_tier=null so trial access is governed by the tenant's
-  // subscription_status='trialing' (default) rather than the paywalling 'free' tier default.
+  // screen. This branch only fires for invite-provisioned workspaces (guest testers), so we
+  // provision them as non-expiring 'tester' with NO trial clock — by rule, only direct
+  // marketing/self-serve signups should be on the 14-day trial.
   let franchiseId = invite.franchise_id as string | null;
   if (!franchiseId) {
     const companyName = (String(body.companyName || "").trim()) || ((email.split("@")[1] || "My Company"));
     try {
-      const r = await createNativeTenantAndFranchise(sb, companyName);
+      const r = await createNativeTenantAndFranchise(sb, companyName, { subscriptionStatus: "tester", setTrialClock: false });
       franchiseId = r.franchiseId;
     } catch (e) {
       return json({ success: false, error: "native_provision_failed", detail: String((e as Error).message) }, 500);

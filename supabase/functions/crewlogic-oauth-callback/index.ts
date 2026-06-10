@@ -311,7 +311,8 @@ async function provisionFromInvite(opts: {
   // Resolve the franchise. Existing-franchise invite (team member) → use it, role from invite.
   // New native workspace (no franchise_id) → create tenant+franchise via the shared helper using
   // a service-role client (RLS blocks anon inserts on tenants/franchises), and the accepter is the
-  // workspace OWNER. Mirrors crewlogic-accept-invite.
+  // workspace OWNER. Mirrors crewlogic-accept-invite — invite-provisioned (guest tester) workspaces
+  // get non-expiring 'tester' with NO trial clock; only direct signups (provisionFromSignup) trial.
   let franchiseId: string | null = invite.franchise_id || null;
   let role: string = invite.role || "estimator";
   if (!franchiseId) {
@@ -320,7 +321,7 @@ async function provisionFromInvite(opts: {
         Deno.env.get("SUPABASE_URL") || SUPABASE_URL,
         Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "",
       );
-      const r = await createNativeTenantAndFranchise(sbAdmin, opts.companyName || "");
+      const r = await createNativeTenantAndFranchise(sbAdmin, opts.companyName || "", { subscriptionStatus: "tester", setTrialClock: false });
       franchiseId = r.franchiseId;
     } catch (e) {
       console.error("Native provision failed:", e);
