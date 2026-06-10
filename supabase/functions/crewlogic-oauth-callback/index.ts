@@ -308,26 +308,33 @@ async function provisionFromInvite(opts: {
     return { error: "invite_email_mismatch" };
   }
 
-  // Resolve the franchise. Existing-franchise invite (team member) → use it, role from invite.
-  // New native workspace (no franchise_id) → create tenant+franchise via the shared helper using
-  // a service-role client (RLS blocks anon inserts on tenants/franchises), and the accepter is the
-  // workspace OWNER. Mirrors crewlogic-accept-invite — invite-provisioned (guest tester) workspaces
-  // get non-expiring 'tester' with NO trial clock; only direct signups (provisionFromSignup) trial.
+  // Resolve the franchise (provisioning & access matrix, docs/provisioning-access-matrix-spec.md).
+  // Existing-franchise invite (team member) → use it. Guest invite (no franchise_id) branches on the
+  // accepter's EMAIL DOMAIN:
+  //   - @junkluggers.com → leave franchise_id NULL (Vonigo-pending); NO native tenant. They connect
+  //     Vonigo creds in Settings, which attaches their real franchise under the shared Junkluggers
+  //     tenant (saveVonigoCredentials). Null-franchise profile gets access via the client's 'trialing'
+  //     fallback (no clock → never expires), then 'tester' once attached.
+  //   - any other domain → create a NEW native workspace (non-expiring 'tester', no trial clock).
+  // Mirrors crewlogic-accept-invite. Only direct signups (provisionFromSignup) get the 14-day trial.
+  const isJunkluggers = /@junkluggers\.com$/i.test(opts.email || "");
   let franchiseId: string | null = invite.franchise_id || null;
   let role: string = invite.role || "estimator";
   if (!franchiseId) {
-    try {
-      const sbAdmin = createClient(
-        Deno.env.get("SUPABASE_URL") || SUPABASE_URL,
-        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "",
-      );
-      const r = await createNativeTenantAndFranchise(sbAdmin, opts.companyName || "", { subscriptionStatus: "tester", setTrialClock: false });
-      franchiseId = r.franchiseId;
-    } catch (e) {
-      console.error("Native provision failed:", e);
-      return { error: "native_provision_failed" };
-    }
     role = invite.role || "owner";
+    if (!isJunkluggers) {
+      try {
+        const sbAdmin = createClient(
+          Deno.env.get("SUPABASE_URL") || SUPABASE_URL,
+          Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "",
+        );
+        const r = await createNativeTenantAndFranchise(sbAdmin, opts.companyName || "", { subscriptionStatus: "tester", setTrialClock: false });
+        franchiseId = r.franchiseId;
+      } catch (e) {
+        console.error("Native provision failed:", e);
+        return { error: "native_provision_failed" };
+      }
+    }
   }
 
   // Insert the profile. on_conflict=email handles the rare race condition where

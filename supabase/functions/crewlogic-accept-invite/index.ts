@@ -58,14 +58,18 @@ Deno.serve(async (req: Request) => {
   if (invite.accepted_at) return json({ success: false, error: "invite_already_used" }, 400);
 
   // 4) Resolve the franchise. If the invite already points to one (team member, or a
-  // pre-provisioned franchise), use it. Otherwise this is a NEW native franchise — create the
-  // tenant (native defaults via migration 0004) + franchise here (provisioning at accept time,
-  // same model as the legacy guest flow). The owner supplies the company name on the accept
-  // screen. This branch only fires for invite-provisioned workspaces (guest testers), so we
-  // provision them as non-expiring 'tester' with NO trial clock — by rule, only direct
-  // marketing/self-serve signups should be on the 14-day trial.
+  // pre-provisioned franchise), use it. Otherwise this is a guest invite (no franchise) and the
+  // accepter's EMAIL DOMAIN decides (provisioning & access matrix, docs/provisioning-access-matrix-spec.md):
+  //   - @junkluggers.com → leave franchise_id NULL (Vonigo-pending). NO native tenant is created.
+  //     They connect their Vonigo credentials in Settings → Vonigo Integration, which auto-discovers
+  //     and attaches their real franchise under the shared Junkluggers tenant (crewlogic-settings
+  //     saveVonigoCredentials). A null-franchise profile gets access via the client's 'trialing'
+  //     fallback with no clock (never expires), then becomes 'tester' once attached. No throwaway tenant.
+  //   - any other domain → create a NEW native workspace here, non-expiring 'tester' with NO trial
+  //     clock (only direct marketing/self-serve signups get the 14-day trial).
+  const isJunkluggers = /@junkluggers\.com$/i.test(email);
   let franchiseId = invite.franchise_id as string | null;
-  if (!franchiseId) {
+  if (!franchiseId && !isJunkluggers) {
     const companyName = (String(body.companyName || "").trim()) || ((email.split("@")[1] || "My Company"));
     try {
       const r = await createNativeTenantAndFranchise(sb, companyName, { subscriptionStatus: "tester", setTrialClock: false });
