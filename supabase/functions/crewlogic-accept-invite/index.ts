@@ -75,11 +75,14 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // 5) Create the owner profile under the resolved franchise.
+  // 5) Create the owner profile under the resolved franchise. Prefer the name the accepter typed
+  // on the invite screen (body.name) — a magic-link/OTP sign-in carries no user_metadata.name, so
+  // without this the profile name fell back to the raw email (showed up in the home greeting).
+  const providedName = (typeof body.name === "string" && body.name.trim()) ? body.name.trim() : null;
   const { error: pErr } = await sb.from("profiles").insert({
     auth_user_id: user.id,
     email,
-    name: (user.user_metadata && (user.user_metadata as Record<string, unknown>).name) || email,
+    name: providedName || (user.user_metadata && (user.user_metadata as Record<string, unknown>).name) || email,
     role: invite.role || "owner",
     franchise_id: franchiseId,
     accepted_invite_id: invite.id,
