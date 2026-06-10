@@ -77,7 +77,7 @@ Source lives in `supabase/functions/<name>/index.ts` (see "Supabase CLI" below).
 - `crewlogic-job-plan` — job plan generation/persistence.
 - `crewlogic-todays-workorders` — fetches today's work orders (Vonigo).
 - `crewlogic-price-lookup` — pricing lookups.
-- `crewlogic-estimate` — estimate save (`save` upserts to the `estimates` table) and `calcDistances` (Google Maps Distance Matrix lookup for cost-analysis routing). Replaces the n8n `save` + `calcDistances` webhook equivalents. Note: `delete` and `searchClients` actions still live in n8n (they require Vonigo OAuth).
+- `crewlogic-estimate` — estimate save (`save` upserts to the `estimates` table) and `calcDistances` (Google Maps Distance Matrix lookup for cost-analysis routing). Replaces the n8n `save` + `calcDistances` webhook equivalents. Also handles `searchClients`, `delete`, and `submitQuote` (all migrated from n8n; they auth to Vonigo directly via MD5 `/security/login/` — **no OAuth**, the old "requires Vonigo OAuth" note was wrong).
 - `crewlogic-pricing` — native price-book lookup for `crm_provider='none'` franchises (reads `price_lists` / `price_list_zips`). Returns the **same JSON shape** as `crewlogic-price-lookup` so the frontend estimating engine is unchanged — only the data source swaps. The client picks between them via `currentUser.pricingSource === 'native'` (~line 3615).
 - `crewlogic-job-lookup` — looks up a single Vonigo job by `jobID` and returns the client/contact/location IDs + display info needed to hydrate an estimate. MD5 `/security/login/` auth (no Vonigo OAuth). Replaces the n8n `crewlogic-job-lookup` webhook.
 - `crewlogic-trucks` — returns current truck GPS locations from Motive (gomotive.com); used by the Route Optimizer truck-distance display. Requires the `MOTIVE_API_KEY` secret. (The large route-optimization engine still lives in n8n.)
@@ -102,7 +102,7 @@ Rules:
 - **If you touch the access-gate logic:** grant when EITHER the franchise tier OR the tenant status is an access value — a non-access franchise tier (`free`) must never override an access-granting tenant. (The current `||` short-circuit does exactly that; fixing it is an open follow-up.)
 
 ### Legacy n8n
-`N8N_BASE` (n8n.cloud webhook) and `apiFetch` still appear in some paths but are being migrated to Supabase Edge Functions. Prefer Edge Functions for new work.
+**Only ONE live n8n dependency remains: the route-optimization engine** — `apiFetch(N8N_BASE + '/crewlogic-route')` (index.html ~7341). `N8N_BASE` (line ~3524) and the `apiFetch` helper exist solely to serve it. Everything else has been migrated to Supabase Edge Functions. Prefer Edge Functions for new work; do not add new n8n calls. (Some stale code comments still mention an "n8n cron sweep" for photos — that's actually the `crewlogic-photo-sweep` pg_cron job now.)
 
 ### Supabase CLI
 The repo is linked to the Supabase project `ozfkpxyachigfpcmvekz` via the Supabase CLI. The `supabase/` folder holds:

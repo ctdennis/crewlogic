@@ -37,7 +37,7 @@ use by a prod tenant"; keep those distinct.
 | Dev/prod Supabase separation | **Done** (Supabase layer) | Live | 2026-06-02 | prod `ozfkpxyachigfpcmvekz` + dev `bagkimfwmpwjfhfhmsrb` (`crewlogic-dev`). Frontend is still single-deploy |
 | `supabase/migrations/` folder | **Done** | n/a | 2026-06-02 | Sequential `NNNN_*.sql` (`0001`–`0004`). Apply to dev first, then promote |
 | Edge function source under git | **Done** | Live | 2026-06-02 | All 14 functions committed & verified byte-identical to prod |
-| n8n → Edge Functions migration | **In progress** | Mixed | 2026-06-02 | Still in n8n: estimate `delete` + `searchClients` (need Vonigo OAuth), large route-optimization engine |
+| n8n → Edge Functions migration | **Nearly done** | Mixed | 2026-06-10 | **Only the route-optimization engine remains in n8n** (`apiFetch(N8N_BASE + '/crewlogic-route')`, index.html ~7341). `delete` + `searchClients` + `submitQuote` were migrated into `crewlogic-estimate` (direct Vonigo MD5 auth, **no OAuth** — the old "requires Vonigo OAuth" note was wrong). Photo sweep is `crewlogic-photo-sweep` pg_cron, not n8n. |
 | Deploy workflow → Claude Code direct | **In progress** | — | 2026-06-02 | Repo moved to `~/code/crewlogic`; now committing/pushing from Claude Code (was Downloads→GitHub Desktop) |
 | Onboarding process | **Not started** | n/a | 2026-06-02 | New todo. At signup / Vonigo provisioning, capture franchise `serviceStates` (the multi-state handful) + a per-estimator default state. Estimators (magic-link) may work in a different state than the office (e.g. estimator in CA, office in AZ) → estimator default state falls back to franchise `officeState`. `serviceStates` also owner-editable in Settings. Feeds Town Price Lookup (Vonigo track) |
 
