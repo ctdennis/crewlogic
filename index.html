@@ -4263,7 +4263,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // a Supabase-Auth-authenticated email, by reading profile→franchise→tenant (incl. the
     // per-capability provider flags). Returns null if no profile exists for that email.
     async function buildSessionFromSupabaseAuth(email) {
-      const rows = await supabaseFetch('/rest/v1/profiles?select=role,franchise_id,name,auth_user_id,franchises(external_id,franchise_name,cost_settings,subscription_tier,subscription_status,trial_ends_at,vonigo_configured,tenants(id,subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(email));
+      const rows = await supabaseFetch('/rest/v1/profiles?select=role,franchise_id,name,auth_user_id,pending_trial_ends_at,franchises(external_id,franchise_name,cost_settings,subscription_tier,subscription_status,trial_ends_at,vonigo_configured,tenants(id,subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(email));
       const p = rows && rows[0];
       if (!p) return null;
       const f = p.franchises || {};
@@ -4298,9 +4298,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           return fs || ft || ts || 'trialing';
         })(),
         subscriptionTier: f.subscription_tier || null,
-        // Per-franchise trial clock wins over the tenant's — lets one franchise in a shared tenant
-        // (e.g. Junkluggers) run its own 14-day trial. NULL → fall back to the tenant value.
-        trialEndsAt: f.trial_ends_at || t.trial_ends_at || null,
+        // Trial clock resolution: per-franchise trial wins, then the profile's pending trial (a
+        // Vonigo-pending marketing signup before they've connected — clock started at signup), then
+        // the tenant's. Lets one franchise in a shared tenant run its own 14-day trial.
+        trialEndsAt: f.trial_ends_at || p.pending_trial_ends_at || t.trial_ends_at || null,
         vonigoConfigured: f.vonigo_configured || false,
         costSettings: cs,
         phone: cs.phone || '', website: cs.website || '',

@@ -261,7 +261,7 @@ async function fetchGoogleUserInfo(accessToken: string): Promise<any> {
 // Step 4: Look up profile by email (joined with franchise + tenant)
 // ─────────────────────────────────────────────────────────────────────────────
 async function lookupProfile(email: string): Promise<any> {
-  const select = "role,franchise_id,email,name,franchises(external_id,franchise_name,cost_settings,subscription_tier,subscription_status,trial_ends_at,vonigo_configured,tenants(id,subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))";
+  const select = "role,franchise_id,email,name,pending_trial_ends_at,franchises(external_id,franchise_name,cost_settings,subscription_tier,subscription_status,trial_ends_at,vonigo_configured,tenants(id,subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))";
   const url = `${SUPABASE_URL}/rest/v1/profiles?select=${encodeURIComponent(select)}&email=eq.${encodeURIComponent(email)}`;
   const res = await fetch(url, { headers: SB_HEADERS });
   if (!res.ok) {
@@ -493,7 +493,7 @@ function buildSession(opts: {
       if (ACCESS.indexOf(ts) !== -1) return ts;
       return fs || ft || ts || "trialing";
     })(),
-    trialEndsAt: f.trial_ends_at || t.trial_ends_at || null,
+    trialEndsAt: f.trial_ends_at || profile.pending_trial_ends_at || t.trial_ends_at || null,
     vonigoConfigured: f.vonigo_configured || false,
     supabaseToken: supabaseAccessToken,
     phone: cs.phone || "",

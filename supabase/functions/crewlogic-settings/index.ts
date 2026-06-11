@@ -129,15 +129,16 @@ async function vonigoLoginAndDiscover(username: string, md5: string): Promise<Vo
 // ─────────────────────────────────────────────────────────────────────────────
 // Look up an existing profile by email
 // ─────────────────────────────────────────────────────────────────────────────
-async function lookupProfileByEmail(email: string): Promise<{ id: string; franchise_id: string | null; role: string } | null> {
+async function lookupProfileByEmail(email: string): Promise<{ id: string; franchise_id: string | null; role: string; pending_trial_ends_at: string | null } | null> {
   const rows = (await supabaseGet(
-    `/rest/v1/profiles?email=eq.${encodeURIComponent(email)}&select=id,franchise_id,role`
+    `/rest/v1/profiles?email=eq.${encodeURIComponent(email)}&select=id,franchise_id,role,pending_trial_ends_at`
   )) as Array<Record<string, unknown>>;
   if (!rows || !rows.length) return null;
   return {
     id: rows[0].id as string,
     franchise_id: rows[0].franchise_id as string | null,
     role: rows[0].role as string,
+    pending_trial_ends_at: (rows[0].pending_trial_ends_at as string | null) ?? null,
   };
 }
 
@@ -495,6 +496,23 @@ async function handleSaveVonigoCredentials(body: Record<string, unknown>): Promi
   if (!configRes.ok) {
     // Non-fatal — the credential was saved successfully
     console.warn("[saveVonigoCredentials] Couldn't set vonigo_configured flag (non-fatal)");
+  }
+
+  // 7) Per-franchise trial carry (access matrix cell #4). A junkluggers prospect who came in via the
+  //    marketing funnel has a trial deadline stamped on their profile AT SIGNUP. Copy it onto the
+  //    franchise (so the 14-day clock — started at signup, not now — lives on their franchise even
+  //    though the shared Junkluggers tenant is 'tester'), then clear the pending field. Guest-invite
+  //    junkluggers have no pending value → the franchise stays 'tester' (never expires) via the tenant.
+  if (profile.pending_trial_ends_at) {
+    const trialRes = await supabasePatch(`/rest/v1/franchises?id=eq.${franchiseUUID}`, {
+      subscription_status: "trialing",
+      trial_ends_at: profile.pending_trial_ends_at,
+    });
+    if (trialRes.ok) {
+      await supabasePatch(`/rest/v1/profiles?id=eq.${profile.id}`, { pending_trial_ends_at: null });
+    } else {
+      console.warn("[saveVonigoCredentials] Couldn't stamp per-franchise trial (non-fatal)");
+    }
   }
 
   return jsonResponse({
