@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.30.2 | 2026-06-10">
+  <meta name="crewlogic-version" content="v5.30.3 | 2026-06-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4263,7 +4263,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // a Supabase-Auth-authenticated email, by reading profile→franchise→tenant (incl. the
     // per-capability provider flags). Returns null if no profile exists for that email.
     async function buildSessionFromSupabaseAuth(email) {
-      const rows = await supabaseFetch('/rest/v1/profiles?select=role,franchise_id,name,auth_user_id,franchises(external_id,franchise_name,cost_settings,subscription_tier,vonigo_configured,tenants(id,subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(email));
+      const rows = await supabaseFetch('/rest/v1/profiles?select=role,franchise_id,name,auth_user_id,franchises(external_id,franchise_name,cost_settings,subscription_tier,subscription_status,trial_ends_at,vonigo_configured,tenants(id,subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(email));
       const p = rows && rows[0];
       if (!p) return null;
       const f = p.franchises || {};
@@ -4288,13 +4288,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // otherwise keep the real status so the paywall can still message past_due/canceled.
         subscriptionStatus: (function () {
           var ACCESS = ['active', 'trialing', 'tester', 'pro', 'enterprise'];
-          var ft = f.subscription_tier, ts = t.subscription_status;
+          var fs = f.subscription_status, ft = f.subscription_tier, ts = t.subscription_status;
+          // Prefer an access value from any level; per-franchise status (its own trial/tester) wins
+          // over the franchise tier, then the tenant status. A non-access value never overrides an
+          // access-granting one. NULL franchise cols (every existing row) → behaves exactly as before.
+          if (ACCESS.indexOf(fs) !== -1) return fs;
           if (ACCESS.indexOf(ft) !== -1) return ft;
           if (ACCESS.indexOf(ts) !== -1) return ts;
-          return ft || ts || 'trialing';
+          return fs || ft || ts || 'trialing';
         })(),
         subscriptionTier: f.subscription_tier || null,
-        trialEndsAt: t.trial_ends_at || null,
+        // Per-franchise trial clock wins over the tenant's — lets one franchise in a shared tenant
+        // (e.g. Junkluggers) run its own 14-day trial. NULL → fall back to the tenant value.
+        trialEndsAt: f.trial_ends_at || t.trial_ends_at || null,
         vonigoConfigured: f.vonigo_configured || false,
         costSettings: cs,
         phone: cs.phone || '', website: cs.website || '',
