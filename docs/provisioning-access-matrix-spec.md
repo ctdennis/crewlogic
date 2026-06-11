@@ -63,4 +63,4 @@ Everything is determined by two orthogonal switches:
 4. **Marketing + `@junkluggers.com` → Vonigo + 14-day** — LAST; blocked on decision #1 (per-franchise trial clock).
 
 ## Onboarding playbook
-_To be written once the build matches this matrix._ Will cover: owner generates the right invite, what the franchisee does (accept → enter Vonigo creds), and how to verify they landed correctly.
+**Written** → [`onboarding-playbook.md`](onboarding-playbook.md). Cold-executable playbooks for onboarding a Junkluggers franchisee (Vonigo), a non-Junkluggers operator (native), and an estimator — with per-step expected results, read-only verification queries, and a troubleshooting table of the real failure modes seen.
