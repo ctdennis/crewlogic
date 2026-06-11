@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.30.4 | 2026-06-11">
+  <meta name="crewlogic-version" content="v5.30.5 | 2026-06-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8754,10 +8754,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         priceBlocks = [];
         priceListID = null;
         priceListName = '';
-        // Auto-refetch price list if zip is available — handles older estimates with empty priceBook
+        // Auto-refetch price list if zip is available — handles estimates saved with an empty priceBook
+        // (e.g. created before the price book was set up). setTimeout(0) defers past the synchronous
+        // openEstimateEditor render (so the editor's status/price-list DOM exists) WITHOUT the old
+        // hardcoded 300ms lag — the toolbar then enables as soon as the lookup returns, not 300ms later.
         const zip = currentEstimate.zip;
         if (zip) {
-          setTimeout(() => autoRefetchPriceBlocks(zip), 300);
+          setTimeout(() => autoRefetchPriceBlocks(zip), 0);
         }
       }
     }
