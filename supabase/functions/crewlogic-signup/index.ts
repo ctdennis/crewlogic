@@ -47,6 +47,30 @@ Deno.serve(async (req: Request) => {
     return json({ success: true, email, franchiseId: existing.franchise_id, alreadyProvisioned: true });
   }
 
+  // 2b) Junkluggers prospect (access matrix cell #4). A @junkluggers.com email NEVER gets a native
+  // tenant — they belong on the Vonigo track. Provision a Vonigo-PENDING profile (franchise_id NULL,
+  // no tenant); they connect their Vonigo credentials in Settings, which attaches their real franchise
+  // under the shared Junkluggers tenant. Marketing-funnel prospects (marketingTrial) carry a 14-day
+  // trial whose clock starts NOW (at signup); pending_trial_ends_at is copied onto their franchise at
+  // connect (so it survives even though the shared Junkluggers tenant is 'tester').
+  const isJunkluggers = /@junkluggers\.com$/i.test(email);
+  if (isJunkluggers) {
+    const marketingTrial = body.marketingTrial === true;
+    const trialEndsAt = marketingTrial
+      ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
+      : null;
+    const { error: jErr } = await sb.from("profiles").insert({
+      auth_user_id: user.id,
+      email,
+      name: ownerName || (user.user_metadata && (user.user_metadata as Record<string, unknown>).name as string) || email,
+      role: "owner",
+      franchise_id: null,
+      pending_trial_ends_at: trialEndsAt,
+    });
+    if (jErr) return json({ success: false, error: "profile_create_failed", detail: jErr.message }, 500);
+    return json({ success: true, email, franchiseId: null, vonigoPending: true, trialEndsAt });
+  }
+
   // 3) Provision the native tenant+franchise (native defaults; subscription_tier=null so trial
   // access is governed by the tenant's subscription_status='trialing' default).
   let franchiseId: string;

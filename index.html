@@ -3970,11 +3970,27 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                 built = await buildSessionFromSupabaseAuth(sbSession.user.email);
               }
             } catch (e) { /* fall through to no_account */ }
+          } else if (_isJunkluggersEmail(sbSession.user.email) && storage.get('pending_signup_trial')) {
+            // Marketing-funnel junkluggers prospect (flag set before Google OAuth — access matrix
+            // cell #4): self-provision a Vonigo-PENDING profile with a 14-day trial (clock started at
+            // signup) via crewlogic-signup, then fall through to normal routing (showApp if built /
+            // no_account below if it failed). They connect their Vonigo credentials in Settings to
+            // attach their franchise under the shared Junkluggers tenant.
+            try {
+              const res = await fetch(EDGE_BASE + '/crewlogic-signup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'apikey': EDGE_ANON_KEY, 'Authorization': 'Bearer ' + sbSession.access_token },
+                body: JSON.stringify({ ownerName: storage.get('pending_signup_name') || undefined, marketingTrial: true })
+              });
+              const data = await res.json().catch(() => ({}));
+              if (data && data.success) built = await buildSessionFromSupabaseAuth(sbSession.user.email);
+            } catch (e) { /* fall through to no_account below */ }
+            ['pending_signup_trial','pending_signup_name','pending_signup_company'].forEach(k => storage.remove(k));
           } else {
             // No profile, no invite → brand-new native self-serve owner (Option B). Defer to the
             // post-verify "Name your workspace" step, which collects the company name and then
-            // provisions via crewlogic-signup. Junkluggers emails don't self-provision natively —
-            // they belong on the Google/Vonigo path — so send them to the no-account screen.
+            // provisions via crewlogic-signup. Junkluggers emails (no marketing-trial flag) don't
+            // self-provision natively — they belong on the Google/Vonigo path — so no-account screen.
             if (_isJunkluggersEmail(sbSession.user.email)) { showAuthErrorScreen('no_account'); return true; }
             // Pre-fill from the marketing trial form's metadata (company/full_name) so the
             // new owner doesn't retype what they already entered on crewlogicai.com.
@@ -5549,7 +5565,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const info = (m) => { if (st) { st.textContent = m; st.style.color = '#94a3b8'; } };
       if (!company) return fail('Enter your company name.');
       if (!_validEmail(email)) return fail('Enter a valid email.');
-      if (_isJunkluggersEmail(email)) return fail('Junkluggers accounts sign in with Google.');
+      if (_isJunkluggersEmail(email)) {
+        // Junkluggers prospect via the marketing funnel (access matrix cell #4): they sign in with
+        // Google (no password). Persist the trial intent across the OAuth round-trip so initAuth
+        // self-provisions them Vonigo-pending with a 14-day trial (see resumeNativeSession).
+        storage.set('pending_signup_trial', '1');
+        if (name) storage.set('pending_signup_name', name); else storage.remove('pending_signup_name');
+        if (company) storage.set('pending_signup_company', company); else storage.remove('pending_signup_company');
+        info('Redirecting to Google to start your trial…');
+        try {
+          const { error } = await supabaseClient.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
+          if (error) throw error;
+        } catch (e) { fail('Could not start Google sign-in: ' + (e.message || 'error')); }
+        return;
+      }
       if (pw.length < 8) return fail('Password must be at least 8 characters.');
       if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
       info('Creating your account…');
