@@ -72,7 +72,7 @@ full street addresses or admin town names broadly.
 - **Default**: the dropdown pre-selects `officeState` every lookup (not last-used).
 - **Single-state majority**: if `serviceStates` is empty, fall back to `[officeState]` → the dropdown has
   one option (effectively moot). Only the multi-state handful ever configure anything.
-- **Captured at onboarding** (future — see `docs/STATUS.md` "Onboarding process"): new-Vonigo
+- **Captured at onboarding** (future — see `.HUB/Hub.md` "Onboarding process"): new-Vonigo
   provisioning will ask which states they serve and seed `serviceStates`.
 
 ## 5. Flow
@@ -94,7 +94,7 @@ routes native (`crewlogic-pricing`) vs Vonigo (`crewlogic-price-lookup`). Backen
 - **Per-estimator default state.** Estimators (magic-link) may work in a different state than the
   franchise office (e.g. estimator in CA, office in AZ). A per-estimator default state (falling back to
   franchise `officeState`) is parked as a future enhancement, tracked under "Onboarding process" in
-  `docs/STATUS.md`. For now the default is always `officeState`.
+  `.HUB/Hub.md`. For now the default is always `officeState`.
 
 ## 8. Build checklist
 - [x] Migration `0005`: `price_list_zips` + `city`/`state` + town index; **applied to dev** (columns confirmed).
