@@ -117,6 +117,23 @@ function getField(fields: VonigoField[], id: number): VonigoField | undefined {
   return fields.find((f) => f.fieldID === id);
 }
 
+// Forward-geocode a US street address via the free US Census Geocoder (no API
+// key, US addresses). Returns null when there's no confident match.
+async function geocodeCensus(address: string): Promise<{ lat: number; lon: number } | null> {
+  const url = 'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress'
+    + '?address=' + encodeURIComponent(address)
+    + '&benchmark=Public_AR_Current&format=json';
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  const m = data?.result?.addressMatches?.[0];
+  if (!m?.coordinates) return null;
+  const lat = Number(m.coordinates.y);
+  const lon = Number(m.coordinates.x);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return { lat, lon };
+}
+
 // Parse Vonigo's multi-checkbox field format into an array of CHECKED labels.
 // Format: "optionID!~!Label!`!1!!~~!!optionID!~!Label!`!0!!~~!!..."
 // The bit between `!\`!` and `!!` is 1 if checked, 0 if unchecked.
@@ -160,6 +177,8 @@ Deno.serve(async (req: Request) => {
     // (fieldID 11215). These are confidential/internal and only used by the
     // Job Plan flow, not the customer-facing job picker.
     const includePlanData = body.includePlanData === true;
+    // When true, geocode OPEN jobs (cache-first) and attach lat/lon for the truck map.
+    const includeCoords = body.includeCoords === true;
 
     if (!franchiseID) {
       return new Response(JSON.stringify({ success: false, error: 'franchiseID required' }), {
@@ -322,6 +341,8 @@ Deno.serve(async (req: Request) => {
           dateService,
           price,
           isComplete: statusOptionID === STATUS_COMPLETED || statusOptionID === STATUS_ARCHIVED,
+          lat: null as number | null,
+          lon: null as number | null,
         };
 
         if (!includePlanData) return base;
@@ -341,6 +362,40 @@ Deno.serve(async (req: Request) => {
       .filter((wo) => wo.jobID)
       // Sort by appointment time ascending
       .sort((a, b) => a.time - b.time);
+
+    // Geocode OPEN jobs (only when asked) so the truck map can drop house pins.
+    // Cache-first via geocode_cache; misses go to the free US Census Geocoder and
+    // are written back (including "not found", so bad addresses aren't retried).
+    if (includeCoords) {
+      const open = workOrders.filter((w) => !w.isComplete && w.address);
+      await Promise.all(open.map(async (w) => {
+        const oneLine = w.address.replace(/\n/g, ', ').replace(/\s+/g, ' ').trim();
+        const key = oneLine.toLowerCase();
+        try {
+          const { data: cached } = await supabase
+            .from('geocode_cache')
+            .select('lat, lon, found')
+            .eq('address_key', key)
+            .maybeSingle();
+          if (cached) {
+            if (cached.found) { w.lat = cached.lat; w.lon = cached.lon; }
+            return;
+          }
+          const g = await geocodeCensus(oneLine);
+          await supabase.from('geocode_cache').upsert({
+            address_key: key,
+            lat: g?.lat ?? null,
+            lon: g?.lon ?? null,
+            found: !!g,
+            provider: 'census',
+            updated_at: new Date().toISOString(),
+          });
+          if (g) { w.lat = g.lat; w.lon = g.lon; }
+        } catch (e) {
+          console.warn('[workorders] geocode failed for one job (non-fatal):', (e as Error).message);
+        }
+      }));
+    }
 
     return new Response(JSON.stringify({
       success: true,

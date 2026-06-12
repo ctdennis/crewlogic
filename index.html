@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.32.1 | 2026-06-12">
+  <meta name="crewlogic-version" content="v5.33.0 | 2026-06-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1312,6 +1312,10 @@
           <button id="trucksRefreshBtn" onclick="showTrucks()" style="font-size:13px;padding:7px 16px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;">🔄 Refresh</button>
         </div>
         <div id="trucksMap" style="width:100%;height:60vh;min-height:400px;max-height:680px;border-radius:var(--radius,16px);overflow:hidden;border:1px solid var(--border,#22354a);background:var(--tile,#1e2f40);"></div>
+        <div id="trucksLegend" style="display:none;align-items:center;gap:18px;margin-top:10px;font-size:12px;color:var(--text-muted,#6e8194);">
+          <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:18px;height:18px;border-radius:50%;background:#00E785;color:#06121d;font-weight:800;font-size:11px;display:inline-flex;align-items:center;justify-content:center;">1</span> Trucks</span>
+          <span style="display:inline-flex;align-items:center;gap:6px;font-size:15px;">🏠 <span style="font-size:12px;">Open jobs today (<span id="jobsLegendCount">0</span>)</span></span>
+        </div>
         <div id="trucksList" style="margin-top:14px;display:flex;flex-direction:column;gap:8px;"></div>
       </div>
 
@@ -6233,7 +6237,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // ===== "Where are my trucks?" — telematics truck locations (Linxup/Motive via crewlogic-trucks) =====
-    let _trucksMap = null, _truckMarkers = [];
+    let _trucksMap = null, _truckMarkers = [], _jobMarkers = [];
     function _truckEsc(s) { return String(s == null ? '' : s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c])); }
     function _truckTimeAgo(ms) {
       if (!ms) return '';
@@ -6260,6 +6264,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const provLabel = data.provider ? (data.provider.charAt(0).toUpperCase() + data.provider.slice(1)) : 'telematics';
         if (sub) sub.textContent = trucks.length + ' truck' + (trucks.length === 1 ? '' : 's') + ' · live from ' + provLabel;
         renderTrucks(trucks);
+        loadJobMarkers(); // overlay today's open jobs (non-blocking)
       } catch (e) {
         console.error('showTrucks error:', e);
         if (listEl) listEl.innerHTML = '<div class="price-error" style="color:#ef4444;font-size:13px;padding:8px;">Could not load trucks: ' + _truckEsc(e.message) + '</div>';
@@ -6340,6 +6345,48 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       else if (pts.length > 1) _trucksMap.fitBounds(pts, { padding: [40, 40], maxZoom: 15 });
       // Leaflet sizes wrong in a just-revealed (was display:none) container — fix after a tick.
       setTimeout(() => { if (_trucksMap) _trucksMap.invalidateSize(); }, 120);
+    }
+
+    // Overlay today's OPEN jobs as house markers on the truck map. Open jobs come
+    // from Vonigo (via crewlogic-todays-workorders, includeCoords) already geocoded;
+    // completed/archived jobs are excluded server-side, so they never appear here.
+    async function loadJobMarkers() {
+      if (typeof L === 'undefined' || !_trucksMap) return;
+      try {
+        const data = await edgeFunctionCall('crewlogic-todays-workorders', { franchiseID: currentUser.franchiseID, dayOffset: 0, includeCoords: true });
+        const jobs = (data.workOrders || []).filter(j => !j.isComplete && j.lat != null && j.lon != null);
+        _jobMarkers.forEach(m => _trucksMap.removeLayer(m));
+        _jobMarkers = [];
+        const jobPts = [];
+        jobs.forEach(j => {
+          const icon = L.divIcon({
+            className: 'job-house-marker',
+            html: '<div style="font-size:22px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.6));">🏠</div>',
+            iconSize: [26, 26], iconAnchor: [13, 24], popupAnchor: [0, -22]
+          });
+          const addr = j.address ? String(j.address).replace(/\n/g, ', ').replace(/\s+/g, ' ').trim() : '';
+          const pop = '<div style="font-size:13px;line-height:1.5;min-width:150px;">'
+            + '<b>🏠 ' + _truckEsc(j.clientName || 'Job') + '</b>'
+            + (j.timeLabel ? '<br>' + _truckEsc(j.timeLabel) : '')
+            + (addr ? '<br>' + _truckEsc(addr) : '')
+            + '</div>';
+          const m = L.marker([j.lat, j.lon], { icon }).addTo(_trucksMap).bindPopup(pop);
+          _jobMarkers.push(m);
+          jobPts.push([j.lat, j.lon]);
+        });
+        // Refit the map to show trucks AND jobs together.
+        const allPts = [];
+        _truckMarkers.forEach(m => allPts.push(m.getLatLng()));
+        jobPts.forEach(p => allPts.push(p));
+        if (allPts.length > 1) _trucksMap.fitBounds(allPts, { padding: [40, 40], maxZoom: 14 });
+        // Show the legend with the open-job count.
+        const legend = document.getElementById('trucksLegend');
+        if (legend) legend.style.display = 'flex';
+        const jc = document.getElementById('jobsLegendCount');
+        if (jc) jc.textContent = jobs.length;
+      } catch (e) {
+        console.warn('loadJobMarkers failed (non-fatal):', e);
+      }
     }
 
     // ===== Settings → Trucks (telematics) tab =====
