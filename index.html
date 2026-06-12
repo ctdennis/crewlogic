@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.33.1 | 2026-06-12">
+  <meta name="crewlogic-version" content="v5.34.0 | 2026-06-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1026,8 +1026,8 @@
     @media (min-width: 480px) {
       .app-content { max-width: 480px; margin: 0 auto; }
     }
-  /* Numbered truck markers — neutralize Leaflet's default white div-icon box */
-  .truck-num-marker { background: transparent !important; border: none !important; }
+  /* Numbered map markers — neutralize Leaflet's default white div-icon box */
+  .truck-num-marker, .job-stop-marker { background: transparent !important; border: none !important; }
   </style>
 </head>
 <body>
@@ -1312,9 +1312,9 @@
           <button id="trucksRefreshBtn" onclick="showTrucks()" style="font-size:13px;padding:7px 16px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;">🔄 Refresh</button>
         </div>
         <div id="trucksMap" style="width:100%;height:60vh;min-height:400px;max-height:680px;border-radius:var(--radius,16px);overflow:hidden;border:1px solid var(--border,#22354a);background:var(--tile,#1e2f40);"></div>
-        <div id="trucksLegend" style="display:none;align-items:center;gap:18px;margin-top:10px;font-size:12px;color:var(--text-muted,#6e8194);">
+        <div id="trucksLegend" style="display:none;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--text-muted,#6e8194);">
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:18px;height:18px;border-radius:50%;background:#00E785;color:#06121d;font-weight:800;font-size:11px;display:inline-flex;align-items:center;justify-content:center;">1</span> Trucks</span>
-          <span style="display:inline-flex;align-items:center;gap:6px;font-size:15px;">🏠 <span style="font-size:12px;">Open jobs today (<span id="jobsLegendCount">0</span>)</span></span>
+          <span id="jobsLegendRoutes" style="display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap;"></span>
         </div>
         <div id="trucksList" style="margin-top:14px;display:flex;flex-direction:column;gap:8px;"></div>
       </div>
@@ -6369,23 +6369,38 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Overlay today's OPEN jobs as house markers on the truck map. Open jobs come
     // from Vonigo (via crewlogic-todays-workorders, includeCoords) already geocoded;
     // completed/archived jobs are excluded server-side, so they never appear here.
+    // Distinct colors assigned to routes in first-seen (earliest-stop) order.
+    const _ROUTE_COLORS = ['#3b82f6', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6', '#ec4899', '#8b5cf6', '#22c55e'];
     async function loadJobMarkers() {
       if (typeof L === 'undefined' || !_trucksMap) return;
       try {
         const data = await edgeFunctionCall('crewlogic-todays-workorders', { franchiseID: currentUser.franchiseID, dayOffset: 0, includeCoords: true });
+        // Server returns jobs sorted by appointment time → this IS each route's stop order.
         const jobs = (data.workOrders || []).filter(j => !j.isComplete && j.lat != null && j.lon != null);
         _jobMarkers.forEach(m => _trucksMap.removeLayer(m));
         _jobMarkers = [];
+        const routeColor = {}; let colorIdx = 0;
+        const colorFor = (key) => {
+          if (!(key in routeColor)) routeColor[key] = (key === 'Unrouted') ? '#6e8194' : _ROUTE_COLORS[colorIdx++ % _ROUTE_COLORS.length];
+          return routeColor[key];
+        };
+        const shortRoute = (r) => ((r || '').replace(/\s*\(.*\)\s*/, '').trim()) || 'Unrouted';
+        const routeStop = {};
         const jobPts = [];
         jobs.forEach(j => {
+          const rkey = shortRoute(j.route);
+          routeStop[rkey] = (routeStop[rkey] || 0) + 1;
+          const n = routeStop[rkey];           // stop number within this route
+          const color = colorFor(rkey);
           const icon = L.divIcon({
-            className: 'job-house-marker',
-            html: '<div style="font-size:22px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.6));">🏠</div>',
-            iconSize: [26, 26], iconAnchor: [13, 24], popupAnchor: [0, -22]
+            className: 'job-stop-marker',
+            html: '<div style="width:26px;height:26px;border-radius:6px;background:' + color + ';color:#fff;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5);">' + n + '</div>',
+            iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -14]
           });
           const addr = j.address ? String(j.address).replace(/\n/g, ', ').replace(/\s+/g, ' ').trim() : '';
-          const pop = '<div style="font-size:13px;line-height:1.5;min-width:150px;">'
-            + '<b>🏠 ' + _truckEsc(j.clientName || 'Job') + '</b>'
+          const pop = '<div style="font-size:13px;line-height:1.5;min-width:160px;">'
+            + '<b>Stop ' + n + ' · ' + _truckEsc(rkey) + '</b>'
+            + '<br>🏠 ' + _truckEsc(j.clientName || 'Job')
             + (j.timeLabel ? '<br>' + _truckEsc(j.timeLabel) : '')
             + (addr ? '<br>' + _truckEsc(addr) : '')
             + '</div>';
@@ -6398,11 +6413,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _truckMarkers.forEach(m => allPts.push(m.getLatLng()));
         jobPts.forEach(p => allPts.push(p));
         if (allPts.length > 1) _trucksMap.fitBounds(allPts, { padding: [40, 40], maxZoom: 14 });
-        // Show the legend with the open-job count.
+        // Legend: one colored chip per route, with its open-stop count.
         const legend = document.getElementById('trucksLegend');
         if (legend) legend.style.display = 'flex';
-        const jc = document.getElementById('jobsLegendCount');
-        if (jc) jc.textContent = jobs.length;
+        const routesEl = document.getElementById('jobsLegendRoutes');
+        if (routesEl) {
+          routesEl.innerHTML = Object.keys(routeStop).map(rkey =>
+            '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:14px;height:14px;border-radius:4px;flex:0 0 auto;background:' + colorFor(rkey) + ';"></span>' + _truckEsc(rkey) + ' (' + routeStop[rkey] + ')</span>'
+          ).join('') || '<span>No open jobs today</span>';
+        }
       } catch (e) {
         console.warn('loadJobMarkers failed (non-fatal):', e);
       }
