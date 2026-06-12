@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.34.0 | 2026-06-12">
+  <meta name="crewlogic-version" content="v5.35.0 | 2026-06-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1308,7 +1308,14 @@
       <div id="trucksScreen" style="display:none;">
         <div class="section-title fade-in">Where Are My Trucks?</div>
         <div class="section-desc fade-in fade-in-delay-1" id="trucksSubhead">Live locations from your telematics provider.</div>
-        <div style="display:flex;justify-content:flex-end;margin:6px 0 8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:6px 0 8px;gap:10px;flex-wrap:wrap;">
+          <div style="display:inline-flex;align-items:center;gap:8px;">
+            <span style="font-size:12px;color:var(--text-muted,#6e8194);">Jobs:</span>
+            <div style="display:inline-flex;border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);overflow:hidden;">
+              <button id="trucksDayTodayBtn" onclick="setTrucksJobDay(0)" style="font-size:13px;padding:7px 14px;background:var(--accent-green,#00E785);color:#06121d;border:none;cursor:pointer;font-weight:700;">Today</button>
+              <button id="trucksDayTomorrowBtn" onclick="setTrucksJobDay(1)" style="font-size:13px;padding:7px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:none;cursor:pointer;font-weight:600;">Tomorrow</button>
+            </div>
+          </div>
           <button id="trucksRefreshBtn" onclick="showTrucks()" style="font-size:13px;padding:7px 16px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;">🔄 Refresh</button>
         </div>
         <div id="trucksMap" style="width:100%;height:60vh;min-height:400px;max-height:680px;border-radius:var(--radius,16px);overflow:hidden;border:1px solid var(--border,#22354a);background:var(--tile,#1e2f40);"></div>
@@ -6238,7 +6245,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // ===== "Where are my trucks?" — telematics truck locations (Linxup/Motive via crewlogic-trucks) =====
-    let _trucksMap = null, _truckMarkers = [], _jobMarkers = [], _trucksRefreshTimer = null;
+    let _trucksMap = null, _truckMarkers = [], _jobMarkers = [], _trucksRefreshTimer = null, _trucksJobDay = 0;
     function _truckEsc(s) { return String(s == null ? '' : s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c])); }
     function _truckTimeAgo(ms) {
       if (!ms) return '';
@@ -6262,6 +6269,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function _stopTrucksAutoRefresh() {
       if (_trucksRefreshTimer) { clearInterval(_trucksRefreshTimer); _trucksRefreshTimer = null; }
+    }
+    // Today/Tomorrow toggle — switches which day's JOBS overlay the (always-live) trucks.
+    function _updateTrucksDayToggle() {
+      const setBtn = (btn, on) => {
+        if (!btn) return;
+        btn.style.background = on ? 'var(--accent-green,#00E785)' : 'var(--bg-input,#1e2f40)';
+        btn.style.color = on ? '#06121d' : 'var(--text-primary,#eef4fa)';
+        btn.style.fontWeight = on ? '700' : '600';
+      };
+      setBtn(document.getElementById('trucksDayTodayBtn'), _trucksJobDay === 0);
+      setBtn(document.getElementById('trucksDayTomorrowBtn'), _trucksJobDay === 1);
+    }
+    function setTrucksJobDay(offset) {
+      _trucksJobDay = offset;
+      _updateTrucksDayToggle();
+      loadJobMarkers(); // reload the job overlay for the selected day; trucks stay live
     }
     async function showTrucks(isRefresh) {
       const listEl = document.getElementById('trucksList');
@@ -6374,7 +6397,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function loadJobMarkers() {
       if (typeof L === 'undefined' || !_trucksMap) return;
       try {
-        const data = await edgeFunctionCall('crewlogic-todays-workorders', { franchiseID: currentUser.franchiseID, dayOffset: 0, includeCoords: true });
+        const data = await edgeFunctionCall('crewlogic-todays-workorders', { franchiseID: currentUser.franchiseID, dayOffset: _trucksJobDay, includeCoords: true });
         // Server returns jobs sorted by appointment time → this IS each route's stop order.
         const jobs = (data.workOrders || []).filter(j => !j.isComplete && j.lat != null && j.lon != null);
         _jobMarkers.forEach(m => _trucksMap.removeLayer(m));
@@ -6420,7 +6443,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (routesEl) {
           routesEl.innerHTML = Object.keys(routeStop).map(rkey =>
             '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:14px;height:14px;border-radius:4px;flex:0 0 auto;background:' + colorFor(rkey) + ';"></span>' + _truckEsc(rkey) + ' (' + routeStop[rkey] + ')</span>'
-          ).join('') || '<span>No open jobs today</span>';
+          ).join('') || '<span>No open jobs ' + (_trucksJobDay === 1 ? 'tomorrow' : 'today') + '</span>';
         }
       } catch (e) {
         console.warn('loadJobMarkers failed (non-fatal):', e);
@@ -6532,6 +6555,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('trucksScreen').style.display = 'block';
         document.getElementById('headerTitle').textContent = 'Where Are My Trucks?';
         currentScreen = 'trucks';
+        _trucksJobDay = 0; _updateTrucksDayToggle(); // fresh entry starts on Today
         showTrucks();
         _startTrucksAutoRefresh();
         return;
