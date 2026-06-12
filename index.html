@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.33.0 | 2026-06-12">
+  <meta name="crewlogic-version" content="v5.33.1 | 2026-06-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -6150,6 +6150,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     ];
 
     function hideAll() {
+      _stopTrucksAutoRefresh();
       allScreens.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -6237,7 +6238,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // ===== "Where are my trucks?" — telematics truck locations (Linxup/Motive via crewlogic-trucks) =====
-    let _trucksMap = null, _truckMarkers = [], _jobMarkers = [];
+    let _trucksMap = null, _truckMarkers = [], _jobMarkers = [], _trucksRefreshTimer = null;
     function _truckEsc(s) { return String(s == null ? '' : s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c])); }
     function _truckTimeAgo(ms) {
       if (!ms) return '';
@@ -6247,10 +6248,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const h = Math.round(m / 60); if (h < 24) return h + ' hr ago';
       const d = Math.round(h / 24); return d + ' day' + (d === 1 ? '' : 's') + ' ago';
     }
-    async function showTrucks() {
+    // Poll the truck locations while the screen is open so positions stay live.
+    function _startTrucksAutoRefresh() {
+      _stopTrucksAutoRefresh();
+      _trucksRefreshTimer = setInterval(() => {
+        const scr = document.getElementById('trucksScreen');
+        if (currentScreen === 'trucks' && scr && scr.style.display !== 'none') {
+          showTrucks(true); // silent refresh — no loading flash, no map re-fit
+        } else {
+          _stopTrucksAutoRefresh();
+        }
+      }, 45000);
+    }
+    function _stopTrucksAutoRefresh() {
+      if (_trucksRefreshTimer) { clearInterval(_trucksRefreshTimer); _trucksRefreshTimer = null; }
+    }
+    async function showTrucks(isRefresh) {
       const listEl = document.getElementById('trucksList');
       const sub = document.getElementById('trucksSubhead');
-      if (listEl) listEl.innerHTML = '<div style="color:var(--text-muted,#6e8194);font-size:13px;padding:8px;">Loading trucks…</div>';
+      if (!isRefresh && listEl) listEl.innerHTML = '<div style="color:var(--text-muted,#6e8194);font-size:13px;padding:8px;">Loading trucks…</div>';
       try {
         const data = await edgeFunctionCall('crewlogic-trucks', { franchiseID: currentUser.franchiseInternalID });
         // Not connected yet → guide the owner to Settings instead of showing an error.
@@ -6262,10 +6278,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (!data.success) throw new Error(data.error || 'Lookup failed');
         const trucks = data.trucks || [];
         const provLabel = data.provider ? (data.provider.charAt(0).toUpperCase() + data.provider.slice(1)) : 'telematics';
-        if (sub) sub.textContent = trucks.length + ' truck' + (trucks.length === 1 ? '' : 's') + ' · live from ' + provLabel;
-        renderTrucks(trucks);
-        loadJobMarkers(); // overlay today's open jobs (non-blocking)
+        if (sub) sub.textContent = trucks.length + ' truck' + (trucks.length === 1 ? '' : 's') + ' · live from ' + provLabel + ' · auto-updating';
+        renderTrucks(trucks, !isRefresh);  // fit the map only on first load, not on auto-refresh
+        if (!isRefresh) loadJobMarkers();  // jobs are static this session — load once, don't re-pull every cycle
       } catch (e) {
+        if (isRefresh) { console.warn('trucks auto-refresh failed (non-fatal):', e); return; }
         console.error('showTrucks error:', e);
         if (listEl) listEl.innerHTML = '<div class="price-error" style="color:#ef4444;font-size:13px;padding:8px;">Could not load trucks: ' + _truckEsc(e.message) + '</div>';
       }
@@ -6286,7 +6303,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!s) return '';
       return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     }
-    function renderTrucks(trucks) {
+    function renderTrucks(trucks, fit) {
       const listEl = document.getElementById('trucksList');
       if (listEl) {
         listEl.innerHTML = trucks.map((t, i) => {
@@ -6341,8 +6358,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _truckMarkers.push(m);
         pts.push([t.lat, t.lon]);
       });
-      if (pts.length === 1) _trucksMap.setView(pts[0], 14);
-      else if (pts.length > 1) _trucksMap.fitBounds(pts, { padding: [40, 40], maxZoom: 15 });
+      if (fit !== false) {
+        if (pts.length === 1) _trucksMap.setView(pts[0], 14);
+        else if (pts.length > 1) _trucksMap.fitBounds(pts, { padding: [40, 40], maxZoom: 15 });
+      }
       // Leaflet sizes wrong in a just-revealed (was display:none) container — fix after a tick.
       setTimeout(() => { if (_trucksMap) _trucksMap.invalidateSize(); }, 120);
     }
@@ -6495,6 +6514,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('headerTitle').textContent = 'Where Are My Trucks?';
         currentScreen = 'trucks';
         showTrucks();
+        _startTrucksAutoRefresh();
         return;
       }
 
