@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.36.0 | 2026-06-12">
+  <meta name="crewlogic-version" content="v5.36.1 | 2026-06-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -6347,14 +6347,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const badge = active ? '#00E785' : '#6e8194';
           const subline = [veh, label].filter(Boolean).join(' · ') + (t.desc ? ' · ' + t.desc : '');
           const isOpen = _expandedTrucks.has(i);
-          // Detail rows — only fields this truck actually reports.
+          // These six fields ALWAYS show (with a — placeholder when not reported, e.g. parked).
+          const dash = '—';
           const rows = [];
-          if (t.odometer != null) rows.push(['Odometer', t.odometer.toLocaleString() + ' mi']);
-          if (t.engineHours != null) rows.push(['Engine hours', t.engineHours.toLocaleString() + ' hrs']);
+          rows.push(['Current driver', t.driver || dash]);
+          rows.push(['Speed', t.speed != null ? (t.speed + ' mph' + (t.heading ? ' ' + t.heading : '')) : dash]);
+          rows.push(['Odometer', t.odometer != null ? t.odometer.toLocaleString() + ' mi' : dash]);
+          rows.push(['Engine hours', t.engineHours != null ? t.engineHours.toLocaleString() + ' hrs' : dash]);
+          rows.push(['Fuel', t.fuelPercent != null ? Math.round(t.fuelPercent) + '%' : dash]);
+          rows.push(['Battery voltage', t.batteryVoltage != null ? t.batteryVoltage + ' V' : dash]);
+          // Contextual rows — shown only when present.
           if (t.fuelType) rows.push(['Fuel type', t.fuelType.charAt(0).toUpperCase() + t.fuelType.slice(1)]);
-          if (t.fuelPercent != null) rows.push(['Fuel level', Math.round(t.fuelPercent) + '%']);
-          if (t.batteryVoltage != null) rows.push(['Battery', t.batteryVoltage + ' V']);
-          if (t.driver) rows.push(['Driver', t.driver]);
           if (t.vin) rows.push(['VIN', t.vin]);
           if (t.desc) rows.push(['Last location', t.desc]);
           if (t.lastUpdate) rows.push(['Last report', _truckTimeAgo(t.lastUpdate)]);
