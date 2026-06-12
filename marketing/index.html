@@ -31,6 +31,13 @@
   .btn-outline:hover{border-color:var(--green);}
   .btn-ghost{background:transparent;color:var(--ink);border:1px solid var(--border);padding:9px 20px;font-size:14px;}
   .btn-ghost:hover{border-color:var(--green);}
+  .nav-links{display:flex;align-items:center;gap:10px;}
+  .dropdown{position:relative;}
+  .dropdown > .btn-ghost{display:inline-flex;gap:6px;}
+  .dropdown-menu{position:absolute;top:calc(100% + 8px);right:0;min-width:236px;background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:8px;display:flex;flex-direction:column;gap:2px;z-index:60;opacity:0;visibility:hidden;transform:translateY(-6px);transition:opacity .14s ease,transform .14s ease,visibility .14s;}
+  .dropdown-menu a{display:flex;gap:9px;align-items:center;padding:10px 12px;border-radius:9px;color:var(--body);font-size:14px;font-weight:600;}
+  .dropdown-menu a:hover{background:var(--tile);color:var(--ink);}
+  .dropdown:hover .dropdown-menu,.dropdown.open .dropdown-menu{opacity:1;visibility:visible;transform:translateY(0);}
 
   header{position:sticky;top:0;z-index:50;background:rgba(11,19,29,0.74);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);}
   .nav{display:flex;align-items:center;justify-content:space-between;height:66px;}
@@ -143,7 +150,20 @@
 <header>
   <div class="wrap nav">
     <a class="logo" href="#top">CrewLogic<span class="ai-box">AI</span></a>
-    <a href="https://app.crewlogicai.com" class="btn btn-ghost">Login</a>
+    <div class="nav-links">
+      <div class="dropdown" id="featDropdown">
+        <button class="btn btn-ghost" onclick="this.closest('.dropdown').classList.toggle('open')">Features ▾</button>
+        <div class="dropdown-menu">
+          <a href="/features/ai-estimating.html">🤖 AI Estimating</a>
+          <a href="/features/cost-margin.html">💵 Cost &amp; Margin</a>
+          <a href="/features/price-book.html">🏷️ Pricing &amp; Price Book</a>
+          <a href="/features/proposals.html">📄 Proposals &amp; PDFs</a>
+          <a href="/features/yard-signs.html">🪧 Yard Signs</a>
+          <a href="/features/crm-integration.html">🔗 CRM Integration</a>
+        </div>
+      </div>
+      <a href="https://app.crewlogicai.com" class="btn btn-ghost">Login</a>
+    </div>
   </div>
 </header>
 
@@ -189,7 +209,6 @@
       </a>
       <a class="feat" href="/features/cost-margin.html"><div class="ico">💵</div><h3>Cost &amp; Margin</h3><p>Labor, disposal, and fuel roll up into a live profit margin on every estimate.</p><span class="go">Learn more →</span></a>
       <a class="feat" href="/features/price-book.html"><div class="ico">🏷️</div><h3>Pricing &amp; Price Book</h3><p>ZIP-mapped price lists with catch-all coverage — native, or synced with your CRM.</p><span class="go">Learn more →</span></a>
-      <a class="feat" href="/features/job-planning.html"><div class="ico">🗺️</div><h3>Job Planning &amp; Routes</h3><p>Per-stop route briefs with truck-load and volume math.</p><span class="go">Learn more →</span></a>
       <a class="feat" href="/features/proposals.html"><div class="ico">📄</div><h3>Proposals &amp; PDFs</h3><p>Branded — your logo, your colors. Customer-ready, straight from the estimate.</p><span class="go">Learn more →</span></a>
       <a class="feat" href="/features/yard-signs.html"><div class="ico">🪧</div><h3>Yard Signs</h3><p>Track sign placements in the field with a crew rewards game.</p><span class="go">Learn more →</span></a>
       <a class="feat" href="/features/crm-integration.html"><div class="ico">🔗</div><h3>CRM Integration</h3><p>Pull live pricing and push quotes into your CRM.</p><span class="go">Learn more →</span></a>
@@ -253,6 +272,11 @@
 
 <script>
   document.getElementById('yr').textContent = new Date().getFullYear();
+  // Close the Features dropdown when tapping/clicking outside it (mobile-friendly toggle).
+  document.addEventListener('click', function (e) {
+    var dd = document.getElementById('featDropdown');
+    if (dd && !dd.contains(e.target)) dd.classList.remove('open');
+  });
 
   // ===== Trial signup =====
   // Fire a Supabase magic link carrying the form info as user metadata; the link lands on the
