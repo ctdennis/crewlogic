@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.31.0 | 2026-06-12">
+  <meta name="crewlogic-version" content="v5.32.0 | 2026-06-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1401,6 +1401,7 @@
           <button class="settings-tab" id="stab-customers" onclick="showSettingsTab('customers')" style="display:none;">👤 Customers</button>
           <button class="settings-tab" id="stab-signs" onclick="showSettingsTab('signs')">🪧 Yard Signs</button>
           <button class="settings-tab" id="stab-tools" onclick="showSettingsTab('tools')">🛠 Tools</button>
+          <button class="settings-tab" id="stab-trucks" onclick="showSettingsTab('trucks')">🚚 Trucks</button>
           <button class="settings-tab" id="stab-account" onclick="showSettingsTab('account')">⚙️ Account</button>
         </div>
 
@@ -1765,6 +1766,60 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         </div><!-- end proposal tab -->
 
         <!-- TAB: Account -->
+        <!-- TAB: Trucks (telematics) — owners only -->
+        <div id="stab-content-trucks" style="display:none;">
+          <div class="settings-card fade-in fade-in-delay-2">
+            <div class="settings-card-title">Truck Tracking (Telematics)</div>
+            <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">
+              Connect your GPS provider to see your trucks live on the <strong>Where Are My Trucks?</strong> screen. Pick your provider, paste your API token, and save — we'll test the connection right away.
+            </div>
+
+            <!-- Current connection status -->
+            <div id="telematicsStatus" style="font-size:13px;margin-bottom:16px;"></div>
+
+            <!-- Provider flag -->
+            <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">Provider</div>
+            <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+              <label style="display:flex;align-items:center;gap:7px;padding:9px 14px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-primary);cursor:pointer;">
+                <input type="radio" name="telematicsProvider" value="motive" onchange="onTelematicsProviderChange()" style="margin:0;"> Motive
+              </label>
+              <label style="display:flex;align-items:center;gap:7px;padding:9px 14px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-primary);cursor:pointer;">
+                <input type="radio" name="telematicsProvider" value="linxup" onchange="onTelematicsProviderChange()" style="margin:0;"> Linxup
+              </label>
+            </div>
+
+            <!-- Flag-driven setup instructions -->
+            <div id="telematicsInstructions" style="display:none;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:14px;font-size:12.5px;line-height:1.6;color:var(--text-secondary);">
+              <div id="telematicsInstrMotive" style="display:none;">
+                <strong style="color:var(--text-primary);">Get your Motive API key</strong>
+                <ol style="margin:7px 0 0 18px;padding:0;">
+                  <li>In Motive, click the <strong>person icon</strong> at the very bottom-left.</li>
+                  <li>Open <strong>Developers</strong>.</li>
+                  <li>Click <strong>Request API Key</strong> (or copy an existing Active key).</li>
+                  <li>Copy the API key and paste it below.</li>
+                </ol>
+              </div>
+              <div id="telematicsInstrLinxup" style="display:none;">
+                <strong style="color:var(--text-primary);">Get your Linxup API token</strong>
+                <ol style="margin:7px 0 0 18px;padding:0;">
+                  <li>In Linxup, click the <strong>Setup</strong> (gear) icon on the top bar.</li>
+                  <li>In the lower-left, open the <strong>API / Developers</strong> link.</li>
+                  <li>Click <strong>Create New API Token</strong> and create the token.</li>
+                  <li>Copy the token and paste it below.</li>
+                </ol>
+              </div>
+            </div>
+
+            <!-- Token input -->
+            <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">API token / key</div>
+            <input id="telematicsToken" type="password" autocomplete="off" placeholder="Paste your provider token here" style="width:100%;box-sizing:border-box;font-size:13px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);margin-bottom:6px;font-family:monospace;">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px;">Stored encrypted in our vault. Never shown again after saving.</div>
+
+            <button id="telematicsSaveBtn" onclick="saveTelematicsCredential()" style="padding:10px 18px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;">Save &amp; Test Connection</button>
+            <div class="settings-feedback" id="telematicsFeedback" style="margin-top:10px;font-size:13px;"></div>
+          </div>
+        </div><!-- end trucks tab -->
+
         <div id="stab-content-account" style="display:none;">
 
           <!-- Team Members — owners only -->
@@ -5917,6 +5972,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (costTab) costTab.style.display = 'none';
         const proposalTab = document.getElementById('stab-proposal');
         if (proposalTab) proposalTab.style.display = 'none';
+        const trucksTab = document.getElementById('stab-trucks');
+        if (trucksTab) trucksTab.style.display = 'none';
 
         // Hide tab bar entirely and show account directly
         const tabBar = document.getElementById('settingsTabBar');
@@ -6024,7 +6081,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // "Where are my trucks?" — telematics (Linxup/Motive). Gated to #90 owner for Phase 1 (the
       // franchise whose Linxup account the global LINXUP_API_KEY belongs to); Phase 2 = per-franchise provider.
       const trucksCard = document.getElementById('trucksCard');
-      if (trucksCard) trucksCard.style.display = (String(currentUser.franchiseID) === '90' && currentUser.role === 'owner') ? '' : 'none';
+      if (trucksCard) trucksCard.style.display = (currentUser.role === 'owner') ? '' : 'none';
 
       // Job Plan pulls the day's schedule/work-orders from the CRM (Vonigo). Native tenants
       // have no scheduling source, so hide it. Cache-safe: hide only when submission_target is
@@ -6189,13 +6246,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const sub = document.getElementById('trucksSubhead');
       if (listEl) listEl.innerHTML = '<div style="color:var(--text-muted,#6e8194);font-size:13px;padding:8px;">Loading trucks…</div>';
       try {
-        const res = await fetch(EDGE_BASE + '/crewlogic-trucks?provider=linxup', {
-          headers: { 'Authorization': 'Bearer ' + EDGE_ANON_KEY, 'apikey': EDGE_ANON_KEY }
-        });
-        const data = await res.json();
+        const data = await edgeFunctionCall('crewlogic-trucks', { franchiseID: currentUser.franchiseInternalID });
+        // Not connected yet → guide the owner to Settings instead of showing an error.
+        if (!data.success && /not configured|no telematics/i.test(data.error || '')) {
+          if (sub) sub.textContent = 'Not connected yet';
+          if (listEl) listEl.innerHTML = '<div style="color:var(--text-muted,#6e8194);font-size:13px;padding:16px;line-height:1.6;">No telematics provider connected yet.<br>Go to <strong>Settings → 🚚 Trucks</strong> to connect Motive or Linxup and your fleet will show up here.</div>';
+          return;
+        }
         if (!data.success) throw new Error(data.error || 'Lookup failed');
         const trucks = data.trucks || [];
-        if (sub) sub.textContent = trucks.length + ' truck' + (trucks.length === 1 ? '' : 's') + ' · live from Linxup';
+        const provLabel = data.provider ? (data.provider.charAt(0).toUpperCase() + data.provider.slice(1)) : 'telematics';
+        if (sub) sub.textContent = trucks.length + ' truck' + (trucks.length === 1 ? '' : 's') + ' · live from ' + provLabel;
         renderTrucks(trucks);
       } catch (e) {
         console.error('showTrucks error:', e);
@@ -6242,6 +6303,77 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       else if (pts.length > 1) _trucksMap.fitBounds(pts, { padding: [40, 40], maxZoom: 15 });
       // Leaflet sizes wrong in a just-revealed (was display:none) container — fix after a tick.
       setTimeout(() => { if (_trucksMap) _trucksMap.invalidateSize(); }, 120);
+    }
+
+    // ===== Settings → Trucks (telematics) tab =====
+    // Provider flag drives which setup instructions show.
+    function onTelematicsProviderChange() {
+      const sel = document.querySelector('input[name="telematicsProvider"]:checked');
+      const p = sel ? sel.value : '';
+      const wrap = document.getElementById('telematicsInstructions');
+      const mot = document.getElementById('telematicsInstrMotive');
+      const lin = document.getElementById('telematicsInstrLinxup');
+      if (mot) mot.style.display = p === 'motive' ? 'block' : 'none';
+      if (lin) lin.style.display = p === 'linxup' ? 'block' : 'none';
+      if (wrap) wrap.style.display = p ? 'block' : 'none';
+    }
+
+    // Load + show the current connection status (no token is ever returned).
+    async function renderTrucksTab() {
+      const statusEl = document.getElementById('telematicsStatus');
+      const fb = document.getElementById('telematicsFeedback');
+      if (fb) fb.textContent = '';
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);">Checking current connection…</span>';
+      try {
+        const data = await edgeFunctionCall('crewlogic-settings', { action: 'getTelematics', franchiseInternalID: currentUser.franchiseInternalID });
+        if (data && data.configured) {
+          const prov = data.provider ? (data.provider.charAt(0).toUpperCase() + data.provider.slice(1)) : '';
+          const connected = data.status === 'connected';
+          const dot = connected ? '#00E785' : '#f59e0b';
+          const label = connected
+            ? ('Connected to ' + prov + ' · ' + (data.truckCount != null ? data.truckCount : '?') + ' truck' + (data.truckCount === 1 ? '' : 's'))
+            : ('Saved for ' + prov + ', but the last test did not connect');
+          if (statusEl) statusEl.innerHTML = '<span style="display:inline-flex;align-items:center;gap:7px;"><span style="width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:' + dot + ';"></span>' + _truckEsc(label) + '</span>';
+          const radio = document.querySelector('input[name="telematicsProvider"][value="' + (data.provider || '') + '"]');
+          if (radio) { radio.checked = true; onTelematicsProviderChange(); }
+        } else {
+          if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);">No provider connected yet.</span>';
+        }
+      } catch (e) {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);">Could not load current status.</span>';
+      }
+    }
+
+    // Save the token (→ Vault, server-side) and run a live test call.
+    async function saveTelematicsCredential() {
+      const sel = document.querySelector('input[name="telematicsProvider"]:checked');
+      const tokenEl = document.getElementById('telematicsToken');
+      const btn = document.getElementById('telematicsSaveBtn');
+      const fb = document.getElementById('telematicsFeedback');
+      const provider = sel ? sel.value : '';
+      const token = tokenEl ? tokenEl.value.trim() : '';
+      if (!provider) { if (fb) { fb.style.color = '#ef4444'; fb.textContent = 'Choose a provider (Motive or Linxup).'; } return; }
+      if (!token) { if (fb) { fb.style.color = '#ef4444'; fb.textContent = 'Paste your API token.'; } return; }
+      if (btn) { btn.disabled = true; btn.textContent = 'Testing…'; }
+      if (fb) { fb.style.color = 'var(--text-muted)'; fb.textContent = 'Saving and testing connection…'; }
+      try {
+        const data = await edgeFunctionCall('crewlogic-settings', { action: 'saveTelematics', franchiseInternalID: currentUser.franchiseInternalID, provider: provider, token: token });
+        if (data && data.success) {
+          if (fb) { fb.style.color = '#00E785'; fb.textContent = 'Connected ✓ — ' + (data.truckCount != null ? data.truckCount : 0) + ' truck' + (data.truckCount === 1 ? '' : 's') + ' found.'; }
+          if (tokenEl) tokenEl.value = '';
+          renderTrucksTab();
+        } else if (data && data.saved) {
+          if (fb) { fb.style.color = '#f59e0b'; fb.textContent = "Saved, but couldn't connect: " + (data.error || 'check the token and try again.'); }
+          if (tokenEl) tokenEl.value = '';
+          renderTrucksTab();
+        } else {
+          if (fb) { fb.style.color = '#ef4444'; fb.textContent = (data && data.error) || 'Save failed.'; }
+        }
+      } catch (e) {
+        if (fb) { fb.style.color = '#ef4444'; fb.textContent = 'Save failed: ' + (e.message || e); }
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Save & Test Connection'; }
+      }
     }
 
     function openModule(module) {
@@ -16505,11 +16637,11 @@ RECYCLING & DONATION
     function showSettingsTab(tab) {
       // Defense-in-depth: owner-only tabs are never reachable by a non-owner, even via a deep-link
       // (e.g. a stale _pendingSettingsTab='pricebook'). Estimators get redirected to their Account tab.
-      const OWNER_ONLY = ['pricebook','pricing','franchise','cost','proposal'];
+      const OWNER_ONLY = ['pricebook','pricing','franchise','cost','proposal','trucks'];
       if (OWNER_ONLY.indexOf(tab) !== -1 && !(currentUser && currentUser.role === 'owner')) {
         tab = 'account';
       }
-      ['franchise','cost','proposal','account','pricing','pricebook','customers','signs','tools'].forEach(t => {
+      ['franchise','cost','proposal','account','pricing','pricebook','customers','signs','tools','trucks'].forEach(t => {
         const el = document.getElementById('stab-content-' + t);
         if (el) el.style.display = t === tab ? 'block' : 'none';
         const btn = document.getElementById('stab-' + t);
@@ -16527,6 +16659,8 @@ RECYCLING & DONATION
       if (tab === 'signs') renderSignsSettingsTab();
       // Render tools inventory
       if (tab === 'tools') renderToolsTab();
+      // Render telematics (trucks) tab
+      if (tab === 'trucks') renderTrucksTab();
     }
 
     // ===== CUSTOMERS (native customer store; crm_provider=none) =====

@@ -23,6 +23,7 @@
 //   SUPABASE_SERVICE_ROLE_KEY
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { fetchTrucks } from "../_shared/telematics.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -581,10 +582,98 @@ async function handleSaveSettings(body: Record<string, unknown>): Promise<Respon
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// HANDLER: saveTelematics (per-franchise "Where Are My Trucks?" credential)
+// Body: { franchiseInternalID, provider: 'motive'|'linxup', token }
+// Stores the token in Vault via upsert_telematics_credential, then does a live
+// test call to the provider and stamps the result. The token is NEVER returned.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleSaveTelematics(body: Record<string, unknown>): Promise<Response> {
+  const franchiseID = String(body.franchiseInternalID || "").trim();
+  const provider = String(body.provider || "").trim().toLowerCase();
+  const token = String(body.token || "").trim();
+
+  if (!franchiseID) return jsonResponse({ success: false, error: "franchiseInternalID required" }, 400);
+  if (provider !== "motive" && provider !== "linxup") {
+    return jsonResponse({ success: false, error: "provider must be 'motive' or 'linxup'" }, 400);
+  }
+  if (!token) return jsonResponse({ success: false, error: "token required" }, 400);
+
+  // 1) Store provider + token (token → Vault)
+  const upsertRes = await supabaseRpc("upsert_telematics_credential", {
+    p_franchise_id: franchiseID,
+    p_provider: provider,
+    p_token: token,
+  });
+  if (!upsertRes.ok) {
+    const errText = await upsertRes.text().catch(() => "");
+    console.error("upsert_telematics_credential failed:", upsertRes.status, errText);
+    return jsonResponse(
+      { success: false, error: `Couldn't save credential: ${upsertRes.status} ${errText.slice(0, 200)}` },
+      500,
+    );
+  }
+
+  // 2) Live validation call (we already hold the token in this request)
+  const result = await fetchTrucks(provider, token);
+  const status = result.success ? "connected" : "error";
+  const truckCount = result.success ? result.trucks.length : null;
+  const errMsg = result.success ? null : (result.error || "Connection failed");
+
+  // 3) Stamp the validation result (non-fatal — the credential is already stored)
+  const stampRes = await supabaseRpc("set_telematics_status", {
+    p_franchise_id: franchiseID,
+    p_status: status,
+    p_truck_count: truckCount,
+    p_error: errMsg,
+  });
+  if (!stampRes.ok) {
+    console.warn("[saveTelematics] set_telematics_status non-fatal failure:", stampRes.status);
+  }
+
+  // success = fully connected; saved = token stored regardless of validation
+  return jsonResponse({
+    success: result.success,
+    saved: true,
+    provider,
+    status,
+    truckCount,
+    error: errMsg,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HANDLER: getTelematics — non-secret status for the Settings tab (NO token)
+// Body: { franchiseInternalID }
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleGetTelematics(body: Record<string, unknown>): Promise<Response> {
+  const franchiseID = String(body.franchiseInternalID || "").trim();
+  if (!franchiseID) return jsonResponse({ success: false, error: "franchiseInternalID required" }, 400);
+
+  const res = await supabaseRpc("get_telematics_status", { p_franchise_id: franchiseID });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error("get_telematics_status failed:", res.status, errText);
+    return jsonResponse({ success: false, error: `DB error ${res.status}` }, 500);
+  }
+  const rows = await res.json().catch(() => []);
+  const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+  return jsonResponse({
+    success: true,
+    configured: !!row,
+    provider: row?.provider || null,
+    status: row?.status || null,
+    truckCount: row?.last_truck_count ?? null,
+    lastValidatedAt: row?.last_validated_at || null,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Routing
 // ─────────────────────────────────────────────────────────────────────────────
 const ACTION_HANDLERS: Record<string, (body: Record<string, unknown>) => Promise<Response>> = {
   saveVonigoCredentials: handleSaveVonigoCredentials,
+  saveTelematics:        handleSaveTelematics,
+  getTelematics:         handleGetTelematics,
   // The 4 other settings save flows all just write to cost_settings JSONB and/or
   // top-level columns — handled by one generic handler.
   saveFranchiseInfo:     handleSaveSettings,
