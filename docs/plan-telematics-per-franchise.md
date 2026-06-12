@@ -62,3 +62,19 @@ per-franchise system; retire the global Linxup test key. 6. Don't promote Phase 
 3. `crewlogic-trucks` per-franchise resolution. 4. Settings "Trucks" tab (flag + instructions +
 save/validate UI). 5. Frontend tile/gate uses franchise provider. 6. Validate end-to-end on
 dev with **Motive** (owner's live trucks) → promote (RED).
+
+## Update log
+- **2026-06-12 — BUILT on dev (v5.32.0):** all of steps 1–5 above. Owner validated Motive
+  connect end-to-end on dev (trucks render).
+- **2026-06-12 — UI polish (v5.32.1):** numbered truck markers ↔ numbered list rows, larger
+  map, rich Motive popups (confirmed Motive v1 returns speed/bearing/located_at/description/
+  make/model/year/vin via a live #90 pull).
+- **2026-06-12 — Jobs-on-map (v5.33.0):** today's OPEN jobs (Vonigo, `!isComplete`) overlaid
+  as 🏠 markers. Addresses geocoded via the FREE **US Census Geocoder** (no Google, no key),
+  cached in `geocode_cache` (migration `0019`). `crewlogic-todays-workorders` gained
+  `includeCoords`. Archived/completed jobs hidden.
+- **2026-06-12 — DEFERRED (owner decision):** harden `crewlogic-trucks` caller-verification.
+  Blocked for Google-OAuth owners (no Supabase JWT per-request); **folded into the future
+  unified-auth work** so it covers everyone at once. Residual risk low (needs a victim's
+  random internal franchise UUID + the public anon key). Tracked in `.HUB/Hub.md`.
+- **Pending:** owner finishes dev validation → promote the whole feature to prod (RED, gated).
