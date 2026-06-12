@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.30.7 | 2026-06-12">
+  <meta name="crewlogic-version" content="v5.31.0 | 2026-06-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -17,6 +17,8 @@
   <script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.min.js"></script>
   <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     // Initialize on DOM ready — no GIS library needed
     window.addEventListener('DOMContentLoaded', function() {
@@ -1273,6 +1275,12 @@
             <div class="module-desc">Find optimal transfer stations</div>
           </div>
 
+          <div class="module-card fade-in fade-in-delay-3" id="trucksCard" onclick="openModule('trucks')" style="display:none;">
+            <div class="module-icon">🚚</div>
+            <div class="module-name">Where Are My Trucks?</div>
+            <div class="module-desc">Live truck locations on the map</div>
+          </div>
+
           <div class="module-card fade-in fade-in-delay-3" id="priceLookupCard" onclick="openModule('priceLookup')">
             <div class="module-icon">💲</div>
             <div class="module-name">Price Lookup</div>
@@ -1292,6 +1300,17 @@
           </div>
 
         </div>
+      </div>
+
+      <!-- WHERE ARE MY TRUCKS? (telematics: Linxup / Motive) -->
+      <div id="trucksScreen" style="display:none;">
+        <div class="section-title fade-in">Where Are My Trucks?</div>
+        <div class="section-desc fade-in fade-in-delay-1" id="trucksSubhead">Live locations from your telematics provider.</div>
+        <div style="display:flex;justify-content:flex-end;margin:6px 0 8px;">
+          <button id="trucksRefreshBtn" onclick="showTrucks()" style="font-size:13px;padding:7px 16px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;">🔄 Refresh</button>
+        </div>
+        <div id="trucksMap" style="width:100%;height:340px;border-radius:var(--radius,16px);overflow:hidden;border:1px solid var(--border,#22354a);background:var(--tile,#1e2f40);"></div>
+        <div id="trucksList" style="margin-top:14px;display:flex;flex-direction:column;gap:8px;"></div>
       </div>
 
       <!-- PRICE LOOKUP -->
@@ -6002,6 +6021,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Route Optimizer only available for franchise 90
       const routerCard = document.getElementById('routerCard');
       if (routerCard) routerCard.style.display = (String(currentUser.franchiseID) === '90' && currentUser.role === 'owner') ? '' : 'none';
+      // "Where are my trucks?" — telematics (Linxup/Motive). Gated to #90 owner for Phase 1 (the
+      // franchise whose Linxup account the global LINXUP_API_KEY belongs to); Phase 2 = per-franchise provider.
+      const trucksCard = document.getElementById('trucksCard');
+      if (trucksCard) trucksCard.style.display = (String(currentUser.franchiseID) === '90' && currentUser.role === 'owner') ? '' : 'none';
 
       // Job Plan pulls the day's schedule/work-orders from the CRM (Vonigo). Native tenants
       // have no scheduling source, so hide it. Cache-safe: hide only when submission_target is
@@ -6060,7 +6083,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       'routerScreen', 'routeResultScreen',
       'storageScreen', 'storageResultsScreen',
       'mattressScreen', 'mattressResultsScreen',
-      'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'jobPlanScreen'
+      'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'jobPlanScreen', 'trucksScreen'
     ];
 
     function hideAll() {
@@ -6150,6 +6173,77 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       currentScreen = 'home';
     }
 
+    // ===== "Where are my trucks?" — telematics truck locations (Linxup/Motive via crewlogic-trucks) =====
+    let _trucksMap = null, _truckMarkers = [];
+    function _truckEsc(s) { return String(s == null ? '' : s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c])); }
+    function _truckTimeAgo(ms) {
+      if (!ms) return '';
+      const m = Math.round((Date.now() - ms) / 60000);
+      if (m < 1) return 'just now';
+      if (m < 60) return m + ' min ago';
+      const h = Math.round(m / 60); if (h < 24) return h + ' hr ago';
+      const d = Math.round(h / 24); return d + ' day' + (d === 1 ? '' : 's') + ' ago';
+    }
+    async function showTrucks() {
+      const listEl = document.getElementById('trucksList');
+      const sub = document.getElementById('trucksSubhead');
+      if (listEl) listEl.innerHTML = '<div style="color:var(--text-muted,#6e8194);font-size:13px;padding:8px;">Loading trucks…</div>';
+      try {
+        const res = await fetch(EDGE_BASE + '/crewlogic-trucks?provider=linxup', {
+          headers: { 'Authorization': 'Bearer ' + EDGE_ANON_KEY, 'apikey': EDGE_ANON_KEY }
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Lookup failed');
+        const trucks = data.trucks || [];
+        if (sub) sub.textContent = trucks.length + ' truck' + (trucks.length === 1 ? '' : 's') + ' · live from Linxup';
+        renderTrucks(trucks);
+      } catch (e) {
+        console.error('showTrucks error:', e);
+        if (listEl) listEl.innerHTML = '<div class="price-error" style="color:#ef4444;font-size:13px;padding:8px;">Could not load trucks: ' + _truckEsc(e.message) + '</div>';
+      }
+    }
+    function renderTrucks(trucks) {
+      const listEl = document.getElementById('trucksList');
+      if (listEl) {
+        listEl.innerHTML = trucks.map(t => {
+          const veh = [t.make, t.model, t.year].filter(Boolean).join(' ');
+          const online = !/offline/i.test(t.status || '');
+          return '<div style="display:flex;align-items:center;gap:12px;background:var(--card,#152230);border:1px solid var(--border,#22354a);border-radius:12px;padding:12px 14px;">'
+            + '<div style="width:10px;height:10px;border-radius:50%;flex:0 0 auto;background:' + (online ? '#00E785' : '#6e8194') + ';"></div>'
+            + '<div style="flex:1;min-width:0;">'
+            +   '<div style="font-weight:700;color:var(--text-primary,#eef4fa);font-size:15px;">' + _truckEsc(t.name) + '</div>'
+            +   '<div style="color:var(--text-muted,#6e8194);font-size:12px;margin-top:2px;">' + _truckEsc(veh) + (veh && t.status ? ' · ' : '') + _truckEsc(t.status || '') + '</div>'
+            + '</div>'
+            + '<div style="text-align:right;color:var(--text-muted,#6e8194);font-size:12px;flex:0 0 auto;white-space:nowrap;">'
+            +   (t.heading ? _truckEsc(t.heading) + ' · ' : '') + (t.speed != null ? t.speed + ' mph' : '')
+            +   '<div style="margin-top:2px;">' + _truckEsc(_truckTimeAgo(t.lastUpdate)) + '</div>'
+            + '</div>'
+          + '</div>';
+        }).join('') || '<div style="color:var(--text-muted,#6e8194);font-size:13px;padding:8px;">No trucks reporting.</div>';
+      }
+      if (typeof L === 'undefined') return;
+      if (!_trucksMap) {
+        _trucksMap = L.map('trucksMap', { zoomControl: true, attributionControl: true }).setView([41.86, -70.92], 12);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+          attribution: '© OpenStreetMap contributors © CARTO', subdomains: 'abcd', maxZoom: 20
+        }).addTo(_trucksMap);
+      }
+      _truckMarkers.forEach(m => _trucksMap.removeLayer(m));
+      _truckMarkers = [];
+      const pts = [];
+      trucks.forEach(t => {
+        if (t.lat == null || t.lon == null) return;
+        const m = L.marker([t.lat, t.lon]).addTo(_trucksMap)
+          .bindPopup('<b>' + _truckEsc(t.name) + '</b><br>' + _truckEsc(t.status || '') + '<br>' + _truckEsc(_truckTimeAgo(t.lastUpdate)));
+        _truckMarkers.push(m);
+        pts.push([t.lat, t.lon]);
+      });
+      if (pts.length === 1) _trucksMap.setView(pts[0], 14);
+      else if (pts.length > 1) _trucksMap.fitBounds(pts, { padding: [40, 40], maxZoom: 15 });
+      // Leaflet sizes wrong in a just-revealed (was display:none) container — fix after a tick.
+      setTimeout(() => { if (_trucksMap) _trucksMap.invalidateSize(); }, 120);
+    }
+
     function openModule(module) {
       // If in estimate editor with unsaved changes OR a discardable throwaway draft, prompt
       // first (same condition as promptSaveBeforeLeaving, so both exit paths behave alike).
@@ -6178,6 +6272,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('headerTitle').textContent = 'Yard Signs';
         currentScreen = 'signs';
         openSignsScreen();
+        return;
+      }
+      if (module === 'trucks') {
+        document.getElementById('trucksScreen').style.display = 'block';
+        document.getElementById('headerTitle').textContent = 'Where Are My Trucks?';
+        currentScreen = 'trucks';
+        showTrucks();
         return;
       }
 
