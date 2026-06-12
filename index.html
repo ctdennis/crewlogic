@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.32.0 | 2026-06-12">
+  <meta name="crewlogic-version" content="v5.32.1 | 2026-06-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1026,6 +1026,8 @@
     @media (min-width: 480px) {
       .app-content { max-width: 480px; margin: 0 auto; }
     }
+  /* Numbered truck markers — neutralize Leaflet's default white div-icon box */
+  .truck-num-marker { background: transparent !important; border: none !important; }
   </style>
 </head>
 <body>
@@ -1309,7 +1311,7 @@
         <div style="display:flex;justify-content:flex-end;margin:6px 0 8px;">
           <button id="trucksRefreshBtn" onclick="showTrucks()" style="font-size:13px;padding:7px 16px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;">🔄 Refresh</button>
         </div>
-        <div id="trucksMap" style="width:100%;height:340px;border-radius:var(--radius,16px);overflow:hidden;border:1px solid var(--border,#22354a);background:var(--tile,#1e2f40);"></div>
+        <div id="trucksMap" style="width:100%;height:60vh;min-height:400px;max-height:680px;border-radius:var(--radius,16px);overflow:hidden;border:1px solid var(--border,#22354a);background:var(--tile,#1e2f40);"></div>
         <div id="trucksList" style="margin-top:14px;display:flex;flex-direction:column;gap:8px;"></div>
       </div>
 
@@ -6263,20 +6265,39 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (listEl) listEl.innerHTML = '<div class="price-error" style="color:#ef4444;font-size:13px;padding:8px;">Could not load trucks: ' + _truckEsc(e.message) + '</div>';
       }
     }
+    // Active = reporting within the last hour and not explicitly offline. Drives marker/dot color.
+    function _truckActive(t) {
+      if (/offline|unplug/i.test(t.status || '')) return false;
+      if (t.lastUpdate && (Date.now() - t.lastUpdate > 60 * 60000)) return false;
+      return true;
+    }
+    // Human-friendly movement/status label from the raw provider status + speed.
+    function _truckStatusLabel(t) {
+      const s = (t.status || '').toLowerCase();
+      if (/offline|unplug/.test(s)) return 'Offline';
+      if (t.speed != null && t.speed > 0) return 'Moving';
+      const map = { engine_stop: 'Parked (engine off)', engine_idle: 'Idling', ignition_off: 'Parked (engine off)', ignition_on: 'Engine on', engine_start: 'Engine on', breadcrumb: 'Stopped' };
+      if (map[s]) return map[s];
+      if (!s) return '';
+      return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
     function renderTrucks(trucks) {
       const listEl = document.getElementById('trucksList');
       if (listEl) {
-        listEl.innerHTML = trucks.map(t => {
-          const veh = [t.make, t.model, t.year].filter(Boolean).join(' ');
-          const online = !/offline/i.test(t.status || '');
+        listEl.innerHTML = trucks.map((t, i) => {
+          const veh = [t.year, t.make, t.model].filter(Boolean).join(' ');
+          const active = _truckActive(t);
+          const label = _truckStatusLabel(t);
+          const badge = active ? '#00E785' : '#6e8194';
+          const subline = [veh, label].filter(Boolean).join(' · ') + (t.desc ? ' · ' + t.desc : '');
           return '<div style="display:flex;align-items:center;gap:12px;background:var(--card,#152230);border:1px solid var(--border,#22354a);border-radius:12px;padding:12px 14px;">'
-            + '<div style="width:10px;height:10px;border-radius:50%;flex:0 0 auto;background:' + (online ? '#00E785' : '#6e8194') + ';"></div>'
+            + '<div style="width:26px;height:26px;border-radius:50%;flex:0 0 auto;background:' + badge + ';color:#06121d;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;">' + (i + 1) + '</div>'
             + '<div style="flex:1;min-width:0;">'
             +   '<div style="font-weight:700;color:var(--text-primary,#eef4fa);font-size:15px;">' + _truckEsc(t.name) + '</div>'
-            +   '<div style="color:var(--text-muted,#6e8194);font-size:12px;margin-top:2px;">' + _truckEsc(veh) + (veh && t.status ? ' · ' : '') + _truckEsc(t.status || '') + '</div>'
+            +   '<div style="color:var(--text-muted,#6e8194);font-size:12px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _truckEsc(subline) + '</div>'
             + '</div>'
             + '<div style="text-align:right;color:var(--text-muted,#6e8194);font-size:12px;flex:0 0 auto;white-space:nowrap;">'
-            +   (t.heading ? _truckEsc(t.heading) + ' · ' : '') + (t.speed != null ? t.speed + ' mph' : '')
+            +   (t.speed != null ? t.speed + ' mph' : '') + (t.speed != null && t.heading ? ' ' : '') + (t.heading ? _truckEsc(t.heading) : '')
             +   '<div style="margin-top:2px;">' + _truckEsc(_truckTimeAgo(t.lastUpdate)) + '</div>'
             + '</div>'
           + '</div>';
@@ -6292,10 +6313,26 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _truckMarkers.forEach(m => _trucksMap.removeLayer(m));
       _truckMarkers = [];
       const pts = [];
-      trucks.forEach(t => {
+      trucks.forEach((t, i) => {
         if (t.lat == null || t.lon == null) return;
-        const m = L.marker([t.lat, t.lon]).addTo(_trucksMap)
-          .bindPopup('<b>' + _truckEsc(t.name) + '</b><br>' + _truckEsc(t.status || '') + '<br>' + _truckEsc(_truckTimeAgo(t.lastUpdate)));
+        const active = _truckActive(t);
+        const color = active ? '#00E785' : '#6e8194';
+        const icon = L.divIcon({
+          className: 'truck-num-marker',
+          html: '<div style="width:30px;height:30px;border-radius:50%;background:' + color + ';color:#06121d;font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5);">' + (i + 1) + '</div>',
+          iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -16]
+        });
+        const veh = [t.year, t.make, t.model].filter(Boolean).join(' ');
+        const move = [(t.speed != null ? t.speed + ' mph' : ''), (t.heading || '')].filter(Boolean).join(' ');
+        const pop = '<div style="font-size:13px;line-height:1.5;min-width:150px;">'
+          + '<b>' + (i + 1) + '. ' + _truckEsc(t.name) + '</b>'
+          + (veh ? '<br>' + _truckEsc(veh) : '')
+          + (t.desc ? '<br>' + _truckEsc(t.desc) : '')
+          + '<br>' + _truckEsc([_truckStatusLabel(t), move].filter(Boolean).join(' · '))
+          + (t.lastUpdate ? '<br><span style="color:#6e8194;">' + _truckEsc(_truckTimeAgo(t.lastUpdate)) + '</span>' : '')
+          + (t.vin ? '<br><span style="color:#6e8194;font-size:11px;">VIN ' + _truckEsc(t.vin) + '</span>' : '')
+          + '</div>';
+        const m = L.marker([t.lat, t.lon], { icon }).addTo(_trucksMap).bindPopup(pop);
         _truckMarkers.push(m);
         pts.push([t.lat, t.lon]);
       });

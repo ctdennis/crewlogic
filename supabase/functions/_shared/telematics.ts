@@ -37,29 +37,49 @@ export interface FetchTrucksResult {
 }
 
 // ---- Motive ----
+function bearingToCompass(deg: number | null | undefined): string | null {
+  if (deg == null || isNaN(deg)) return null;
+  const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  return dirs[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
+}
+interface MotiveCurrentLocation {
+  lat?: number;
+  lon?: number;
+  located_at?: string; // ISO timestamp
+  bearing?: number; // degrees
+  speed?: number; // mph
+  type?: string; // e.g. "moving" | "stationary"
+  description?: string; // reverse-geocoded address
+}
 interface MotiveVehicleEntry {
   vehicle?: {
     number?: string | number;
-    current_location?: { lat?: number; lon?: number; description?: string } | null;
+    make?: string;
+    model?: string;
+    year?: string | number;
+    vin?: string;
+    current_location?: MotiveCurrentLocation | null;
   };
 }
 function fromMotive(data: { vehicles?: MotiveVehicleEntry[] }): Truck[] {
   return (data.vehicles || [])
     .map((v): Truck => {
-      const loc = v.vehicle?.current_location || null;
+      const veh = v.vehicle || {};
+      const loc = veh.current_location || null;
+      const located = loc?.located_at ? Date.parse(loc.located_at) : NaN;
       return {
-        number: v.vehicle?.number ?? null,
-        name: String(v.vehicle?.number ?? ""),
+        number: veh.number ?? null,
+        name: String(veh.number ?? ""),
         lat: loc?.lat ?? null,
         lon: loc?.lon ?? null,
-        speed: null,
-        heading: null,
-        status: null,
-        lastUpdate: null,
-        make: null,
-        model: null,
-        year: null,
-        vin: null,
+        speed: loc?.speed != null ? Math.round(loc.speed) : null,
+        heading: bearingToCompass(loc?.bearing),
+        status: loc?.type ? String(loc.type) : null,
+        lastUpdate: isNaN(located) ? null : located,
+        make: veh.make ?? null,
+        model: veh.model ?? null,
+        year: veh.year != null ? String(veh.year) : null,
+        vin: veh.vin ?? null,
         desc: loc?.description ?? "",
       };
     })
