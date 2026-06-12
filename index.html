@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.35.1 | 2026-06-12">
+  <meta name="crewlogic-version" content="v5.36.0 | 2026-06-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -6247,6 +6247,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     // ===== "Where are my trucks?" — telematics truck locations (Linxup/Motive via crewlogic-trucks) =====
     let _trucksMap = null, _truckMarkers = [], _jobMarkers = [], _trucksRefreshTimer = null, _trucksJobDay = 0;
+    const _expandedTrucks = new Set(); // which truck cards are expanded (by index; survives auto-refresh)
     function _truckEsc(s) { return String(s == null ? '' : s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c])); }
     function _truckTimeAgo(ms) {
       if (!ms) return '';
@@ -6311,6 +6312,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (listEl) listEl.innerHTML = '<div class="price-error" style="color:#ef4444;font-size:13px;padding:8px;">Could not load trucks: ' + _truckEsc(e.message) + '</div>';
       }
     }
+    // Expand/collapse a truck card's detail panel (odometer, engine hours, fuel, driver…).
+    function _toggleTruckCard(i) {
+      if (_expandedTrucks.has(i)) _expandedTrucks.delete(i); else _expandedTrucks.add(i);
+      const open = _expandedTrucks.has(i);
+      const el = document.getElementById('truckDetail-' + i);
+      if (el) el.style.display = open ? 'block' : 'none';
+      const ch = document.getElementById('truckChevron-' + i);
+      if (ch) ch.style.transform = 'rotate(' + (open ? '90' : '0') + 'deg)';
+    }
     // Active = reporting within the last hour and not explicitly offline. Drives marker/dot color.
     function _truckActive(t) {
       if (/offline|unplug/i.test(t.status || '')) return false;
@@ -6336,16 +6346,33 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const label = _truckStatusLabel(t);
           const badge = active ? '#00E785' : '#6e8194';
           const subline = [veh, label].filter(Boolean).join(' · ') + (t.desc ? ' · ' + t.desc : '');
-          return '<div style="display:flex;align-items:center;gap:12px;background:var(--card,#152230);border:1px solid var(--border,#22354a);border-radius:12px;padding:12px 14px;">'
-            + '<div style="width:26px;height:26px;border-radius:50%;flex:0 0 auto;background:' + badge + ';color:#06121d;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;">' + (i + 1) + '</div>'
-            + '<div style="flex:1;min-width:0;">'
-            +   '<div style="font-weight:700;color:var(--text-primary,#eef4fa);font-size:15px;">' + _truckEsc(t.name) + '</div>'
-            +   '<div style="color:var(--text-muted,#6e8194);font-size:12px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _truckEsc(subline) + '</div>'
+          const isOpen = _expandedTrucks.has(i);
+          // Detail rows — only fields this truck actually reports.
+          const rows = [];
+          if (t.odometer != null) rows.push(['Odometer', t.odometer.toLocaleString() + ' mi']);
+          if (t.engineHours != null) rows.push(['Engine hours', t.engineHours.toLocaleString() + ' hrs']);
+          if (t.fuelType) rows.push(['Fuel type', t.fuelType.charAt(0).toUpperCase() + t.fuelType.slice(1)]);
+          if (t.fuelPercent != null) rows.push(['Fuel level', Math.round(t.fuelPercent) + '%']);
+          if (t.batteryVoltage != null) rows.push(['Battery', t.batteryVoltage + ' V']);
+          if (t.driver) rows.push(['Driver', t.driver]);
+          if (t.vin) rows.push(['VIN', t.vin]);
+          if (t.desc) rows.push(['Last location', t.desc]);
+          if (t.lastUpdate) rows.push(['Last report', _truckTimeAgo(t.lastUpdate)]);
+          const detail = rows.map(r => '<div style="display:flex;justify-content:space-between;gap:14px;padding:3px 0;"><span style="color:var(--text-muted,#6e8194);">' + r[0] + '</span><span style="color:var(--text-primary,#eef4fa);text-align:right;">' + _truckEsc(r[1]) + '</span></div>').join('');
+          return '<div onclick="_toggleTruckCard(' + i + ')" style="background:var(--card,#152230);border:1px solid var(--border,#22354a);border-radius:12px;padding:12px 14px;cursor:pointer;">'
+            + '<div style="display:flex;align-items:center;gap:12px;">'
+            +   '<div style="width:26px;height:26px;border-radius:50%;flex:0 0 auto;background:' + badge + ';color:#06121d;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;">' + (i + 1) + '</div>'
+            +   '<div style="flex:1;min-width:0;">'
+            +     '<div style="font-weight:700;color:var(--text-primary,#eef4fa);font-size:15px;">' + _truckEsc(t.name) + '</div>'
+            +     '<div style="color:var(--text-muted,#6e8194);font-size:12px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _truckEsc(subline) + '</div>'
+            +   '</div>'
+            +   '<div style="text-align:right;color:var(--text-muted,#6e8194);font-size:12px;flex:0 0 auto;white-space:nowrap;">'
+            +     (t.speed != null ? t.speed + ' mph' : '') + (t.speed != null && t.heading ? ' ' : '') + (t.heading ? _truckEsc(t.heading) : '')
+            +     '<div style="margin-top:2px;">' + _truckEsc(_truckTimeAgo(t.lastUpdate)) + '</div>'
+            +   '</div>'
+            +   '<div id="truckChevron-' + i + '" style="flex:0 0 auto;color:var(--text-muted,#6e8194);font-size:13px;transition:transform .15s;transform:rotate(' + (isOpen ? '90' : '0') + 'deg);">▸</div>'
             + '</div>'
-            + '<div style="text-align:right;color:var(--text-muted,#6e8194);font-size:12px;flex:0 0 auto;white-space:nowrap;">'
-            +   (t.speed != null ? t.speed + ' mph' : '') + (t.speed != null && t.heading ? ' ' : '') + (t.heading ? _truckEsc(t.heading) : '')
-            +   '<div style="margin-top:2px;">' + _truckEsc(_truckTimeAgo(t.lastUpdate)) + '</div>'
-            + '</div>'
+            + '<div id="truckDetail-' + i + '" style="display:' + (isOpen ? 'block' : 'none') + ';margin-top:10px;padding-top:10px;border-top:1px solid var(--border,#22354a);font-size:12.5px;">' + (detail || '<span style="color:var(--text-muted,#6e8194);">No extra data reported.</span>') + '</div>'
           + '</div>';
         }).join('') || '<div style="color:var(--text-muted,#6e8194);font-size:13px;padding:8px;">No trucks reporting.</div>';
       }

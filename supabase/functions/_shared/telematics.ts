@@ -9,7 +9,7 @@
 //   linxup  → GET app02.linxup.com/ibis/rest/api/v2/locations
 //             (Authorization: Bearer <token>; token is the RAW Linxup REST token)
 
-export const MOTIVE_URL = "https://api.gomotive.com/v1/vehicle_locations";
+export const MOTIVE_URL = "https://api.gomotive.com/v2/vehicle_locations?per_page=100&page_no=1";
 export const LINXUP_URL = "https://app02.linxup.com/ibis/rest/api/v2/locations";
 
 export interface Truck {
@@ -26,6 +26,12 @@ export interface Truck {
   year: string | null;
   vin: string | null;
   desc: string;
+  odometer: number | null;       // miles
+  engineHours: number | null;
+  fuelType: string | null;
+  fuelPercent: number | null;    // % remaining, when reported
+  batteryVoltage: number | null; // volts, when reported
+  driver: string | null;         // current driver, when logged in
 }
 
 export interface FetchTrucksResult {
@@ -50,6 +56,15 @@ interface MotiveCurrentLocation {
   speed?: number; // mph
   type?: string; // e.g. "moving" | "stationary"
   description?: string; // reverse-geocoded address
+  odometer?: number;
+  true_odometer?: number;
+  engine_hours?: number;
+  battery_voltage?: number;
+  fuel_primary_remaining_percentage?: number;
+}
+interface MotiveDriver {
+  first_name?: string;
+  last_name?: string;
 }
 interface MotiveVehicleEntry {
   vehicle?: {
@@ -58,15 +73,20 @@ interface MotiveVehicleEntry {
     model?: string;
     year?: string | number;
     vin?: string;
+    fuel_type?: string;
     current_location?: MotiveCurrentLocation | null;
   };
+  current_driver?: MotiveDriver | null;
 }
 function fromMotive(data: { vehicles?: MotiveVehicleEntry[] }): Truck[] {
   return (data.vehicles || [])
     .map((v): Truck => {
       const veh = v.vehicle || {};
       const loc = veh.current_location || null;
+      const drv = v.current_driver || null;
       const located = loc?.located_at ? Date.parse(loc.located_at) : NaN;
+      const odo = loc?.odometer ?? loc?.true_odometer;
+      const driverName = drv ? [drv.first_name, drv.last_name].filter(Boolean).join(" ").trim() : "";
       return {
         number: veh.number ?? null,
         name: String(veh.number ?? ""),
@@ -81,6 +101,12 @@ function fromMotive(data: { vehicles?: MotiveVehicleEntry[] }): Truck[] {
         year: veh.year != null ? String(veh.year) : null,
         vin: veh.vin ?? null,
         desc: loc?.description ?? "",
+        odometer: odo != null ? Math.round(odo) : null,
+        engineHours: loc?.engine_hours != null ? Math.round(loc.engine_hours) : null,
+        fuelType: veh.fuel_type ?? null,
+        fuelPercent: loc?.fuel_primary_remaining_percentage ?? null,
+        batteryVoltage: loc?.battery_voltage ?? null,
+        driver: driverName || null,
       };
     })
     .filter((t) => t.number != null);
@@ -118,6 +144,12 @@ function fromLinxup(data: { data?: { locations?: LinxupLocation[] } }): Truck[] 
       year: l.year ?? null,
       vin: l.vin ?? null,
       desc: l.status ?? "",
+      odometer: null,
+      engineHours: null,
+      fuelType: null,
+      fuelPercent: null,
+      batteryVoltage: null,
+      driver: null,
     }))
     .filter((t) => t.lat != null && t.lon != null);
 }
