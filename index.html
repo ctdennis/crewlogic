@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.38.0 | 2026-06-13">
+  <meta name="crewlogic-version" content="v5.38.1 | 2026-06-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9196,6 +9196,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           currentEstimate.priceBlocks = priceBlocks;
           currentEstimate.priceListID = priceListID;
           currentEstimate.priceListName = priceListName;
+          // Expose the loaded blocks to the customer-price-list matcher so native estimates
+          // can compute item-level CPL discounts (parity with the Vonigo path).
+          window._cplPriceBlocks = priceData.blocks;
+          window._cplStandardPrices = buildPriceMap(priceData.blocks);
           if (statusEl) { statusEl.textContent = '✓ ' + (currentEstimate.clientName || '') + '  |  ' + priceListName; statusEl.className = 'zip-status ok'; }
           const plDisplay = document.getElementById('estPriceListDisplay');
           if (plDisplay) plDisplay.textContent = priceListName;
@@ -9303,7 +9307,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const rows = await supabaseFetch('/rest/v1/customers?id=eq.' + id + '&select=name,company,first_name,last_name,street,city,state,zip,email,phone,address&limit=1');
         const c = rows && rows[0];
         if (!c) { if (el) el.innerHTML = '<div style="font-size:12px;color:#ef4444;padding:6px 0;">Could not load customer.</div>'; return; }
-        _estApplyCustomer(c);
+        currentEstimate.clientID = id;       // native customer id → keys the CPL lookup + persists with the estimate
+        await checkCustomerPriceList(id);    // load this customer's negotiated price list → badge + discount
+        _estApplyCustomer(c);                // then load pricing + render so the CPL discount applies
       } catch (e) {
         if (el) el.innerHTML = '<div style="font-size:12px;color:#ef4444;padding:6px 0;">Could not load customer.</div>';
       }
@@ -9425,40 +9431,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const svBtn2 = document.getElementById('streetViewBtn');
       if (svBtn2 && currentEstimate.address) svBtn2.style.display = 'block';
 
-      // Restore negotiated rate badge — always re-fetch CPL from Supabase to avoid stale snapshots
-      if (currentEstimate.customerPriceList) {
-        showNegotiatedRateBadge(currentEstimate.customerPriceList.name);
-        // Re-fetch fresh CPL from Supabase using the stored vonigo_client_id
-        const cplClientID = currentEstimate.customerPriceList.vonigo_client_id || currentEstimate.clientID;
-        const refreshCpl = async () => {
-          if (!cplClientID) return;
-          try {
-            const franchiseUUID = await getFranchiseUUID();
-            if (!franchiseUUID) return;
-            const data = await supabaseFetch(
-              '/rest/v1/customer_price_lists?franchise_id=eq.' + franchiseUUID +
-              '&vonigo_client_id=eq.' + cplClientID +
-              '&is_active=eq.true&limit=1'
-            );
-            if (data && data.length > 0) {
-              // Got fresh data — update snapshot
-              currentEstimate.customerPriceList = backfillItemNames(data[0]);
-              showNegotiatedRateBadge(data[0].name);
-            }
-            // If no match, silently keep existing snapshot — don't wipe it
-          } catch(e) {}
-        };
-        refreshCpl().then(() => {
-          // Load price blocks for item name matching
-          const zipForBlocks = currentEstimate.zip || currentEstimate.customerPriceList?.zip;
+      // Restore the customer's negotiated price list (native + Vonigo). Re-fetch by the customer
+      // key so a CPL created/edited after the estimate was first saved still shows on reopen.
+      // (checkCustomerPriceList sets currentEstimate.customerPriceList + shows/hides the badge.)
+      const _cplKey = (currentEstimate.customerPriceList && currentEstimate.customerPriceList.vonigo_client_id) || currentEstimate.clientID;
+      if (_cplKey) {
+        checkCustomerPriceList(_cplKey).then(() => {
+          const zipForBlocks = currentEstimate.zip || (currentEstimate.customerPriceList && currentEstimate.customerPriceList.zip);
           if (!window._cplPriceBlocks && zipForBlocks) {
             priceLookup({ zipCode: zipForBlocks, franchiseID: currentUser.franchiseID, email: currentUser.email }).then(r => r.json()).then(data => {
               if (data.success && data.blocks) {
                 window._cplPriceBlocks = data.blocks;
                 window._cplStandardPrices = buildPriceMap(data.blocks);
-                if (currentEstimate.customerPriceList) {
-                  currentEstimate.customerPriceList = backfillItemNames(currentEstimate.customerPriceList);
-                }
+                if (currentEstimate.customerPriceList) currentEstimate.customerPriceList = backfillItemNames(currentEstimate.customerPriceList);
                 updateTotals();
               }
             }).catch(() => {});
