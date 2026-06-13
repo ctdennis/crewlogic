@@ -89,7 +89,7 @@ Source lives in `supabase/functions/<name>/index.ts` (see "Supabase CLI" below).
 ### Auth & multi-tenancy
 Google OAuth uses `hd=junkluggers.com` for direct sign-ins. Today all owner accounts in production happen to have `@junkluggers.com` Google addresses. The invite-link flow exists and bypasses the `hd=` restriction (intended for inviting estimators with non-junkluggers email accounts), but currently no non-junkluggers.com accounts have actually used it. Adding email/password and magic-link auth for non-Google estimators is on the roadmap.
 
-After callback, `currentUser` holds `role` (`'owner'` | `'crew'`), `franchiseID` (external), `franchiseInternalID`, `tenantID`, `franchiseName`. **Most queries are scoped by `currentUser.franchiseID` / tenant — preserve this scoping when writing new queries.** Access is gated in `showApp` by subscription `status` (`active`/`trialing`/`tester`/`pro`/`enterprise`); otherwise `#paywallScreen` shows.
+After callback, `currentUser` holds `role` (`'owner'` | `'estimator'`), `franchiseID` (external), `franchiseInternalID`, `tenantID`, `franchiseName`. **Most queries are scoped by `currentUser.franchiseID` / tenant — preserve this scoping when writing new queries.** Access is gated in `showApp` by subscription `status` (`active`/`trialing`/`tester`/`pro`/`enterprise`); otherwise `#paywallScreen` shows.
 
 ### Guest / tester access — never lock testers out
 **Guest and tester accounts MUST keep working app access throughout the development process. A tester losing access mid-development is a regression — treat it like a P1 bug.**
