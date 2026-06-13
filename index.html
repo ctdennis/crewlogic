@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.37.2 | 2026-06-13">
+  <meta name="crewlogic-version" content="v5.38.0 | 2026-06-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4899,7 +4899,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Build itemNames from price blocks
         const itemNames = {};
         blocks.forEach(block => {
-          if (cat.blockNames.includes(block.name)) {
+          if ((cat.blockType && block.blockType === cat.blockType) || cat.blockNames.includes(block.name)) {
             (block.items || []).forEach(item => {
               const stored = catData.items[String(item.priceItemID)];
               if (stored) itemNames[item.name.toLowerCase().trim()] = stored;
@@ -5003,7 +5003,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (cat.key === 'volume' && charge.type === 'volume') {
           isMatch = true;
         } else if (cat.key !== 'volume') {
-          const items = getCategoryItems(cat.blockNames);
+          const items = getCategoryItems(cat);
           const chargeName = (charge.name || '').toLowerCase().trim();
           // Match by name (works across price list zones) or priceItemID
           isMatch = items.some(i =>
@@ -5032,7 +5032,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             }
             // 3. Try price blocks name match as last resort
             if (!itemDisc || itemDisc.amount === 0) {
-              const items = getCategoryItems(cat.blockNames);
+              const items = getCategoryItems(cat);
               const matchedItem = items.find(i => i.name.toLowerCase().trim() === chargeName);
               if (matchedItem) itemDisc = (catData.items || {})[String(matchedItem.priceItemID)];
             }
@@ -5077,23 +5077,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // ===== SURCHARGE DISCOUNT CATEGORIES =====
+    // blockNames = Vonigo block names (matched by name); blockType = native stable enum
+    // (matched first for native books, whose block names are owner-customizable).
     const CPL_CATEGORIES = [
-      { key: 'volume', label: 'Volume Charges', blockNames: ['Volume Charges'] },
+      { key: 'volume', label: 'Volume Charges', blockNames: ['Volume Charges'], blockType: 'volume' },
       { key: 'recycling', label: 'Recycling & Heavy Items', blockNames: [
           'Surcharge - Additional Environmental/Recycling Fees',
           'Surcharge - Additional Labor and Recycling Fee'
-        ]
+        ], blockType: 'surcharge'
       },
-      { key: 'labor', label: 'Additional Labor', blockNames: ['Additional Labor'] },
-      { key: 'singleItems', label: 'Single Items', blockNames: ['Single Item Price List'] }
+      { key: 'labor', label: 'Additional Labor', blockNames: ['Additional Labor'], blockType: 'labor' },
+      { key: 'singleItems', label: 'Single Items', blockNames: ['Single Item Price List'], blockType: 'single_item' }
     ];
 
-    function getCategoryItems(blockNames) {
+    function getCategoryItems(cat) {
       if (!window._cplPriceBlocks) return [];
       const items = [];
       const volumeExclude = ['Overage Surcharge', 'Heavy Dense Material', 'Cubic Yard'];
+      const blockNames = cat.blockNames || [];
+      const blockType = cat.blockType;
       window._cplPriceBlocks.forEach(block => {
-        if (blockNames.includes(block.name)) {
+        // Native books match by the stable block_type; Vonigo matches by block name.
+        const match = (blockType && block.blockType === blockType) || blockNames.includes(block.name);
+        if (match) {
           (block.items || []).forEach(item => {
             if (item.value > 0 && !volumeExclude.includes(item.name)) items.push(item);
           });
@@ -5111,7 +5117,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const mode = saved.mode || 'category';
         const catAmt = saved.category?.amount || 0;
         const catType = saved.category?.type || 'flat';
-        const catItems = getCategoryItems(cat.blockNames);
+        const catItems = getCategoryItems(cat);
         html += '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;overflow:hidden;">';
         // Category header row
         html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--surface-2);">';

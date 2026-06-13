@@ -47,12 +47,13 @@ Deno.serve(async (req: Request) => {
 
     const { data: list } = await sb.from("price_lists").select("num_id, name").eq("id", priceListId).single();
     const { data: blocks } = await sb.from("price_blocks")
-      .select("num_id, name, sequence, price_items(num_id, name, value, unit_of_measure, sequence, is_active)")
+      .select("num_id, name, block_type, sequence, price_items(num_id, name, value, unit_of_measure, sequence, is_active)")
       .eq("price_list_id", priceListId).order("sequence");
 
     const shaped = (blocks || []).map((b: Record<string, unknown>) => ({
       priceBlockID: b.num_id,
       name: b.name,
+      blockType: b.block_type, // stable enum (volume|labor|surcharge|single_item) — lets CPL match native books
       sequence: b.sequence,
       items: ((b.price_items as Array<Record<string, unknown>>) || [])
         .filter((i) => i.is_active)
