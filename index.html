@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.38.4 | 2026-06-14">
+  <meta name="crewlogic-version" content="v5.39.0 | 2026-06-14">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1027,7 +1027,7 @@
       .app-content { max-width: 480px; margin: 0 auto; }
     }
   /* Numbered map markers — neutralize Leaflet's default white div-icon box */
-  .truck-num-marker, .job-stop-marker { background: transparent !important; border: none !important; }
+  .truck-num-marker, .job-stop-marker, .job-lookahead-dot { background: transparent !important; border: none !important; }
   </style>
 </head>
 <body>
@@ -1315,6 +1315,7 @@
               <button id="trucksDayTodayBtn" onclick="setTrucksJobDay(0)" style="font-size:13px;padding:7px 14px;background:var(--accent-green,#00E785);color:#06121d;border:none;cursor:pointer;font-weight:700;">Today</button>
               <button id="trucksDayTomorrowBtn" onclick="setTrucksJobDay(1)" style="font-size:13px;padding:7px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:none;cursor:pointer;font-weight:600;">Tomorrow</button>
             </div>
+            <button id="trucksLookaheadBtn" onclick="toggleTrucksLookahead()" title="Show jobs for the next 3 days as gray dots" style="font-size:12px;padding:7px 12px;background:var(--bg-input,#1e2f40);color:var(--text-muted,#6e8194);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;white-space:nowrap;">◌ +3 days</button>
           </div>
           <button id="trucksRefreshBtn" onclick="showTrucks()" style="font-size:13px;padding:7px 16px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;">🔄 Refresh</button>
         </div>
@@ -1323,6 +1324,7 @@
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:14px;border-radius:50%;flex:0 0 auto;background:#00E785;"></span> Truck · live</span>
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:14px;border-radius:50%;flex:0 0 auto;background:#6e8194;"></span> Truck · last report &gt;1h ago</span>
           <span id="jobsLegendRoutes" style="display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap;"></span>
+          <span id="lookaheadLegend" style="display:none;align-items:center;gap:6px;"><span style="width:11px;height:11px;border-radius:50%;flex:0 0 auto;background:#8b97a4;border:1.5px solid #fff;"></span> Next 3 days (<span id="lookaheadLegendCount">0</span>)</span>
         </div>
         <div id="trucksList" style="margin-top:14px;display:flex;flex-direction:column;gap:8px;"></div>
       </div>
@@ -4379,11 +4381,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Phase 2: build the standard currentUser session (same shape as the OAuth callback) from
     // a Supabase-Auth-authenticated email, by reading profile→franchise→tenant (incl. the
     // per-capability provider flags). Returns null if no profile exists for that email.
-    async function buildSessionFromSupabaseAuth(email) {
+    async function buildSessionFromSupabaseAuth(email, _retried) {
       const rows = await supabaseFetch('/rest/v1/profiles?select=role,franchise_id,name,auth_user_id,pending_trial_ends_at,franchises(external_id,franchise_name,cost_settings,subscription_tier,subscription_status,trial_ends_at,vonigo_configured,tenants(id,subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(email));
       const p = rows && rows[0];
       if (!p) return null;
       const f = p.franchises || {};
+      // Graceful stale-session recovery (no "log out / log back in" bounce). The profile is linked
+      // to a franchise (p.franchise_id set) but the embedded franchise didn't load (f.external_id
+      // missing) → an expired access token fell back to the anon key and RLS blocked the embed.
+      // Silently refresh the session ONCE and re-read — a stale-but-refreshable session (access token
+      // expired, refresh token still valid) recovers seamlessly. This also prevents building a
+      // half-formed currentUser (franchiseInternalID set, external franchiseID null) that would send
+      // a null franchiseID to data calls and silently 404 the trucks/jobs/customers lookups.
+      if (p.franchise_id && !f.external_id && !_retried) {
+        try { await supabaseClient.auth.refreshSession(); } catch (e) { /* fall through to one retry */ }
+        return buildSessionFromSupabaseAuth(email, true);
+      }
+      if (p.franchise_id && !f.external_id) {
+        // Still incomplete after a refresh → the session is genuinely dead (refresh token expired/
+        // revoked). Return null so the caller re-auths cleanly instead of entering with a broken
+        // franchise context. (Common stale sessions never reach here — the refresh above recovers them.)
+        console.warn('[session] franchise read still incomplete after refresh — re-auth required');
+        return null;
+      }
       const t = f.tenants || {};
       const cs = f.cost_settings || {};
       return {
@@ -6253,7 +6273,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // ===== "Where are my trucks?" — telematics truck locations (Linxup/Motive via crewlogic-trucks) =====
-    let _trucksMap = null, _truckMarkers = [], _jobMarkers = [], _trucksRefreshTimer = null, _trucksJobDay = 0;
+    let _trucksMap = null, _truckMarkers = [], _jobMarkers = [], _trucksRefreshTimer = null, _trucksJobDay = 0, _trucksLookahead = false, _lookaheadMarkers = [];
     const _expandedTrucks = new Set(); // which truck cards are expanded (by index; survives auto-refresh)
     function _truckEsc(s) { return String(s == null ? '' : s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c])); }
     function _truckTimeAgo(ms) {
@@ -6294,6 +6314,63 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _trucksJobDay = offset;
       _updateTrucksDayToggle();
       loadJobMarkers(); // reload the job overlay for the selected day; trucks stay live
+      if (_trucksLookahead) loadLookaheadDots(); // shift the +3-day look-ahead window too
+    }
+    // Look-ahead: faint gray dots for OPEN jobs in the next 3 days (selected day +1..+3), hoverable.
+    function _lookaheadDayLabel(offset) {
+      const d = new Date(); d.setDate(d.getDate() + offset);
+      return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+    function toggleTrucksLookahead() {
+      _trucksLookahead = !_trucksLookahead;
+      const btn = document.getElementById('trucksLookaheadBtn');
+      if (btn) {
+        btn.style.background = _trucksLookahead ? 'var(--accent-green,#00E785)' : 'var(--bg-input,#1e2f40)';
+        btn.style.color = _trucksLookahead ? '#06121d' : 'var(--text-muted,#6e8194)';
+        btn.style.fontWeight = _trucksLookahead ? '700' : '600';
+      }
+      loadLookaheadDots();
+    }
+    async function loadLookaheadDots() {
+      if (typeof L === 'undefined' || !_trucksMap) return;
+      _lookaheadMarkers.forEach(m => _trucksMap.removeLayer(m));
+      _lookaheadMarkers = [];
+      const legEl = document.getElementById('lookaheadLegend');
+      if (!_trucksLookahead) { if (legEl) legEl.style.display = 'none'; return; }
+      const base = _trucksJobDay;
+      // Fetch the next 3 days in parallel (cached geocodes make repeats instant).
+      const results = await Promise.all([1, 2, 3].map(k =>
+        edgeFunctionCall('crewlogic-todays-workorders', { franchiseID: currentUser.franchiseID, dayOffset: base + k, includeCoords: true })
+          .then(d => ({ k, jobs: (d.workOrders || []).filter(j => !j.isComplete && j.lat != null && j.lon != null) }))
+          .catch(() => ({ k, jobs: [] }))
+      ));
+      let total = 0;
+      results.forEach(({ k, jobs }) => {
+        const dayLabel = _lookaheadDayLabel(base + k);
+        jobs.forEach(j => {
+          total++;
+          const icon = L.divIcon({
+            className: 'job-lookahead-dot',
+            html: '<div style="width:10px;height:10px;border-radius:50%;background:#8b97a4;border:1.5px solid #fff;box-shadow:0 1px 2px rgba(0,0,0,.45);"></div>',
+            iconSize: [10, 10], iconAnchor: [5, 5]
+          });
+          const route = j.route ? String(j.route).replace(/\s*\(.*\)\s*/, '').trim() : '';
+          const addr = j.address ? String(j.address).replace(/\n/g, ', ').replace(/\s+/g, ' ').trim() : '';
+          const tip = '<div style="font-size:12px;line-height:1.4;">'
+            + '<b>' + dayLabel + '</b>' + (j.timeLabel ? ' · ' + _truckEsc(j.timeLabel) : '') + (route ? ' · ' + _truckEsc(route) : '')
+            + '<br>' + _truckEsc(j.clientName || 'Job')
+            + (addr ? '<br><span style="color:#9aa7b4;">' + _truckEsc(addr) + '</span>' : '')
+            + '</div>';
+          const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap)
+            .bindTooltip(tip, { direction: 'top', opacity: 1 });
+          _lookaheadMarkers.push(m);
+        });
+      });
+      if (legEl) {
+        legEl.style.display = total ? 'inline-flex' : 'none';
+        const c = document.getElementById('lookaheadLegendCount');
+        if (c) c.textContent = total;
+      }
     }
     async function showTrucks(isRefresh) {
       const listEl = document.getElementById('trucksList');
@@ -6602,6 +6679,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('headerTitle').textContent = 'Where Are My Trucks?';
         currentScreen = 'trucks';
         _trucksJobDay = 0; _updateTrucksDayToggle(); // fresh entry starts on Today
+        _trucksLookahead = false; // look-ahead off by default each visit
+        const _laBtn = document.getElementById('trucksLookaheadBtn');
+        if (_laBtn) { _laBtn.style.background = 'var(--bg-input,#1e2f40)'; _laBtn.style.color = 'var(--text-muted,#6e8194)'; _laBtn.style.fontWeight = '600'; }
         showTrucks();
         _startTrucksAutoRefresh();
         return;
