@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.40.3 | 2026-06-15">
+  <meta name="crewlogic-version" content="v5.40.4 | 2026-06-15">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3882,12 +3882,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             '<button onclick="applySubAction(\'' + fid + '\',\'extend\',{days:7})" style="padding:6px 10px;font-size:12px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;">+7d</button>' +
             '<button onclick="applySubAction(\'' + fid + '\',\'extend\',{days:14})" style="padding:6px 10px;font-size:12px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;">+14d</button>' +
             '<button onclick="applySubAction(\'' + fid + '\',\'extend\',{days:30})" style="padding:6px 10px;font-size:12px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;">+30d</button>' +
-            '<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-primary);background:var(--bg-input,#1e2f40);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;cursor:pointer;">Set end date <input type="date" onchange="if(this.value)applySubAction(\'' + fid + '\',\'set_end_date\',{endDate:this.value})" style="background:transparent;border:none;color:var(--text-primary);font-size:12px;cursor:pointer;color-scheme:dark;"></label>' +
+            '<button type="button" onclick="_subPickDate(\'' + fid + '\')" style="padding:6px 10px;font-size:12px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;">Select expiration date</button>' +
+            '<input type="date" id="subend-' + fid + '" onchange="if(this.value)applySubAction(\'' + fid + '\',\'set_end_date\',{endDate:this.value})" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;color-scheme:dark;">' +
             '<button onclick="applySubAction(\'' + fid + '\',\'cancel\')" style="padding:6px 10px;font-size:12px;background:rgba(255,118,118,0.12);color:#ff7676;border:1px solid rgba(255,118,118,0.3);border-radius:var(--radius-sm);cursor:pointer;">Cancel</button>' +
           '</div>' +
           '<div class="sub-admin-feedback" data-fid="' + fid + '" style="font-size:12px;margin-top:8px;"></div>' +
         '</div>';
       }).join('');
+    }
+
+    // Open the native calendar for a row's hidden date input (button-triggered, user gesture).
+    function _subPickDate(fid) {
+      const i = document.getElementById('subend-' + fid);
+      if (!i) return;
+      if (typeof i.showPicker === 'function') { try { i.showPicker(); return; } catch (e) {} }
+      i.focus(); i.click();
     }
 
     async function applySubAction(franchiseId, op, extra) {
