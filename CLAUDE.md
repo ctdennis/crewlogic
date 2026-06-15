@@ -157,4 +157,5 @@ The rebrand from "CrewLogic" to "CrewLogicAI" happened recently. The brand name 
 
 - Because everything is in one file, use line-anchored or uniquely-scoped edits; the same UI patterns (inline `onclick`, `style.display` toggles) repeat hundreds of times.
 - UI is inline-style heavy and uses the CSS variables above — match existing variables rather than hardcoding colors.
+- **Button color standard (locked 2026-06-15):** secondary/utility buttons on dark surfaces use `.btn-surface` or `var(--btn-surface)` (#34485d) / `var(--btn-surface-border)` (#46596d) — NOT `--bg-input` (#253545), which is nearly identical to `--bg-card` (#1e2f40) and renders buttons near-invisible. Primary/accent buttons keep `--accent-green`/`--accent-yellow`.
 - The app is mobile-first / PWA-style (`apple-mobile-web-app-capable`, fixed viewport, no user scaling).
