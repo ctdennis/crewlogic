@@ -488,10 +488,14 @@ function buildSession(opts: {
     subscriptionStatus: (function () {
       const ACCESS = ["active", "trialing", "tester", "pro", "enterprise"];
       const fs = f.subscription_status, ft = f.subscription_tier, ts = t.subscription_status;
-      if (ACCESS.indexOf(fs) !== -1) return fs;
+      // Per-franchise subscription_status is AUTHORITATIVE when set — it can GRANT or REVOKE
+      // (admin make-permanent / cancel / end-date). NULL on every legacy row, so unchanged for them.
+      if (fs) return fs;
+      // Franchise TIER must never reduce access (a 'free' default can't paywall an access-granting
+      // tenant); honor it only when it grants, else fall back to tenant status.
       if (ACCESS.indexOf(ft) !== -1) return ft;
       if (ACCESS.indexOf(ts) !== -1) return ts;
-      return fs || ft || ts || "trialing";
+      return ft || ts || "trialing";
     })(),
     trialEndsAt: f.trial_ends_at || profile.pending_trial_ends_at || t.trial_ends_at || null,
     vonigoConfigured: f.vonigo_configured || false,
