@@ -49,18 +49,18 @@ Deno.serve(async (req: Request) => {
 
     // ===== searchAccounts =====
     if (action === "searchAccounts") {
+      // query is OPTIONAL: empty → return ALL accounts (the frontend lists everyone and
+      // filters client-side, like the estimate customer lookup). A term still narrows server-side.
       const q = sanitizeTerm(String(body.query || ""));
-      if (!q) return json({ success: false, error: "query required" }, 400);
-
-      const { data: rows, error } = await sb
+      let qb = sb
         .from("profiles")
         .select(
           "id,email,name,role,franchise_id,pending_trial_ends_at," +
           "franchises(id,external_id,franchise_name,subscription_status,subscription_tier,trial_ends_at,tenant_id,vonigo_configured," +
           "tenants(id,crm_type,subscription_status,trial_ends_at))"
-        )
-        .or(`name.ilike.%${q}%,email.ilike.%${q}%`)
-        .limit(50);
+        );
+      if (q) qb = qb.or(`name.ilike.%${q}%,email.ilike.%${q}%`);
+      const { data: rows, error } = await qb.order("name", { ascending: true }).limit(200);
       if (error) return json({ success: false, error: error.message }, 500);
 
       const accounts = (rows || []).map((r: Record<string, unknown>) => {

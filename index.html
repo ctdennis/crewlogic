@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.40.0 | 2026-06-15">
+  <meta name="crewlogic-version" content="v5.40.1 | 2026-06-15">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1399,10 +1399,10 @@
           <button onclick="openModule('settings')" style="padding:6px 12px;background:var(--bg-input,#1e2f40);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-primary);cursor:pointer;">← Back</button>
           <div class="section-title fade-in" style="margin:0;">Subscription Management</div>
         </div>
-        <div class="section-desc fade-in fade-in-delay-1">Search an account, then adjust its trial / subscription clock.</div>
+        <div class="section-desc fade-in fade-in-delay-1">All accounts — type to filter by name or email, then adjust the trial / subscription clock.</div>
         <div style="display:flex;gap:8px;align-items:center;margin:12px 0;flex-wrap:wrap;">
-          <input id="subAdminQuery" type="text" placeholder="Search last name, first name, or email" onkeydown="if(event.key==='Enter')searchSubscriptionAccounts()" style="flex:1;min-width:200px;font-size:14px;padding:9px 12px;background:var(--bg-input,#1e2f40);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);">
-          <button onclick="searchSubscriptionAccounts()" style="padding:9px 18px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap;">Search</button>
+          <input id="subAdminQuery" type="text" placeholder="Filter by last name, first name, or email" oninput="filterSubscriptionAccounts()" style="flex:1;min-width:200px;font-size:14px;padding:9px 12px;background:var(--bg-input,#1e2f40);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);">
+          <button onclick="loadSubscriptionAccounts()" style="padding:9px 18px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap;">↻ Refresh</button>
         </div>
         <div id="subAdminResults" style="font-size:13px;color:var(--text-muted);"></div>
       </div>
@@ -3792,7 +3792,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const bb = document.getElementById('backBtn');
       if (bb) bb.classList.add('visible');
       const q = document.getElementById('subAdminQuery');
-      if (q) q.focus();
+      if (q) { q.value = ''; q.focus(); }
+      loadSubscriptionAccounts();
     }
 
     function _escHtml(s) {
@@ -3808,21 +3809,46 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return Math.ceil((end - Date.now()) / 86400000);
     }
 
-    async function searchSubscriptionAccounts() {
-      const qEl = document.getElementById('subAdminQuery');
+    let _subAdminAll = [];
+
+    // Pull ALL accounts once (server returns everyone when query is empty), then filter client-side.
+    async function loadSubscriptionAccounts() {
       const results = document.getElementById('subAdminResults');
-      if (!results) return;
-      const query = (qEl && qEl.value || '').trim();
-      if (!query) { results.innerHTML = '<div style="padding:8px;">Type a name or email to search.</div>'; return; }
-      results.innerHTML = '<div style="padding:8px;">Searching…</div>';
-      const data = await adminEdgeCall('searchAccounts', { query });
+      if (results) results.innerHTML = '<div style="padding:8px;">Loading accounts…</div>';
+      const data = await adminEdgeCall('searchAccounts', {});
       if (!data || !data.success) {
-        results.innerHTML = '<div style="padding:8px;color:#ff7676;">' + _escHtml((data && data.error) || 'Search failed') + '</div>';
+        _subAdminAll = [];
+        if (results) results.innerHTML = '<div style="padding:8px;color:#ff7676;">' + _escHtml((data && data.error) || 'Load failed') + '</div>';
         return;
       }
-      const accounts = data.accounts || [];
-      if (!accounts.length) { results.innerHTML = '<div style="padding:8px;">No accounts found.</div>'; return; }
-      results.innerHTML = accounts.map(function (a) {
+      _subAdminAll = data.accounts || [];
+      filterSubscriptionAccounts();
+    }
+
+    // Live client-side filter by name / email / franchise (like the estimate customer lookup).
+    function filterSubscriptionAccounts() {
+      const qEl = document.getElementById('subAdminQuery');
+      const q = (qEl && qEl.value || '').trim().toLowerCase();
+      const list = !q ? _subAdminAll : _subAdminAll.filter(function (a) {
+        return (String(a.name || '').toLowerCase().indexOf(q) !== -1)
+          || (String(a.email || '').toLowerCase().indexOf(q) !== -1)
+          || (String(a.franchiseName || '').toLowerCase().indexOf(q) !== -1);
+      });
+      _renderSubAdminList(list, _subAdminAll.length);
+    }
+
+    // Back-compat: Enter / Refresh re-pulls from the server.
+    function searchSubscriptionAccounts() { return loadSubscriptionAccounts(); }
+
+    function _renderSubAdminList(accounts, totalCount) {
+      const results = document.getElementById('subAdminResults');
+      if (!results) return;
+      if (!accounts.length) {
+        results.innerHTML = '<div style="padding:8px;">' + (totalCount ? 'No accounts match that filter.' : 'No accounts found.') + '</div>';
+        return;
+      }
+      const header = '<div style="padding:4px 2px 10px;color:var(--text-muted);font-size:12px;">Showing ' + accounts.length + (totalCount && totalCount !== accounts.length ? ' of ' + totalCount : '') + ' account' + (accounts.length === 1 ? '' : 's') + '</div>';
+      results.innerHTML = header + accounts.map(function (a) {
         if (!a.franchiseId) {
           return '<div style="padding:12px;margin-bottom:10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);">' +
             '<div style="font-weight:700;color:var(--text-primary);">' + _escHtml(a.name || a.email) + '</div>' +
