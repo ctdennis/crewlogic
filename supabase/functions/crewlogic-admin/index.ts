@@ -131,7 +131,10 @@ Deno.serve(async (req: Request) => {
         newTrial = new Date(Date.now() + (days > 0 ? days : 14) * DAY_MS).toISOString();
       } else if (op === "set_end_date") {
         const endDate = String(body.endDate || "");
-        const parsed = new Date(endDate);
+        // A date-only value (YYYY-MM-DD from the picker) → pin to NOON UTC so it renders as the
+        // same calendar day across US/most timezones (avoids the midnight-UTC off-by-one).
+        const norm = /^\d{4}-\d{2}-\d{2}$/.test(endDate) ? endDate + "T12:00:00Z" : endDate;
+        const parsed = new Date(norm);
         if (!endDate || isNaN(parsed.getTime())) return json({ success: false, error: "invalid endDate" }, 400);
         newStatus = "trialing";
         newTrial = parsed.toISOString();
