@@ -293,9 +293,23 @@ Deno.serve(async (req: Request) => {
 
   } catch (e) {
     const err = e as Error;
+    const msg = err.message || String(e);
+    // Full error to the server console always (diagnosability) — never to the client.
+    console.error('[price-lookup] error:', msg, err.stack || '');
+    // Out-of-territory: Vonigo rejects a price-list lookup for a ZIP not in this franchise's
+    // zone ("Data validation failed" on the priceLists call). Common on courtesy / out-of-area
+    // jobs (the job is on our schedule but tagged to another franchise's territory in Vonigo).
+    // Return a clean, user-friendly message instead of the raw Vonigo internals.
+    if (/data validation failed/i.test(msg) || /priceLists method/i.test(msg)) {
+      return new Response(JSON.stringify({
+        success: false,
+        code: 'ZIP_OUT_OF_TERRITORY',
+        error: 'No price list for this ZIP (outside your territory).',
+      }), { status: 200, headers: { ...CORS, 'Content-Type': 'application/json' } });
+    }
     return new Response(JSON.stringify({
       success: false,
-      error: 'Unhandled error: ' + (err.message || String(e)),
+      error: 'Price lookup failed. Please try again.',
     }), { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } });
   }
 });
