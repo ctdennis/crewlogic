@@ -23,6 +23,7 @@
 //   SUPABASE_SERVICE_ROLE_KEY
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { fetchTrucks } from "../_shared/telematics.ts";
 
 const CORS_HEADERS = {
@@ -33,6 +34,7 @@ const CORS_HEADERS = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Supabase REST helpers (service role bypasses RLS)
@@ -668,6 +670,52 @@ async function handleGetTelematics(body: Record<string, unknown>): Promise<Respo
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// HANDLER: saveHomeCardOrder (per-user home-screen drag-to-reorder preference)
+// Body: { order: string[] }  — the card keys in the user's chosen order.
+// Auth: the caller is identified from the Authorization Bearer token (their own
+// Supabase Auth session). We update ONLY that user's own profile row (matched by
+// auth_user_id) and ONLY the home_card_order column — never another user/column.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleSaveHomeCardOrder(
+  body: Record<string, unknown>,
+  token: string | null,
+): Promise<Response> {
+  // 1) Verify the caller from their Bearer token (mirrors crewlogic-admin)
+  if (!token) {
+    return jsonResponse({ success: false, error: "Missing Authorization token" }, 401);
+  }
+  const anonClient = createClient(SUPABASE_URL, ANON_KEY);
+  const { data: { user }, error: authErr } = await anonClient.auth.getUser(token);
+  if (authErr || !user) {
+    return jsonResponse({ success: false, error: "Invalid or expired session" }, 401);
+  }
+
+  // 2) Validate the order payload — array of short strings only
+  const order = body.order;
+  if (!Array.isArray(order) || order.length > 20) {
+    return jsonResponse({ success: false, error: "order must be an array of <=20 strings" }, 400);
+  }
+  for (const item of order) {
+    if (typeof item !== "string" || item.length === 0 || item.length > 40) {
+      return jsonResponse({ success: false, error: "each order item must be a short string" }, 400);
+    }
+  }
+
+  // 3) Update ONLY the caller's own profile row, ONLY the home_card_order column
+  const res = await supabasePatch(
+    `/rest/v1/profiles?auth_user_id=eq.${encodeURIComponent(user.id)}`,
+    { home_card_order: order },
+  );
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error("saveHomeCardOrder update failed:", res.status, errText);
+    return jsonResponse({ success: false, error: `DB error ${res.status}` }, 500);
+  }
+
+  return jsonResponse({ success: true });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Routing
 // ─────────────────────────────────────────────────────────────────────────────
 const ACTION_HANDLERS: Record<string, (body: Record<string, unknown>) => Promise<Response>> = {
@@ -712,6 +760,22 @@ serve(async (req) => {
   if (!action) {
     if (body.vonigoPassword) action = "saveVonigoCredentials";
     else action = "saveSettings";
+  }
+
+  // saveHomeCardOrder is caller-verified (uses the Bearer token), so it's routed
+  // here rather than through the body-only ACTION_HANDLERS map.
+  if (action === "saveHomeCardOrder") {
+    const authHeader = req.headers.get("Authorization") || "";
+    const token = authHeader.toLowerCase().startsWith("bearer ")
+      ? authHeader.slice(7).trim()
+      : null;
+    try {
+      return await handleSaveHomeCardOrder(body, token);
+    } catch (e) {
+      const err = e as Error;
+      console.error("crewlogic-settings saveHomeCardOrder error:", err);
+      return jsonResponse({ success: false, error: err.message || "Internal error" }, 500);
+    }
   }
 
   const handler = ACTION_HANDLERS[action];

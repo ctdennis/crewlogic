@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.40.6 | 2026-06-15">
+  <meta name="crewlogic-version" content="v5.41.0 | 2026-06-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -17,6 +17,7 @@
   <script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.min.js"></script>
   <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
@@ -1267,43 +1268,43 @@
         <div id="trialBanner" class="fade-in" style="display:none;"></div>
 
         <div class="module-grid">
-          <div class="module-card fade-in fade-in-delay-2" onclick="openModule('estimates')">
+          <div class="module-card fade-in fade-in-delay-2" data-card="estimates" onclick="openModule('estimates')">
             <div class="module-icon">📝</div>
             <div class="module-name">Estimates</div>
             <div class="module-desc">Create & manage customer estimates</div>
           </div>
 
-          <div class="module-card fade-in fade-in-delay-2" onclick="openModule('volumeCheck')">
+          <div class="module-card fade-in fade-in-delay-2" data-card="volumeCheck" onclick="openModule('volumeCheck')">
             <div class="module-icon">📐</div>
             <div class="module-name">Volume Check</div>
             <div class="module-desc">Quick AI volume check from photos — no job needed</div>
           </div>
 
-          <div class="module-card fade-in fade-in-delay-3" id="routerCard" onclick="openModule('router')" style="display:none;">
+          <div class="module-card fade-in fade-in-delay-3" id="routerCard" data-card="router" onclick="openModule('router')" style="display:none;">
             <div class="module-icon">🚛</div>
             <div class="module-name">Route Optimizer</div>
             <div class="module-desc">Find optimal transfer stations</div>
           </div>
 
-          <div class="module-card fade-in fade-in-delay-3" id="trucksCard" onclick="openModule('trucks')" style="display:none;">
+          <div class="module-card fade-in fade-in-delay-3" id="trucksCard" data-card="trucks" onclick="openModule('trucks')" style="display:none;">
             <div class="module-icon">🚚</div>
             <div class="module-name">Where Are My Trucks?</div>
             <div class="module-desc">Live truck locations on the map</div>
           </div>
 
-          <div class="module-card fade-in fade-in-delay-3" id="priceLookupCard" onclick="openModule('priceLookup')">
+          <div class="module-card fade-in fade-in-delay-3" id="priceLookupCard" data-card="priceLookup" onclick="openModule('priceLookup')">
             <div class="module-icon">💲</div>
             <div class="module-name">Price Lookup</div>
             <div class="module-desc">Look up pricing by ZIP code</div>
           </div>
 
-          <div class="module-card fade-in fade-in-delay-4" id="signsModuleCard" style="display:none;" onclick="openModule('signs')">
+          <div class="module-card fade-in fade-in-delay-4" id="signsModuleCard" data-card="signs" style="display:none;" onclick="openModule('signs')">
             <div class="module-icon">🪧</div>
             <div class="module-name">Yard Signs</div>
             <div class="module-desc">Track sign placements & crew rewards</div>
           </div>
 
-          <div class="module-card fade-in fade-in-delay-4" id="jobPlanCard" onclick="openModule('jobPlan')">
+          <div class="module-card fade-in fade-in-delay-4" id="jobPlanCard" data-card="jobPlan" onclick="openModule('jobPlan')">
             <div class="module-icon">📋</div>
             <div class="module-name">Job Plan</div>
             <div class="module-desc">AI-generated morning brief for the crew</div>
@@ -4185,10 +4186,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           if (session && session.email) {
             currentUser = session;
             // Refresh costSettings + role + tier from Supabase in background (may have changed since cache)
-            supabaseFetch('/rest/v1/profiles?select=role,franchises(id,external_id,franchise_name,subscription_tier,cost_settings,tenant_id,tenants(trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(session.email))
+            supabaseFetch('/rest/v1/profiles?select=role,home_card_order,franchises(id,external_id,franchise_name,subscription_tier,cost_settings,tenant_id,tenants(trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(session.email))
               .then(rows => {
                 if (rows && rows[0]) {
                   if (rows[0].role) currentUser.role = rows[0].role;
+                  if (rows[0].home_card_order !== undefined) {
+                    currentUser.homeCardOrder = Array.isArray(rows[0].home_card_order) ? rows[0].home_card_order : null;
+                    applyHomeCardOrder();
+                  }
                   if (rows[0].franchises) {
                     if (rows[0].franchises.id) currentUser.franchiseInternalID = rows[0].franchises.id;
                     if (rows[0].franchises.external_id) currentUser.franchiseID = rows[0].franchises.external_id;
@@ -4576,7 +4581,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // a Supabase-Auth-authenticated email, by reading profile→franchise→tenant (incl. the
     // per-capability provider flags). Returns null if no profile exists for that email.
     async function buildSessionFromSupabaseAuth(email, _retried) {
-      const rows = await supabaseFetch('/rest/v1/profiles?select=role,franchise_id,name,auth_user_id,pending_trial_ends_at,franchises(external_id,franchise_name,cost_settings,subscription_tier,subscription_status,trial_ends_at,vonigo_configured,tenants(id,subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(email));
+      const rows = await supabaseFetch('/rest/v1/profiles?select=role,franchise_id,name,auth_user_id,pending_trial_ends_at,home_card_order,franchises(external_id,franchise_name,cost_settings,subscription_tier,subscription_status,trial_ends_at,vonigo_configured,tenants(id,subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(email));
       const p = rows && rows[0];
       if (!p) return null;
       const f = p.franchises || {};
@@ -4607,6 +4612,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         franchiseID: f.external_id || null,
         franchiseInternalID: p.franchise_id || null,
         authUserId: p.auth_user_id || null,
+        homeCardOrder: Array.isArray(p.home_card_order) ? p.home_card_order : null,
         tenantID: t.id || null,
         franchiseName: f.franchise_name || null,
         pricingSource: t.pricing_source || 'vonigo',
@@ -6457,6 +6463,70 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (list) list.style.display = 'none';
     }
 
+    // ===== HOME SCREEN: drag-to-reorder card preference (per-user, DB-persisted) =====
+    // Reorder the .module-grid children to match currentUser.homeCardOrder (an array of
+    // data-card keys). Any card not in the saved list keeps its default position at the end.
+    // Hidden (display:none) cards are still ordered, so the order holds when they become visible.
+    function applyHomeCardOrder() {
+      try {
+        const grid = document.querySelector('#homeScreen .module-grid');
+        if (!grid) return;
+        const order = currentUser && Array.isArray(currentUser.homeCardOrder) ? currentUser.homeCardOrder : null;
+        if (!order || !order.length) return;
+        order.forEach(function (key) {
+          if (!key) return;
+          const el = grid.querySelector('.module-card[data-card="' + String(key).replace(/"/g, '') + '"]');
+          if (el) grid.appendChild(el); // append in saved order; un-listed cards stay after
+        });
+      } catch (e) { console.warn('[homeCardOrder] apply failed', e); }
+    }
+
+    // Init SortableJS on the home grid exactly once. The delay + delayOnTouchOnly options are
+    // critical: a plain tap still fires the card's onclick (openModule); only a long-press
+    // starts a drag on touch. On drag end we read the new order and persist it.
+    let _homeSortInited = false;
+    function initHomeCardSort() {
+      if (_homeSortInited) return;
+      if (typeof Sortable === 'undefined') return;
+      const grid = document.querySelector('#homeScreen .module-grid');
+      if (!grid) return;
+      _homeSortInited = true;
+      Sortable.create(grid, {
+        animation: 150,
+        delay: 200,
+        delayOnTouchOnly: true,
+        onEnd: function () {
+          const order = Array.from(grid.children)
+            .map(function (el) { return el.getAttribute && el.getAttribute('data-card'); })
+            .filter(Boolean);
+          if (currentUser) currentUser.homeCardOrder = order;
+          saveHomeCardOrder(order);
+        }
+      });
+    }
+
+    // Persist the order to the user's own profile via the caller-verified edge action.
+    // Visual reorder already happened; a failure here just means it won't persist — warn, don't block.
+    async function saveHomeCardOrder(order) {
+      try {
+        const token = (await _supabaseUserToken()) || EDGE_ANON_KEY;
+        const res = await fetch(EDGE_BASE + '/crewlogic-settings', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + token,
+            'apikey': EDGE_ANON_KEY,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ action: 'saveHomeCardOrder', order: order })
+        });
+        let data = null;
+        try { data = await res.json(); } catch (e) {}
+        if (!res.ok || !data || !data.success) {
+          console.warn('[homeCardOrder] save failed', res.status, data && data.error);
+        }
+      } catch (e) { console.warn('[homeCardOrder] save error', e); }
+    }
+
     function goHome() {
       // If in estimate editor, go back to estimates list
       const editorScreen = document.getElementById('estimateEditorScreen');
@@ -6469,6 +6539,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.getElementById('backBtn').classList.remove('visible');
       document.getElementById('headerTitle').textContent = 'CrewLogicAI';
       currentScreen = 'home';
+      // Apply the user's saved card order, then enable drag-to-reorder (init once).
+      applyHomeCardOrder();
+      initHomeCardSort();
     }
 
     // ===== "Where are my trucks?" — telematics truck locations (Linxup/Motive via crewlogic-trucks) =====
