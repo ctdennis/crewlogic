@@ -64,10 +64,30 @@
 // edge function with this file's contents.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { logUsage } from '../_shared/usage.ts';
 
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-6';
+
+// Service-role client used ONLY for fire-and-forget usage metering (see _shared/usage.ts).
+// Constructed once at module scope; harmless if the env vars are unset (logUsage swallows
+// any failure). This must NEVER affect the user-facing AI request path.
+const _usageClient = createClient(
+  Deno.env.get('SUPABASE_URL') || '',
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '',
+);
+
+// Pull Anthropic token usage off a Messages API response (shape: { usage: { input_tokens,
+// output_tokens } }). Returns zeros when absent so metering never throws on a missing field.
+function anthropicUsage(result: Record<string, unknown> | undefined): { tokens_in: number; tokens_out: number } {
+  const u = (result?.usage ?? {}) as Record<string, unknown>;
+  return {
+    tokens_in: Number(u.input_tokens) || 0,
+    tokens_out: Number(u.output_tokens) || 0,
+  };
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -335,6 +355,21 @@ async function handleAnalyzeEstimate(payload: Record<string, unknown>): Promise<
     label: 'analyzeEstimate',
   });
 
+  // Meter the (now-billed) Anthropic call. Volume Check vs. estimate is distinguished by
+  // the frontend-passed `source`. Non-blocking: logUsage never throws.
+  {
+    const source = (payload.source as string) || 'estimate';
+    const { tokens_in, tokens_out } = anthropicUsage(result);
+    await logUsage(_usageClient, {
+      tenantId: payload.tenantID as string | undefined,
+      franchiseId: (payload.franchiseID ?? payload.franchiseInternalID) as string | undefined,
+      eventType: source === 'volume_check' ? 'ai.volume_check' : 'ai.analyze_estimate',
+      model: MODEL,
+      units: photos.length,
+      metadata: { images: photos.length, tokens_in, tokens_out, source },
+    });
+  }
+
   const content = result.content as Array<{ type: string; text: string }> | undefined;
   const rawText = content?.[0]?.text || '[]';
 
@@ -477,6 +512,19 @@ Respond ONLY with a JSON object, no markdown fences, no preamble:
     maxTokens: 800,
   });
 
+  // Meter the billed Anthropic call. Non-blocking: logUsage never throws.
+  {
+    const { tokens_in, tokens_out } = anthropicUsage(result);
+    await logUsage(_usageClient, {
+      tenantId: payload.tenantID as string | undefined,
+      franchiseId: (payload.franchiseID ?? payload.franchiseInternalID ?? franchiseInternalID) as string | undefined,
+      eventType: 'ai.job_summary',
+      model: MODEL,
+      units: 1,
+      metadata: { tokens_in, tokens_out },
+    });
+  }
+
   const content = result.content as Array<{ type: string; text: string }> | undefined;
   const rawText = content?.[0]?.text || '{}';
 
@@ -579,6 +627,19 @@ Respond ONLY with a JSON object in this exact format (no markdown, no preamble):
       parkingType: null,
       reasoning: 'Anthropic call failed: ' + (err.message || String(e)),
     };
+  }
+
+  // Meter the billed Anthropic vision call. Non-blocking: logUsage never throws.
+  {
+    const { tokens_in, tokens_out } = anthropicUsage(result);
+    await logUsage(_usageClient, {
+      tenantId: payload.tenantID as string | undefined,
+      franchiseId: (payload.franchiseID ?? payload.franchiseInternalID) as string | undefined,
+      eventType: 'ai.classify',
+      model: MODEL,
+      units: 1,
+      metadata: { images: 1, tokens_in, tokens_out },
+    });
   }
 
   const content = result.content as Array<{ type: string; text: string }> | undefined;
@@ -685,6 +746,19 @@ Be lenient on partial views — if you can see ANY portion of a yard sign in the
     };
   }
 
+  // Meter the billed Anthropic vision call. Non-blocking: logUsage never throws.
+  {
+    const { tokens_in, tokens_out } = anthropicUsage(result);
+    await logUsage(_usageClient, {
+      tenantId: payload.tenantID as string | undefined,
+      franchiseId: (payload.franchiseID ?? payload.franchiseInternalID) as string | undefined,
+      eventType: 'ai.detect_sign',
+      model: MODEL,
+      units: 1,
+      metadata: { images: 1, tokens_in, tokens_out },
+    });
+  }
+
   const content = result.content as Array<{ type: string; text: string }> | undefined;
   const rawText = content?.[0]?.text || '';
   if (!rawText) {
@@ -760,6 +834,17 @@ async function handleReverseGeocode(payload: Record<string, unknown>): Promise<u
     }
 
     const address = data.results?.[0]?.formatted_address || '';
+
+    // Meter the billed Google Geocoding call (not Claude — no tokens). Non-blocking.
+    await logUsage(_usageClient, {
+      tenantId: payload.tenantID as string | undefined,
+      franchiseId: (payload.franchiseID ?? payload.franchiseInternalID) as string | undefined,
+      eventType: 'maps.geocode',
+      model: null,
+      units: 1,
+      metadata: { source: 'reverseGeocode' },
+    });
+
     return { address };
 
   } catch (e) {

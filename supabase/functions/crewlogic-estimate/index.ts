@@ -55,6 +55,13 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { logUsage } from "../_shared/usage.ts";
+
+// Service-role client used ONLY for fire-and-forget usage metering (see _shared/usage.ts).
+const _usageClient = createClient(
+  Deno.env.get("SUPABASE_URL") || "",
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "",
+);
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -416,6 +423,19 @@ async function handleCalcDistances(body: Record<string, unknown>): Promise<Respo
       distances.donationMinutes = jobToDonation.minutes;
     }
   }
+
+  // Meter the billed Google Distance Matrix call. units = billed elements (origins ×
+  // destinations). franchiseInternalID/tenantID are passed by the frontend (UUIDs); the
+  // external `franchiseID` ("90") would coerce to null in usage_events (uuid column).
+  // Non-blocking: logUsage never throws.
+  await logUsage(_usageClient, {
+    tenantId: body.tenantID as string | undefined,
+    franchiseId: (body.franchiseInternalID ?? body.franchiseID) as string | undefined,
+    eventType: "maps.distance_matrix",
+    model: null,
+    units: origins.length * destinations.length,
+    metadata: { elements: origins.length * destinations.length },
+  });
 
   return jsonResponse({ success: true, distances });
 }

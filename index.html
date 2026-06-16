@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.41.0 | 2026-06-16">
+  <meta name="crewlogic-version" content="v5.42.0 | 2026-06-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4004,7 +4004,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // their own AbortController but never pass its signal to the fetch — so the abort did nothing and
     // a slow/stuck AI call hung the analyze UI for minutes on iPhone until a refresh.) On abort this
     // throws a DOMException named 'AbortError', which the callers' catch blocks already handle.
-    async function callAnalyzeVoice({ transcript, areas, photos }, opts = {}) {
+    async function callAnalyzeVoice({ transcript, areas, photos, source = 'estimate' }, opts = {}) {
       const SUPABASE_ANON_KEY = EDGE_ANON_KEY;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), opts.timeoutMs || 60000); // 60s hard cap
@@ -4017,7 +4017,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
             'apikey': SUPABASE_ANON_KEY
           },
-          body: JSON.stringify({ action: 'analyzeEstimate', transcript, areas, photos, truckCY: truckCapacityCY() }),
+          // franchiseID/tenantID + source are passed for server-side usage metering (non-blocking).
+          body: JSON.stringify({ action: 'analyzeEstimate', transcript, areas, photos, truckCY: truckCapacityCY(), source, franchiseID: currentUser.franchiseInternalID, tenantID: currentUser.tenantID }),
           signal: controller.signal
         });
       } finally {
@@ -13451,7 +13452,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                 },
                 body: JSON.stringify({
                   action: 'classifyProperty',
-                  photo: coverResolved
+                  photo: coverResolved,
+                  franchiseID: currentUser.franchiseInternalID,
+                  tenantID: currentUser.tenantID
                 })
               });
               if (cpRes.ok) {
@@ -13532,7 +13535,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               action: 'generateJobSummary',
               charges: currentEstimate.charges || [],
               notes: currentEstimate.notes || '',
-              franchiseInternalID: currentUser.franchiseInternalID || null
+              franchiseInternalID: currentUser.franchiseInternalID || null,
+              franchiseID: currentUser.franchiseInternalID,
+              tenantID: currentUser.tenantID
             })
           });
           console.log('[JobSummary] Response status:', summaryRes.status);
@@ -19266,6 +19271,9 @@ Please review the estimate below. If you have any questions or would like to adj
           action: 'calcDistances',
           email: currentUser.email,
           franchiseID: currentUser.franchiseID,
+          // UUIDs for server-side usage metering (the external franchiseID isn't a uuid).
+          franchiseInternalID: currentUser.franchiseInternalID,
+          tenantID: currentUser.tenantID,
           truckHome,
           jobSite,
           disposalSite,
@@ -20452,7 +20460,7 @@ Please review the estimate below. If you have any questions or would like to adj
             'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
             'apikey': SUPABASE_ANON_KEY
           },
-          body: JSON.stringify({ action: 'reverseGeocode', lat, lng })
+          body: JSON.stringify({ action: 'reverseGeocode', lat, lng, franchiseID: currentUser.franchiseInternalID, tenantID: currentUser.tenantID })
         });
         clearTimeout(timer);
         if (!res.ok) return '';
@@ -20517,7 +20525,7 @@ Please review the estimate below. If you have any questions or would like to adj
             'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
             'apikey': SUPABASE_ANON_KEY
           },
-          body: JSON.stringify({ action: 'detectYardSign', photo: analysisBase64 })
+          body: JSON.stringify({ action: 'detectYardSign', photo: analysisBase64, franchiseID: currentUser.franchiseInternalID, tenantID: currentUser.tenantID })
         });
         clearTimeout(timer);
         if (!res.ok) {
@@ -21955,7 +21963,8 @@ Please review the estimate below. If you have any questions or would like to adj
           const data = await callAnalyzeVoice({
             transcript: transcript,
             areas: ['Area 1', 'Area 2', 'Area 3', 'Area 4', 'Area 5', 'Area 6', 'Area 7', 'Area 8'],
-            photos: photos
+            photos: photos,
+            source: 'volume_check'
           });
           if (data && data.success) {
             const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result].filter(Boolean);

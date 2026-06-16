@@ -34,6 +34,7 @@
 // Requires Edge Function secret: ANTHROPIC_API_KEY
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { logUsage } from '../_shared/usage.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -435,6 +436,20 @@ Deno.serve(async (req: Request) => {
     const date = getEasternDate(dayOffset);
     const prompt = buildPrompt(date, routesGrouped, toolsOnTruck, toolsSpecialty);
     const { text: aiText, usage } = await callAnthropic(anthropicKey, prompt);
+
+    // Meter the billed Anthropic (Haiku) generation. franchiseRow.id is the franchise UUID
+    // already resolved above; tenant is the Junkluggers TENANT_ID. Non-blocking: never throws.
+    await logUsage(supabase, {
+      tenantId: TENANT_ID,
+      franchiseId: franchiseRow.id as string,
+      eventType: 'ai.job_plan',
+      model: ANTHROPIC_MODEL,
+      units: 1,
+      metadata: {
+        tokens_in: Number(usage?.input_tokens) || 0,
+        tokens_out: Number(usage?.output_tokens) || 0,
+      },
+    });
 
     // 6) Parse the response into per-route blocks
     const knownRouteNames = Object.keys(routesGrouped);
