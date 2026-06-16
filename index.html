@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.43.0 | 2026-06-16">
+  <meta name="crewlogic-version" content="v5.43.1 | 2026-06-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1428,7 +1428,11 @@
           <button class="btn-surface" id="usageWin-30" onclick="loadUsageDashboard(30)" style="padding:8px 14px;font-size:13px;font-weight:700;">30 days</button>
           <button class="btn-surface" id="usageWin-90" onclick="loadUsageDashboard(90)" style="padding:8px 14px;font-size:13px;font-weight:700;">90 days</button>
           <button class="btn-surface" onclick="loadUsageDashboard(_usageDashWindow)" style="padding:8px 14px;font-size:13px;font-weight:700;white-space:nowrap;">↻ Refresh</button>
+          <select id="usageDashTenant" onchange="onUsageDashTenantChange()" style="padding:8px 12px;font-size:13px;font-weight:600;background:var(--bg-input,#1e2f40);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);cursor:pointer;">
+            <option value="">All tenants</option>
+          </select>
         </div>
+        <div id="usageDashStorage" style="margin-bottom:12px;"></div>
         <div id="usageDashSummary" style="font-size:14px;color:var(--text-primary);font-weight:600;margin-bottom:12px;"></div>
         <div id="usageDashResults" style="font-size:13px;color:var(--text-muted);"></div>
       </div>
@@ -3960,6 +3964,24 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     // ===== Super-admin: Usage & Cost dashboard =====
     let _usageDashWindow = 30;
+    let _usageDashTenantId = '';        // current tenant filter ('' = all)
+    let _usageDashTenantPopulated = false; // dropdown options seeded from first unfiltered load
+
+    // Format a byte count as MB/GB (2 decimals).
+    function _usageFmtBytes(n) {
+      const b = Number(n) || 0;
+      if (b >= 1024 * 1024 * 1024) return (b / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+      if (b >= 1024 * 1024) return (b / (1024 * 1024)).toFixed(2) + ' MB';
+      if (b >= 1024) return (b / 1024).toFixed(1) + ' KB';
+      return b + ' B';
+    }
+
+    // Tenant filter change → re-run with the selected tenantId.
+    function onUsageDashTenantChange() {
+      const sel = document.getElementById('usageDashTenant');
+      _usageDashTenantId = sel ? sel.value : '';
+      loadUsageDashboard(_usageDashWindow);
+    }
 
     function showUsageDashboard() {
       hideAll();
@@ -3969,6 +3991,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (ht) ht.textContent = 'Usage & Cost';
       const bb = document.getElementById('backBtn');
       if (bb) bb.classList.add('visible');
+      // Fresh open: reset the tenant filter + force the dropdown to re-seed.
+      _usageDashTenantId = '';
+      _usageDashTenantPopulated = false;
+      const tsel = document.getElementById('usageDashTenant');
+      if (tsel) tsel.value = '';
       loadUsageDashboard(30);
     }
 
@@ -3999,11 +4026,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       sinceDays = Number(sinceDays) > 0 ? Number(sinceDays) : 30;
       _usageDashWindow = sinceDays;
       _usageHighlightWindow(sinceDays);
+      const tenantId = _usageDashTenantId || '';
       const summary = document.getElementById('usageDashSummary');
       const results = document.getElementById('usageDashResults');
+      const storageEl = document.getElementById('usageDashStorage');
       if (summary) summary.textContent = 'Loading…';
       if (results) results.innerHTML = '';
-      const data = await adminEdgeCall('usageSummary', { sinceDays: sinceDays });
+      if (storageEl) storageEl.innerHTML = '';
+      // Storage panel loads independently so a storage error can't break the usage render.
+      loadUsageStorage(tenantId);
+      const data = await adminEdgeCall('usageSummary', { sinceDays: sinceDays, tenantId: tenantId });
       if (!data || !data.success) {
         if (summary) summary.textContent = '';
         if (results) results.innerHTML = '<div style="padding:8px;color:#ff7676;">' + _escHtml((data && data.error) || 'Load failed') + '</div>';
@@ -4013,9 +4045,27 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         summary.textContent = 'Last ' + data.sinceDays + ' days · ' + (data.totalEvents || 0) + ' events · '
           + _usageFmtCost(data.totalCostUSD) + ' total' + (data.capped ? ' (capped at 50,000 rows)' : '');
       }
+
+      // Seed the tenant dropdown from the first unfiltered load's byTenant list.
+      if (!_usageDashTenantPopulated && !tenantId) {
+        const tsel = document.getElementById('usageDashTenant');
+        if (tsel) {
+          const tens = (data.byTenant || []).filter(function (t) { return t.tenantId; })
+            .slice().sort(function (a, b) { return String(a.tenantName || '').localeCompare(String(b.tenantName || '')); });
+          let opts = '<option value="">All tenants</option>';
+          opts += tens.map(function (t) {
+            return '<option value="' + _escHtml(t.tenantId) + '">' + _escHtml(t.tenantName || 'Unknown') + '</option>';
+          }).join('');
+          tsel.innerHTML = opts;
+          tsel.value = '';
+        }
+        _usageDashTenantPopulated = true;
+      }
+
       if (!results) return;
 
       const byType = (data.byType || []).slice().sort(function (a, b) { return (b.costUSD || 0) - (a.costUSD || 0); });
+      const byTenant = (data.byTenant || []).slice().sort(function (a, b) { return (b.costUSD || 0) - (a.costUSD || 0); });
       const byFranchise = (data.byFranchise || []).slice().sort(function (a, b) { return (b.costUSD || 0) - (a.costUSD || 0); });
 
       const cardOpen = '<div style="padding:12px;margin-bottom:14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);overflow-x:auto;">';
@@ -4052,6 +4102,28 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
       html += '</div>';
 
+      // By tenant table.
+      html += cardOpen
+        + '<div style="font-weight:700;color:var(--text-primary);margin-bottom:8px;">By tenant</div>';
+      if (!byTenant.length) {
+        html += '<div style="color:var(--text-muted);padding:4px 8px;">No events in this window.</div>';
+      } else {
+        html += '<table style="width:100%;border-collapse:collapse;min-width:360px;"><thead><tr>'
+          + '<th ' + th + '>Tenant</th>'
+          + '<th ' + thR + '>Events</th>'
+          + '<th ' + thR + '>Cost</th>'
+          + '</tr></thead><tbody>';
+        html += byTenant.map(function (t) {
+          return '<tr>'
+            + '<td ' + td + '>' + _escHtml(t.tenantName || 'Unknown') + '</td>'
+            + '<td ' + tdR + '>' + (t.events || 0) + '</td>'
+            + '<td ' + tdR + '>' + _usageFmtCost(t.costUSD) + '</td>'
+            + '</tr>';
+        }).join('');
+        html += '</tbody></table>';
+      }
+      html += '</div>';
+
       // By franchise table.
       html += cardOpen
         + '<div style="font-weight:700;color:var(--text-primary);margin-bottom:8px;">By franchise</div>';
@@ -4077,6 +4149,86 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       html += '</div>';
 
       results.innerHTML = html;
+    }
+
+    // Storage panel — loaded separately so a storage error never breaks the usage render.
+    async function loadUsageStorage(tenantId) {
+      const el = document.getElementById('usageDashStorage');
+      if (!el) return;
+      el.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:4px 0;">Loading storage…</div>';
+      let data;
+      try {
+        data = await adminEdgeCall('storageSummary', { tenantId: tenantId || '' });
+      } catch (e) {
+        data = { success: false, error: 'request failed' };
+      }
+      if (!data || !data.success) {
+        el.innerHTML = '<div style="padding:8px;color:var(--text-muted);font-size:12px;">Storage unavailable'
+          + (data && data.error ? ' (' + _escHtml(data.error) + ')' : '') + '</div>';
+        return;
+      }
+
+      const totalBytes = Number(data.totalBytes) || 0;
+      const includedBytes = Number(data.includedBytes) || 1;
+      const includedGB = Number(data.includedGB) || 1;
+      const pct = Number(data.pctUsed) || 0;
+      const barColor = pct > 90 ? '#ef4444' : (pct >= 70 ? '#f59e0b' : '#22c55e');
+      const barPct = Math.max(0, Math.min(100, pct));
+
+      const cardOpen = '<div style="padding:12px;margin-bottom:14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);overflow-x:auto;">';
+      const th = 'style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:11px;font-weight:700;border-bottom:1px solid var(--border);white-space:nowrap;"';
+      const thR = 'style="text-align:right;padding:6px 8px;color:var(--text-muted);font-size:11px;font-weight:700;border-bottom:1px solid var(--border);white-space:nowrap;"';
+      const td = 'style="text-align:left;padding:6px 8px;color:var(--text-primary);font-size:12px;border-bottom:1px solid var(--border);"';
+      const tdR = 'style="text-align:right;padding:6px 8px;color:var(--text-primary);font-size:12px;border-bottom:1px solid var(--border);white-space:nowrap;"';
+
+      let html = cardOpen;
+      const usedGBstr = (totalBytes / (1024 * 1024 * 1024)).toFixed(2);
+      html += '<div style="font-weight:700;color:var(--text-primary);margin-bottom:6px;">'
+        + 'Storage: ' + usedGBstr + ' GB / ' + includedGB + ' GB (' + pct + '%)</div>';
+      // Bar.
+      html += '<div style="width:100%;height:14px;background:var(--bg-input,#1e2f40);border:1px solid var(--border);border-radius:7px;overflow:hidden;margin-bottom:6px;">'
+        + '<div style="width:' + barPct + '%;height:100%;background:' + barColor + ';"></div></div>';
+      html += '<div style="color:var(--text-muted);font-size:12px;margin-bottom:4px;">'
+        + (data.totalObjects || 0) + ' objects'
+        + (data.filteredBytes != null ? ' · selected tenant: ' + _usageFmtBytes(data.filteredBytes) : '')
+        + (data.capped ? ' · (capped at 200,000 objects)' : '') + '</div>';
+
+      const byTenant = (data.byTenant || []).slice().sort(function (a, b) { return (b.bytes || 0) - (a.bytes || 0); });
+      const byFranchise = (data.byFranchise || []).slice().sort(function (a, b) { return (b.bytes || 0) - (a.bytes || 0); });
+
+      // Per-tenant storage.
+      if (byTenant.length) {
+        html += '<div style="font-weight:700;color:var(--text-primary);margin:10px 0 6px;">By tenant</div>';
+        html += '<table style="width:100%;border-collapse:collapse;min-width:360px;"><thead><tr>'
+          + '<th ' + th + '>Tenant</th><th ' + thR + '>Objects</th><th ' + thR + '>Size</th>'
+          + '</tr></thead><tbody>';
+        html += byTenant.map(function (t) {
+          return '<tr>'
+            + '<td ' + td + '>' + _escHtml(t.tenantName || 'Unknown') + '</td>'
+            + '<td ' + tdR + '>' + (t.objects || 0) + '</td>'
+            + '<td ' + tdR + '>' + _usageFmtBytes(t.bytes) + '</td>'
+            + '</tr>';
+        }).join('');
+        html += '</tbody></table>';
+      }
+      // Per-franchise storage.
+      if (byFranchise.length) {
+        html += '<div style="font-weight:700;color:var(--text-primary);margin:10px 0 6px;">By franchise</div>';
+        html += '<table style="width:100%;border-collapse:collapse;min-width:360px;"><thead><tr>'
+          + '<th ' + th + '>Franchise</th><th ' + thR + '>Objects</th><th ' + thR + '>Size</th>'
+          + '</tr></thead><tbody>';
+        html += byFranchise.map(function (f) {
+          const ext = f.externalId ? ' · #' + _escHtml(f.externalId) : '';
+          return '<tr>'
+            + '<td ' + td + '>' + _escHtml(f.franchiseName || 'Unknown') + ext + '</td>'
+            + '<td ' + tdR + '>' + (f.objects || 0) + '</td>'
+            + '<td ' + tdR + '>' + _usageFmtBytes(f.bytes) + '</td>'
+            + '</tr>';
+        }).join('');
+        html += '</tbody></table>';
+      }
+      html += '</div>';
+      el.innerHTML = html;
     }
 
     // Calls the crewlogic-price-lookup Edge Function. Returns a Response-like

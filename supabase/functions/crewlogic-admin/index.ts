@@ -188,13 +188,15 @@ Deno.serve(async (req: Request) => {
 
       const sinceDays = Number(body.sinceDays) > 0 ? Number(body.sinceDays) : 30;
       const franchiseId = body.franchiseId ? String(body.franchiseId) : "";
+      const tenantId = body.tenantId ? String(body.tenantId) : "";
       const cutoffIso = new Date(Date.now() - sinceDays * DAY_MS).toISOString();
 
       let uq = sb
         .from("usage_events")
-        .select("franchise_id,event_type,model,units,metadata,created_at")
+        .select("tenant_id,franchise_id,event_type,model,units,metadata,created_at")
         .gte("created_at", cutoffIso);
       if (franchiseId) uq = uq.eq("franchise_id", franchiseId);
+      if (tenantId) uq = uq.eq("tenant_id", tenantId);
       const { data: events, error: uErr } = await uq
         .order("created_at", { ascending: false })
         .limit(50000);
@@ -224,6 +226,7 @@ Deno.serve(async (req: Request) => {
       // Aggregate byType (event_type + model) and byFranchise (franchise_id).
       const typeMap = new Map<string, { eventType: string; model: string; events: number; tokensIn: number; tokensOut: number; costUSD: number }>();
       const franMap = new Map<string, { franchiseId: string | null; events: number; costUSD: number }>();
+      const tenMap = new Map<string, { tenantId: string | null; events: number; costUSD: number }>();
       let totalEvents = 0;
       let totalCostUSD = 0;
 
@@ -246,6 +249,13 @@ Deno.serve(async (req: Request) => {
         fEntry.costUSD += cost;
         franMap.set(fk, fEntry);
 
+        const tidRaw = (r as Record<string, unknown>).tenant_id;
+        const tk2 = tidRaw == null ? "__unattributed__" : String(tidRaw);
+        const tEnt = tenMap.get(tk2) || { tenantId: tidRaw == null ? null : String(tidRaw), events: 0, costUSD: 0 };
+        tEnt.events += 1;
+        tEnt.costUSD += cost;
+        tenMap.set(tk2, tEnt);
+
         totalEvents += 1;
         totalCostUSD += cost;
       }
@@ -265,7 +275,31 @@ Deno.serve(async (req: Request) => {
         }
       }
 
+      // Resolve tenant names in one query.
+      const tids = Array.from(tenMap.values())
+        .map((t) => t.tenantId)
+        .filter((x): x is string => !!x);
+      const tInfo = new Map<string, string | null>();
+      if (tids.length) {
+        const { data: tRows } = await sb
+          .from("tenants")
+          .select("id,name")
+          .in("id", tids);
+        for (const tr of tRows || []) {
+          tInfo.set(String(tr.id), (tr.name as string) ?? null);
+        }
+      }
+
       const round4 = (n: number) => Math.round(n * 1e4) / 1e4;
+
+      const byTenant = Array.from(tenMap.values())
+        .map((t) => ({
+          tenantId: t.tenantId,
+          tenantName: t.tenantId ? (tInfo.get(t.tenantId) || "Unknown") : "Unattributed",
+          events: t.events,
+          costUSD: round4(t.costUSD),
+        }))
+        .sort((a, b) => b.costUSD - a.costUSD);
 
       const byType = Array.from(typeMap.values())
         .map((t) => ({ ...t, costUSD: round4(t.costUSD) }))
@@ -291,8 +325,129 @@ Deno.serve(async (req: Request) => {
         totalEvents,
         totalCostUSD: round4(totalCostUSD),
         byType,
+        byTenant,
         byFranchise,
       });
+    }
+
+    // ===== storageSummary =====
+    // Per-tenant / per-franchise estimate-photo storage usage vs the plan limit.
+    // Runs AFTER the super-admin caller verification above (reuses `sb` service-role client).
+    // Photo path = {franchiseExternalId}/{estimateID}/{ts}_{label}.{ext} in bucket estimate-photos,
+    // so storage.objects.name's first path segment = the franchise EXTERNAL id.
+    if (action === "storageSummary") {
+      try {
+        const tenantId = body.tenantId ? String(body.tenantId) : "";
+        const BUCKET = "estimate-photos";
+        const CAP = 200000;
+
+        const { data: objs, error: oErr } = await sb
+          .schema("storage")
+          .from("objects")
+          .select("name,metadata")
+          .eq("bucket_id", BUCKET)
+          .limit(CAP);
+        if (oErr) return json({ success: false, error: oErr.message }, 500);
+
+        const objRows = objs || [];
+        const capped = objRows.length === CAP;
+
+        // Aggregate by franchise external id (first path segment).
+        const extMap = new Map<string, { bytes: number; objects: number }>();
+        let totalBytes = 0;
+        let totalObjects = 0;
+        for (const o of objRows) {
+          const md = ((o as Record<string, unknown>).metadata || {}) as Record<string, unknown>;
+          const bytes = Number(md.size) || 0;
+          const name = String((o as Record<string, unknown>).name || "");
+          const ext = name.split("/")[0] || "__unknown__";
+          const e = extMap.get(ext) || { bytes: 0, objects: 0 };
+          e.bytes += bytes;
+          e.objects += 1;
+          extMap.set(ext, e);
+          totalBytes += bytes;
+          totalObjects += 1;
+        }
+
+        // Resolve franchise + tenant names for the external ids present.
+        const exts = Array.from(extMap.keys()).filter((x) => x !== "__unknown__");
+        const frByExt = new Map<string, { franchiseName: string | null; tenantId: string | null }>();
+        const tenantIdsPresent = new Set<string>();
+        if (exts.length) {
+          const { data: frRows } = await sb
+            .from("franchises")
+            .select("id,external_id,franchise_name,tenant_id")
+            .in("external_id", exts);
+          for (const fr of frRows || []) {
+            frByExt.set(String(fr.external_id), {
+              franchiseName: (fr.franchise_name as string) ?? null,
+              tenantId: (fr.tenant_id as string) ?? null,
+            });
+            if (fr.tenant_id) tenantIdsPresent.add(String(fr.tenant_id));
+          }
+        }
+        const tNameById = new Map<string, string | null>();
+        if (tenantIdsPresent.size) {
+          const { data: tRows } = await sb
+            .from("tenants")
+            .select("id,name")
+            .in("id", Array.from(tenantIdsPresent));
+          for (const tr of tRows || []) tNameById.set(String(tr.id), (tr.name as string) ?? null);
+        }
+
+        // Build per-franchise rows + roll up per tenant.
+        const tenAgg = new Map<string, { tenantId: string | null; tenantName: string; bytes: number; objects: number }>();
+        let byFranchise = Array.from(extMap.entries()).map(([ext, v]) => {
+          const info = ext === "__unknown__" ? null : frByExt.get(ext);
+          const tid = info ? info.tenantId : null;
+          const fName = ext === "__unknown__" ? "Unattributed" : (info ? (info.franchiseName || "Unknown") : "Unknown");
+          // tenant rollup
+          const tkey = tid == null ? "__unattributed__" : tid;
+          const tName = tid == null ? "Unattributed" : (tNameById.get(tid) || "Unknown");
+          const tEnt = tenAgg.get(tkey) || { tenantId: tid, tenantName: tName, bytes: 0, objects: 0 };
+          tEnt.bytes += v.bytes;
+          tEnt.objects += v.objects;
+          tenAgg.set(tkey, tEnt);
+          return {
+            externalId: ext === "__unknown__" ? null : ext,
+            franchiseName: fName,
+            tenantId: tid,
+            bytes: v.bytes,
+            objects: v.objects,
+          };
+        });
+        let byTenant = Array.from(tenAgg.values()).sort((a, b) => b.bytes - a.bytes);
+
+        // Optional tenant filter restricts the per-franchise / per-tenant output (but the
+        // headline total stays whole-bucket — total bucket size is plan-relevant regardless).
+        let filteredBytes: number | undefined;
+        if (tenantId) {
+          byFranchise = byFranchise.filter((f) => f.tenantId === tenantId);
+          byTenant = byTenant.filter((t) => t.tenantId === tenantId);
+          filteredBytes = byFranchise.reduce((s, f) => s + f.bytes, 0);
+        }
+        byFranchise = byFranchise.sort((a, b) => b.bytes - a.bytes);
+
+        const includedGB = Number(Deno.env.get("STORAGE_INCLUDED_GB")) || 1;
+        const includedBytes = includedGB * 1024 ** 3;
+        const pctUsed = includedBytes > 0 ? Math.round((totalBytes / includedBytes) * 100 * 10) / 10 : 0;
+
+        return json({
+          success: true,
+          totalBytes,
+          totalObjects,
+          ...(filteredBytes != null ? { filteredBytes } : {}),
+          includedGB,
+          includedBytes,
+          pctUsed,
+          capped,
+          byTenant,
+          byFranchise,
+        });
+      } catch (se) {
+        console.error("crewlogic-admin storageSummary error:", se);
+        return json({ success: false, error: (se as Error).message || "storage error" }, 500);
+      }
     }
 
     return json({ success: false, error: "unknown action" }, 400);
