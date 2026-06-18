@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.43.10 | 2026-06-18">
+  <meta name="crewlogic-version" content="v5.44.0 | 2026-06-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1737,14 +1737,15 @@
             <!-- Disposal Sites -->
             <div style="margin-bottom:10px;">
               <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">🗑 Disposal Sites</div>
-              <div style="display:flex;gap:6px;padding:0 0 4px 38px;font-size:10px;color:var(--text-muted);">
-                <span style="flex:1;">Name</span>
-                <span style="flex:2;">Address</span>
-                <span style="width:72px;text-align:center;">$/ton</span>
-                <span style="width:34px;"></span>
-              </div>
               <div id="settingsDisposalSitesList"></div>
               <button onclick="addFacility('disposal')" style="width:100%;padding:7px;background:none;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;margin-top:4px;">+ Add Disposal Site</button>
+            </div>
+
+            <!-- Disposal Site Holidays (franchise-level) -->
+            <div style="margin-bottom:10px;">
+              <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">📅 Disposal Site Holidays (closed)</div>
+              <div class="form-hint" style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Checked holidays = all disposal sites treated as closed that day.</div>
+              <div id="settingsDisposalHolidaysList"></div>
             </div>
 
             <!-- Recycling Sites -->
@@ -17330,7 +17331,39 @@ RECYCLING & DONATION
 
     // ===== FACILITIES MANAGEMENT =====
     // facilities stored in costSettings.disposalSites, recyclingSites, donationSites
-    // each entry: { name: "Raynham Transfer", address: "35 Thrasher St..." }
+    // recycling/donation entry: { name, address, isDefault, [revenue] }
+    // disposal entry (extended): { name, address, isDefault, cost ($/ton),
+    //   minimumType: 'none'|'weight'|'dollar', minimumValue: number|null,
+    //   hours: { mon:{open:'HH:MM',close:'HH:MM',closed:bool}, ...sun } }
+
+    const DISPOSAL_DAY_KEYS = ['mon','tue','wed','thu','fri','sat','sun'];
+    const DISPOSAL_DAY_LABELS = { mon:'Mon', tue:'Tue', wed:'Wed', thu:'Thu', fri:'Fri', sat:'Sat', sun:'Sun' };
+    // Defaults: Mon–Fri 07:00–16:00, Sat 07:00–12:00, Sun closed
+    function getDefaultDisposalHours() {
+      return {
+        mon: { open:'07:00', close:'16:00', closed:false },
+        tue: { open:'07:00', close:'16:00', closed:false },
+        wed: { open:'07:00', close:'16:00', closed:false },
+        thu: { open:'07:00', close:'16:00', closed:false },
+        fri: { open:'07:00', close:'16:00', closed:false },
+        sat: { open:'07:00', close:'12:00', closed:false },
+        sun: { open:'',      close:'',      closed:true  }
+      };
+    }
+    // The 11 US federal holidays (default: all observed = sites closed)
+    const FEDERAL_HOLIDAYS = [
+      ['newYears',     "New Year's Day"],
+      ['mlk',          'MLK Day'],
+      ['presidents',   "Presidents' Day"],
+      ['memorial',     'Memorial Day'],
+      ['juneteenth',   'Juneteenth'],
+      ['independence', 'Independence Day'],
+      ['labor',        'Labor Day'],
+      ['columbus',     "Columbus / Indigenous Peoples' Day"],
+      ['veterans',     'Veterans Day'],
+      ['thanksgiving', 'Thanksgiving'],
+      ['christmas',    'Christmas']
+    ];
 
     function getFacilities(type) {
       const cs = (currentUser && currentUser.costSettings) || {};
@@ -17355,6 +17388,18 @@ RECYCLING & DONATION
       const facilities = getFacilities(type);
       if (facilities.length === 0) {
         listEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:4px 0;">No sites added yet.</div>';
+        return;
+      }
+      // Disposal sites render as compact bordered cards (minimum + hours fields).
+      if (type === 'disposal') {
+        // Normalize defaults onto existing disposal sites that predate these fields.
+        let changed = false;
+        facilities.forEach(f => {
+          if (!f.hours || typeof f.hours !== 'object') { f.hours = getDefaultDisposalHours(); changed = true; }
+          if (f.minimumType == null) { f.minimumType = 'none'; changed = true; }
+        });
+        if (changed) setFacilities('disposal', facilities);
+        listEl.innerHTML = facilities.map((f, i) => renderDisposalCard(f, i)).join('');
         return;
       }
       listEl.innerHTML = facilities.map((f, i) => {
@@ -17388,10 +17433,170 @@ RECYCLING & DONATION
       }).join('');
     }
 
+    // Compact bordered card for a single DISPOSAL site (name/address/$/ton/★/✕
+    // plus per-site minimum + 7-day hours editor). Recycling/donation stay single-line.
+    function renderDisposalCard(f, i) {
+      const isDefault = !!f.isDefault;
+      const starStyle = isDefault
+        ? 'flex-shrink:0;padding:7px 9px;background:none;border:1px solid var(--accent-green);border-radius:var(--radius-sm);color:var(--accent-green);font-size:13px;cursor:pointer;'
+        : 'flex-shrink:0;padding:7px 9px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:13px;cursor:pointer;';
+      const star = isDefault ? '★' : '☆';
+      const esc = s => (s || '').replace(/"/g, '&quot;');
+
+      const minType = f.minimumType || 'none';
+      const minVal = (f.minimumValue != null ? f.minimumValue : '');
+      const minTip = 'Minimum charge for this site. Weight = minimum tons billed; $ = flat dollar floor. ' +
+        'Above the minimum, the disposal fee is always prorated by actual weight.';
+      const opt = (v, label) => '<option value="' + v + '"' + (minType === v ? ' selected' : '') + '>' + label + '</option>';
+      const minValPlaceholder = minType === 'weight' ? 'min tons' : '$ floor';
+      const minValHidden = minType === 'none' ? 'display:none;' : '';
+      const minRow =
+        '<div style="display:flex;gap:6px;align-items:center;margin-top:8px;" title="' + minTip + '">' +
+          '<span style="width:62px;font-size:11px;color:var(--text-muted);flex-shrink:0;">Minimum</span>' +
+          '<select class="form-input" style="font-size:12px;padding:6px 8px;width:auto;flex-shrink:0;" ' +
+            'onchange="setDisposalMinType(' + i + ',this.value)">' +
+            opt('none', 'None') + opt('weight', 'Weight (tons)') + opt('dollar', '$') +
+          '</select>' +
+          '<input type="number" class="form-input" min="0" step="0.01" style="width:90px;font-size:12px;padding:6px 8px;' + minValHidden + '" ' +
+            'placeholder="' + minValPlaceholder + '" value="' + (minVal === null ? '' : minVal) + '" ' +
+            'oninput="updateFacility(\'disposal\',' + i + ',\'minimumValue\',this.value !== \'\' ? parseFloat(this.value) : null)">' +
+        '</div>';
+
+      const hours = (f.hours && typeof f.hours === 'object') ? f.hours : getDefaultDisposalHours();
+      const hoursRows = DISPOSAL_DAY_KEYS.map(d => {
+        const h = hours[d] || { open:'', close:'', closed:true };
+        const closed = !!h.closed;
+        const dis = closed ? ' disabled' : '';
+        const timeStyle = 'flex:1;min-width:0;font-size:11px;padding:4px 6px;' + (closed ? 'opacity:0.4;' : '');
+        return '<div style="display:flex;align-items:center;gap:6px;margin-top:3px;">' +
+          '<span style="width:30px;font-size:11px;color:var(--text-muted);flex-shrink:0;">' + DISPOSAL_DAY_LABELS[d] + '</span>' +
+          '<label style="display:flex;align-items:center;gap:3px;font-size:11px;color:var(--text-muted);cursor:pointer;flex-shrink:0;">' +
+            '<input type="checkbox"' + (closed ? '' : ' checked') + ' onchange="toggleSiteDay(' + i + ',\'' + d + '\',!this.checked)"> Open' +
+          '</label>' +
+          '<input type="time" class="form-input"' + dis + ' style="' + timeStyle + '" value="' + (h.open || '') + '" ' +
+            'oninput="updateFacility(\'disposal\',' + i + ',\'hours.' + d + '.open\',this.value)">' +
+          '<span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">–</span>' +
+          '<input type="time" class="form-input"' + dis + ' style="' + timeStyle + '" value="' + (h.close || '') + '" ' +
+            'oninput="updateFacility(\'disposal\',' + i + ',\'hours.' + d + '.close\',this.value)">' +
+        '</div>';
+      }).join('');
+
+      return '<div style="border:1px solid var(--border);background:var(--bg-card);border-radius:var(--radius-sm);padding:8px;margin-bottom:8px;">' +
+        '<div style="display:flex;gap:6px;align-items:flex-start;">' +
+          '<button title="Set as default" onclick="setDefaultFacility(\'disposal\',' + i + ')" style="' + starStyle + '">' + star + '</button>' +
+          '<input class="form-input" style="flex:1;min-width:0;font-size:12px;padding:7px 10px;" placeholder="Name" value="' + esc(f.name) + '" ' +
+            'oninput="updateFacility(\'disposal\',' + i + ',\'name\',this.value)">' +
+          '<button onclick="removeFacility(\'disposal\',' + i + ')" style="flex-shrink:0;padding:7px 9px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;">✕</button>' +
+        '</div>' +
+        '<div style="display:flex;gap:6px;align-items:center;margin-top:6px;">' +
+          '<input class="form-input" style="flex:1;min-width:0;font-size:12px;padding:7px 10px;" placeholder="Address" value="' + esc(f.address) + '" ' +
+            'oninput="updateFacility(\'disposal\',' + i + ',\'address\',this.value)">' +
+          '<input type="number" class="form-input" style="width:80px;flex-shrink:0;font-size:12px;padding:7px 8px;text-align:center;" placeholder="$/ton" min="0" value="' + (f.cost != null ? f.cost : '') + '" ' +
+            'title="Disposal cost $/ton (overrides default)" ' +
+            'oninput="updateFacility(\'disposal\',' + i + ',\'cost\',this.value ? parseFloat(this.value) : null)">' +
+        '</div>' +
+        minRow +
+        '<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px;">' +
+          '<div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">Hours</div>' +
+          hoursRows +
+        '</div>' +
+      '</div>';
+    }
+
+    // Minimum-type selector change: persist + re-render (shows/hides the value field).
+    function setDisposalMinType(idx, value) {
+      updateFacility('disposal', idx, 'minimumType', value);
+      renderFacilityList('disposal');
+    }
+
+    // Day Open/Closed toggle: persist + re-render (enables/disables the time inputs).
+    function toggleSiteDay(idx, day, closed) {
+      const facilities = getFacilities('disposal');
+      if (facilities[idx] && (!facilities[idx].hours || typeof facilities[idx].hours !== 'object')) {
+        facilities[idx].hours = getDefaultDisposalHours();
+        setFacilities('disposal', facilities);
+      }
+      updateFacility('disposal', idx, 'hours.' + day + '.closed', closed);
+      renderFacilityList('disposal');
+    }
+
     function renderAllFacilityLists() {
       renderFacilityList('disposal');
       renderFacilityList('recycling');
       renderFacilityList('donation');
+      renderDisposalHolidays();
+    }
+
+    // ── Franchise-level disposal holidays (closed dates) ──
+    // Stored in cost_settings.disposalHolidays = { federal:{<key>:bool}, custom:[{name,date}] }
+    function getDisposalHolidays() {
+      const cs = (currentUser && currentUser.costSettings) || {};
+      let h = cs.disposalHolidays;
+      if (typeof h === 'string') { try { h = JSON.parse(h); } catch(e) { h = null; } }
+      if (!h || typeof h !== 'object') h = {};
+      if (!h.federal || typeof h.federal !== 'object') h.federal = {};
+      if (!Array.isArray(h.custom)) h.custom = [];
+      // Default: any federal holiday not explicitly set is observed (closed = true).
+      FEDERAL_HOLIDAYS.forEach(([k]) => { if (h.federal[k] === undefined) h.federal[k] = true; });
+      return h;
+    }
+
+    function setDisposalHolidays(h) {
+      if (!currentUser.costSettings) currentUser.costSettings = {};
+      currentUser.costSettings.disposalHolidays = h;
+    }
+
+    function renderDisposalHolidays() {
+      const el = document.getElementById('settingsDisposalHolidaysList');
+      if (!el) return;
+      const h = getDisposalHolidays();
+      const escHol = s => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+      const fed = FEDERAL_HOLIDAYS.map(([k, label]) => {
+        const checked = h.federal[k] !== false;
+        return '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-primary);padding:3px 0;cursor:pointer;">' +
+          '<input type="checkbox"' + (checked ? ' checked' : '') + ' onchange="toggleFederalHoliday(\'' + k + '\',this.checked)">' +
+          '<span>' + label + '</span></label>';
+      }).join('');
+      const custom = (h.custom || []).map((c, i) =>
+        '<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;">' +
+          '<span style="flex:1;font-size:12px;color:var(--text-primary);">' + escHol(c.name) + '</span>' +
+          '<span style="font-size:12px;color:var(--text-muted);">' + escHol(c.date) + '</span>' +
+          '<button onclick="removeCustomHoliday(' + i + ')" style="flex-shrink:0;padding:5px 8px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;">✕</button>' +
+        '</div>'
+      ).join('');
+      el.innerHTML =
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px;margin-bottom:8px;">' + fed + '</div>' +
+        (custom ? '<div style="margin-bottom:6px;">' + custom + '</div>' : '') +
+        '<div style="display:flex;gap:6px;">' +
+          '<input class="form-input" id="disposalHolidayCustomName" placeholder="Custom holiday name" style="flex:1;min-width:0;font-size:12px;padding:7px 10px;">' +
+          '<input type="date" class="form-input" id="disposalHolidayCustomDate" style="font-size:12px;padding:7px 8px;width:auto;flex-shrink:0;">' +
+          '<button onclick="addCustomHoliday()" style="flex-shrink:0;padding:7px 12px;background:none;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;">+ Add</button>' +
+        '</div>';
+    }
+
+    function toggleFederalHoliday(key, checked) {
+      const h = getDisposalHolidays();
+      h.federal[key] = !!checked;
+      setDisposalHolidays(h);
+    }
+
+    function addCustomHoliday() {
+      const nameEl = document.getElementById('disposalHolidayCustomName');
+      const dateEl = document.getElementById('disposalHolidayCustomDate');
+      const name = nameEl ? nameEl.value.trim() : '';
+      const date = dateEl ? dateEl.value.trim() : '';
+      if (!name && !date) return;
+      const h = getDisposalHolidays();
+      h.custom.push({ name, date });
+      setDisposalHolidays(h);
+      renderDisposalHolidays();
+    }
+
+    function removeCustomHoliday(idx) {
+      const h = getDisposalHolidays();
+      h.custom.splice(idx, 1);
+      setDisposalHolidays(h);
+      renderDisposalHolidays();
     }
 
     // Resolve per-site disposal cost or recycling revenue
@@ -17416,20 +17621,41 @@ RECYCLING & DONATION
 
     function addFacility(type) {
       const facilities = getFacilities(type);
-      facilities.push({ name: '', address: '' });
+      const entry = { name: '', address: '' };
+      // New disposal sites get minimum + default hours up front.
+      if (type === 'disposal') {
+        entry.minimumType = 'none';
+        entry.minimumValue = null;
+        entry.hours = getDefaultDisposalHours();
+      }
+      facilities.push(entry);
       setFacilities(type, facilities);
       renderFacilityList(type);
       // Focus the new name input
       const listEl = document.getElementById('settings' + type.charAt(0).toUpperCase() + type.slice(1) + 'SitesList');
       if (listEl) {
-        const inputs = listEl.querySelectorAll('input');
-        if (inputs.length > 0) inputs[inputs.length - 2].focus();
+        const nameInput = listEl.querySelector('div:last-child input[placeholder="Name"]');
+        if (nameInput) nameInput.focus();
       }
     }
 
+    // Supports flat fields ('name') and dotted nested paths ('hours.mon.open').
+    // Flat-field callers are unchanged.
     function updateFacility(type, idx, field, value) {
       const facilities = getFacilities(type);
-      if (facilities[idx]) facilities[idx][field] = value;
+      if (facilities[idx]) {
+        if (field.indexOf('.') === -1) {
+          facilities[idx][field] = value;
+        } else {
+          const parts = field.split('.');
+          let obj = facilities[idx];
+          for (let p = 0; p < parts.length - 1; p++) {
+            if (obj[parts[p]] == null || typeof obj[parts[p]] !== 'object') obj[parts[p]] = {};
+            obj = obj[parts[p]];
+          }
+          obj[parts[parts.length - 1]] = value;
+        }
+      }
       setFacilities(type, facilities);
       // Don't re-render — let user keep typing
     }
@@ -18962,6 +19188,8 @@ Please review the estimate below. If you have any questions or would like to adj
       vals.disposalSites  = getFacilities('disposal');
       vals.recyclingSites = getFacilities('recycling');
       vals.donationSites  = getFacilities('donation');
+      // Franchise-level disposal holiday list (federal checklist + custom dates)
+      vals.disposalHolidays = getDisposalHolidays();
       // Merge into the FULL costSettings object so we don't wipe phone/website/proposal/signs
       // when saving cost-tab fields. n8n stores cost_settings as a single JSONB column.
       const merged = Object.assign({}, currentUser.costSettings || {}, vals);
