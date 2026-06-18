@@ -1,0 +1,448 @@
+// Supabase Edge Function: crewlogic-route-disposal (v1.0)
+// Route Optimizer R1 — disposal-stop recommender engine.
+//
+// Computes, for a loaded truck that must dispose BEFORE reaching a fixed endpoint:
+//   truck current location → disposal site → endpoint (job or "Our location")
+// the total time + total cost for each candidate disposal site, filters out sites
+// that would be closed (hours/holiday) at the estimated arrival in the franchise's
+// OWN local timezone, ranks the open ones, and returns the least-cost and
+// least-time picks plus the full per-site breakdown.
+//
+// Spec: docs/plan-route-optimizer-r1.md (§3 inputs, §5 math, Resolved decisions)
+//       docs/plan-route-optimizer-r1-schema.md (facilities / facility_hours / franchise_holidays)
+//
+// Deploy (DEV): supabase functions deploy --project-ref bagkimfwmpwjfhfhmsrb \
+//                 crewlogic-route-disposal --use-api --no-verify-jwt
+//
+// SECRETS REQUIRED (auto-populated except the Google key):
+//   SUPABASE_URL
+//   SUPABASE_SERVICE_ROLE_KEY
+//   GOOGLE_GEOCODING_API_KEY  (must have the Distance Matrix API enabled)
+//
+// POST body:
+//   { franchiseID, truckLat, truckLng, endpointAddress,
+//     endpointScheduledTime? (ISO or null for "Our location"), loadPercent (0-100) }
+//
+// Response:
+//   { success:true, timezoneUsed, leastCost:{...}, leastTime:{...}, sites:[ ... ] }
+//   { success:false, error }   (safe message only; full detail is console.error'd)
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+const TENANT_ID = "946a4535-aa61-45b6-a6fb-9190ff546d41"; // Junkluggers
+
+// Per-franchise cost-setting defaults (used when the field is blank/absent).
+const DEFAULTS = {
+  crewRate: 25,     // $/hr PER PERSON
+  MPG: 10,
+  fuelCost: 3.5,    // $/gal
+  truckCY: 16,      // cubic yards at 100% full
+  disposalWait: 15, // minutes idle at the disposal site
+};
+const TONS_PER_FULL_16CY = 16; // 16 CY = 1 ton (locked)
+
+function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...CORS, "Content-Type": "application/json" },
+  });
+}
+
+// Numeric parse with default: "" / null / NaN → def.
+function num(v: unknown, def: number): number {
+  if (v === null || v === undefined) return def;
+  if (typeof v === "number") return Number.isFinite(v) ? v : def;
+  const s = String(v).trim();
+  if (s === "") return def;
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : def;
+}
+
+function round2(n: number): number { return Math.round(n * 100) / 100; }
+function round1(n: number): number { return Math.round(n * 10) / 10; }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Timezone — derive a franchise IANA tz from its US state when not stored.
+// Multi-zone states resolved to their DOMINANT zone (the n8n hardcoded ET — the
+// exact multi-tenant trap this function exists to avoid).
+// ─────────────────────────────────────────────────────────────────────────────
+const STATE_TZ: Record<string, string> = {
+  AL: "America/Chicago", AK: "America/Anchorage", AZ: "America/Phoenix",
+  AR: "America/Chicago", CA: "America/Los_Angeles", CO: "America/Denver",
+  CT: "America/New_York", DE: "America/New_York", DC: "America/New_York",
+  FL: "America/New_York", GA: "America/New_York", HI: "Pacific/Honolulu",
+  ID: "America/Boise", IL: "America/Chicago", IN: "America/Indiana/Indianapolis",
+  IA: "America/Chicago", KS: "America/Chicago", KY: "America/New_York",
+  LA: "America/Chicago", ME: "America/New_York", MD: "America/New_York",
+  MA: "America/New_York", MI: "America/Detroit", MN: "America/Chicago",
+  MS: "America/Chicago", MO: "America/Chicago", MT: "America/Denver",
+  NE: "America/Chicago", NV: "America/Los_Angeles", NH: "America/New_York",
+  NJ: "America/New_York", NM: "America/Denver", NY: "America/New_York",
+  NC: "America/New_York", ND: "America/Chicago", OH: "America/New_York",
+  OK: "America/Chicago", OR: "America/Los_Angeles", PA: "America/New_York",
+  RI: "America/New_York", SC: "America/New_York", SD: "America/Chicago",
+  TN: "America/Chicago", TX: "America/Chicago", UT: "America/Denver",
+  VT: "America/New_York", VA: "America/New_York", WA: "America/Los_Angeles",
+  WV: "America/New_York", WI: "America/Chicago", WY: "America/Denver",
+};
+
+function resolveTimezone(cs: Record<string, unknown>): string {
+  const explicit = String(cs.officeTimezone || "").trim();
+  if (explicit) return explicit;
+  const state = String(cs.officeState || "").trim().toUpperCase();
+  return STATE_TZ[state] || "America/New_York";
+}
+
+// Local-time parts of a UTC instant in the given IANA tz.
+interface LocalParts {
+  year: number; month: number; day: number; // month 1-12
+  dow: number;        // 0=Sun … 6=Sat
+  minutesOfDay: number;
+  label: string;      // "2026-06-18 14:30 EDT"
+}
+const DOW_MAP: Record<string, number> = {
+  Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6,
+};
+function localParts(date: Date, tz: string): LocalParts {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false, weekday: "long",
+    timeZoneName: "short",
+  });
+  const parts = fmt.formatToParts(date);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value || "";
+  const year = parseInt(get("year"), 10);
+  const month = parseInt(get("month"), 10);
+  const day = parseInt(get("day"), 10);
+  let hour = parseInt(get("hour"), 10);
+  if (hour === 24) hour = 0; // some runtimes emit "24" for midnight
+  const minute = parseInt(get("minute"), 10);
+  const dow = DOW_MAP[get("weekday")] ?? 0;
+  const tzName = get("timeZoneName");
+  const label = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")} ` +
+    `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")} ${tzName}`;
+  return { year, month, day, dow, minutesOfDay: hour * 60 + minute, label };
+}
+
+// "HH:MM[:SS]" → minutes from midnight (null on blank).
+function timeToMinutes(t: unknown): number | null {
+  const s = String(t || "").trim();
+  if (!s) return null;
+  const m = s.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// US federal holiday date resolution (calendar-date math; tz-independent).
+// ─────────────────────────────────────────────────────────────────────────────
+// nth (1-based) weekday of a month. weekday: 0=Sun … 6=Sat.
+function nthWeekday(year: number, month: number, weekday: number, n: number): number {
+  const first = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+  const offset = (weekday - first + 7) % 7;
+  return 1 + offset + (n - 1) * 7;
+}
+function lastWeekday(year: number, month: number, weekday: number): number {
+  const last = new Date(Date.UTC(year, month, 0)).getUTCDate(); // last day of month
+  const lastDow = new Date(Date.UTC(year, month - 1, last)).getUTCDay();
+  return last - ((lastDow - weekday + 7) % 7);
+}
+// Returns {month (1-12), day} for a federal holiday key in a given year, or null.
+function federalHolidayDate(key: string, year: number): { month: number; day: number } | null {
+  switch (key) {
+    case "newYears":     return { month: 1, day: 1 };
+    case "mlk":          return { month: 1, day: nthWeekday(year, 1, 1, 3) };   // 3rd Mon Jan
+    case "presidents":   return { month: 2, day: nthWeekday(year, 2, 1, 3) };   // 3rd Mon Feb
+    case "memorial":     return { month: 5, day: lastWeekday(year, 5, 1) };     // last Mon May
+    case "juneteenth":   return { month: 6, day: 19 };
+    case "independence": return { month: 7, day: 4 };
+    case "labor":        return { month: 9, day: nthWeekday(year, 9, 1, 1) };   // 1st Mon Sep
+    case "columbus":     return { month: 10, day: nthWeekday(year, 10, 1, 2) }; // 2nd Mon Oct
+    case "veterans":     return { month: 11, day: 11 };
+    case "thanksgiving": return { month: 11, day: nthWeekday(year, 11, 4, 4) }; // 4th Thu Nov
+    case "christmas":    return { month: 12, day: 25 };
+    default:             return null;
+  }
+}
+const FEDERAL_LABEL: Record<string, string> = {
+  newYears: "New Year's Day", mlk: "MLK Day", presidents: "Presidents' Day",
+  memorial: "Memorial Day", juneteenth: "Juneteenth", independence: "Independence Day",
+  labor: "Labor Day", columbus: "Columbus Day", veterans: "Veterans Day",
+  thanksgiving: "Thanksgiving", christmas: "Christmas",
+};
+
+interface HolidayRow {
+  federal_key: string | null;
+  custom_label: string | null;
+  custom_date: string | null; // 'YYYY-MM-DD'
+  is_observed: boolean;
+}
+// Is the local arrival date a closed holiday? Returns the holiday label or null.
+function holidayClosure(lp: LocalParts, holidays: HolidayRow[]): string | null {
+  for (const h of holidays) {
+    if (h.federal_key) {
+      if (h.is_observed === false) continue;
+      const fd = federalHolidayDate(h.federal_key, lp.year);
+      if (fd && fd.month === lp.month && fd.day === lp.day) {
+        return FEDERAL_LABEL[h.federal_key] || h.federal_key;
+      }
+    } else if (h.custom_date) {
+      const m = h.custom_date.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (m && parseInt(m[1], 10) === lp.year && parseInt(m[2], 10) === lp.month &&
+          parseInt(m[3], 10) === lp.day) {
+        return h.custom_label || "Holiday";
+      }
+    }
+  }
+  return null;
+}
+
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+function fmtClock(min: number): string {
+  const h = Math.floor(min / 60), m = min % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+interface HoursRow { dow: number; is_closed: boolean; open_time: string | null; close_time: string | null; }
+// Returns a closedReason string if the site is closed at the arrival local time, else null.
+function hoursClosure(lp: LocalParts, hours: HoursRow[]): string | null {
+  const row = hours.find((h) => h.dow === lp.dow);
+  if (!row) return null; // no row → treat as open (no constraint configured)
+  if (row.is_closed) return `closed ${DAY_NAMES[lp.dow]}s`;
+  const open = timeToMinutes(row.open_time);
+  const close = timeToMinutes(row.close_time);
+  if (open !== null && lp.minutesOfDay < open) return `arrives before open (${fmtClock(open)})`;
+  if (close !== null && lp.minutesOfDay >= close) return `arrives after close (${fmtClock(close)})`;
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Distance Matrix — one call, all sites. Token per point: "lat,lng" or address.
+// ─────────────────────────────────────────────────────────────────────────────
+interface Leg { miles: number; minutes: number; }
+async function distanceMatrix(
+  apiKey: string, origins: string[], destinations: string[],
+): Promise<(Leg | null)[][]> {
+  const url = "https://maps.googleapis.com/maps/api/distancematrix/json" +
+    `?origins=${origins.map(encodeURIComponent).join("|")}` +
+    `&destinations=${destinations.map(encodeURIComponent).join("|")}` +
+    `&units=imperial&key=${apiKey}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Google Distance Matrix HTTP ${res.status}`);
+  const data = await res.json() as {
+    status: string; error_message?: string;
+    rows?: Array<{ elements: Array<{ status: string; distance?: { value: number }; duration?: { value: number } }> }>;
+  };
+  if (data.status !== "OK") {
+    throw new Error(`Google Distance Matrix: ${data.status}${data.error_message ? " — " + data.error_message : ""}`);
+  }
+  return (data.rows || []).map((row) =>
+    (row.elements || []).map((cell) => {
+      if (!cell || cell.status !== "OK" || !cell.distance || !cell.duration) return null;
+      return {
+        miles: Math.round((cell.distance.value / 1609.344) * 10) / 10,
+        minutes: Math.round(cell.duration.value / 60),
+      };
+    }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN
+// ─────────────────────────────────────────────────────────────────────────────
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  if (req.method !== "POST") return jsonResponse({ success: false, error: "Method not allowed" }, 405);
+
+  let body: Record<string, unknown>;
+  try {
+    body = await req.json();
+  } catch (_e) {
+    return jsonResponse({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  try {
+    const franchiseID = String(body.franchiseID || "").trim();
+    const truckLat = Number(body.truckLat);
+    const truckLng = Number(body.truckLng);
+    const endpointAddress = String(body.endpointAddress || "").trim();
+    const endpointScheduledTime = body.endpointScheduledTime
+      ? String(body.endpointScheduledTime).trim() : "";
+    const loadPercent = num(body.loadPercent, NaN);
+
+    if (!franchiseID) return jsonResponse({ success: false, error: "franchiseID required" }, 400);
+    if (!Number.isFinite(truckLat) || !Number.isFinite(truckLng)) {
+      return jsonResponse({ success: false, error: "truckLat and truckLng required" }, 400);
+    }
+    if (!endpointAddress) return jsonResponse({ success: false, error: "endpointAddress required" }, 400);
+    if (!Number.isFinite(loadPercent)) return jsonResponse({ success: false, error: "loadPercent required" }, 400);
+
+    const apiKey = Deno.env.get("GOOGLE_GEOCODING_API_KEY") || Deno.env.get("GOOGLE_MAPS_API_KEY");
+    if (!apiKey) {
+      console.error("[route-disposal] No Google Distance Matrix key configured.");
+      return jsonResponse({ success: false, error: "Distance lookup is not configured." }, 500);
+    }
+
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+
+    // 1) Resolve franchise (external_id → id, Junkluggers tenant) + cost_settings.
+    const { data: franchiseRow, error: frErr } = await supabase
+      .from("franchises")
+      .select("id, cost_settings")
+      .eq("external_id", franchiseID)
+      .eq("tenant_id", TENANT_ID)
+      .single();
+    if (frErr || !franchiseRow) {
+      return jsonResponse({ success: false, error: "Franchise not found: " + franchiseID }, 404);
+    }
+    const franchiseUUID = franchiseRow.id as string;
+    const cs = (franchiseRow.cost_settings as Record<string, unknown>) || {};
+
+    const crewRate = num(cs.crewRate, DEFAULTS.crewRate);
+    const MPG = num(cs.MPG, DEFAULTS.MPG);
+    const fuelCost = num(cs.fuelCost, DEFAULTS.fuelCost);
+    const truckCY = num(cs.truckCY, DEFAULTS.truckCY);
+    const disposalWait = num(cs.disposalWait, DEFAULTS.disposalWait);
+    const timezoneUsed = resolveTimezone(cs);
+
+    // 2) Load percent → tons. tons = (load% × truckCY) / 16.
+    const cy = (loadPercent / 100) * truckCY;
+    const tons = round2(cy / TONS_PER_FULL_16CY);
+
+    // 3) Load disposal facilities (service role), their hours, and franchise holidays.
+    const { data: facilities, error: facErr } = await supabase
+      .from("facilities")
+      .select("id, name, address, latitude, longitude, per_ton_rate, minimum_type, minimum_value")
+      .eq("franchise_id", franchiseUUID)
+      .eq("type", "disposal")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true });
+    if (facErr) {
+      console.error("[route-disposal] facilities query failed:", facErr.message);
+      return jsonResponse({ success: false, error: "Could not load disposal sites." }, 500);
+    }
+    if (!facilities || !facilities.length) {
+      return jsonResponse({ success: false, error: "No active disposal sites configured for this franchise." }, 404);
+    }
+    const facilityIds = facilities.map((f) => f.id);
+
+    const { data: hoursRows } = await supabase
+      .from("facility_hours")
+      .select("facility_id, dow, is_closed, open_time, close_time")
+      .in("facility_id", facilityIds);
+    const hoursByFacility: Record<string, HoursRow[]> = {};
+    for (const h of (hoursRows || [])) {
+      (hoursByFacility[h.facility_id as string] ||= []).push(h as unknown as HoursRow);
+    }
+
+    const { data: holidayRows } = await supabase
+      .from("franchise_holidays")
+      .select("federal_key, custom_label, custom_date, is_observed")
+      .eq("franchise_id", franchiseUUID);
+    const holidays = (holidayRows || []) as unknown as HolidayRow[];
+
+    // 4) Distance Matrix — origins = [truck, ...sites]; destinations = [...sites, endpoint].
+    const siteToken = (f: Record<string, unknown>) =>
+      (f.latitude != null && f.longitude != null) ? `${f.latitude},${f.longitude}` : String(f.address || "");
+    const origins = [`${truckLat},${truckLng}`, ...facilities.map(siteToken)];
+    const destinations = [...facilities.map(siteToken), endpointAddress];
+    const matrix = await distanceMatrix(apiKey, origins, destinations);
+    const endpointDestIdx = facilities.length; // endpoint is the last destination
+
+    const now = new Date();
+    const scheduledDate = endpointScheduledTime ? new Date(endpointScheduledTime) : null;
+    const hasSchedule = scheduledDate !== null && !isNaN(scheduledDate.getTime());
+
+    // 5) Per-site cost + time + open/closed + late warning.
+    const sites = facilities.map((f, i) => {
+      const truckToSite = matrix[0]?.[i] ?? null;            // origin 0 → dest i
+      const siteToEndpoint = matrix[1 + i]?.[endpointDestIdx] ?? null; // origin (1+i) → endpoint
+
+      const base: Record<string, unknown> = {
+        facilityId: f.id,
+        name: f.name || "",
+        address: f.address || "",
+        tons,
+      };
+
+      if (!truckToSite || !siteToEndpoint) {
+        return { ...base, open: false, closedReason: "distance lookup unavailable for this site" };
+      }
+
+      const totalRouteMinutes = truckToSite.minutes + siteToEndpoint.minutes;
+      const totalTimeWithWait = totalRouteMinutes + disposalWait;
+      const routeMiles = round1(truckToSite.miles + siteToEndpoint.miles);
+
+      // Disposal fee — base prorated by tons; floored by minimum per minimum_type.
+      const ratePos = Math.max(0, num(f.per_ton_rate, 0));
+      const minType = String(f.minimum_type || "none");
+      const minVal = num(f.minimum_value, 0);
+      let disposalFee: number;
+      if (minType === "weight") disposalFee = Math.max(tons, minVal) * ratePos;
+      else if (minType === "dollar") disposalFee = Math.max(ratePos * tons, minVal);
+      else disposalFee = ratePos * tons; // 'none'
+      disposalFee = round2(disposalFee);
+
+      // Labor (2-person crew, wait billed at full rate) + fuel.
+      const laborCost = round2(2 * crewRate * (totalTimeWithWait / 60));
+      const fuelCost$ = round2((routeMiles / MPG) * fuelCost);
+      const totalCost = round2(disposalFee + laborCost + fuelCost$);
+
+      // Arrival AT the disposal site (drives the hours/holiday check).
+      const arriveAtSite = new Date(now.getTime() + truckToSite.minutes * 60000);
+      const lp = localParts(arriveAtSite, timezoneUsed);
+      const holiday = holidayClosure(lp, holidays);
+      const hourClose = hoursClosure(lp, hoursByFacility[f.id as string] || []);
+      const closedReason = holiday ? `closed for holiday (${holiday})` : hourClose;
+      const open = !closedReason;
+
+      const out: Record<string, unknown> = {
+        ...base,
+        open,
+        disposalFee,
+        laborCost,
+        fuelCost: fuelCost$,
+        totalCost,
+        driveMinutes: totalRouteMinutes,
+        waitMinutes: disposalWait,
+        totalTimeWithWait,
+        routeMiles,
+        arrivalLocal: lp.label,
+      };
+      if (closedReason) out.closedReason = closedReason;
+
+      // Late warning vs scheduled endpoint time — arrival AT the endpoint.
+      if (hasSchedule) {
+        const arriveAtEndpoint = now.getTime() + totalTimeWithWait * 60000;
+        const minutesLate = Math.round((arriveAtEndpoint - (scheduledDate as Date).getTime()) / 60000);
+        out.minutesLate = minutesLate;
+        out.warning = minutesLate < 0 ? "early"
+          : minutesLate <= 30 ? "green"
+          : minutesLate <= 90 ? "yellow"
+          : "red";
+      }
+      return out;
+    });
+
+    // 6) Rank the OPEN sites → least-cost + least-time picks.
+    const openSites = sites.filter((s) => s.open === true);
+    const pickMin = (key: string) => openSites.reduce<Record<string, unknown> | null>(
+      (best, s) => (best === null || (s[key] as number) < (best[key] as number)) ? s : best, null);
+    const leastCost = pickMin("totalCost");
+    const leastTime = pickMin("totalTimeWithWait");
+
+    return jsonResponse({ success: true, timezoneUsed, leastCost, leastTime, sites });
+  } catch (e) {
+    const err = e as Error;
+    console.error("[route-disposal] error:", err?.stack || err?.message || String(e));
+    return jsonResponse({ success: false, error: "Could not compute disposal routes." }, 500);
+  }
+});
