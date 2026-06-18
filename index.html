@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.44.1 | 2026-06-18">
+  <meta name="crewlogic-version" content="v5.45.0 | 2026-06-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -820,6 +820,29 @@
     .route-result-section { display: none; }
     .route-result-section.active { display: block; }
 
+    /* Disposal Router (R1) result styling */
+    .disp-rec { background: var(--bg-card); border: 2px solid var(--accent-green); border-radius: var(--radius, 12px); padding: 14px 16px; margin-bottom: 14px; }
+    .disp-rec-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+    .disp-rec-title { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; }
+    .disp-rec-name { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+    .disp-rec-addr { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
+    .disp-rec-stats { display: flex; gap: 10px; margin-bottom: 8px; }
+    .disp-stat { flex: 1; text-align: center; background: var(--bg-input); border-radius: var(--radius-sm); padding: 8px 6px; }
+    .disp-stat-val { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+    .disp-stat-lbl { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin-top: 2px; }
+    .disp-breakdown { font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+    .disp-chip { font-size: 10px; font-weight: 700; border: 1px solid; border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
+    .disp-sub { font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin: 14px 0 8px; }
+    .disp-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 8px; }
+    .disp-row-closed { opacity: .5; }
+    .disp-row-name { font-size: 14px; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .disp-row-addr { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .disp-row-meta { text-align: right; white-space: nowrap; }
+    .disp-row-cost { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+    .disp-row-time { font-size: 11px; color: var(--text-muted); }
+    .disp-empty { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 18px; text-align: center; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+    .disp-tz { font-size: 10px; color: var(--text-muted); text-align: center; margin-top: 10px; }
+
     .route-result-card {
       background: var(--bg-card); border: 1px solid var(--accent-green);
       border-radius: var(--radius); padding: 16px; margin-bottom: 14px;
@@ -1295,6 +1318,12 @@
             <div class="module-icon">🚚</div>
             <div class="module-name">Where Are My Trucks?</div>
             <div class="module-desc">Live truck locations on the map</div>
+          </div>
+
+          <div class="module-card fade-in fade-in-delay-3" id="disposalRouterCard" data-card="disposalRouter" onclick="openModule('disposalRouter')" style="display:none;">
+            <div class="module-icon">♻️</div>
+            <div class="module-name">Disposal Router</div>
+            <div class="module-desc">Best transfer station between your truck & the next job</div>
           </div>
 
           <div class="module-card fade-in fade-in-delay-3" id="priceLookupCard" data-card="priceLookup" onclick="openModule('priceLookup')">
@@ -3301,6 +3330,44 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         <div id="routeResultContent"></div>
         <div class="results-note fade-in fade-in-delay-4">Routes optimized based on facility hours, drive times, and truck capacity.</div>
         <button class="new-estimate-btn fade-in fade-in-delay-5" onclick="newRoute()">← New Route</button>
+      </div>
+
+      <!-- DISPOSAL ROUTER (R1) — separate from the #90-only n8n Route Optimizer above -->
+      <div class="router-section" id="disposalRouterScreen">
+        <div class="section-title fade-in">Disposal Router</div>
+        <div class="section-desc fade-in fade-in-delay-1">Find the cheapest and fastest transfer station between your truck and the next job.</div>
+
+        <div class="form-section-label fade-in fade-in-delay-1">Your Truck</div>
+        <div id="dispTruckLoading" class="truck-loading">
+          <span class="spinner-inline"></span> Locating trucks...
+        </div>
+        <div class="truck-selector" id="dispTruckSelector" style="display:none;"></div>
+        <div id="dispTruckGpsError" style="display:none; color: var(--accent-orange); font-size: 12px; margin-bottom: 16px; text-align: center;">
+          Could not get your location. Pick your truck manually below.
+        </div>
+
+        <div class="form-group fade-in fade-in-delay-2">
+          <div class="form-label">Endpoint (where the truck heads after dumping)</div>
+          <select class="form-select" id="dispEndpointSelect">
+            <option value="">Loading jobs...</option>
+          </select>
+          <div class="form-hint" id="dispEndpointHint">Today's jobs from Vonigo + your own location</div>
+        </div>
+
+        <div class="form-group fade-in fade-in-delay-2">
+          <div class="form-label">How full is the truck?</div>
+          <div class="slider-container">
+            <input type="range" id="dispLoadPct" min="0" max="100" value="75" step="5" oninput="updateDispLoadDisplay()">
+            <div class="slider-value" id="dispLoadDisplay">75%</div>
+          </div>
+        </div>
+
+        <button class="calc-btn" id="dispRouteBtn" onclick="runDisposalRoute()" style="margin-top: 20px;">
+          <div class="spinner"></div>
+          <span class="btn-text">Find best disposal</span>
+        </button>
+        <div id="dispRouteError" style="color: var(--accent-red); font-size: 13px; text-align: center; margin-top: 12px; min-height: 20px;"></div>
+        <div id="dispRouteResults" style="margin-top: 18px;"></div>
       </div>
 
       <!-- STORAGE UNIT ESTIMATOR -->
@@ -6640,6 +6707,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const trucksCard = document.getElementById('trucksCard');
       if (trucksCard) trucksCard.style.display = (currentUser.role === 'owner') ? '' : 'none';
 
+      // Disposal Router (R1) — recommends the best transfer station between the truck's live
+      // position and the next job. Gated to telematics-connected (mirrors trucksCard's owner/Phase-1
+      // telematics signal) AND a Vonigo franchise (endpoint = today's Vonigo jobs; native excluded).
+      const disposalRouterCard = document.getElementById('disposalRouterCard');
+      if (disposalRouterCard) {
+        const _telematics = (currentUser.role === 'owner'); // same Phase-1 telematics signal trucksCard uses
+        const _vonigo = (currentUser.submissionTarget !== 'none' && currentUser.pricingSource !== 'native');
+        disposalRouterCard.style.display = (_telematics && _vonigo) ? '' : 'none';
+      }
+
       // Job Plan pulls the day's schedule/work-orders from the CRM (Vonigo). Native tenants
       // have no scheduling source, so hide it. Cache-safe: hide only when submission_target is
       // explicitly 'none' (undefined on a stale session stays Vonigo → card shown).
@@ -6700,6 +6777,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     const allScreens = [
       'homeScreen', 'estimatorScreen', 'resultsScreen',
       'routerScreen', 'routeResultScreen',
+      'disposalRouterScreen',
       'storageScreen', 'storageResultsScreen',
       'mattressScreen', 'mattressResultsScreen',
       'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'jobPlanScreen', 'trucksScreen', 'subscriptionAdminScreen', 'usageDashboardScreen'
@@ -7329,6 +7407,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (_laBtn) { _laBtn.style.background = 'var(--bg-input,#1e2f40)'; _laBtn.style.color = 'var(--text-muted,#6e8194)'; _laBtn.style.fontWeight = '600'; }
         showTrucks();
         _startTrucksAutoRefresh();
+        return;
+      }
+      if (module === 'disposalRouter') {
+        document.getElementById('disposalRouterScreen').classList.add('active');
+        document.getElementById('headerTitle').textContent = 'Disposal Router';
+        currentScreen = 'disposalRouter';
+        initDisposalRouter();
         return;
       }
 
@@ -8488,6 +8573,239 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     function updateRouteLoadDisplay() {
       document.getElementById('routeLoadDisplay').textContent = document.getElementById('routeLoadPct').value + '%';
+    }
+
+    // ===== DISPOSAL ROUTER (R1) — separate from the #90-only n8n Route Optimizer above. =====
+    // Reuses the generic helpers getUserLocation / getTruckLocations / haversine (read-only) and
+    // edgeFunctionCall. Recommends the cheapest + fastest transfer station between the truck's live
+    // position and the next Vonigo job (or the franchise's own location).
+    let dispState = { trucks: [], selectedIdx: null, userLat: null, userLon: null, endpoints: {} };
+
+    function dispEsc(s) { return String(s == null ? '' : s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c])); }
+    function dispMoney(n) { const v = Number(n) || 0; return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+    function dispMins(m) { m = Math.round(Number(m) || 0); if (m < 60) return m + ' min'; const h = Math.floor(m / 60), mm = m % 60; return h + 'h' + (mm ? (' ' + mm + 'm') : ''); }
+
+    function dispRenderTruckButtons() {
+      const sel = document.getElementById('dispTruckSelector');
+      sel.innerHTML = (dispState.trucks || []).map((t, i) =>
+        '<div class="truck-btn" id="dispTruckBtn' + i + '" onclick="dispSelectTruck(' + i + ')">' +
+          '<div class="truck-btn-name">' + dispEsc(t.number || ('Truck ' + (i + 1))) + '</div>' +
+          '<div class="truck-btn-dist" id="dispTruckDist' + i + '">—</div>' +
+          '<div class="truck-btn-suggested">Nearest</div>' +
+        '</div>').join('');
+    }
+
+    function dispSelectTruck(i) {
+      dispState.selectedIdx = i;
+      (dispState.trucks || []).forEach((t, idx) => {
+        const b = document.getElementById('dispTruckBtn' + idx);
+        if (b) b.classList.toggle('selected', idx === i);
+      });
+    }
+
+    function updateDispLoadDisplay() {
+      document.getElementById('dispLoadDisplay').textContent = document.getElementById('dispLoadPct').value + '%';
+    }
+
+    // Best-effort scheduled instant for the late-warning: dateService = service-day midnight (epoch
+    // sec), time = minutes since midnight. R1 late-warning is informational; the franchise-tz offset
+    // is not applied client-side (the edge fn handles tz for hours/holiday separately).
+    function dispBuildScheduledISO(wo) {
+      const ds = Number(wo.dateService || 0), tm = Number(wo.time || 0);
+      if (!ds) return null;
+      try { return new Date(ds * 1000 + tm * 60000).toISOString(); } catch (e) { return null; }
+    }
+
+    async function initDisposalRouter() {
+      dispState = { trucks: [], selectedIdx: null, userLat: null, userLon: null, endpoints: {} };
+      document.getElementById('dispTruckSelector').style.display = 'none';
+      document.getElementById('dispTruckSelector').innerHTML = '';
+      document.getElementById('dispTruckLoading').style.display = 'block';
+      document.getElementById('dispTruckGpsError').style.display = 'none';
+      document.getElementById('dispLoadPct').value = 75;
+      document.getElementById('dispLoadDisplay').textContent = '75%';
+      document.getElementById('dispRouteError').textContent = '';
+      document.getElementById('dispRouteResults').innerHTML = '';
+      document.getElementById('dispRouteBtn').classList.remove('loading');
+
+      loadDisposalRouterJobs();
+
+      try {
+        const [userPos, truckData] = await Promise.all([getUserLocation(), getTruckLocations()]);
+        dispState.userLat = userPos.lat;
+        dispState.userLon = userPos.lon;
+        dispState.trucks = truckData || [];
+        dispRenderTruckButtons();
+        let closestIdx = 0, closestDist = Infinity;
+        dispState.trucks.forEach((t, i) => {
+          const el = document.getElementById('dispTruckDist' + i);
+          if (t.lat != null && t.lon != null && !(t.lat === 0 && t.lon === 0)) {
+            const d = haversine(userPos.lat, userPos.lon, t.lat, t.lon);
+            if (el) el.textContent = (d * 0.621371).toFixed(1) + ' mi';
+            if (d < closestDist) { closestDist = d; closestIdx = i; }
+          } else if (el) { el.textContent = t.desc || '—'; }
+        });
+        const sb = document.getElementById('dispTruckBtn' + closestIdx);
+        if (sb) sb.classList.add('suggested');
+        dispSelectTruck(closestIdx);
+        document.getElementById('dispTruckLoading').style.display = 'none';
+        document.getElementById('dispTruckSelector').style.display = 'grid';
+      } catch (e) {
+        document.getElementById('dispTruckLoading').style.display = 'none';
+        document.getElementById('dispTruckGpsError').style.display = 'block';
+        try {
+          const truckData = await getTruckLocations();
+          dispState.trucks = truckData || [];
+          dispRenderTruckButtons();
+          dispState.trucks.forEach((t, i) => { const el = document.getElementById('dispTruckDist' + i); if (el) el.textContent = t.desc || '—'; });
+        } catch (e2) {}
+        document.getElementById('dispTruckSelector').style.display = 'grid';
+      }
+    }
+
+    async function loadDisposalRouterJobs() {
+      const select = document.getElementById('dispEndpointSelect');
+      const esc = s => String(s || '').replace(/[<>&"']/g, '');
+      dispState.endpoints = {};
+      const home = (currentUser.costSettings && currentUser.costSettings.truckHome) || '';
+      dispState.endpoints['home'] = { address: home, scheduled: null, label: 'Our location' };
+      let html = '<option value="home">📍 Our location' + (home ? (' — ' + esc(home)) : ' (set in Settings → Cost Analysis)') + '</option>';
+      try {
+        const data = await edgeFunctionCall('crewlogic-todays-workorders', { franchiseID: currentUser.franchiseID, dayOffset: 0 });
+        const jobs = (data.workOrders || []).filter(wo => !wo.isComplete && wo.address);
+        if (jobs.length) {
+          html += '<option value="" disabled>─── Today\'s jobs ───</option>';
+          jobs.forEach(wo => {
+            const addr = (wo.address || '').replace(/\n/g, ', ');
+            const cityMatch = addr.match(/([^,]+),\s*[A-Z]{2}\s+\d{5}/);
+            const city = cityMatch ? cityMatch[1].trim() : '';
+            dispState.endpoints[String(wo.jobID)] = { address: addr, scheduled: dispBuildScheduledISO(wo), label: (wo.clientName || ('Job ' + wo.jobID)) };
+            const parts = [wo.jobID, wo.clientName, city, wo.timeLabel].filter(Boolean).map(esc);
+            html += '<option value="' + esc(wo.jobID) + '">' + parts.join(' — ') + '</option>';
+          });
+        }
+        document.getElementById('dispEndpointHint').textContent = "Today's jobs from Vonigo + your own location";
+      } catch (e) {
+        document.getElementById('dispEndpointHint').textContent = 'Could not load jobs — you can still route to your own location.';
+      }
+      select.innerHTML = html;
+    }
+
+    async function runDisposalRoute() {
+      const errEl = document.getElementById('dispRouteError');
+      const resEl = document.getElementById('dispRouteResults');
+      const btn = document.getElementById('dispRouteBtn');
+      errEl.textContent = '';
+      const idx = dispState.selectedIdx;
+      if (idx == null || !dispState.trucks[idx]) { errEl.textContent = 'Select a truck first.'; return; }
+      const truck = dispState.trucks[idx];
+      const truckLat = Number(truck.lat), truckLng = Number(truck.lon);
+      if (!Number.isFinite(truckLat) || !Number.isFinite(truckLng) || (truckLat === 0 && truckLng === 0)) {
+        errEl.textContent = 'No live GPS position for that truck. Pick a truck with a current location.'; return;
+      }
+      const epVal = document.getElementById('dispEndpointSelect').value;
+      const ep = dispState.endpoints[epVal];
+      if (!ep || !ep.address) {
+        errEl.textContent = (epVal === 'home') ? 'Set your location in Settings → Cost Analysis (Truck home) first.' : 'Pick an endpoint.'; return;
+      }
+      const loadPercent = Number(document.getElementById('dispLoadPct').value) || 0;
+      btn.classList.add('loading');
+      resEl.innerHTML = '';
+      try {
+        const data = await edgeFunctionCall('crewlogic-route-disposal', {
+          franchiseID: currentUser.franchiseID,
+          truckLat, truckLng,
+          endpointAddress: ep.address,
+          endpointScheduledTime: ep.scheduled || null,
+          loadPercent
+        });
+        if (!data || !data.success) {
+          const msg = String((data && data.error) || '');
+          if (/no .*disposal sites/i.test(msg)) {
+            resEl.innerHTML = '<div class="disp-empty">No disposal sites configured yet.<br>Add them in <strong>Settings → Cost Analysis</strong>.</div>';
+          } else {
+            errEl.textContent = msg || 'Could not compute disposal routes.';
+          }
+          return;
+        }
+        renderDisposalResults(data);
+      } catch (e) {
+        errEl.textContent = 'Something went wrong. Please try again.';
+      } finally {
+        btn.classList.remove('loading');
+      }
+    }
+
+    function dispWarnChip(site) {
+      if (!site || !site.warning) return '';
+      const w = site.warning, ml = Number(site.minutesLate);
+      let color, label;
+      if (w === 'early') { color = 'var(--accent-green)'; label = 'On time (' + Math.abs(ml) + ' min early)'; }
+      else if (w === 'green') { color = 'var(--accent-green)'; label = 'On time (+' + ml + ' min)'; }
+      else if (w === 'yellow') { color = 'var(--accent-orange)'; label = 'Tight (+' + ml + ' min)'; }
+      else { color = 'var(--accent-red)'; label = 'Late risk (+' + ml + ' min)'; }
+      return '<span class="disp-chip" style="color:' + color + ';border-color:' + color + ';">' + label + '</span>';
+    }
+
+    function dispRecCard(title, accent, site) {
+      if (!site) return '';
+      return '' +
+        '<div class="disp-rec" style="border-color:' + accent + ';">' +
+          '<div class="disp-rec-head"><span class="disp-rec-title" style="color:' + accent + ';">' + title + '</span>' + dispWarnChip(site) + '</div>' +
+          '<div class="disp-rec-name">' + dispEsc(site.name) + '</div>' +
+          '<div class="disp-rec-addr">' + dispEsc(site.address) + '</div>' +
+          '<div class="disp-rec-stats">' +
+            '<div class="disp-stat"><div class="disp-stat-val">' + dispMoney(site.totalCost) + '</div><div class="disp-stat-lbl">total cost</div></div>' +
+            '<div class="disp-stat"><div class="disp-stat-val">' + dispMins(site.totalTimeWithWait) + '</div><div class="disp-stat-lbl">total time</div></div>' +
+            '<div class="disp-stat"><div class="disp-stat-val">' + dispEsc(site.arrivalLocal || '—') + '</div><div class="disp-stat-lbl">arrive job</div></div>' +
+          '</div>' +
+          '<div class="disp-breakdown">Disposal ' + dispMoney(site.disposalFee) + ' · Labor ' + dispMoney(site.laborCost) + ' · Fuel ' + dispMoney(site.fuelCost) +
+            ' · ' + (Number(site.routeMiles) || 0) + ' mi · ' + dispMins(site.driveMinutes) + ' drive + ' + dispMins(site.waitMinutes) + ' wait</div>' +
+        '</div>';
+    }
+
+    function dispOtherRow(s) {
+      return '<div class="disp-row">' +
+        '<div class="disp-row-main"><div class="disp-row-name">' + dispEsc(s.name) + dispWarnChip(s) + '</div>' +
+        '<div class="disp-row-addr">' + dispEsc(s.address) + '</div></div>' +
+        '<div class="disp-row-meta"><div class="disp-row-cost">' + dispMoney(s.totalCost) + '</div>' +
+        '<div class="disp-row-time">' + dispMins(s.totalTimeWithWait) + ' · ' + dispEsc(s.arrivalLocal || '') + '</div></div></div>';
+    }
+
+    function dispClosedRow(s) {
+      return '<div class="disp-row disp-row-closed">' +
+        '<div class="disp-row-main"><div class="disp-row-name">' + dispEsc(s.name) + '</div>' +
+        '<div class="disp-row-addr">' + dispEsc(s.closedReason || 'closed') + '</div></div></div>';
+    }
+
+    function renderDisposalResults(data) {
+      const resEl = document.getElementById('dispRouteResults');
+      const sites = Array.isArray(data.sites) ? data.sites : [];
+      const lc = data.leastCost, lt = data.leastTime;
+      let html = '';
+      if (!lc && !lt) {
+        html += '<div class="disp-empty">No open disposal sites for this route right now.';
+        if (sites.some(s => !s.open)) html += '<br>All configured sites are closed at your arrival time.';
+        html += '</div>';
+      } else if (lc && lt && lc.facilityId === lt.facilityId) {
+        html += dispRecCard('💰⏱ Cheapest &amp; Fastest', 'var(--accent-green)', lc);
+      } else {
+        html += dispRecCard('💰 Cheapest', 'var(--accent-green)', lc);
+        html += dispRecCard('⏱ Fastest', 'var(--accent-yellow)', lt);
+      }
+      const pickIds = new Set([lc && lc.facilityId, lt && lt.facilityId].filter(Boolean));
+      const others = sites.filter(s => s.open && !pickIds.has(s.facilityId)).sort((a, b) => a.totalCost - b.totalCost);
+      if (others.length) {
+        html += '<div class="disp-sub">Other open sites</div>';
+        others.forEach(s => { html += dispOtherRow(s); });
+      }
+      const closed = sites.filter(s => !s.open);
+      if (closed.length) {
+        html += '<div class="disp-sub">Closed</div>';
+        closed.forEach(s => { html += dispClosedRow(s); });
+      }
+      if (data.timezoneUsed) html += '<div class="disp-tz">Local times in ' + dispEsc(data.timezoneUsed) + '</div>';
+      resEl.innerHTML = html;
     }
 
     function toggleMaterial(type) {
