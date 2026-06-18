@@ -32,6 +32,8 @@ return-to-base leg (clock ends at job arrival).
 
 - **Available ONLY if the franchise has Motive OR Linxup connected** (the recommendation starts from
   the truck's live position). Gate on the existing per-franchise telematics status (`getTelematics`).
+- **R1 is Vonigo (Junkluggers) only** — NOT native users (endpoint comes from the Vonigo jobs list).
+  Gate = telematics connected **AND** Vonigo franchise.
 - In the payments matrix: **Pro+ tier AND telematics connected.**
 - The existing `#routerCard` (currently hard-gated to #90) is re-gated to telematics-connected; the
   old n8n route call (`crewlogic-route`) is NOT used by R1.
@@ -46,7 +48,7 @@ All of these already exist on the current `#routerScreen` (reuse the helpers, no
 |---|---|
 | Truck current position | live telematics (`getTruckLocations` → `crewlogic-trucks`, :8395) |
 | Truck auto-assignment | **device location → nearest truck via haversine** (`getUserLocation` :8384 + :8318-8329); picker fallback if GPS fails — feature already exists |
-| Job (endpoint) | today's Vonigo jobs picker (`loadUpcomingJobs` → `crewlogic-todays-workorders`, :8350), storage option, or manual job ID |
+| Endpoint | today's Vonigo jobs (`loadUpcomingJobs` → `crewlogic-todays-workorders`, :8350) **+ always "Our location" (`cost_settings.truckHome`)** as a selectable endpoint, or manual job ID |
 | What's in the truck | **load % full** entry (`routeLoadPct`, default 75%, :8312) → `CY = load% × truckCY` → `tons = CY / 16` |
 | Candidate disposal sites | `cost_settings.disposalSites[]` (address + per-site rate + new minimum fields) |
 | Per-site rate ($/ton) | `getDisposalCost(address)` (existing per-site cost; default `cs.disposalCost`) |
@@ -69,10 +71,12 @@ Add to each disposal site:
 
 Settings UI (Cost tab → disposal site row): a small **Minimum** selector (None / Weight / $) + value.
 
-**Hours of operation (pending decision #2 in §7):** the n8n's transfer-station sheet carried per-site
-`Weekdays` ("open-close"), `Saturday`, `Closed` (days), `Holidays`, plus `Status` (Open). If we adopt
-open-at-arrival filtering, add per-site **hours** (weekday open/close, Saturday open/close, closed days)
-to `disposalSites[]`. Full holiday calendar can be a later round.
+**Hours of operation (INCLUDED in R1):** add per-site **open/close per day of week** to
+`disposalSites[]`. **Defaults** when a site is added: Mon–Fri 7:00am–4:00pm, Sat 7:00am–12:00pm,
+Sun closed. A site that's closed (or closes before the truck would arrive) is filtered out / flagged.
+**Holidays:** a **franchise-level** setting — a checklist of **US federal holidays** + custom local
+holidays the franchise adds; sites are treated as closed on those dates. (R1: one franchise-wide
+holiday list applied to all disposal sites; per-site holiday overrides later.)
 
 **n8n transfer-station schema (reference, from the Sheet → our `disposalSites[]` mapping):** `TS Name`
 → name; `Address`/`Latitude`/`Longitude` → address (we geocode); `PerTonRate` → rate ($/ton; **negative
@@ -120,8 +124,9 @@ truck→station + station→job).
 > (its truck = 16 CY); our `tons = CY/16` generalizes to any `truckCY`.
 
 **Recommendation:** rank candidate sites and return the **least-cost** and **least-time** picks
-(may be the same), each with its cost + time breakdown. *(See §7 — whether R1 also adopts the n8n's
-schedule-window awareness is an open decision.)*
+(may be the same), each with its cost + time breakdown. **Late warning INCLUDED:** compare each
+route's arrival vs the endpoint's Vonigo scheduled time → GREEN (≤30 min) / YELLOW (≤90) / RED
+(>90). (For the "Our location" endpoint there's no appointment time → no late warning, just cost+time.)
 
 ---
 
@@ -178,11 +183,20 @@ schedule-window awareness is an open decision.)*
 - **Labor:** 2-person crew assumed always; wait billed at full crew rate (see §5).
 - **Density:** 16 CY = 1 ton (locked).
 
-### Still open
-- **Hours of operation?** The n8n filters out **closed** stations (per-site weekday/Saturday hours,
-  closed-days, holidays) and flags "cutting it close" (<15 min before close). You've called out hours
-  as franchisee-entered data. Include open-at-arrival filtering in R1 (so we never recommend a closed
-  dump), or defer to a later round? *Lean: include basic open/closed; full holiday calendar later.*
+### Resolved 2026-06-18 (round 2)
+- **Hours of operation: INCLUDE.** Per-site open/close per day of week. **Defaults:** Mon–Fri
+  7:00am–4:00pm, Sat 7:00am–12:00pm, Sun closed. A closed station (or one that closes before arrival)
+  is filtered out / flagged. **Holidays:** a **franchise-level checklist of US federal holidays** +
+  the ability to **add custom local holidays**; on those dates sites are treated as closed. (R1:
+  franchise-level holiday list applied to all disposal sites; per-site holiday overrides can come later.)
+- **Audience: Vonigo (Junkluggers) only for R1** — NOT native users at this time. Gate = telematics
+  connected **and** Vonigo franchise. No manual-address endpoint needed (native excluded).
+- **Late warning: INCLUDE** — compare arrival vs the job's Vonigo scheduled time, flag GREEN (≤30 min)
+  / YELLOW (≤90) / RED (>90, "risk missing window") in the output.
+- **"Our location" is always an endpoint option.** The endpoint picker lists today's Vonigo jobs **plus
+  the franchise's own location** (`cost_settings.truckHome`) — common case: full truck at base, decide
+  the best place to empty and return to base vs. heading to the next job. "Our location" always appears.
+- **Dev Google key: owner will enable** a Distance-Matrix key for the dev Supabase (needs walk-through).
 
 ### Security finding (action needed)
 - `docs/Route Optimization.json` contains **live API keys** (Google Maps, Anthropic ×2, Motive token)
@@ -193,9 +207,14 @@ schedule-window awareness is an open decision.)*
 
 ## 8. Build sequence (after approval)
 
+0. **Prereq:** enable a Google **Distance Matrix** key on the **dev** Supabase (owner; needs
+   walk-through) — required to test the edge fn on dev.
 1. This spec approved + reconciled against the n8n trash-only model.
-2. `cost_settings` disposal-site fields (minimumType/minimumValue) + Settings UI.
-3. `crewlogic-route-disposal` edge function (Distance Matrix + math).
-4. NEW Route Optimizer card + screen (telematics-gated; reuses existing input helpers; existing #90
-   n8n card untouched) + recommendation UI.
+2. `cost_settings` disposal-site fields: **minimumType/minimumValue**, **per-site hours** (per-day
+   open/close, with the M–F 7–4 / Sat 7–12 / Sun-closed defaults), and a **franchise-level holiday
+   list** (federal checklist + custom) + Settings UI for all of it.
+3. `crewlogic-route-disposal` edge function (Distance Matrix + cost/time math + hours/holiday filter
+   + late-warning vs scheduled time).
+4. NEW Route Optimizer card + screen (telematics+Vonigo-gated; reuses existing input helpers; endpoint
+   = today's Vonigo jobs + "Our location"; existing #90 n8n card untouched) + recommendation UI.
 5. Smoke test on dev with #90 (real telematics + real disposal sites) → promote.
