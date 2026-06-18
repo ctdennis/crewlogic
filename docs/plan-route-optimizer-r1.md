@@ -197,6 +197,13 @@ route's arrival vs the endpoint's Vonigo scheduled time → GREEN (≤30 min) / 
   the franchise's own location** (`cost_settings.truckHome`) — common case: full truck at base, decide
   the best place to empty and return to base vs. heading to the next job. "Our location" always appears.
 - **Dev Google key: owner will enable** a Distance-Matrix key for the dev Supabase (needs walk-through).
+- **Timezone (multi-tenant — critical):** ALL local-time logic — hours open/closed at arrival, holiday
+  "is today closed", and the appointment late-warning — must run in the **franchise's own local
+  timezone**, derived from the office location. The n8n hardcoded `America/New_York` (#90's zone) — that
+  is the exact multi-tenant trap to avoid. Plan: store an **IANA timezone per franchise** (scalar,
+  derived from the office address/lat-lng once; e.g. `cost_settings.officeTimezone='America/Chicago'`),
+  and the `crewlogic-route-disposal` edge fn applies it. `facility_hours` stores **local** `time`s and
+  `franchise_holidays` stores **local** `date`s — interpreted via the franchise tz at compute time.
 
 ### Security finding (action needed)
 - `docs/Route Optimization.json` contains **live API keys** (Google Maps, Anthropic ×2, Motive token)

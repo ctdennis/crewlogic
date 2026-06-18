@@ -74,6 +74,12 @@ alter table public.franchise_holidays enable row level security;   -- service-ro
 Federal rows = `federal_key` + `is_observed`; the edge fn resolves each federal holiday's *date for the
 current year* in code (e.g. MLK = 3rd Mon of Jan). Custom rows = `custom_label` + `custom_date`.
 
+**Timezone (multi-tenant):** `facility_hours.open_time/close_time` are **local** `time`s and
+`franchise_holidays.custom_date` is a **local** `date` — both interpreted in the **franchise's IANA
+timezone** (stored per franchise, derived from office location; see R1 spec). The edge fn must NOT
+assume a single zone (the n8n hardcoded `America/New_York`). No schema change needed here — the tz is a
+franchise-level scalar applied at compute time.
+
 ## 4. Recycling/donation "mirror disposal hours & holidays" flag
 
 A **scalar boolean** `cost_settings.facilitiesInheritDisposalHours` (default true). Per the
