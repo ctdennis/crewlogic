@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.45.6 | 2026-06-18">
+  <meta name="crewlogic-version" content="v5.45.7 | 2026-06-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8588,6 +8588,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function dispEsc(s) { return String(s == null ? '' : s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c])); }
     function dispMoney(n) { const v = Number(n) || 0; return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
     function dispMins(m) { m = Math.round(Number(m) || 0); if (m < 60) return m + ' min'; const h = Math.floor(m / 60), mm = m % 60; return h + 'h' + (mm ? (' ' + mm + 'm') : ''); }
+    // Google Maps 2-stop directions deep-link: phone's CURRENT location → disposal site → job.
+    // No origin param → Google Maps uses the device's live location (the crew's phone is the navigator).
+    function dispDirectionsUrl(siteAddr, jobAddr) {
+      return 'https://www.google.com/maps/dir/?api=1&travelmode=driving' +
+        '&waypoints=' + encodeURIComponent(siteAddr || '') +
+        '&destination=' + encodeURIComponent(jobAddr || '');
+    }
 
     // Franchise-aware truck fetch (the shared getTruckLocations() sends no franchiseID and is left
     // untouched for the #90 n8n screen). Returns [] on any error/empty so the UI shows a clear state.
@@ -8726,6 +8733,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!ep || !ep.address) {
         errEl.textContent = (epVal === 'home') ? 'Set your location in Settings → Cost Analysis (Truck home) first.' : 'Pick an endpoint.'; return;
       }
+      dispState.endpointAddress = ep.address; // job address for the Directions deep-link
       const loadPercent = Number(document.getElementById('dispLoadPct').value) || 0;
       btn.classList.add('loading');
       resEl.innerHTML = '';
@@ -8783,6 +8791,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           timesBlock +
           '<div class="disp-breakdown">Disposal ' + dispMoney(site.disposalFee) + ' · Labor ' + dispMoney(site.laborCost) + ' · Fuel ' + dispMoney(site.fuelCost) +
             ' · ' + (Number(site.routeMiles) || 0) + ' mi · ' + dispMins(site.driveMinutes) + ' drive + ' + dispMins(site.waitMinutes) + ' wait</div>' +
+          '<a href="' + dispDirectionsUrl(site.address, dispState.endpointAddress) + '" target="_blank" rel="noopener" ' +
+            'style="display:block;text-align:center;margin-top:10px;padding:9px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;font-weight:600;text-decoration:none;">🧭 Directions · you → dump → job</a>' +
         '</div>';
     }
 
