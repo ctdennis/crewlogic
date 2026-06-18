@@ -130,6 +130,17 @@ function localParts(date: Date, tz: string): LocalParts {
   return { year, month, day, dow, minutesOfDay: hour * 60 + minute, label };
 }
 
+// minutes-from-midnight → friendly 12-hour clock, e.g. 810 → "1:30pm". No tz suffix (the time is
+// already in the franchise's local zone; we don't surface the zone label to the user).
+function to12h(min: number): string {
+  const mm = (((Math.round(min) % 1440) + 1440) % 1440);
+  let h = Math.floor(mm / 60);
+  const m = mm % 60;
+  const ap = h < 12 ? "am" : "pm";
+  h = h % 12; if (h === 0) h = 12;
+  return `${h}:${String(m).padStart(2, "0")}${ap}`;
+}
+
 // "HH:MM[:SS]" → minutes from midnight (null on blank).
 function timeToMinutes(t: unknown): number | null {
   const s = String(t || "").trim();
@@ -422,7 +433,8 @@ Deno.serve(async (req: Request) => {
         waitMinutes: disposalWait,
         totalTimeWithWait,
         routeMiles,
-        arrivalLocal: endpointLp.label,
+        arrivalLocal: endpointLp.label,        // full "YYYY-MM-DD HH:MM TZ" (kept for debugging)
+        arrivalTime: to12h(endpointLp.minutesOfDay), // friendly "1:50pm" for display
       };
       if (closedReason) out.closedReason = closedReason;
 
@@ -447,7 +459,8 @@ Deno.serve(async (req: Request) => {
     const leastCost = pickMin("totalCost");
     const leastTime = pickMin("totalTimeWithWait");
 
-    return jsonResponse({ success: true, timezoneUsed, leastCost, leastTime, sites });
+    const jobStartTime = hasSchedule ? to12h(endpointScheduledMinutes) : null;
+    return jsonResponse({ success: true, timezoneUsed, jobStartTime, leastCost, leastTime, sites });
   } catch (e) {
     const err = e as Error;
     console.error("[route-disposal] error:", err?.stack || err?.message || String(e));

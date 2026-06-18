@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.45.4 | 2026-06-18">
+  <meta name="crewlogic-version" content="v5.45.5 | 2026-06-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -831,6 +831,10 @@
     .disp-stat-val { font-size: 14px; font-weight: 700; color: var(--text-primary); }
     .disp-stat-lbl { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin-top: 2px; }
     .disp-breakdown { font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+    .disp-times { display: flex; flex-direction: column; gap: 3px; margin-bottom: 9px; }
+    .disp-time-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+    .disp-time-lbl { font-size: 12px; color: var(--text-muted); }
+    .disp-time-val { font-size: 16px; font-weight: 700; color: var(--text-primary); }
     .disp-chip { font-size: 10px; font-weight: 700; border: 1px solid; border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
     .disp-sub { font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin: 14px 0 8px; }
     .disp-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 8px; }
@@ -8761,8 +8765,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return '<span class="disp-chip" style="color:' + color + ';border-color:' + color + ';">' + label + '</span>';
     }
 
-    function dispRecCard(title, accent, site) {
+    function dispRecCard(title, accent, site, jobStartTime) {
       if (!site) return '';
+      const timesBlock = '<div class="disp-times">' +
+        (jobStartTime ? '<div class="disp-time-row"><span class="disp-time-lbl">Job Start</span><span class="disp-time-val">' + dispEsc(jobStartTime) + '</span></div>' : '') +
+        '<div class="disp-time-row"><span class="disp-time-lbl">Expected Arrival</span><span class="disp-time-val">' + dispEsc(site.arrivalTime || site.arrivalLocal || '—') + '</span></div>' +
+        '</div>';
       return '' +
         '<div class="disp-rec" style="border-color:' + accent + ';">' +
           '<div class="disp-rec-head"><span class="disp-rec-title" style="color:' + accent + ';">' + title + '</span>' + dispWarnChip(site) + '</div>' +
@@ -8771,8 +8779,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '<div class="disp-rec-stats">' +
             '<div class="disp-stat"><div class="disp-stat-val">' + dispMoney(site.totalCost) + '</div><div class="disp-stat-lbl">total cost</div></div>' +
             '<div class="disp-stat"><div class="disp-stat-val">' + dispMins(site.totalTimeWithWait) + '</div><div class="disp-stat-lbl">total time</div></div>' +
-            '<div class="disp-stat"><div class="disp-stat-val">' + dispEsc(site.arrivalLocal || '—') + '</div><div class="disp-stat-lbl">arrive job</div></div>' +
           '</div>' +
+          timesBlock +
           '<div class="disp-breakdown">Disposal ' + dispMoney(site.disposalFee) + ' · Labor ' + dispMoney(site.laborCost) + ' · Fuel ' + dispMoney(site.fuelCost) +
             ' · ' + (Number(site.routeMiles) || 0) + ' mi · ' + dispMins(site.driveMinutes) + ' drive + ' + dispMins(site.waitMinutes) + ' wait</div>' +
         '</div>';
@@ -8783,7 +8791,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         '<div class="disp-row-main"><div class="disp-row-name">' + dispEsc(s.name) + dispWarnChip(s) + '</div>' +
         '<div class="disp-row-addr">' + dispEsc(s.address) + '</div></div>' +
         '<div class="disp-row-meta"><div class="disp-row-cost">' + dispMoney(s.totalCost) + '</div>' +
-        '<div class="disp-row-time">' + dispMins(s.totalTimeWithWait) + ' · ' + dispEsc(s.arrivalLocal || '') + '</div></div></div>';
+        '<div class="disp-row-time">' + dispMins(s.totalTimeWithWait) + ' · arrive ' + dispEsc(s.arrivalTime || s.arrivalLocal || '') + '</div></div></div>';
     }
 
     function dispClosedRow(s) {
@@ -8802,10 +8810,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (sites.some(s => !s.open)) html += '<br>All configured sites are closed at your arrival time.';
         html += '</div>';
       } else if (lc && lt && lc.facilityId === lt.facilityId) {
-        html += dispRecCard('💰⏱ Cheapest &amp; Fastest', 'var(--accent-green)', lc);
+        html += dispRecCard('💰⏱ Cheapest &amp; Fastest', 'var(--accent-green)', lc, data.jobStartTime);
       } else {
-        html += dispRecCard('💰 Cheapest', 'var(--accent-green)', lc);
-        html += dispRecCard('⏱ Fastest', 'var(--accent-yellow)', lt);
+        html += dispRecCard('💰 Cheapest', 'var(--accent-green)', lc, data.jobStartTime);
+        html += dispRecCard('⏱ Fastest', 'var(--accent-yellow)', lt, data.jobStartTime);
       }
       const pickIds = new Set([lc && lc.facilityId, lt && lt.facilityId].filter(Boolean));
       const others = sites.filter(s => s.open && !pickIds.has(s.facilityId)).sort((a, b) => a.totalCost - b.totalCost);
@@ -8818,7 +8826,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         html += '<div class="disp-sub">Closed</div>';
         closed.forEach(s => { html += dispClosedRow(s); });
       }
-      if (data.timezoneUsed) html += '<div class="disp-tz">Local times in ' + dispEsc(data.timezoneUsed) + '</div>';
       resEl.innerHTML = html;
     }
 
