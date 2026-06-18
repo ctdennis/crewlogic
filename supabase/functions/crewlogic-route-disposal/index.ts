@@ -271,8 +271,10 @@ Deno.serve(async (req: Request) => {
     const truckLat = Number(body.truckLat);
     const truckLng = Number(body.truckLng);
     const endpointAddress = String(body.endpointAddress || "").trim();
-    const endpointScheduledTime = body.endpointScheduledTime
-      ? String(body.endpointScheduledTime).trim() : "";
+    // Scheduled time as LOCAL minutes-since-midnight (franchise tz), e.g. 720 = 12:00 noon. The
+    // workorder's `time` field is exactly this. NaN = no appointment (e.g. the "Our location" endpoint).
+    const endpointScheduledMinutes = (body.endpointScheduledMinutes != null && body.endpointScheduledMinutes !== "")
+      ? num(body.endpointScheduledMinutes, NaN) : NaN;
     const loadPercent = num(body.loadPercent, NaN);
 
     if (!franchiseID) return jsonResponse({ success: false, error: "franchiseID required" }, 400);
@@ -358,8 +360,7 @@ Deno.serve(async (req: Request) => {
     const endpointDestIdx = facilities.length; // endpoint is the last destination
 
     const now = new Date();
-    const scheduledDate = endpointScheduledTime ? new Date(endpointScheduledTime) : null;
-    const hasSchedule = scheduledDate !== null && !isNaN(scheduledDate.getTime());
+    const hasSchedule = Number.isFinite(endpointScheduledMinutes);
 
     // 5) Per-site cost + time + open/closed + late warning.
     const sites = facilities.map((f, i) => {
@@ -396,13 +397,19 @@ Deno.serve(async (req: Request) => {
       const fuelCost$ = round2((routeMiles / MPG) * fuelCost);
       const totalCost = round2(disposalFee + laborCost + fuelCost$);
 
-      // Arrival AT the disposal site (drives the hours/holiday check).
+      // Arrival AT the disposal site — drives the hours/holiday open-check (is the dump open when
+      // the truck pulls in?). This is now + the FIRST leg only.
       const arriveAtSite = new Date(now.getTime() + truckToSite.minutes * 60000);
-      const lp = localParts(arriveAtSite, timezoneUsed);
-      const holiday = holidayClosure(lp, holidays);
-      const hourClose = hoursClosure(lp, hoursByFacility[f.id as string] || []);
+      const siteLp = localParts(arriveAtSite, timezoneUsed);
+      const holiday = holidayClosure(siteLp, holidays);
+      const hourClose = hoursClosure(siteLp, hoursByFacility[f.id as string] || []);
       const closedReason = holiday ? `closed for holiday (${holiday})` : hourClose;
       const open = !closedReason;
+
+      // Arrival AT the job/endpoint — the displayed arrival + the late-warning base. This is the
+      // WHOLE route: now + truck→site + wait + site→job (= totalTimeWithWait).
+      const arriveAtEndpoint = new Date(now.getTime() + totalTimeWithWait * 60000);
+      const endpointLp = localParts(arriveAtEndpoint, timezoneUsed);
 
       const out: Record<string, unknown> = {
         ...base,
@@ -415,14 +422,15 @@ Deno.serve(async (req: Request) => {
         waitMinutes: disposalWait,
         totalTimeWithWait,
         routeMiles,
-        arrivalLocal: lp.label,
+        arrivalLocal: endpointLp.label,
       };
       if (closedReason) out.closedReason = closedReason;
 
-      // Late warning vs scheduled endpoint time — arrival AT the endpoint.
+      // Late warning: compare the job-arrival's LOCAL wall-clock minutes to the appointment's local
+      // minutes-since-midnight (both in the franchise tz — no UTC-offset math). Same-day assumed
+      // (today's jobs; a drive crossing local midnight is an ignored v1 edge case).
       if (hasSchedule) {
-        const arriveAtEndpoint = now.getTime() + totalTimeWithWait * 60000;
-        const minutesLate = Math.round((arriveAtEndpoint - (scheduledDate as Date).getTime()) / 60000);
+        const minutesLate = endpointLp.minutesOfDay - endpointScheduledMinutes;
         out.minutesLate = minutesLate;
         out.warning = minutesLate < 0 ? "early"
           : minutesLate <= 30 ? "green"

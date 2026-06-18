@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.45.2 | 2026-06-18">
+  <meta name="crewlogic-version" content="v5.45.3 | 2026-06-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8681,7 +8681,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const esc = s => String(s || '').replace(/[<>&"']/g, '');
       dispState.endpoints = {};
       const home = (currentUser.costSettings && currentUser.costSettings.truckHome) || '';
-      dispState.endpoints['home'] = { address: home, scheduled: null, label: 'Our location' };
+      dispState.endpoints['home'] = { address: home, scheduledMinutes: null, label: 'Our location' };
       let html = '<option value="home">📍 Our location' + (home ? (' — ' + esc(home)) : ' (set in Settings → Cost Analysis)') + '</option>';
       try {
         const data = await edgeFunctionCall('crewlogic-todays-workorders', { franchiseID: currentUser.franchiseID, dayOffset: 0 });
@@ -8692,7 +8692,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             const addr = (wo.address || '').replace(/\n/g, ', ');
             const cityMatch = addr.match(/([^,]+),\s*[A-Z]{2}\s+\d{5}/);
             const city = cityMatch ? cityMatch[1].trim() : '';
-            dispState.endpoints[String(wo.jobID)] = { address: addr, scheduled: dispBuildScheduledISO(wo), label: (wo.clientName || ('Job ' + wo.jobID)) };
+            dispState.endpoints[String(wo.jobID)] = { address: addr, scheduledMinutes: (wo.time != null ? Number(wo.time) : null), label: (wo.clientName || ('Job ' + wo.jobID)) };
             const parts = [wo.jobID, wo.clientName, city, wo.timeLabel].filter(Boolean).map(esc);
             html += '<option value="' + esc(wo.jobID) + '">' + parts.join(' — ') + '</option>';
           });
@@ -8729,7 +8729,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           franchiseID: currentUser.franchiseID,
           truckLat, truckLng,
           endpointAddress: ep.address,
-          endpointScheduledTime: ep.scheduled || null,
+          endpointScheduledMinutes: (ep.scheduledMinutes != null ? ep.scheduledMinutes : null),
           loadPercent
         });
         if (!data || !data.success) {
