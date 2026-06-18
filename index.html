@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.44.0 | 2026-06-18">
+  <meta name="crewlogic-version" content="v5.44.1 | 2026-06-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -6666,6 +6666,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Drain any photos that were queued while offline
       drainPhotoQueue();
 
+      // Load facilities/hours/holidays from the relational tables (0023) into the
+      // in-memory costSettings cache so the estimator's cost-analysis dropdowns and
+      // per-site cost/revenue resolve even when Settings is never opened. Non-blocking.
+      loadFacilitiesFromTables();
+
       goHome();
     }
 
@@ -6836,6 +6841,63 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           console.warn('[homeCardOrder] save failed', res.status, data && data.error);
         }
       } catch (e) { console.warn('[homeCardOrder] save error', e); }
+    }
+
+    // ── Facilities load/save via relational tables (migration 0023) ──
+    // Facilities (disposal/recycling/donation sites + 7-day hours) and the franchise
+    // holiday list now live in the `facilities` / `facility_hours` / `franchise_holidays`
+    // tables instead of the cost_settings JSONB blob. The crewlogic-settings edge fn
+    // returns them in the SAME in-memory shape the existing synchronous UI readers expect
+    // (currentUser.costSettings.disposalSites/recyclingSites/donationSites with nested
+    // hours, and currentUser.costSettings.disposalHolidays), so every sync reader
+    // (getFacilities, getDisposalCost, renderDisposalCard, populateFacilityDropdowns,
+    // cost analysis) keeps working unchanged. We send the user's Supabase JWT (falling
+    // back to the anon key) so the fn can caller-verify; franchiseID/email ride along as
+    // the fallback resolver (same trust model saveCostSettings uses).
+    async function facilitiesEdgeCall(body) {
+      const token = (await _supabaseUserToken()) || EDGE_ANON_KEY;
+      const res = await fetch(EDGE_BASE + '/crewlogic-settings', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'apikey': EDGE_ANON_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+      const text = await res.text();
+      try { return JSON.parse(text); }
+      catch (_e) { return { success: false, error: 'Unexpected response (HTTP ' + res.status + ')' }; }
+    }
+
+    // Fetch facilities/hours/holidays from the tables and populate the in-memory
+    // costSettings cache, then (re)render any visible facility UI. Non-blocking and
+    // resilient: on failure it keeps whatever is already in memory and still renders.
+    async function loadFacilitiesFromTables() {
+      try {
+        const data = await facilitiesEdgeCall({
+          action: 'getFacilities',
+          franchiseID: currentUser && currentUser.franchiseID,
+          email: currentUser && currentUser.email
+        });
+        if (data && data.success) {
+          if (!currentUser.costSettings) currentUser.costSettings = {};
+          currentUser.costSettings.disposalSites  = Array.isArray(data.disposalSites)  ? data.disposalSites  : [];
+          currentUser.costSettings.recyclingSites = Array.isArray(data.recyclingSites) ? data.recyclingSites : [];
+          currentUser.costSettings.donationSites  = Array.isArray(data.donationSites)  ? data.donationSites  : [];
+          currentUser.costSettings.disposalHolidays = (data.disposalHolidays && typeof data.disposalHolidays === 'object')
+            ? data.disposalHolidays
+            : { federal: {}, custom: [] };
+          try { storage.set(SESSION_KEY, JSON.stringify(currentUser)); } catch (e) {}
+        } else {
+          console.warn('[facilities] load from tables failed:', data && data.error);
+        }
+      } catch (e) {
+        console.warn('[facilities] load error:', e);
+      }
+      // Always re-render with whatever is now in memory so the UI is consistent.
+      try { renderAllFacilityLists(); } catch (e) {}
+      try { populateFacilityDropdowns(); } catch (e) {}
     }
 
     function goHome() {
@@ -17756,8 +17818,9 @@ RECYCLING & DONATION
         const btn = document.getElementById('stab-' + t);
         if (btn) btn.classList.toggle('active', t === tab);
       });
-      // Render facility lists when switching to cost tab
-      if (tab === 'cost') renderAllFacilityLists();
+      // Render facility lists when switching to cost tab. Render immediately from the
+      // in-memory cache (no flash), then refresh from the relational tables (0023).
+      if (tab === 'cost') { renderAllFacilityLists(); loadFacilitiesFromTables(); }
       // Load customer pricing list when switching to pricing tab
       if (tab === 'pricing') loadCustomerPricingList();
       // Render the native price book when switching to the pricebook tab
@@ -19184,16 +19247,38 @@ Please review the estimate below. If you have any questions or would like to adj
         const el = document.getElementById('settings' + f.charAt(0).toUpperCase() + f.slice(1));
         vals[f] = el ? el.value.trim() : '';
       });
-      // Include facility lists
-      vals.disposalSites  = getFacilities('disposal');
-      vals.recyclingSites = getFacilities('recycling');
-      vals.donationSites  = getFacilities('donation');
-      // Franchise-level disposal holiday list (federal checklist + custom dates)
-      vals.disposalHolidays = getDisposalHolidays();
-      // Merge into the FULL costSettings object so we don't wipe phone/website/proposal/signs
-      // when saving cost-tab fields. n8n stores cost_settings as a single JSONB column.
+      // Facilities (disposal/recycling/donation sites + hours) and the franchise holiday
+      // list now persist to the relational tables (0023) via the saveFacilities action —
+      // NOT into cost_settings. Capture them from the in-memory cache for that call.
+      const facilitiesPayload = {
+        disposalSites:  getFacilities('disposal'),
+        recyclingSites: getFacilities('recycling'),
+        donationSites:  getFacilities('donation'),
+        disposalHolidays: getDisposalHolidays()
+      };
+      // Merge the scalar cost fields into the FULL costSettings object so we don't wipe
+      // phone/website/proposal/signs. Facilities/holidays are deliberately NOT included
+      // here — they live in tables now (strip them so they don't get re-written to the blob).
       const merged = Object.assign({}, currentUser.costSettings || {}, vals);
+      delete merged.disposalSites;
+      delete merged.recyclingSites;
+      delete merged.donationSites;
+      delete merged.disposalHolidays;
       try {
+        // 1) Persist facilities/hours/holidays to the tables FIRST. If this fails we abort
+        //    (don't strip the in-memory facilities, don't claim success) so nothing is lost.
+        const facData = await facilitiesEdgeCall(Object.assign({
+          action: 'saveFacilities',
+          email: currentUser.email,
+          franchiseID: currentUser.franchiseID
+        }, facilitiesPayload));
+        if (!facData || !facData.success) {
+          feedbackEl.textContent = (facData && facData.error) || 'Failed to save facilities.';
+          feedbackEl.className = 'settings-feedback error';
+          btn.classList.remove('loading');
+          return;
+        }
+        // 2) Persist the remaining scalar cost settings to cost_settings.
         const data = await edgeFunctionCall('crewlogic-settings', {
           action: 'saveCostSettings',
           email: currentUser.email,
@@ -19201,7 +19286,14 @@ Please review the estimate below. If you have any questions or would like to adj
           costSettings: merged
         });
         if (data.success) {
-          currentUser.costSettings = merged;
+          // Keep facilities in the in-memory cache (sync readers need them) but mirror the
+          // stripped blob for the scalar fields.
+          currentUser.costSettings = Object.assign({}, merged, {
+            disposalSites:  facilitiesPayload.disposalSites,
+            recyclingSites: facilitiesPayload.recyclingSites,
+            donationSites:  facilitiesPayload.donationSites,
+            disposalHolidays: facilitiesPayload.disposalHolidays
+          });
           storage.set(SESSION_KEY, JSON.stringify(currentUser));
           feedbackEl.textContent = '✓ Cost settings saved';
           feedbackEl.className = 'settings-feedback ok';

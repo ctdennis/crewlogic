@@ -17,6 +17,10 @@
 //   saveProposalSettings   - merge proposal fields into franchise.cost_settings JSONB
 //   saveSignsConfig        - merge full costSettings (yard signs config inside) JSONB
 //   saveSettings           - generic save: merge any provided fields into cost_settings + top-level
+//   getFacilities          - read disposal/recycling/donation sites + hours + holidays from the
+//                            relational tables (migration 0023), returned in the UI's in-memory shape
+//   saveFacilities         - replace-set the franchise's facilities/facility_hours/franchise_holidays
+//                            (moved out of the cost_settings JSONB blob)
 //
 // SECRETS REQUIRED (auto-populated by Supabase):
 //   SUPABASE_URL
@@ -70,6 +74,17 @@ async function supabasePost(path: string, body: unknown): Promise<Response> {
       Prefer: "return=representation",
     },
     body: JSON.stringify(body),
+  });
+}
+
+async function supabaseDelete(path: string): Promise<Response> {
+  return fetch(SUPABASE_URL + path, {
+    method: "DELETE",
+    headers: {
+      apikey: SERVICE_KEY,
+      Authorization: "Bearer " + SERVICE_KEY,
+      Prefer: "return=minimal",
+    },
   });
 }
 
@@ -716,6 +731,270 @@ async function handleSaveHomeCardOrder(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// FACILITIES (disposal/recycling/donation sites + hours + holidays)
+//
+// These live in the relational tables `facilities`, `facility_hours`, and
+// `franchise_holidays` (migration 0023) — moved out of the cost_settings JSONB
+// blob. All three tables are RLS service-role-only, so the client reaches them
+// only through these edge-fn actions.
+//
+// Resolution of the caller's franchise: when a real Supabase Auth Bearer token is
+// present (native/Google/dev-password sessions), we verify the caller via
+// auth.getUser(token) → their profile → franchise_id. When no user session is
+// present (anon-key fallback), we resolve by the external franchiseID in the body
+// — the SAME trust model saveCostSettings already uses (facilities were written
+// through saveCostSettings before this repoint), so this preserves current behavior.
+// ─────────────────────────────────────────────────────────────────────────────
+const DOW_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]; // index = dow (0=Sun..6=Sat)
+
+function trimTime(t: string | null | undefined): string {
+  return t ? String(t).slice(0, 5) : ""; // "HH:MM:SS" → "HH:MM"
+}
+
+function toNum(v: unknown): number | null {
+  if (v === "" || v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Default seed hours per dow: Mon–Fri 07:00–16:00, Sat 07:00–12:00, Sun closed.
+function defaultHours(dow: number): { is_closed: boolean; open_time: string | null; close_time: string | null } {
+  if (dow === 0) return { is_closed: true, open_time: null, close_time: null };
+  if (dow === 6) return { is_closed: false, open_time: "07:00", close_time: "12:00" };
+  return { is_closed: false, open_time: "07:00", close_time: "16:00" };
+}
+
+async function resolveFranchiseForCaller(
+  body: Record<string, unknown>,
+  token: string | null,
+): Promise<{ id: string }> {
+  // Prefer caller verification when a real user token (not the anon key) is present.
+  if (token && token !== ANON_KEY) {
+    try {
+      const anonClient = createClient(SUPABASE_URL, ANON_KEY);
+      const { data: { user }, error } = await anonClient.auth.getUser(token);
+      if (!error && user) {
+        const rows = (await supabaseGet(
+          `/rest/v1/profiles?auth_user_id=eq.${encodeURIComponent(user.id)}&select=franchise_id`,
+        )) as Array<{ franchise_id: string | null }>;
+        const fid = rows && rows[0] && rows[0].franchise_id;
+        if (fid) return { id: fid };
+      }
+    } catch (e) {
+      console.warn("[facilities] token resolution failed, falling back to franchiseID:", (e as Error).message);
+    }
+  }
+  // Fallback: resolve by external franchiseID (same as saveCostSettings).
+  const externalID = String(body.franchiseID || "");
+  if (!externalID) throw new Error("Could not resolve caller franchise (no session and no franchiseID)");
+  const f = await lookupFranchise(externalID);
+  return { id: f.id };
+}
+
+// HANDLER: getFacilities — returns sites + hours + holidays in the UI's in-memory shape.
+async function handleGetFacilities(
+  body: Record<string, unknown>,
+  token: string | null,
+): Promise<Response> {
+  const { id: franchiseUUID } = await resolveFranchiseForCaller(body, token);
+
+  const facs = (await supabaseGet(
+    `/rest/v1/facilities?franchise_id=eq.${franchiseUUID}` +
+      `&select=id,type,name,address,per_ton_rate,minimum_type,minimum_value,is_default,sort_order` +
+      `&order=type.asc,sort_order.asc`,
+  )) as Array<Record<string, unknown>>;
+
+  // Join facility_hours → per-facility { mon..sun: {open,close,closed} }
+  const hoursByFac: Record<string, Record<string, { open: string; close: string; closed: boolean }>> = {};
+  if (facs.length) {
+    const ids = facs.map((f) => f.id as string);
+    const hrs = (await supabaseGet(
+      `/rest/v1/facility_hours?facility_id=in.(${ids.join(",")})` +
+        `&select=facility_id,dow,is_closed,open_time,close_time`,
+    )) as Array<Record<string, unknown>>;
+    for (const h of hrs) {
+      const fid = h.facility_id as string;
+      if (!hoursByFac[fid]) hoursByFac[fid] = {};
+      const key = DOW_KEYS[h.dow as number];
+      if (!key) continue;
+      const closed = !!h.is_closed;
+      hoursByFac[fid][key] = {
+        open: closed ? "" : trimTime(h.open_time as string | null),
+        close: closed ? "" : trimTime(h.close_time as string | null),
+        closed,
+      };
+    }
+  }
+
+  const toSite = (f: Record<string, unknown>) => {
+    const site: Record<string, unknown> = {
+      name: f.name || "",
+      address: f.address || "",
+      isDefault: !!f.is_default,
+      minimumType: (f.minimum_type as string) || "none",
+      minimumValue: toNum(f.minimum_value),
+      hours: hoursByFac[f.id as string] || {},
+    };
+    if (f.type === "disposal") site.cost = toNum(f.per_ton_rate);
+    else if (f.type === "recycling") site.revenue = toNum(f.per_ton_rate);
+    return site;
+  };
+
+  const disposalSites = facs.filter((f) => f.type === "disposal").map(toSite);
+  const recyclingSites = facs.filter((f) => f.type === "recycling").map(toSite);
+  const donationSites = facs.filter((f) => f.type === "donation").map(toSite);
+
+  // Holidays → { federal:{key:bool}, custom:[{name,date}] }
+  const hols = (await supabaseGet(
+    `/rest/v1/franchise_holidays?franchise_id=eq.${franchiseUUID}` +
+      `&select=federal_key,custom_label,custom_date,is_observed`,
+  )) as Array<Record<string, unknown>>;
+  const federal: Record<string, boolean> = {};
+  const custom: Array<{ name: string; date: string }> = [];
+  for (const h of hols) {
+    if (h.federal_key) {
+      federal[h.federal_key as string] = h.is_observed !== false;
+    } else if (h.custom_label != null || h.custom_date != null) {
+      custom.push({ name: (h.custom_label as string) || "", date: (h.custom_date as string) || "" });
+    }
+  }
+
+  return jsonResponse({
+    success: true,
+    disposalSites,
+    recyclingSites,
+    donationSites,
+    disposalHolidays: { federal, custom },
+  });
+}
+
+// HANDLER: saveFacilities — replace-set the franchise's facilities/hours/holidays.
+// Accepts the same shape getFacilities returns.
+async function handleSaveFacilities(
+  body: Record<string, unknown>,
+  token: string | null,
+): Promise<Response> {
+  const { id: franchiseUUID } = await resolveFranchiseForCaller(body, token);
+
+  const arr = (v: unknown): any[] => (Array.isArray(v) ? v : []);
+  const disposalSites = arr(body.disposalSites);
+  const recyclingSites = arr(body.recyclingSites);
+  const donationSites = arr(body.donationSites);
+  const holidays = (body.disposalHolidays && typeof body.disposalHolidays === "object")
+    ? (body.disposalHolidays as Record<string, unknown>)
+    : { federal: {}, custom: [] };
+
+  // 1) Build facility rows (+ parallel hours sources, same index order).
+  const types: Array<[string, any[]]> = [
+    ["disposal", disposalSites],
+    ["recycling", recyclingSites],
+    ["donation", donationSites],
+  ];
+  const facRows: Array<Record<string, unknown>> = [];
+  const hoursSrc: Array<Record<string, unknown> | null> = [];
+  for (const [type, sites] of types) {
+    sites.forEach((s: Record<string, unknown>, idx: number) => {
+      facRows.push({
+        franchise_id: franchiseUUID,
+        type,
+        name: (s && s.name) || "",
+        address: (s && s.address) || "",
+        per_ton_rate: type === "disposal" ? toNum(s && s.cost) : type === "recycling" ? toNum(s && s.revenue) : null,
+        minimum_type: (s && (s.minimumType as string)) || "none",
+        minimum_value: toNum(s && s.minimumValue),
+        is_default: !!(s && s.isDefault),
+        sort_order: idx,
+      });
+      hoursSrc.push((s && s.hours && typeof s.hours === "object") ? (s.hours as Record<string, unknown>) : null);
+    });
+  }
+
+  // 2) Replace-set facilities: delete existing (cascades facility_hours), then insert.
+  const delFac = await supabaseDelete(`/rest/v1/facilities?franchise_id=eq.${franchiseUUID}`);
+  if (!delFac.ok) {
+    const t = await delFac.text().catch(() => "");
+    console.error("[saveFacilities] delete facilities failed:", delFac.status, t);
+    return jsonResponse({ success: false, error: `Couldn't clear facilities: ${delFac.status}` }, 500);
+  }
+
+  if (facRows.length) {
+    const insFac = await supabasePost("/rest/v1/facilities", facRows);
+    if (!insFac.ok) {
+      const t = await insFac.text().catch(() => "");
+      console.error("[saveFacilities] insert facilities failed:", insFac.status, t);
+      return jsonResponse({ success: false, error: `Couldn't save facilities: ${insFac.status} ${t.slice(0, 200)}` }, 500);
+    }
+    const facCreated = (await insFac.json()) as Array<{ id: string }>;
+
+    // 3) Build + insert facility_hours (7 rows per facility; default-seed missing days).
+    const hoursRows: Array<Record<string, unknown>> = [];
+    facCreated.forEach((fac, k) => {
+      const h = hoursSrc[k];
+      for (let dow = 0; dow < 7; dow++) {
+        const day = h ? (h[DOW_KEYS[dow]] as Record<string, unknown> | undefined) : undefined;
+        if (day && typeof day === "object") {
+          const closed = !!day.closed;
+          hoursRows.push({
+            facility_id: fac.id,
+            dow,
+            is_closed: closed,
+            open_time: closed ? null : ((day.open as string) || null),
+            close_time: closed ? null : ((day.close as string) || null),
+          });
+        } else {
+          hoursRows.push({ facility_id: fac.id, dow, ...defaultHours(dow) });
+        }
+      }
+    });
+    if (hoursRows.length) {
+      const insHrs = await supabasePost("/rest/v1/facility_hours", hoursRows);
+      if (!insHrs.ok) {
+        const t = await insHrs.text().catch(() => "");
+        console.error("[saveFacilities] insert facility_hours failed:", insHrs.status, t);
+        return jsonResponse({ success: false, error: `Couldn't save facility hours: ${insHrs.status} ${t.slice(0, 200)}` }, 500);
+      }
+    }
+  }
+
+  // 4) Replace-set holidays.
+  const delHol = await supabaseDelete(`/rest/v1/franchise_holidays?franchise_id=eq.${franchiseUUID}`);
+  if (!delHol.ok) {
+    const t = await delHol.text().catch(() => "");
+    console.error("[saveFacilities] delete holidays failed:", delHol.status, t);
+    return jsonResponse({ success: false, error: `Couldn't clear holidays: ${delHol.status}` }, 500);
+  }
+  const holRows: Array<Record<string, unknown>> = [];
+  const fed = (holidays.federal && typeof holidays.federal === "object") ? (holidays.federal as Record<string, unknown>) : {};
+  for (const k of Object.keys(fed)) {
+    holRows.push({ franchise_id: franchiseUUID, federal_key: k, is_observed: !!fed[k] });
+  }
+  const cust = Array.isArray(holidays.custom) ? (holidays.custom as Array<Record<string, unknown>>) : [];
+  for (const c of cust) {
+    if (c && (c.name || c.date)) {
+      holRows.push({
+        franchise_id: franchiseUUID,
+        custom_label: (c.name as string) || null,
+        custom_date: (c.date as string) || null,
+      });
+    }
+  }
+  if (holRows.length) {
+    const insHol = await supabasePost("/rest/v1/franchise_holidays", holRows);
+    if (!insHol.ok) {
+      const t = await insHol.text().catch(() => "");
+      console.error("[saveFacilities] insert holidays failed:", insHol.status, t);
+      return jsonResponse({ success: false, error: `Couldn't save holidays: ${insHol.status} ${t.slice(0, 200)}` }, 500);
+    }
+  }
+
+  return jsonResponse({
+    success: true,
+    franchiseID: body.franchiseID || null,
+    counts: { facilities: facRows.length, holidays: holRows.length },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Routing
 // ─────────────────────────────────────────────────────────────────────────────
 const ACTION_HANDLERS: Record<string, (body: Record<string, unknown>) => Promise<Response>> = {
@@ -762,18 +1041,20 @@ serve(async (req) => {
     else action = "saveSettings";
   }
 
-  // saveHomeCardOrder is caller-verified (uses the Bearer token), so it's routed
-  // here rather than through the body-only ACTION_HANDLERS map.
-  if (action === "saveHomeCardOrder") {
+  // Token-aware actions (caller-verified via the Authorization Bearer token) are
+  // routed here rather than through the body-only ACTION_HANDLERS map.
+  if (action === "saveHomeCardOrder" || action === "getFacilities" || action === "saveFacilities") {
     const authHeader = req.headers.get("Authorization") || "";
     const token = authHeader.toLowerCase().startsWith("bearer ")
       ? authHeader.slice(7).trim()
       : null;
     try {
-      return await handleSaveHomeCardOrder(body, token);
+      if (action === "saveHomeCardOrder") return await handleSaveHomeCardOrder(body, token);
+      if (action === "getFacilities") return await handleGetFacilities(body, token);
+      return await handleSaveFacilities(body, token);
     } catch (e) {
       const err = e as Error;
-      console.error("crewlogic-settings saveHomeCardOrder error:", err);
+      console.error(`crewlogic-settings ${action} error:`, err);
       return jsonResponse({ success: false, error: err.message || "Internal error" }, 500);
     }
   }
