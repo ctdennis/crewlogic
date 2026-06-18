@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.45.5 | 2026-06-18">
+  <meta name="crewlogic-version" content="v5.45.6 | 2026-06-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -17783,6 +17783,11 @@ RECYCLING & DONATION
     }
 
     // ── Settings screen: render facility rows ──
+    // Per-disposal-site collapse state (keyed by list index). Collapsed by default so the Settings
+    // list stays short even with many sites; a newly-added site is auto-expanded for editing.
+    let dispCardOpen = {};
+    function toggleDisposalCard(i) { dispCardOpen[i] = !dispCardOpen[i]; renderFacilityList('disposal'); }
+
     function renderFacilityList(type) {
       const listEl = document.getElementById('settings' + type.charAt(0).toUpperCase() + type.slice(1) + 'SitesList');
       if (!listEl) return;
@@ -17843,6 +17848,7 @@ RECYCLING & DONATION
         : 'flex-shrink:0;padding:7px 9px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:13px;cursor:pointer;';
       const star = isDefault ? '★' : '☆';
       const esc = s => (s || '').replace(/"/g, '&quot;');
+      const open = !!dispCardOpen[i];
 
       const minType = f.minimumType || 'none';
       const minVal = (f.minimumValue != null ? f.minimumValue : '');
@@ -17882,13 +17888,26 @@ RECYCLING & DONATION
         '</div>';
       }).join('');
 
-      return '<div style="border:1px solid var(--border);background:var(--bg-card);border-radius:var(--radius-sm);padding:8px;margin-bottom:8px;">' +
-        '<div style="display:flex;gap:6px;align-items:flex-start;">' +
+      const headerRow = '<div style="display:flex;gap:6px;align-items:center;">' +
           '<button title="Set as default" onclick="setDefaultFacility(\'disposal\',' + i + ')" style="' + starStyle + '">' + star + '</button>' +
           '<input class="form-input" style="flex:1;min-width:0;font-size:12px;padding:7px 10px;" placeholder="Name" value="' + esc(f.name) + '" ' +
             'oninput="updateFacility(\'disposal\',' + i + ',\'name\',this.value)">' +
+          '<button onclick="toggleDisposalCard(' + i + ')" title="' + (open ? 'Collapse' : 'Expand') + '" style="flex-shrink:0;padding:7px 10px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;">' + (open ? '▾' : '▸') + '</button>' +
           '<button onclick="removeFacility(\'disposal\',' + i + ')" style="flex-shrink:0;padding:7px 9px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;">✕</button>' +
-        '</div>' +
+        '</div>';
+
+      const cardOpen = '<div style="border:1px solid var(--border);background:var(--bg-card);border-radius:var(--radius-sm);padding:8px;margin-bottom:8px;">';
+
+      if (!open) {
+        const summary = '<div onclick="toggleDisposalCard(' + i + ')" style="font-size:11px;color:var(--text-muted);margin-top:5px;padding-left:2px;line-height:1.4;cursor:pointer;">' +
+          (f.address ? esc(f.address) : 'No address yet') +
+          (f.cost != null && f.cost !== '' ? ' · $' + esc(String(f.cost)) + '/ton' : '') +
+        '</div>';
+        return cardOpen + headerRow + summary + '</div>';
+      }
+
+      return cardOpen +
+        headerRow +
         '<div style="display:flex;gap:6px;align-items:center;margin-top:6px;">' +
           '<input class="form-input" style="flex:1;min-width:0;font-size:12px;padding:7px 10px;" placeholder="Address" value="' + esc(f.address) + '" ' +
             'oninput="updateFacility(\'disposal\',' + i + ',\'address\',this.value)">' +
@@ -18031,6 +18050,7 @@ RECYCLING & DONATION
       }
       facilities.push(entry);
       setFacilities(type, facilities);
+      if (type === 'disposal') dispCardOpen[facilities.length - 1] = true; // auto-expand the new site
       renderFacilityList(type);
       // Focus the new name input
       const listEl = document.getElementById('settings' + type.charAt(0).toUpperCase() + type.slice(1) + 'SitesList');
