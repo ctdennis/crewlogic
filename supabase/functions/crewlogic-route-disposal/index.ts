@@ -296,7 +296,8 @@ Deno.serve(async (req: Request) => {
     const franchiseID = String(body.franchiseID || "").trim();
     const truckLat = Number(body.truckLat);
     const truckLng = Number(body.truckLng);
-    const endpointAddress = String(body.endpointAddress || "").trim();
+    let endpointAddress = String(body.endpointAddress || "").trim();
+    const endpointIsHome = body.endpointIsHome === true; // "Our location" → resolve from cost_settings server-side
     // Scheduled time as LOCAL minutes-since-midnight (franchise tz), e.g. 720 = 12:00 noon. The
     // workorder's `time` field is exactly this. NaN = no appointment (e.g. the "Our location" endpoint).
     const endpointScheduledMinutes = (body.endpointScheduledMinutes != null && body.endpointScheduledMinutes !== "")
@@ -307,8 +308,8 @@ Deno.serve(async (req: Request) => {
     if (!Number.isFinite(truckLat) || !Number.isFinite(truckLng)) {
       return jsonResponse({ success: false, error: "truckLat and truckLng required" }, 400);
     }
-    if (!endpointAddress) return jsonResponse({ success: false, error: "endpointAddress required" }, 400);
     if (!Number.isFinite(loadPercent)) return jsonResponse({ success: false, error: "loadPercent required" }, 400);
+    // endpointAddress is validated AFTER cost_settings loads (the "Our location" endpoint resolves from it).
 
     const apiKey = Deno.env.get("GOOGLE_GEOCODING_API_KEY") || Deno.env.get("GOOGLE_MAPS_API_KEY");
     if (!apiKey) {
@@ -333,6 +334,19 @@ Deno.serve(async (req: Request) => {
     }
     const franchiseUUID = franchiseRow.id as string;
     const cs = (franchiseRow.cost_settings as Record<string, unknown>) || {};
+
+    // "Our location" endpoint resolves server-side from cost_settings (truck home, else office
+    // address) — single source of truth, independent of the client's possibly-stale session.
+    if (endpointIsHome) {
+      const office = [cs.officeAddress, cs.officeCity, cs.officeState, cs.officeZip]
+        .map((v) => String(v || "").trim()).filter(Boolean).join(", ");
+      endpointAddress = String(cs.truckHome || "").trim() || office;
+    }
+    if (!endpointAddress) {
+      return jsonResponse({ success: false, error: endpointIsHome
+        ? "Set your Truck Home (or office address) in Settings → Cost Analysis."
+        : "endpointAddress required" }, 400);
+    }
 
     const crewRate = num(cs.crewRate, DEFAULTS.crewRate);
     const MPG = num(cs.MPG, DEFAULTS.MPG);
@@ -481,7 +495,7 @@ Deno.serve(async (req: Request) => {
     const leastTime = pickMin("totalTimeWithWait");
 
     const jobStartTime = hasSchedule ? to12h(endpointScheduledMinutes) : null;
-    return jsonResponse({ success: true, timezoneUsed, jobStartTime, leastCost, leastTime, sites });
+    return jsonResponse({ success: true, timezoneUsed, jobStartTime, endpointAddressUsed: endpointAddress, leastCost, leastTime, sites });
   } catch (e) {
     const err = e as Error;
     console.error("[route-disposal] error:", err?.stack || err?.message || String(e));

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.45.20 | 2026-06-19">
+  <meta name="crewlogic-version" content="v5.45.21 | 2026-06-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8830,10 +8830,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
       const epVal = document.getElementById('dispEndpointSelect').value;
       const ep = dispState.endpoints[epVal];
-      if (!ep || !ep.address) {
-        errEl.textContent = (epVal === 'home') ? 'Set your location in Settings → Cost Analysis (Truck home) first.' : 'Pick an endpoint.'; return;
-      }
-      dispState.endpointAddress = ep.address; // job address for the Directions deep-link
+      const isHome = (epVal === 'home');
+      // For "Our location" the edge fn resolves the address from cost_settings (truck home / office),
+      // so an empty client-side address is fine; only require an address for actual job endpoints.
+      if (!ep || (!ep.address && !isHome)) { errEl.textContent = 'Pick an endpoint.'; return; }
+      dispState.endpointAddress = ep.address || ''; // updated from the server-resolved address below
       const loadPercent = Number(document.getElementById('dispLoadPct').value) || 0;
       btn.classList.add('loading');
       resEl.innerHTML = '';
@@ -8841,10 +8842,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const data = await edgeFunctionCall('crewlogic-route-disposal', {
           franchiseID: currentUser.franchiseID,
           truckLat, truckLng,
-          endpointAddress: ep.address,
+          endpointAddress: ep.address || '',
+          endpointIsHome: isHome,
           endpointScheduledMinutes: (ep.scheduledMinutes != null ? ep.scheduledMinutes : null),
           loadPercent
         });
+        // Use the server-resolved endpoint address for the Directions deep-link (home → truck home/office).
+        if (data && data.endpointAddressUsed) dispState.endpointAddress = data.endpointAddressUsed;
         if (!data || !data.success) {
           const msg = String((data && data.error) || '');
           if (/no .*disposal sites/i.test(msg)) {
