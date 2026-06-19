@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.45.15 | 2026-06-19">
+  <meta name="crewlogic-version" content="v5.45.16 | 2026-06-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7024,18 +7024,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (d.length === 11 && d[0] === '1') return '1-' + d.slice(1, 4) + '-' + d.slice(4, 7) + '-' + d.slice(7);
       return String(raw == null ? '' : raw).trim();
     }
-    // Clickable Vonigo link — straight to the APPOINTMENT (Job_WorkOrder.aspx?woID=) so you can change
-    // the date in one click; falls back to the Job page if no work-order ID is present.
+    // Clickable Vonigo link to the Job page (Job_Main.aspx?jobID=) — the appointment sub-page only
+    // renders inside Vonigo's own frame, so the Job page is the deepest link that loads clean.
     function _vonigoApptLinkHtml(workOrderID, jobID) {
-      let url, label;
-      if (workOrderID) {
-        url = 'https://junkluggers.vonigo.com/Schedule/Job/Job_WorkOrder.aspx?woID=' + encodeURIComponent(String(workOrderID));
-        label = '🔗 Open appointment in Vonigo';
-      } else if (jobID) {
-        url = 'https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(jobID));
-        label = '🔗 Open job in Vonigo';
-      } else return '';
-      return '<div style="margin-top:3px;"><a href="' + url + '" target="_blank" rel="noopener" style="color:#2563eb;font-weight:600;text-decoration:none;">' + label + '</a></div>';
+      if (!jobID) return '';
+      const url = 'https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(jobID));
+      return '<div style="margin-top:3px;"><a href="' + url + '" target="_blank" rel="noopener" style="color:#2563eb;font-weight:600;text-decoration:none;">🔗 Open job in Vonigo</a></div>';
     }
     function _truckTimeAgo(ms) {
       if (!ms) return '';
