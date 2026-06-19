@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.45.19 | 2026-06-19">
+  <meta name="crewlogic-version" content="v5.45.20 | 2026-06-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4534,6 +4534,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               if (_cs.website) currentUser.website = _cs.website;
               storage.set(SESSION_KEY, JSON.stringify(currentUser));
             }
+            // The OAuth hash session doesn't carry the saved home-card order — load it now so a
+            // fresh Google login keeps the user's card arrangement (showApp→goHome applies it).
+            try {
+              const _hco = await supabaseFetch('/rest/v1/profiles?select=home_card_order&email=eq.' + encodeURIComponent(currentUser.email));
+              if (_hco && _hco[0] && Array.isArray(_hco[0].home_card_order)) {
+                currentUser.homeCardOrder = _hco[0].home_card_order;
+                storage.set(SESSION_KEY, JSON.stringify(currentUser));
+              }
+            } catch (e) {}
             showApp();
             return;
           }
