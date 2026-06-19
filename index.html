@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.45.16 | 2026-06-19">
+  <meta name="crewlogic-version" content="v5.45.17 | 2026-06-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -820,7 +820,7 @@
     .route-result-section { display: none; }
     .route-result-section.active { display: block; }
 
-    /* Disposal Router (R1) result styling */
+    /* Job Router (R1) result styling */
     .disp-rec { background: var(--bg-card); border: 2px solid var(--accent-green); border-radius: var(--radius, 12px); padding: 14px 16px; margin-bottom: 14px; }
     .disp-rec-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
     .disp-rec-title { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; }
@@ -1326,7 +1326,7 @@
 
           <div class="module-card fade-in fade-in-delay-3" id="disposalRouterCard" data-card="disposalRouter" onclick="openModule('disposalRouter')" style="display:none;">
             <div class="module-icon">♻️</div>
-            <div class="module-name">Disposal Router</div>
+            <div class="module-name">Job Router</div>
             <div class="module-desc">Best transfer station between your truck & the next job</div>
           </div>
 
@@ -3338,7 +3338,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       <!-- DISPOSAL ROUTER (R1) — separate from the #90-only n8n Route Optimizer above -->
       <div class="router-section" id="disposalRouterScreen">
-        <div class="section-title fade-in">Disposal Router</div>
+        <div class="section-title fade-in">Job Router</div>
         <div class="section-desc fade-in fade-in-delay-1">Find the cheapest and fastest transfer station between your truck and the next job.</div>
 
         <div class="form-section-label fade-in fade-in-delay-1">Your Truck</div>
@@ -6711,7 +6711,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const trucksCard = document.getElementById('trucksCard');
       if (trucksCard) trucksCard.style.display = (currentUser.role === 'owner') ? '' : 'none';
 
-      // Disposal Router (R1) — recommends the best transfer station between the truck's live
+      // Job Router (R1) — recommends the best transfer station between the truck's live
       // position and the next job. Gated to telematics-connected (mirrors trucksCard's owner/Phase-1
       // telematics signal) AND a Vonigo franchise (endpoint = today's Vonigo jobs; native excluded).
       const disposalRouterCard = document.getElementById('disposalRouterCard');
@@ -7138,7 +7138,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Not connected yet → guide the owner to Settings instead of showing an error.
         if (!data.success && /not configured|no telematics/i.test(data.error || '')) {
           if (sub) sub.textContent = 'Not connected yet';
-          if (listEl) listEl.innerHTML = '<div style="color:var(--text-muted,#6e8194);font-size:13px;padding:16px;line-height:1.6;">No telematics provider connected yet.<br>Go to <strong>Settings → 🚚 Trucks</strong> to connect Motive or Linxup and your fleet will show up here.</div>';
+          if (listEl) listEl.innerHTML = '<div style="color:var(--text-muted,#6e8194);font-size:13px;padding:16px;line-height:1.6;">No telematics provider connected yet.<br>Go to <strong>Settings → 🚚 Trucks</strong> to connect <strong>Motive</strong> or <strong>Linxup</strong> and your fleet will show up here.'
+            + '<div style="margin-top:10px;">No GPS provider yet? Sign up: '
+            + '<a href="https://gomotive.com" target="_blank" rel="noopener" style="color:var(--accent-green,#00E785);">Motive</a> · '
+            + '<a href="https://www.linxup.com" target="_blank" rel="noopener" style="color:var(--accent-green,#00E785);">Linxup</a></div>'
+            + '</div>';
           return;
         }
         if (!data.success) throw new Error(data.error || 'Lookup failed');
@@ -7496,7 +7500,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
       if (module === 'disposalRouter') {
         document.getElementById('disposalRouterScreen').classList.add('active');
-        document.getElementById('headerTitle').textContent = 'Disposal Router';
+        document.getElementById('headerTitle').textContent = 'Job Router';
         currentScreen = 'disposalRouter';
         initDisposalRouter();
         return;
@@ -8689,7 +8693,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function dispRenderTruckButtons() {
       const sel = document.getElementById('dispTruckSelector');
       if (!dispState.trucks || dispState.trucks.length === 0) {
-        sel.innerHTML = '<div style="grid-column:1/-1;font-size:13px;color:var(--text-muted);line-height:1.5;padding:6px 0;">No live trucks found. Connect Motive or Linxup in <strong>Settings → 🚚 Trucks</strong>, then reopen this screen.</div>';
+        sel.innerHTML = '<div style="grid-column:1/-1;font-size:13px;color:var(--text-muted);line-height:1.6;padding:6px 0;">'
+          + 'No live trucks found. Connect <strong>Motive</strong> or <strong>Linxup</strong> in <strong>Settings → 🚚 Trucks</strong>, then reopen this screen.'
+          + '<div style="margin-top:8px;">No GPS provider yet? Sign up: '
+          + '<a href="https://gomotive.com" target="_blank" rel="noopener" style="color:var(--accent-green);">Motive</a> · '
+          + '<a href="https://www.linxup.com" target="_blank" rel="noopener" style="color:var(--accent-green);">Linxup</a></div>'
+          + '</div>';
         return;
       }
       sel.innerHTML = (dispState.trucks || []).map((t, i) =>
