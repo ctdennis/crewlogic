@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.45.10 | 2026-06-19">
+  <meta name="crewlogic-version" content="v5.45.11 | 2026-06-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7236,6 +7236,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // completed/archived jobs are excluded server-side, so they never appear here.
     // Distinct colors assigned to routes in first-seen (earliest-stop) order.
     const _ROUTE_COLORS = ['#3b82f6', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6', '#ec4899', '#8b5cf6', '#22c55e'];
+    // Vonigo returns addresses ALL CAPS — title-case for display, keeping the 2-letter state upper.
+    function _truckProperAddr(s) {
+      let t = String(s || '').toLowerCase().replace(/\b([a-z])/g, c => c.toUpperCase());
+      t = t.replace(/,?\s*\b([A-Za-z]{2})\b\s+(\d{5})/, (_m, st, z) => ', ' + st.toUpperCase() + ' ' + z);
+      return t;
+    }
+    // Lazy-fetch a job's customer phone on first popup open (reuses crewlogic-job-lookup → clientPhone).
+    async function _loadJobPhone(marker, jobID) {
+      if (marker._phoneLoaded) return;
+      marker._phoneLoaded = true;
+      const slot = () => document.getElementById('jobph-' + jobID);
+      try {
+        const r = await edgeFunctionCall('crewlogic-job-lookup', { jobID: String(jobID), franchiseID: currentUser.franchiseID });
+        const ph = (r && r.success && r.clientPhone) ? String(r.clientPhone).trim() : '';
+        const e = slot();
+        if (e) e.innerHTML = ph
+          ? '📞 <a href="tel:' + ph.replace(/[^0-9+]/g, '') + '" style="color:#2563eb;font-weight:600;text-decoration:none;">' + _truckEsc(ph) + '</a>'
+          : '<span style="color:#9aa7b4;">No phone on file</span>';
+      } catch (_e) {
+        const e = slot(); if (e) e.innerHTML = '<span style="color:#9aa7b4;">Phone unavailable</span>';
+      }
+    }
+
     async function loadJobMarkers() {
       if (typeof L === 'undefined' || !_trucksMap) return;
       try {
@@ -7271,7 +7294,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               '<text x="12" y="18.5" text-anchor="middle" font-size="9.5" font-weight="800" fill="#fff" font-family="sans-serif">' + n + '</text></svg>',
             iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -18]
           });
-          const addr = j.address ? String(j.address).replace(/\n/g, ', ').replace(/\s+/g, ' ').trim() : '';
+          const addr = j.address ? _truckProperAddr(String(j.address).replace(/\n/g, ', ').replace(/\s+/g, ' ').replace(/\s+,/g, ',').trim()) : '';
+          // Nearest live truck (haversine, miles) to this job.
+          let nearestMi = null;
+          _truckMarkers.forEach(tm => {
+            const ll = tm.getLatLng();
+            const d = haversine(j.lat, j.lon, ll.lat, ll.lng) * 0.621371;
+            if (nearestMi == null || d < nearestMi) nearestMi = d;
+          });
           const items = String(j.items || '').split('\n').map(s => s.trim()).filter(Boolean);
           const itemsHtml = items.length
             ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #e5e7eb;font-size:11px;line-height:1.45;color:#4b5563;max-height:108px;overflow-y:auto;">'
@@ -7279,14 +7309,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               + items.map(it => _truckEsc(it)).join('<br>')
               + '</div>'
             : '';
-          const pop = '<div style="font-size:13px;line-height:1.5;min-width:160px;max-width:240px;">'
-            + '<b>Stop ' + n + ' · ' + _truckEsc(rkey) + '</b>'
-            + '<br>🏠 ' + _truckEsc(j.clientName || 'Job')
-            + (j.timeLabel ? '<br>' + _truckEsc(j.timeLabel) : '')
-            + (addr ? '<br>' + _truckEsc(addr) : '')
+          const pop = '<div style="font-size:13px;line-height:1.5;min-width:185px;max-width:250px;">'
+            + '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;">'
+              + '<b>Stop ' + n + ' · ' + _truckEsc(rkey) + '</b>'
+              + (j.timeLabel ? '<span style="color:#6e8194;white-space:nowrap;font-weight:600;">' + _truckEsc(j.timeLabel) + '</span>' : '')
+            + '</div>'
+            + '<div style="margin-top:3px;">🏠 ' + _truckEsc(j.clientName || 'Job') + '</div>'
+            + (addr ? '<div>' + _truckEsc(addr) + '</div>' : '')
+            + (nearestMi != null ? '<div style="color:#6e8194;">🚚 Nearest truck: ' + nearestMi.toFixed(1) + ' mi</div>' : '')
+            + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
             + itemsHtml
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon }).addTo(_trucksMap).bindPopup(pop);
+          m.on('popupopen', () => _loadJobPhone(m, j.jobID));
           _jobMarkers.push(m);
           jobPts.push([j.lat, j.lon]);
         });
