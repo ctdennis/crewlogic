@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.45.14 | 2026-06-19">
+  <meta name="crewlogic-version" content="v5.45.15 | 2026-06-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7024,11 +7024,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (d.length === 11 && d[0] === '1') return '1-' + d.slice(1, 4) + '-' + d.slice(4, 7) + '-' + d.slice(7);
       return String(raw == null ? '' : raw).trim();
     }
-    // Clickable link to the job in Vonigo (the work-order/Job page).
-    function _vonigoJobLinkHtml(jobID) {
-      if (!jobID) return '';
-      const url = 'https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(jobID));
-      return '<div style="margin-top:3px;"><a href="' + url + '" target="_blank" rel="noopener" style="color:#2563eb;font-weight:600;text-decoration:none;">🔗 Open job in Vonigo</a></div>';
+    // Clickable Vonigo link — straight to the APPOINTMENT (Job_WorkOrder.aspx?woID=) so you can change
+    // the date in one click; falls back to the Job page if no work-order ID is present.
+    function _vonigoApptLinkHtml(workOrderID, jobID) {
+      let url, label;
+      if (workOrderID) {
+        url = 'https://junkluggers.vonigo.com/Schedule/Job/Job_WorkOrder.aspx?woID=' + encodeURIComponent(String(workOrderID));
+        label = '🔗 Open appointment in Vonigo';
+      } else if (jobID) {
+        url = 'https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(jobID));
+        label = '🔗 Open job in Vonigo';
+      } else return '';
+      return '<div style="margin-top:3px;"><a href="' + url + '" target="_blank" rel="noopener" style="color:#2563eb;font-weight:600;text-decoration:none;">' + label + '</a></div>';
     }
     function _truckTimeAgo(ms) {
       if (!ms) return '';
@@ -7115,7 +7122,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '<br>' + _truckEsc(j.clientName || 'Job')
             + (addr ? '<br><span style="color:#9aa7b4;">' + _truckEsc(addr) + '</span>' : '')
             + _nearestTruckHtml(j.lat, j.lon)
-            + _vonigoJobLinkHtml(j.jobID)
+            + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap)
             .bindPopup(tip);
@@ -7351,7 +7358,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + (addr ? '<div>' + _truckEsc(addr) + '</div>' : '')
             + _nearestTruckHtml(j.lat, j.lon)
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
-            + _vonigoJobLinkHtml(j.jobID)
+            + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
             + itemsHtml
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon }).addTo(_trucksMap).bindPopup(pop);
