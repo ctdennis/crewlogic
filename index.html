@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.45.12 | 2026-06-19">
+  <meta name="crewlogic-version" content="v5.45.13 | 2026-06-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7000,9 +7000,30 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // ===== "Where are my trucks?" — telematics truck locations (Linxup/Motive via crewlogic-trucks) =====
-    let _trucksMap = null, _truckMarkers = [], _jobMarkers = [], _trucksRefreshTimer = null, _trucksJobDay = 0, _trucksLookahead = false, _lookaheadMarkers = [];
+    let _trucksMap = null, _truckMarkers = [], _jobMarkers = [], _trucksRefreshTimer = null, _trucksJobDay = 0, _trucksLookahead = false, _lookaheadMarkers = [], _trucksData = [];
     const _expandedTrucks = new Set(); // which truck cards are expanded (by index; survives auto-refresh)
     function _truckEsc(s) { return String(s == null ? '' : s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c])); }
+    // Nearest live truck (by name) to a point — for job/look-ahead popups. Returns {name, mi} or null.
+    function _nearestTruck(lat, lon) {
+      let best = null;
+      (_trucksData || []).forEach(t => {
+        if (t.lat == null || t.lon == null) return;
+        const mi = haversine(lat, lon, t.lat, t.lon) * 0.621371;
+        if (!best || mi < best.mi) best = { name: t.name || t.number || 'Truck', mi };
+      });
+      return best;
+    }
+    function _nearestTruckHtml(lat, lon) {
+      const nt = _nearestTruck(lat, lon);
+      return nt ? '<div style="color:#6e8194;">🚚 ' + _truckEsc(nt.name) + ' — ' + nt.mi.toFixed(1) + ' mi away</div>' : '';
+    }
+    // Format a US phone for display: 8603878366 → 860-387-8366 (the tel: link still uses raw digits).
+    function _fmtPhone(raw) {
+      const d = String(raw == null ? '' : raw).replace(/\D/g, '');
+      if (d.length === 10) return d.slice(0, 3) + '-' + d.slice(3, 6) + '-' + d.slice(6);
+      if (d.length === 11 && d[0] === '1') return '1-' + d.slice(1, 4) + '-' + d.slice(4, 7) + '-' + d.slice(7);
+      return String(raw == null ? '' : raw).trim();
+    }
     function _truckTimeAgo(ms) {
       if (!ms) return '';
       const m = Math.round((Date.now() - ms) / 60000);
@@ -7078,15 +7099,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           total++;
           const icon = L.divIcon({
             className: 'job-lookahead-dot',
-            html: '<div style="width:14px;height:14px;border-radius:50%;background:#8b97a4;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.5);"></div>',
+            html: '<div style="width:14px;height:14px;border-radius:50%;background:#00E785;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.5);"></div>',
             iconSize: [14, 14], iconAnchor: [7, 7]
           });
-          const route = j.route ? String(j.route).replace(/\s*\(.*\)\s*/, '').trim() : '';
-          const addr = j.address ? String(j.address).replace(/\n/g, ', ').replace(/\s+/g, ' ').trim() : '';
+          const route = j.route ? ((String(j.route).match(/\(([^)]+)\)/) || [])[1] || String(j.route).replace(/\s*\(.*\)\s*/, '')).trim() : '';
+          const addr = j.address ? _truckProperAddr(String(j.address).replace(/\n/g, ', ').replace(/\s+/g, ' ').replace(/\s+,/g, ',').trim()) : '';
           const tip = '<div style="font-size:12px;line-height:1.4;">'
             + '<b>' + dayLabel + '</b>' + (j.timeLabel ? ' · ' + _truckEsc(j.timeLabel) : '') + (route ? ' · ' + _truckEsc(route) : '')
             + '<br>' + _truckEsc(j.clientName || 'Job')
             + (addr ? '<br><span style="color:#9aa7b4;">' + _truckEsc(addr) + '</span>' : '')
+            + _nearestTruckHtml(j.lat, j.lon)
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap)
             .bindTooltip(tip, { direction: 'top', opacity: 1 });
@@ -7149,6 +7171,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     }
     function renderTrucks(trucks, fit) {
+      _trucksData = trucks || []; // keep latest truck positions/names for nearest-truck popups
       const listEl = document.getElementById('trucksList');
       if (listEl) {
         listEl.innerHTML = trucks.map((t, i) => {
@@ -7193,9 +7216,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (typeof L === 'undefined') return;
       if (!_trucksMap) {
         _trucksMap = L.map('trucksMap', { zoomControl: true, attributionControl: true }).setView([41.86, -70.92], 12);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        const _streetLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
           attribution: '© OpenStreetMap contributors © CARTO', subdomains: 'abcd', maxZoom: 20
-        }).addTo(_trucksMap);
+        });
+        const _satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+          attribution: 'Imagery © Esri', maxZoom: 20
+        });
+        _streetLayer.addTo(_trucksMap); // default = street
+        L.control.layers({ 'Street': _streetLayer, 'Satellite': _satLayer }, null, { position: 'topright', collapsed: false }).addTo(_trucksMap);
       }
       _truckMarkers.forEach(m => _trucksMap.removeLayer(m));
       _truckMarkers = [];
@@ -7250,7 +7278,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const e = document.getElementById('jobph-' + jobID);
       if (!e) return;
       e.innerHTML = phone
-        ? '📞 <a href="tel:' + String(phone).replace(/[^0-9+]/g, '') + '" style="color:#2563eb;font-weight:600;text-decoration:none;">' + _truckEsc(phone) + '</a>'
+        ? '📞 <a href="tel:' + String(phone).replace(/[^0-9+]/g, '') + '" style="color:#2563eb;font-weight:600;text-decoration:none;">' + _truckEsc(_fmtPhone(phone)) + '</a>'
         : '<span style="color:#9aa7b4;">No phone on file</span>';
     }
     function _prefetchJobPhone(jobID) {
@@ -7300,13 +7328,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -18]
           });
           const addr = j.address ? _truckProperAddr(String(j.address).replace(/\n/g, ', ').replace(/\s+/g, ' ').replace(/\s+,/g, ',').trim()) : '';
-          // Nearest live truck (haversine, miles) to this job.
-          let nearestMi = null;
-          _truckMarkers.forEach(tm => {
-            const ll = tm.getLatLng();
-            const d = haversine(j.lat, j.lon, ll.lat, ll.lng) * 0.621371;
-            if (nearestMi == null || d < nearestMi) nearestMi = d;
-          });
           const items = String(j.items || '').split('\n').map(s => s.trim()).filter(Boolean);
           const itemsHtml = items.length
             ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #e5e7eb;font-size:11px;line-height:1.45;color:#4b5563;max-height:108px;overflow-y:auto;">'
@@ -7321,7 +7342,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '</div>'
             + '<div style="margin-top:3px;">🏠 ' + _truckEsc(j.clientName || 'Job') + '</div>'
             + (addr ? '<div>' + _truckEsc(addr) + '</div>' : '')
-            + (nearestMi != null ? '<div style="color:#6e8194;">🚚 Nearest truck: ' + nearestMi.toFixed(1) + ' mi</div>' : '')
+            + _nearestTruckHtml(j.lat, j.lon)
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
             + itemsHtml
             + '</div>';
