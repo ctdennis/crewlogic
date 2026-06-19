@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.45.21 | 2026-06-19">
+  <meta name="crewlogic-version" content="v5.45.22 | 2026-06-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7126,10 +7126,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '<br>' + _truckEsc(j.clientName || 'Job')
             + (addr ? '<br><span style="color:#9aa7b4;">' + _truckEsc(addr) + '</span>' : '')
             + _nearestTruckHtml(j.lat, j.lon)
+            + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
             + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap)
             .bindPopup(tip);
+          // Lazy-load the clickable client phone on popup open (avoids a burst of Vonigo
+          // lookups across 3 days the moment look-ahead is toggled on).
+          m.on('popupopen', () => _prefetchJobPhone(j.jobID).then(ph => _renderJobPhoneSlot(j.jobID, ph)));
           _lookaheadMarkers.push(m);
         });
       });
