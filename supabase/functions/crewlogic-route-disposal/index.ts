@@ -195,20 +195,26 @@ interface HolidayRow {
   is_observed: boolean;
 }
 // Is the local arrival date a closed holiday? Returns the holiday label or null.
+// Federal holidays are observed BY DEFAULT (matches the Settings UI default) — so a franchise that
+// has never saved its holiday list (empty table, e.g. post-migration) still closes on them. A
+// franchise opts a holiday OUT by saving it unchecked, which writes an is_observed=false row.
 function holidayClosure(lp: LocalParts, holidays: HolidayRow[]): string | null {
+  const unobserved = new Set<string>();
   for (const h of holidays) {
-    if (h.federal_key) {
-      if (h.is_observed === false) continue;
-      const fd = federalHolidayDate(h.federal_key, lp.year);
-      if (fd && fd.month === lp.month && fd.day === lp.day) {
-        return FEDERAL_LABEL[h.federal_key] || h.federal_key;
-      }
-    } else if (h.custom_date) {
-      const m = h.custom_date.match(/^(\d{4})-(\d{2})-(\d{2})/);
-      if (m && parseInt(m[1], 10) === lp.year && parseInt(m[2], 10) === lp.month &&
-          parseInt(m[3], 10) === lp.day) {
-        return h.custom_label || "Holiday";
-      }
+    if (h.federal_key && h.is_observed === false) unobserved.add(h.federal_key);
+  }
+  for (const key of Object.keys(FEDERAL_LABEL)) {
+    if (unobserved.has(key)) continue;
+    const fd = federalHolidayDate(key, lp.year);
+    if (fd && fd.month === lp.month && fd.day === lp.day) return FEDERAL_LABEL[key];
+  }
+  // Custom (local) holidays — explicit rows only, observed unless turned off.
+  for (const h of holidays) {
+    if (h.federal_key || h.is_observed === false || !h.custom_date) continue;
+    const m = h.custom_date.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m && parseInt(m[1], 10) === lp.year && parseInt(m[2], 10) === lp.month &&
+        parseInt(m[3], 10) === lp.day) {
+      return h.custom_label || "Holiday";
     }
   }
   return null;
