@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.45.8 | 2026-06-19">
+  <meta name="crewlogic-version" content="v5.45.9 | 2026-06-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7249,7 +7249,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           if (!(key in routeColor)) routeColor[key] = (key === 'Unrouted') ? '#6e8194' : _ROUTE_COLORS[colorIdx++ % _ROUTE_COLORS.length];
           return routeColor[key];
         };
-        const shortRoute = (r) => ((r || '').replace(/\s*\(.*\)\s*/, '').trim()) || 'Unrouted';
+        // Prefer the Vonigo route code in parentheses (e.g. "Route 2 (MA2FAR)" → "MA2FAR");
+        // fall back to the plain label, then "Unrouted".
+        const shortRoute = (r) => {
+          const s = (r || '').trim();
+          const paren = s.match(/\(([^)]+)\)/);
+          if (paren && paren[1].trim()) return paren[1].trim();
+          return s.replace(/\s*\(.*\)\s*/, '').trim() || 'Unrouted';
+        };
         const routeStop = {};
         const jobPts = [];
         jobs.forEach(j => {
