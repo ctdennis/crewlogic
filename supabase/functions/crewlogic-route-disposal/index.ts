@@ -238,6 +238,15 @@ function hoursClosure(lp: LocalParts, hours: HoursRow[]): string | null {
   if (close !== null && lp.minutesOfDay >= close) return `arrives after close (${fmtClock(close)})`;
   return null;
 }
+// For an OPEN site: minutes between the truck's ARRIVAL and the facility's closing time (null if no
+// closing time configured). Used to flag "cutting it close" when arrival is within ~15 min of close.
+function minsUntilClose(lp: LocalParts, hours: HoursRow[]): number | null {
+  const row = hours.find((h) => h.dow === lp.dow);
+  if (!row || row.is_closed) return null;
+  const close = timeToMinutes(row.close_time);
+  if (close === null) return null;
+  return close - lp.minutesOfDay;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Distance Matrix — one call, all sites. Token per point: "lat,lng" or address.
@@ -419,9 +428,13 @@ Deno.serve(async (req: Request) => {
       const arriveAtSite = new Date(now.getTime() + truckToSite.minutes * 60000);
       const siteLp = localParts(arriveAtSite, timezoneUsed);
       const holiday = holidayClosure(siteLp, holidays);
-      const hourClose = hoursClosure(siteLp, hoursByFacility[f.id as string] || []);
+      const fhours = hoursByFacility[f.id as string] || [];
+      const hourClose = hoursClosure(siteLp, fhours);
       const closedReason = holiday ? `closed for holiday (${holiday})` : hourClose;
       const open = !closedReason;
+      // "Cutting it close": open, but the truck arrives within 15 min of the facility's closing time.
+      const muc = open ? minsUntilClose(siteLp, fhours) : null;
+      const cuttingItClose = muc !== null && muc > 0 && muc <= 15;
 
       // Arrival AT the job/endpoint — the displayed arrival + the late-warning base. This is the
       // WHOLE route: now + truck→site + wait + site→job (= totalTimeWithWait).
@@ -441,7 +454,9 @@ Deno.serve(async (req: Request) => {
         routeMiles,
         arrivalLocal: endpointLp.label,        // full "YYYY-MM-DD HH:MM TZ" (kept for debugging)
         arrivalTime: to12h(endpointLp.minutesOfDay), // friendly "1:50pm" for display
+        cuttingItClose,
       };
+      if (cuttingItClose) out.minsUntilClose = muc;
       if (closedReason) out.closedReason = closedReason;
 
       // Late warning: compare the job-arrival's LOCAL wall-clock minutes to the appointment's local
