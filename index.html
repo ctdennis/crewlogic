@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.45.11 | 2026-06-19">
+  <meta name="crewlogic-version" content="v5.45.12 | 2026-06-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7242,21 +7242,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       t = t.replace(/,?\s*\b([A-Za-z]{2})\b\s+(\d{5})/, (_m, st, z) => ', ' + st.toUpperCase() + ' ' + z);
       return t;
     }
-    // Lazy-fetch a job's customer phone on first popup open (reuses crewlogic-job-lookup → clientPhone).
-    async function _loadJobPhone(marker, jobID) {
-      if (marker._phoneLoaded) return;
-      marker._phoneLoaded = true;
-      const slot = () => document.getElementById('jobph-' + jobID);
-      try {
-        const r = await edgeFunctionCall('crewlogic-job-lookup', { jobID: String(jobID), franchiseID: currentUser.franchiseID });
-        const ph = (r && r.success && r.clientPhone) ? String(r.clientPhone).trim() : '';
-        const e = slot();
-        if (e) e.innerHTML = ph
-          ? '📞 <a href="tel:' + ph.replace(/[^0-9+]/g, '') + '" style="color:#2563eb;font-weight:600;text-decoration:none;">' + _truckEsc(ph) + '</a>'
-          : '<span style="color:#9aa7b4;">No phone on file</span>';
-      } catch (_e) {
-        const e = slot(); if (e) e.innerHTML = '<span style="color:#9aa7b4;">Phone unavailable</span>';
-      }
+    // Customer phones are PREFETCHED in the background when the truck map loads its jobs, so the
+    // number is already in hand by the time a user opens a job popup (transparent — no click-wait).
+    // Cache: jobID -> Promise<phone string|''> (reuses crewlogic-job-lookup → clientPhone).
+    let _jobPhones = {};
+    function _renderJobPhoneSlot(jobID, phone) {
+      const e = document.getElementById('jobph-' + jobID);
+      if (!e) return;
+      e.innerHTML = phone
+        ? '📞 <a href="tel:' + String(phone).replace(/[^0-9+]/g, '') + '" style="color:#2563eb;font-weight:600;text-decoration:none;">' + _truckEsc(phone) + '</a>'
+        : '<span style="color:#9aa7b4;">No phone on file</span>';
+    }
+    function _prefetchJobPhone(jobID) {
+      if (_jobPhones[jobID]) return _jobPhones[jobID];
+      const p = edgeFunctionCall('crewlogic-job-lookup', { jobID: String(jobID), franchiseID: currentUser.franchiseID })
+        .then(r => (r && r.success && r.clientPhone) ? String(r.clientPhone).trim() : '')
+        .catch(() => '');
+      _jobPhones[jobID] = p;
+      p.then(ph => _renderJobPhoneSlot(jobID, ph)); // fill in if the popup happens to be open already
+      return p;
     }
 
     async function loadJobMarkers() {
@@ -7267,6 +7271,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const jobs = (data.workOrders || []).filter(j => !j.isComplete && j.lat != null && j.lon != null);
         _jobMarkers.forEach(m => _trucksMap.removeLayer(m));
         _jobMarkers = [];
+        _jobPhones = {}; // reset phone cache for this fresh job set
         const routeColor = {}; let colorIdx = 0;
         const colorFor = (key) => {
           if (!(key in routeColor)) routeColor[key] = (key === 'Unrouted') ? '#6e8194' : _ROUTE_COLORS[colorIdx++ % _ROUTE_COLORS.length];
@@ -7321,10 +7326,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + itemsHtml
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon }).addTo(_trucksMap).bindPopup(pop);
-          m.on('popupopen', () => _loadJobPhone(m, j.jobID));
+          m.on('popupopen', () => _prefetchJobPhone(j.jobID).then(ph => _renderJobPhoneSlot(j.jobID, ph)));
           _jobMarkers.push(m);
           jobPts.push([j.lat, j.lon]);
         });
+        // Prefetch all job phones in the background now (transparent) so they're ready on click.
+        jobs.forEach(j => _prefetchJobPhone(j.jobID));
         // Refit the map to show trucks AND jobs together.
         const allPts = [];
         _truckMarkers.forEach(m => allPts.push(m.getLatLng()));
