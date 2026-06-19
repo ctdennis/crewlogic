@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.45.17 | 2026-06-19">
+  <meta name="crewlogic-version" content="v5.45.18 | 2026-06-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -845,6 +845,7 @@
     .disp-row-cost { font-size: 14px; font-weight: 700; color: var(--text-primary); }
     .disp-row-time { font-size: 11px; color: var(--text-muted); }
     .disp-empty { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 18px; text-align: center; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+    .disp-alert { background: rgba(245,158,11,0.13); border: 1.5px solid var(--accent-orange,#f59e0b); border-radius: var(--radius-sm); padding: 16px; text-align: center; color: var(--text-primary,#eef4fa); font-size: 14px; line-height: 1.55; margin-bottom: 12px; }
     .disp-tz { font-size: 10px; color: var(--text-muted); text-align: center; margin-top: 10px; }
 
     .route-result-card {
@@ -8906,9 +8907,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const lc = data.leastCost, lt = data.leastTime;
       let html = '';
       if (!lc && !lt) {
-        html += '<div class="disp-empty">No open disposal sites for this route right now.';
-        if (sites.some(s => !s.open)) html += '<br>All configured sites are closed at your arrival time.';
-        html += '</div>';
+        const reasons = sites.filter(s => !s.open).map(s => s.closedReason || '');
+        const holiday = reasons.map(r => (r.match(/holiday \(([^)]+)\)/) || [])[1]).find(Boolean);
+        const FEDERAL_NAMES = ["New Year's Day", "MLK Day", "Presidents' Day", "Memorial Day", "Juneteenth", "Independence Day", "Labor Day", "Columbus Day", "Veterans Day", "Thanksgiving", "Christmas"];
+        const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+        let msg;
+        if (holiday) {
+          const kind = FEDERAL_NAMES.indexOf(holiday) !== -1 ? 'a federal holiday' : 'a holiday';
+          msg = '🛑 <strong>Today is ' + dispEsc(today) + ' — ' + kind + ' (' + dispEsc(holiday) + ').</strong>'
+            + '<br>All transfer stations, recycling facilities, and donation centers are closed.';
+        } else if (reasons.some(r => /after close|closed/i.test(r))) {
+          msg = '🕒 <strong>All disposal sites are closed at your arrival time.</strong>'
+            + '<br>They\'ve closed for the day — try again during business hours.';
+        } else {
+          msg = '<strong>No open disposal sites for this route right now.</strong>'
+            + '<br>All configured sites are closed at your arrival time.';
+        }
+        html += '<div class="disp-alert">' + msg + '</div>';
       } else if (lc && lt && lc.facilityId === lt.facilityId) {
         html += dispRecCard('💰⏱ Cheapest &amp; Fastest', 'var(--accent-green)', lc, data.jobStartTime);
       } else {
