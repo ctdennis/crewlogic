@@ -19,6 +19,25 @@ const CORS = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const GOOGLE_KEY = Deno.env.get("GOOGLE_GEOCODING_API_KEY") || Deno.env.get("GOOGLE_MAPS_API_KEY") || "";
+
+// Rooftop-accurate forward geocode via Google (better than Census street-interpolation for a pin).
+async function geocodeGoogle(address: string): Promise<{ lat: number; lon: number } | null> {
+  if (!GOOGLE_KEY || !address) return null;
+  try {
+    const url = "https://maps.googleapis.com/maps/api/geocode/json?address=" +
+      encodeURIComponent(address) + "&key=" + GOOGLE_KEY;
+    const res = await fetch(url);
+    const data = await res.json().catch(() => ({}));
+    const loc = data?.results?.[0]?.geometry?.location;
+    if (loc && typeof loc.lat === "number" && typeof loc.lng === "number") {
+      return { lat: loc.lat, lon: loc.lng };
+    }
+  } catch (e) {
+    console.error("[geofence-create] geocode error:", (e as Error).message);
+  }
+  return null;
+}
 
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -61,15 +80,21 @@ Deno.serve(async (req: Request) => {
     const category = String(body.category || "").trim();
     const address = String(body.address || "").trim();
     const radius_in_meters = Number(body.radius_in_meters);
-    const centre_lat = Number(body.centre_lat);
-    const centre_lon = Number(body.centre_lon);
+    let centre_lat = Number(body.centre_lat);
+    let centre_lon = Number(body.centre_lon);
+    let geocodedVia = "client";
     const status = String(body.status || "active").trim();
     const description = String(body.description || "").trim();
 
     if (!franchiseID) return jsonResponse({ success: false, error: "franchiseID required" }, 400);
     if (!name) return jsonResponse({ success: false, error: "name required" }, 400);
+    // Prefer a client-provided center; otherwise geocode the address via Google (rooftop-accurate).
+    if ((!Number.isFinite(centre_lat) || !Number.isFinite(centre_lon)) && address) {
+      const g = await geocodeGoogle(address);
+      if (g) { centre_lat = g.lat; centre_lon = g.lon; geocodedVia = "google"; }
+    }
     if (!Number.isFinite(centre_lat) || !Number.isFinite(centre_lon)) {
-      return jsonResponse({ success: false, error: "centre_lat and centre_lon required" }, 400);
+      return jsonResponse({ success: false, error: "centre_lat/centre_lon required (Google geocoding of the address returned nothing)" }, 400);
     }
     if (!Number.isFinite(radius_in_meters) || radius_in_meters <= 0) {
       return jsonResponse({ success: false, error: "radius_in_meters must be > 0" }, 400);
@@ -92,7 +117,7 @@ Deno.serve(async (req: Request) => {
     if (!motiveRes.ok) {
       console.error(`[geofence-create] Motive ${motiveRes.status}: ${JSON.stringify(motive).slice(0, 300)}`);
     }
-    return jsonResponse({ success: motiveRes.ok, status: motiveRes.status, provider: "motive", motive });
+    return jsonResponse({ success: motiveRes.ok, status: motiveRes.status, provider: "motive", geocodedVia, centre: { lat: centre_lat, lon: centre_lon }, motive });
   } catch (e) {
     const err = e as Error;
     console.error("[geofence-create] error:", err?.stack || err?.message || String(e));
