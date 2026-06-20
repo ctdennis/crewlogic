@@ -381,8 +381,12 @@ async function handleAnalyzeEstimate(payload: Record<string, unknown>): Promise<
     .replace(/```\s*/g, '')
     .trim();
 
-  // If the cleaned text doesn't START with '[' or '{', extract the first array we find.
-  if (!jsonText.startsWith('[') && !jsonText.startsWith('{')) {
+  // ALWAYS extract the first balanced JSON value (array or object). Claude frequently
+  // appends a prose/markdown summary AFTER the array (e.g. "[...]\n\n**Volume:** ...")
+  // and/or prepends preamble before it. We must trim BOTH sides — even when the text
+  // already starts with '[' (the old guard skipped trailing-prose trimming in that case,
+  // which made the Volume Check intermittently throw "Claude returned invalid JSON").
+  {
     const firstBracket = jsonText.indexOf('[');
     const firstBrace = jsonText.indexOf('{');
     let start = -1;
@@ -392,16 +396,13 @@ async function handleAnalyzeEstimate(payload: Record<string, unknown>): Promise<
       start = firstBrace;
     }
     if (start !== -1) {
-      jsonText = jsonText.slice(start);
-      // Trim trailing prose after the JSON ends
-      // Walk forward tracking bracket depth to find the matching close
-      const open = jsonText[0];
+      const open = jsonText[start];
       const close = open === '[' ? ']' : '}';
       let depth = 0;
       let inString = false;
       let escape = false;
       let endIdx = -1;
-      for (let i = 0; i < jsonText.length; i++) {
+      for (let i = start; i < jsonText.length; i++) {
         const ch = jsonText[i];
         if (escape) { escape = false; continue; }
         if (ch === '\\') { escape = true; continue; }
@@ -413,7 +414,7 @@ async function handleAnalyzeEstimate(payload: Record<string, unknown>): Promise<
           if (depth === 0) { endIdx = i; break; }
         }
       }
-      if (endIdx !== -1) jsonText = jsonText.slice(0, endIdx + 1);
+      jsonText = (endIdx !== -1) ? jsonText.slice(start, endIdx + 1) : jsonText.slice(start);
     }
   }
 
