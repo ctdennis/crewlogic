@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.11 | 2026-06-21">
+  <meta name="crewlogic-version" content="v5.46.12 | 2026-06-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7766,7 +7766,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const r = document.getElementById('mjResult');
       if (data.intent === 'move' && data.plan) {
         const p = data.plan; _mjPlan = p;
-        r.innerHTML = mjCard('Confirm move', [['Job', p.jobLabel || ''], ['From', p.fromLabel || ''], ['To', (p.toRouteCode || '') + ' · ' + (p.startLabel || '') + (p.zoned === false ? '  ⚠ owner override (not zoned for ' + (p.zip || '') + ')' : '')]]);
+        const rows = [['Job', p.jobLabel || ''], ['From', p.fromLabel || ''], ['To', (p.toRouteCode || '') + ' · ' + (p.startLabel || '') + (p.zoned === false ? '  ⚠ owner override (not zoned for ' + (p.zip || '') + ')' : '')]];
+        if (p.fromDurationMin && p.durationMin && Number(p.fromDurationMin) !== Number(p.durationMin)) rows.push(['Duration', p.fromDurationMin + ' min → ' + p.durationMin + ' min']);
+        r.innerHTML = mjCard('Confirm move', rows);
         return;
       }
       if (data.intent === 'cancel' && data.plan) {
