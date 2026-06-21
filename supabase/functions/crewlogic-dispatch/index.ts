@@ -193,6 +193,7 @@ Everything in the final plan must appear in the confirm message so the human ver
   If the requested time isn't open, offer the nearest open times.
 - CANCEL: resolveJob, then map the spoken reason to a category+reason from this list (case-insensitive): ${JSON.stringify(Object.fromEntries(Object.entries(REASON_CODES).map(([c, v]) => [c, Object.keys(v.reasons)])))}.
 - LISTING jobs ("what jobs are on RE-SCD tomorrow", "what's on route 3"): call showJobs(route, dayID) — the app renders a clean expandable list. Do NOT list them in text and do NOT call listRouteJobs for this.
+- FOLLOW-UP after a list: a prior assistant turn may contain the exact jobs just listed (number, time, client, route code, JobID, WO id, zip, duration). When the user references one of them ("the second job", "Melissa's job", "move that 11 AM"), resolve it from THAT remembered list — match by the client name or position they used — and use its details directly. Do not re-list; do not ask which job if the remembered list makes it unambiguous. IMPORTANT for a MOVE plan: the plan's woID MUST be the remembered WO id (not the JobID) — a move acts on the WorkOrder. For a CANCEL plan use the JobID.
 - AVAILABILITY question (open slots/times): answer from suggestSlots in plain text.
 
 TO FINISH: if (and only if) you have a concrete MOVE or CANCEL plan ready to confirm, call the "respond" tool with intent (move|cancel) + the plan. For an AVAILABILITY answer or a CLARIFYING question, reply in plain text and SHOW the options (route CODES like MA1REG/MA6REG — never raw route ID numbers — and the open times) to help the user decide.
@@ -222,7 +223,7 @@ FORMAT for a NARROW PHONE SCREEN: NEVER use markdown tables or "|" pipe characte
       const WD2 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
       const dt = new Date(Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8)));
       const dayLabel = `${WD2[dt.getUTCDay()]} ${+d.slice(4, 6)}/${+d.slice(6, 8)}`;
-      return { intent: 'jobs', route: a.route || '', dayID: d, dayLabel, jobs: jobs.map((j: any) => ({ jobID: j.jobID, client: j.client, address: j.address, zip: j.zip, timeLabel: j.timeLabel, durationMin: j.durationMin, routeCode: j.routeCode, status: j.status })) };
+      return { intent: 'jobs', route: a.route || '', dayID: d, dayLabel, jobs: jobs.map((j: any) => ({ jobID: j.jobID, woID: j.woID, client: j.client, address: j.address, zip: j.zip, timeLabel: j.timeLabel, durationMin: j.durationMin, routeCode: j.routeCode, status: j.status })) };
     }
     if (data.stop_reason === 'tool_use') {
       const results: any[] = [];

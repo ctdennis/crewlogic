@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.4 | 2026-06-21">
+  <meta name="crewlogic-version" content="v5.46.5 | 2026-06-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7582,9 +7582,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       r.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline" style="display:inline-block;"></span>Thinking…</div>';
       const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'command', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, transcript, history: _mjHistory });
       if (!data || !data.success) { r.innerHTML = '<div style="color:#ff6b6b;font-size:13px;">' + mjEsc((data && data.error) || 'Something went wrong.') + '</div>'; return; }
-      // keep short conversation memory so "that job" / "it" resolves on the next command
+      // keep short conversation memory so "that job" / "it" / "Melissa's job" resolves on the next command
       _mjHistory.push({ role: 'user', text: transcript });
-      if (data.message) _mjHistory.push({ role: 'assistant', text: data.message });
+      let mem = data.message || '';
+      if (data.intent === 'jobs') {
+        // a jobs list has no .message — synthesize a memory turn so a follow-up ("move the 2nd job for
+        // Melissa") can resolve against the exact jobs just shown (number, time, client, route, JobID, zip, duration).
+        const js = data.jobs || [];
+        mem = 'Listed ' + js.length + ' job' + (js.length !== 1 ? 's' : '') + ' on ' + (data.route || 'all routes') + (data.dayLabel ? (' ' + data.dayLabel) : '') + ': '
+          + js.map((j, n) => (n + 1) + '. ' + (j.timeLabel || '') + ' ' + (j.client || '') + ' (' + (j.routeCode || '') + ', Job ' + (j.jobID || '') + ', WO ' + (j.woID || '') + ', ' + (j.durationMin || '') + 'min, zip ' + (j.zip || '') + ')').join('; ');
+      }
+      if (mem) _mjHistory.push({ role: 'assistant', text: mem });
       if (_mjHistory.length > 8) _mjHistory = _mjHistory.slice(-8);
       mjRenderResult(data);
     }
@@ -7616,20 +7624,39 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (!jobs.length) h += '<div style="padding:12px 14px;font-size:13px;color:var(--text-muted);">No jobs.</div>';
         jobs.forEach((j, i) => {
           const openInit = jobs.length === 1; // single job → show details
-          h += '<div onclick="mjToggleRow(' + i + ')" style="padding:11px 14px;cursor:pointer;' + (i < jobs.length - 1 ? 'border-bottom:1px solid var(--border);' : '') + '">';
+          const jid = mjEsc(String(j.jobID || ''));
+          h += '<div onclick="mjToggleRow(' + i + ',\'' + jid + '\')" style="padding:11px 14px;cursor:pointer;' + (i < jobs.length - 1 ? 'border-bottom:1px solid var(--border);' : '') + '">';
           h += '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">';
           h += '<span style="font-size:14px;color:var(--text-primary);"><span style="color:var(--accent-green,#00E785);font-weight:700;">' + mjEsc(j.timeLabel || '') + '</span>&nbsp;&nbsp;' + mjEsc(j.client || '') + '</span>';
           h += '<span id="mjrowchev' + i + '" style="color:var(--text-muted);font-size:11px;">' + (openInit ? '▴' : '▾') + '</span></div>';
-          h += '<div id="mjrow' + i + '" style="display:' + (openInit ? 'block' : 'none') + ';margin-top:8px;font-size:12px;color:var(--text-muted);line-height:1.55;">' + mjEsc(j.address || '') + '<br>' + mjEsc((j.durationMin || '') + ' min') + (j.routeCode ? '  ·  ' + mjEsc(j.routeCode) : '') + '  ·  Job ' + mjEsc(j.jobID || '') + (j.status ? '  ·  ' + mjEsc(j.status) : '') + '</div>';
+          h += '<div id="mjrow' + i + '" style="display:' + (openInit ? 'block' : 'none') + ';margin-top:8px;font-size:12px;color:var(--text-muted);line-height:1.55;">'
+            + mjEsc(j.address || '')
+            + '<br>' + mjEsc((j.durationMin || '') + ' min') + (j.routeCode ? '  ·  ' + mjEsc(j.routeCode) : '') + (j.status ? '  ·  ' + mjEsc(j.status) : '')
+            + '<div id="mjjobph-' + jid + '" style="margin-top:5px;">Loading phone…</div>'
+            + '<div style="margin-top:4px;"><a href="https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(j.jobID || '')) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#6db3ff;font-weight:600;text-decoration:none;">🔗 Job ' + mjEsc(j.jobID || '') + ' in Vonigo</a></div>'
+            + '</div>';
           h += '</div>';
         });
         h += '</div>';
         r.innerHTML = h;
+        if (jobs.length === 1 && jobs[0].jobID) mjLoadJobPhone(String(jobs[0].jobID)); // auto-open single → fetch phone now
         return;
       }
-      r.innerHTML = '<div style="font-size:14px;color:var(--text-secondary);background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;line-height:1.5;white-space:pre-wrap;">' + mjEsc(data.message || '') + '</div>';
+      r.innerHTML = '<div style="font-size:14px;color:var(--text-secondary);background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;line-height:1.5;white-space:pre-wrap;">' + mjEsc(data.message || "I didn't catch that — could you rephrase?") + '</div>';
     }
-    function mjToggleRow(i) { const el = document.getElementById('mjrow' + i); const ch = document.getElementById('mjrowchev' + i); if (!el) return; const open = el.style.display !== 'none'; el.style.display = open ? 'none' : 'block'; if (ch) ch.textContent = open ? '▾' : '▴'; }
+    function mjToggleRow(i, jobID) { const el = document.getElementById('mjrow' + i); const ch = document.getElementById('mjrowchev' + i); if (!el) return; const open = el.style.display !== 'none'; el.style.display = open ? 'none' : 'block'; if (ch) ch.textContent = open ? '▾' : '▴'; if (!open) mjLoadJobPhone(jobID); }
+    // Lazy-load the clickable client phone for an expanded job row. Reuses the trucks-map prefetch
+    // (_prefetchJobPhone → crewlogic-job-lookup → clientPhone) + _fmtPhone, so phones are shared-cached.
+    function mjLoadJobPhone(jobID) {
+      if (!jobID) return;
+      const slot = document.getElementById('mjjobph-' + jobID); if (!slot || slot.dataset.loaded) return;
+      slot.dataset.loaded = '1'; slot.style.color = 'var(--text-muted)';
+      _prefetchJobPhone(jobID).then(ph => {
+        slot.innerHTML = ph
+          ? '📞 <a href="tel:' + String(ph).replace(/[^0-9+]/g, '') + '" onclick="event.stopPropagation()" style="color:var(--accent-green,#00E785);font-weight:600;text-decoration:none;">' + mjEsc(_fmtPhone(ph)) + '</a>'
+          : '<span style="color:var(--text-muted);">No phone on file</span>';
+      }).catch(() => { slot.innerHTML = '<span style="color:var(--text-muted);">No phone on file</span>'; });
+    }
     function mjCancelPlan() { _mjPlan = null; document.getElementById('mjResult').innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Cancelled — nothing was changed.</div>'; }
     async function mjExecute() {
       if (!_mjPlan) return;
