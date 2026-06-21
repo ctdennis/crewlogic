@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.8 | 2026-06-21">
+  <meta name="crewlogic-version" content="v5.46.9 | 2026-06-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3629,7 +3629,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         <input type="date" id="mjDatePicker" onchange="mjPickDate(this.value)" style="position:fixed;left:-9999px;width:1px;height:1px;opacity:0;" aria-hidden="true">
 
         <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5;">
-          Speak a command to move or cancel a job, or ask what's available — e.g. <em>"Move the second appointment on Route 1 to Route 3,"</em> <em>"Cancel job 2 on Route 3,"</em> or <em>"What's open Thursday afternoon?"</em> CrewLogic will confirm before making any change.
+          Speak a command to move, reschedule, or cancel a job, or ask what's available — e.g. <em>"Move the second appointment on Route 1 to Route 3,"</em> <em>"Change the Route 1 estimate tomorrow to one hour,"</em> <em>"Cancel job 2 on Route 3,"</em> or <em>"What's open Thursday afternoon?"</em> CrewLogic will confirm before making any change.
         </div>
 
         <div style="display:flex;flex-direction:column;align-items:center;gap:12px;margin-bottom:18px;">
@@ -7773,6 +7773,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         r.innerHTML = mjCard('Confirm cancel', [['Job', p.jobLabel || ''], ['Reason', (p.category || '') + ' · ' + (p.reason || '')], ['Notes', p.comments || '—']]);
         return;
       }
+      if (data.intent === 'duration' && data.plan) {
+        const p = data.plan; _mjPlan = p;
+        const fromTxt = (p.fromDurationMin ? (p.fromDurationMin + ' min') : '—') + ' → ' + (p.durationMin || '?') + ' min';
+        r.innerHTML = mjCard('Confirm duration change', [['Job', p.jobLabel || ''], ['Duration', fromTxt], ['Slot', (p.routeCode || '') + ' · ' + (p.startLabel || '') + ' (unchanged)']]);
+        return;
+      }
       if (data.intent === 'jobs') {
         const jobs = data.jobs || [];
         const hdr = ((data.route || 'All routes')) + (data.dayLabel ? ' · ' + data.dayLabel : '') + ' — ' + jobs.length + ' job' + (jobs.length !== 1 ? 's' : '');
@@ -7819,11 +7825,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!_mjPlan) return;
       const plan = _mjPlan; _mjPlan = null;
       const r = document.getElementById('mjResult');
-      r.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline" style="display:inline-block;"></span>' + (plan.kind === 'cancel' ? 'Cancelling…' : 'Moving…') + '</div>';
+      const busyTxt = plan.kind === 'cancel' ? 'Cancelling…' : plan.kind === 'duration' ? 'Updating duration…' : 'Moving…';
+      r.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline" style="display:inline-block;"></span>' + busyTxt + '</div>';
       const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'execute', franchiseID: currentUser.franchiseID, plan });
       if (data && data.success) {
         _mjHistory = []; // task complete — start a fresh conversation
-        r.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--accent-green,#00E785);border-radius:var(--radius);padding:14px 16px;font-size:14px;color:var(--text-primary);">✅ ' + (plan.kind === 'cancel' ? 'Job cancelled.' : ('Moved to ' + mjEsc(plan.toRouteCode || '') + ' · ' + mjEsc(plan.startLabel || '') + '.')) + '</div>';
+        const okTxt = plan.kind === 'cancel' ? 'Job cancelled.' : plan.kind === 'duration' ? ('Duration updated to ' + mjEsc(String(plan.durationMin || '')) + ' min.') : ('Moved to ' + mjEsc(plan.toRouteCode || '') + ' · ' + mjEsc(plan.startLabel || '') + '.');
+        r.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--accent-green,#00E785);border-radius:var(--radius);padding:14px 16px;font-size:14px;color:var(--text-primary);">✅ ' + okTxt + '</div>';
       } else {
         const msg = (data && (data.error || (data.move && data.move.errMsg) || (data.cancel && data.cancel.errMsg))) || 'The change could not be completed.';
         r.innerHTML = '<div style="color:#ff6b6b;font-size:13px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;">⚠ ' + mjEsc(msg) + '</div>';
