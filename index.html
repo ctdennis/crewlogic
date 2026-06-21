@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.5 | 2026-06-21">
+  <meta name="crewlogic-version" content="v5.46.6 | 2026-06-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3623,6 +3623,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           <div class="section-title">🎤 Manage Jobs</div>
           <button onclick="mjReset()" style="padding:6px 12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm);font-size:12px;color:var(--text-primary);cursor:pointer;">Reset</button>
         </div>
+
+        <!-- Quick-pick the next 5 days (+ calendar) → lists that day's jobs (all routes), same collapsible view as the AI -->
+        <div id="mjDateStrip" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:14px;-webkit-overflow-scrolling:touch;"></div>
+        <input type="date" id="mjDatePicker" onchange="mjPickDate(this.value)" style="position:fixed;left:-9999px;width:1px;height:1px;opacity:0;" aria-hidden="true">
+
         <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5;">
           Speak a command to move or cancel a job, or ask what's available — e.g. <em>"Move the second appointment on Route 1 to Route 3,"</em> <em>"Cancel job 2 on Route 3,"</em> or <em>"What's open Thursday afternoon?"</em> CrewLogic will confirm before making any change.
         </div>
@@ -7533,7 +7538,64 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const t = document.getElementById('mjTextInput'); if (t) t.value = '';
       const tr = document.getElementById('mjTranscript'); if (tr) { tr.style.display = 'none'; tr.textContent = ''; }
       const r = document.getElementById('mjResult'); if (r) r.innerHTML = '';
+      document.querySelectorAll('#mjDateStrip .mj-date-chip').forEach(c => mjChipActive(c, false));
       mjMicUI(false);
+    }
+    // ── Manage Jobs: date strip — quick-pick the next 5 days (+ calendar) → list that day's jobs.
+    // Calls the deterministic crewlogic-dispatch listRouteJobs (no AI), then renders via the SAME
+    // 'jobs' branch of mjRenderResult that the AI uses — so the collapsible list is identical.
+    function mjDayID(d) { return '' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0'); }
+    function mjDayLabelFromID(dayID) {
+      const y = +String(dayID).slice(0, 4), mo = +String(dayID).slice(4, 6) - 1, d = +String(dayID).slice(6, 8);
+      const dt = new Date(y, mo, d);
+      return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dt.getDay()] + ' ' + (mo + 1) + '/' + d;
+    }
+    function mjChipActive(el, on) {
+      if (!el) return;
+      el.style.background = on ? 'var(--accent-green,#00E785)' : 'var(--btn-surface,#34485d)';
+      el.style.color = on ? '#06121d' : 'var(--text-primary)';
+      el.style.borderColor = on ? 'var(--accent-green,#00E785)' : 'var(--btn-surface-border,#46596d)';
+    }
+    function mjBuildDateStrip() {
+      const strip = document.getElementById('mjDateStrip'); if (!strip) return;
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      let h = '';
+      for (let i = 0; i < 5; i++) {
+        const d = new Date(today); d.setDate(today.getDate() + i);
+        const id = mjDayID(d);
+        const label = i === 0 ? 'Today' : (i === 1 ? 'Tomorrow' : mjDayLabelFromID(id));
+        h += '<button class="mj-date-chip" data-dayid="' + id + '" onclick="mjSelectDate(\'' + id + '\',this)" style="flex:0 0 auto;padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">' + mjEsc(label) + '</button>';
+      }
+      h += '<button onclick="mjOpenDatePicker()" title="Pick a date" style="flex:0 0 auto;padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-size:15px;cursor:pointer;">📅</button>';
+      strip.innerHTML = h;
+    }
+    function mjOpenDatePicker() {
+      const p = document.getElementById('mjDatePicker'); if (!p) return;
+      if (p.showPicker) { try { p.showPicker(); return; } catch (e) {} }
+      p.click();
+    }
+    function mjPickDate(val) {
+      if (!val) return;
+      const id = String(val).replace(/-/g, '');
+      // a custom-picked date may or may not be one of the 5 chips — highlight a matching chip if present
+      document.querySelectorAll('#mjDateStrip .mj-date-chip').forEach(c => mjChipActive(c, c.dataset.dayid === id));
+      const chip = document.querySelector('#mjDateStrip .mj-date-chip[data-dayid="' + id + '"]');
+      mjSelectDate(id, chip || null);
+    }
+    async function mjSelectDate(dayID, chipEl) {
+      document.querySelectorAll('#mjDateStrip .mj-date-chip').forEach(c => mjChipActive(c, c === chipEl));
+      _mjPlan = null;
+      const r = document.getElementById('mjResult');
+      r.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline" style="display:inline-block;"></span>Loading jobs…</div>';
+      const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'listRouteJobs', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, dayID, withCoords: false });
+      if (!data || !data.success) { r.innerHTML = '<div style="color:#ff6b6b;font-size:13px;">' + mjEsc((data && data.error) || 'Could not load jobs.') + '</div>'; return; }
+      const dayLabel = mjDayLabelFromID(dayID), jobs = data.jobs || [];
+      // Mirror the AI 'jobs' path's conversation memory so a follow-up ("move the 2nd job to Route 3")
+      // resolves against the exact jobs just listed (number, time, client, route, JobID, WO, duration, zip).
+      _mjHistory.push({ role: 'user', text: 'List all jobs on ' + dayLabel });
+      _mjHistory.push({ role: 'assistant', text: 'Listed ' + jobs.length + ' job' + (jobs.length !== 1 ? 's' : '') + ' on all routes ' + dayLabel + ': ' + jobs.map((j, n) => (n + 1) + '. ' + (j.timeLabel || '') + ' ' + (j.client || '') + ' (' + (j.routeCode || '') + ', Job ' + (j.jobID || '') + ', WO ' + (j.woID || '') + ', ' + (j.durationMin || '') + 'min, zip ' + (j.zip || '') + ')').join('; ') });
+      if (_mjHistory.length > 8) _mjHistory = _mjHistory.slice(-8);
+      mjRenderResult({ intent: 'jobs', route: 'All routes', dayID, dayLabel, jobs });
     }
     function mjMicUI(on) {
       _mjListening = on;
@@ -7727,6 +7789,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('headerTitle').textContent = 'Manage Jobs';
         currentScreen = 'manageJobs';
         mjReset();
+        mjBuildDateStrip();
         return;
       }
 
