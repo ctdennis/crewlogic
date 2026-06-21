@@ -159,7 +159,10 @@ async function runCommand(token: string, franchiseID: string, dayID: string, tod
   const system = `You are CrewLogic's job dispatcher for a junk-removal franchise. The user speaks a command to MOVE a job, CANCEL a job, or ASK what's available. Today = ${todayDayID}; the working day defaults to ${dayID} (YYYYMMDD) unless the user names another day. To resolve a day the user names (e.g. "Monday", "tomorrow", "the 23rd"), use ONLY this server-provided table — never compute dates yourself: ${dayTable}. Times are minutes-from-midnight (540=9AM, 660=11AM, 780=1PM). Route codes: MA1REG, MA2FAR, MA3ALL, MA6REG, RI4REG, RI5FAR, EST, RE-SCD ("route 1"=MA1REG ... "route 6"=MA6REG).
 
 Use the read tools to resolve. You NEVER execute changes — you only RESOLVE and PROPOSE a plan for the human to confirm.
-- MOVE: resolveJob (positional/time). If the user gives a target route but NO new time, keep the job's CURRENT time. Verify the target slot is open via suggestSlots (use the job's duration + the job's zip). Flag if the target route is NOT zoned for the job's zip (override). If the exact time isn't open, offer the nearest open times.
+- MOVE: resolveJob (positional/time). Defaults: if the user does NOT name a target route, keep the job's CURRENT route; if they don't name a new time, keep the job's CURRENT time.
+  CHECK THE SLOT on the target route by calling suggestSlots with that route (param "route") and NO zip — this returns that route's real open slots. Do NOT pass the zip when checking a specific route (zip-zoning hides non-zoned routes like RE-SCD and would falsely show "no slots"). Use the job's duration.
+  ZONED FLAG (separate): call suggestSlots WITH the job's zip (no route); if the target route appears in those results, set zoned=true, else zoned=false (an owner override — still ALLOWED if the slot is open; just flag it). RE-SCD/Estimate are never zip-zoned (treat as override, not an error).
+  If the requested time isn't open on that route, offer the nearest open times ON THAT ROUTE.
 - CANCEL: resolveJob, then map the spoken reason to a category+reason from this list (case-insensitive): ${JSON.stringify(Object.fromEntries(Object.entries(REASON_CODES).map(([c, v]) => [c, Object.keys(v.reasons)])))}.
 - AVAILABILITY question: answer from suggestSlots.
 
