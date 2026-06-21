@@ -76,6 +76,17 @@ async function vonigoAuth(franchiseID: string): Promise<{ token: string } | { er
 const vpost = (token: string, path: string, payload: any) =>
   fetch(VONIGO_BASE + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ securityToken: token, ...payload }) }).then(r => r.json());
 
+// Durable audit of every dispatcher write (move/cancel), incl. dry-runs. BEST-EFFORT: a failure here
+// must NEVER block or fail the actual Vonigo write — it only logs. (Table: dispatch_audit, migration 0024.)
+async function audit(row: { franchiseID: string; action: string; commandText?: string | null; resolved?: unknown; fieldsWritten?: unknown; vonigoErrno?: number | null; success: boolean; dryRun?: boolean; result?: unknown; actorEmail?: string | null }) {
+  try {
+    const sb = supa();
+    let franchise_id: string | null = null, tenant_id: string | null = TENANT_ID;
+    try { const { data: fr } = await sb.from('franchises').select('id, tenant_id').eq('external_id', row.franchiseID).eq('tenant_id', TENANT_ID).single(); if (fr) { franchise_id = fr.id; tenant_id = fr.tenant_id; } } catch { /* best-effort */ }
+    await sb.from('dispatch_audit').insert({ tenant_id, franchise_id, franchise_external_id: row.franchiseID, actor_email: row.actorEmail ?? null, action: row.action, command_text: row.commandText ?? null, resolved: row.resolved ?? null, fields_written: row.fieldsWritten ?? null, vonigo_errno: row.vonigoErrno ?? null, success: row.success, dry_run: row.dryRun ?? false, result: row.result ?? null });
+  } catch (e) { console.error('[dispatch][audit] failed (non-fatal):', (e as Error).message); }
+}
+
 // Geocode (cache-first, free US Census) — gives route-opt the lat/lon it needs.
 async function geocode(addr: string): Promise<{ lat: number; lon: number } | null> {
   const oneLine = String(addr || '').replace(/\n/g, ', ').replace(/\s+/g, ' ').trim();
@@ -301,6 +312,7 @@ Deno.serve(async (req: Request) => {
       const mv = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockID) });
       const ok = mv.errNo === 0;
       console.log(`[dispatch][AUDIT] moveJob wo=${woID} -> route=${routeID} ${plan.startLabel} ${dayID} lock=${lockID} errNo=${mv.errNo}`);
+      await audit({ franchiseID, action: 'move', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan, lockID }, fieldsWritten: { method: 16, objectID: String(woID), lockID: String(lockID) }, vonigoErrno: mv.errNo, success: ok, result: { errMsg: mv.errMsg || null, errors: mv.Errors || null } });
       return json({ success: ok, plan, lockID, move: { errNo: mv.errNo, errMsg: mv.errMsg || null, errors: mv.Errors || null } }, ok ? 200 : 502);
     }
 
@@ -315,6 +327,7 @@ Deno.serve(async (req: Request) => {
       const c = await vpost(token, '/data/Jobs/', { method: '4', objectID: String(jobID), Fields });
       const ok = c.errNo === 0;
       console.log(`[dispatch][AUDIT] cancelJob job=${jobID} cat=${categoryOptionID} reason=${reasonOptionID} errNo=${c.errNo}`);
+      await audit({ franchiseID, action: 'cancel', actorEmail: body.actorEmail, commandText: body.commandText, resolved: plan, fieldsWritten: { method: 4, objectID: String(jobID), Fields }, vonigoErrno: c.errNo, success: ok, result: { errMsg: c.errMsg || null, errors: c.Errors || null } });
       return json({ success: ok, plan, cancel: { errNo: c.errNo, errMsg: c.errMsg || null, errors: c.Errors || null } }, ok ? 200 : 502);
     }
 
@@ -340,6 +353,7 @@ Deno.serve(async (req: Request) => {
         const mv = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockID) });
         const ok = mv.errNo === 0;
         console.log(`[dispatch][AUDIT] execute move wo=${woID} route=${toRouteID} ${plan.startLabel} ${dayID} lock=${lockID} errNo=${mv.errNo}`);
+        await audit({ franchiseID, action: 'move', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan, toRouteID, lockID }, fieldsWritten: { method: 16, objectID: String(woID), lockID: String(lockID) }, vonigoErrno: mv.errNo, success: ok, result: { errMsg: mv.errMsg || null, errors: mv.Errors || null } });
         return json({ success: ok, kind: 'move', plan, move: { errNo: mv.errNo, errMsg: mv.errMsg || null, errors: mv.Errors || null } }, ok ? 200 : 502);
       }
       if (plan.kind === 'cancel') {
@@ -355,6 +369,7 @@ Deno.serve(async (req: Request) => {
         const c = await vpost(token, '/data/Jobs/', { method: '4', objectID: String(plan.jobID), Fields });
         const ok = c.errNo === 0;
         console.log(`[dispatch][AUDIT] execute cancel job=${plan.jobID} ${cat}/${reason} errNo=${c.errNo}`);
+        await audit({ franchiseID, action: 'cancel', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { jobID: String(plan.jobID), category: cat, reason, categoryOptionID, reasonOptionID, comments: plan.comments || null }, fieldsWritten: { method: 4, objectID: String(plan.jobID), Fields }, vonigoErrno: c.errNo, success: ok, result: { errMsg: c.errMsg || null, errors: c.Errors || null } });
         return json({ success: ok, kind: 'cancel', plan, cancel: { errNo: c.errNo, errMsg: c.errMsg || null, errors: c.Errors || null } }, ok ? 200 : 502);
       }
       return json({ success: false, error: 'execute needs plan.kind = move | cancel' }, 400);
