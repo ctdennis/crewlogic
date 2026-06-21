@@ -162,6 +162,7 @@ async function runCommand(token: string, franchiseID: string, dayID: string, tod
     { name: 'listRouteJobs', description: 'List jobs on a route (or all routes) for a day, with times/durations/zip.', input_schema: { type: 'object', properties: { route: { type: 'string' }, dayID: { type: 'string' } }, required: [] } },
     { name: 'suggestSlots', description: 'Open booking slots for a day. Pass zip for the job\'s ZONED routes (normal); omit zip for ALL routes (owner override). route (code like MA3ALL or "Route 3") to check one route.', input_schema: { type: 'object', properties: { dayID: { type: 'string' }, durationMin: { type: 'number' }, zip: { type: 'string' }, route: { type: 'string', description: 'route code e.g. MA3ALL or "Route 3"' } }, required: ['durationMin'] } },
     { name: 'respond', description: 'Call this ONLY when you have a concrete MOVE or CANCEL plan ready for the user to confirm — include the plan object. For availability answers or clarifying questions, do NOT call respond; just reply in plain text.', input_schema: { type: 'object', properties: { intent: { type: 'string', enum: ['move', 'cancel'] }, message: { type: 'string', description: 'one short sentence confirming what will happen' }, plan: { type: 'object', description: 'MOVE: {kind:"move",woID,jobLabel,fromLabel,toRouteCode,dayID,startTime,startLabel,durationMin,zip,zoned}. CANCEL: {kind:"cancel",jobID,jobLabel,category,reason,comments}.' } }, required: ['intent', 'message', 'plan'] } },
+    { name: 'showJobs', description: 'Use this to ANSWER a "what jobs are on <route> [on <day>]" request — the app renders a clean expandable list, so do NOT list jobs in text and do NOT also call listRouteJobs. Pass the route code (omit to list all routes that day) and dayID.', input_schema: { type: 'object', properties: { route: { type: 'string', description: 'route code e.g. RE-SCD; omit for all routes' }, dayID: { type: 'string' } }, required: [] } },
   ];
   // Server-computed day table (TZ-correct) so the AI never does date math — it just looks up day names.
   const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -180,7 +181,8 @@ Everything in the final plan must appear in the confirm message so the human ver
   (b) User does NOT name a target route: ASK FIRST (intent "clarify") whether to keep the job on its CURRENT route or move it to a different (zoned) route — e.g. "Keep this on RE-SCD, or move it to one of its zoned routes?" You MAY note which zoned routes have the requested time open (from suggestSlots WITH the job's zip). Do NOT pick a route yourself yet. After the user answers: "same/keep" -> check the CURRENT route (suggestSlots route=current, NO zip) and propose; "different/zoned/move it" -> use the zoned routes (suggestSlots with the zip): if exactly ONE has the time open propose it, if MULTIPLE ask which, if NONE offer the nearest open times.
   If the requested time isn't open, offer the nearest open times.
 - CANCEL: resolveJob, then map the spoken reason to a category+reason from this list (case-insensitive): ${JSON.stringify(Object.fromEntries(Object.entries(REASON_CODES).map(([c, v]) => [c, Object.keys(v.reasons)])))}.
-- AVAILABILITY question: answer from suggestSlots.
+- LISTING jobs ("what jobs are on RE-SCD tomorrow", "what's on route 3"): call showJobs(route, dayID) — the app renders a clean expandable list. Do NOT list them in text and do NOT call listRouteJobs for this.
+- AVAILABILITY question (open slots/times): answer from suggestSlots in plain text.
 
 TO FINISH: if (and only if) you have a concrete MOVE or CANCEL plan ready to confirm, call the "respond" tool with intent (move|cancel) + the plan. For an AVAILABILITY answer or a CLARIFYING question, reply in plain text and SHOW the options (route CODES like MA1REG/MA6REG — never raw route ID numbers — and the open times) to help the user decide.
 YOUR PLAIN-TEXT REPLY IS SHOWN VERBATIM TO THE USER — it must contain ONLY the final answer or question. Do NOT narrate your steps or thinking: no "let me check…", "before I…", "actually…", no minutes-from-midnight math, no tool talk. Do all checking SILENTLY via the tools first, then give one clean reply.
@@ -201,6 +203,16 @@ FORMAT for a NARROW PHONE SCREEN: NEVER use markdown tables or "|" pipe characte
     // Terminal: the AI called respond() with its final structured answer.
     const respondBlock = data.content.find((b: any) => b.type === 'tool_use' && b.name === 'respond');
     if (respondBlock) return respondBlock.input || { intent: 'error', message: 'No answer produced.' };
+    const showBlock = data.content.find((b: any) => b.type === 'tool_use' && b.name === 'showJobs');
+    if (showBlock) {
+      const a = showBlock.input || {};
+      const d = String(a.dayID || dayID);
+      const jobs = await listRouteJobs(token, franchiseID, d, a.route ? String(a.route) : undefined, false);
+      const WD2 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const dt = new Date(Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8)));
+      const dayLabel = `${WD2[dt.getUTCDay()]} ${+d.slice(4, 6)}/${+d.slice(6, 8)}`;
+      return { intent: 'jobs', route: a.route || '', dayID: d, dayLabel, jobs: jobs.map((j: any) => ({ jobID: j.jobID, client: j.client, address: j.address, zip: j.zip, timeLabel: j.timeLabel, durationMin: j.durationMin, routeCode: j.routeCode, status: j.status })) };
+    }
     if (data.stop_reason === 'tool_use') {
       const results: any[] = [];
       for (const block of data.content) {

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.3 | 2026-06-21">
+  <meta name="crewlogic-version" content="v5.46.4 | 2026-06-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7608,8 +7608,28 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         r.innerHTML = mjCard('Confirm cancel', [['Job', p.jobLabel || ''], ['Reason', (p.category || '') + ' · ' + (p.reason || '')], ['Notes', p.comments || '—']]);
         return;
       }
+      if (data.intent === 'jobs') {
+        const jobs = data.jobs || [];
+        const hdr = ((data.route || 'All routes')) + (data.dayLabel ? ' · ' + data.dayLabel : '') + ' — ' + jobs.length + ' job' + (jobs.length !== 1 ? 's' : '');
+        let h = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">';
+        h += '<div style="padding:11px 14px;font-weight:700;font-size:13px;color:var(--text-primary);border-bottom:1px solid var(--border);">' + mjEsc(hdr) + '</div>';
+        if (!jobs.length) h += '<div style="padding:12px 14px;font-size:13px;color:var(--text-muted);">No jobs.</div>';
+        jobs.forEach((j, i) => {
+          const openInit = jobs.length === 1; // single job → show details
+          h += '<div onclick="mjToggleRow(' + i + ')" style="padding:11px 14px;cursor:pointer;' + (i < jobs.length - 1 ? 'border-bottom:1px solid var(--border);' : '') + '">';
+          h += '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">';
+          h += '<span style="font-size:14px;color:var(--text-primary);"><span style="color:var(--accent-green,#00E785);font-weight:700;">' + mjEsc(j.timeLabel || '') + '</span>&nbsp;&nbsp;' + mjEsc(j.client || '') + '</span>';
+          h += '<span id="mjrowchev' + i + '" style="color:var(--text-muted);font-size:11px;">' + (openInit ? '▴' : '▾') + '</span></div>';
+          h += '<div id="mjrow' + i + '" style="display:' + (openInit ? 'block' : 'none') + ';margin-top:8px;font-size:12px;color:var(--text-muted);line-height:1.55;">' + mjEsc(j.address || '') + '<br>' + mjEsc((j.durationMin || '') + ' min') + (j.routeCode ? '  ·  ' + mjEsc(j.routeCode) : '') + '  ·  Job ' + mjEsc(j.jobID || '') + (j.status ? '  ·  ' + mjEsc(j.status) : '') + '</div>';
+          h += '</div>';
+        });
+        h += '</div>';
+        r.innerHTML = h;
+        return;
+      }
       r.innerHTML = '<div style="font-size:14px;color:var(--text-secondary);background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;line-height:1.5;white-space:pre-wrap;">' + mjEsc(data.message || '') + '</div>';
     }
+    function mjToggleRow(i) { const el = document.getElementById('mjrow' + i); const ch = document.getElementById('mjrowchev' + i); if (!el) return; const open = el.style.display !== 'none'; el.style.display = open ? 'none' : 'block'; if (ch) ch.textContent = open ? '▾' : '▴'; }
     function mjCancelPlan() { _mjPlan = null; document.getElementById('mjResult').innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Cancelled — nothing was changed.</div>'; }
     async function mjExecute() {
       if (!_mjPlan) return;
