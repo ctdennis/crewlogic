@@ -381,20 +381,19 @@ Deno.serve(async (req: Request) => {
         return json({ success: ok, kind: 'cancel', plan, cancel: { errNo: c.errNo, errMsg: c.errMsg || null, errors: c.Errors || null } }, ok ? 200 : 502);
       }
       if (plan.kind === 'duration') {
-        // Duration change = re-lock the SAME slot (current route/day/start) at the NEW length, then commit
-        // with method 16 — the same proven appointment-write primitive as a move, slot unchanged.
-        const { woID, dayID, startTime } = plan;
-        const duration = String(plan.durationMin || ''), zip = String(plan.zip || ''), serviceTypeID = String(plan.serviceTypeID || '11');
-        const routeID = await resolveRouteID(token, String(dayID), String(plan.routeCode || plan.routeID || ''));
-        if (!woID || !routeID || !dayID || startTime == null || !duration) return json({ success: false, error: 'duration plan missing woID / resolvable routeCode / dayID / startTime / durationMin', routeID }, 400);
-        const lock = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID: String(routeID), zip, serviceTypeID, duration, startTime: String(startTime) });
-        const lockID = lock.Ids && (lock.Ids.lockID || lock.Ids.LockID);
-        if (!lockID) return json({ success: false, error: 'could not set the new duration (slot not open that long?)', lock: { errNo: lock.errNo, errors: lock.Errors || null } }, 409);
-        const mv = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockID) });
-        const ok = mv.errNo === 0;
-        console.log(`[dispatch][AUDIT] execute duration wo=${woID} -> ${duration}min ${plan.startLabel || ''} ${dayID} lock=${lockID} errNo=${mv.errNo}`);
-        await audit({ franchiseID, action: 'duration', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan, routeID, lockID }, fieldsWritten: { method: 16, objectID: String(woID), lockID: String(lockID), durationMin: duration }, vonigoErrno: mv.errNo, success: ok, result: { errMsg: mv.errMsg || null, errors: mv.Errors || null } });
-        return json({ success: ok, kind: 'duration', plan, move: { errNo: mv.errNo, errMsg: mv.errMsg || null, errors: mv.Errors || null } }, ok ? 200 : 502);
+        // Duration change = direct field edit of the WorkOrder duration (field 186) via method 2 (Edit) —
+        // the same proven edit pattern as the National Accounts summary write. The slot does NOT move, so
+        // we deliberately do NOT use the lock+method16 reschedule path (the same-start re-lock is rejected
+        // because the job already occupies that instant).
+        const { woID } = plan;
+        const duration = String(plan.durationMin || '');
+        if (!woID || !duration) return json({ success: false, error: 'duration plan missing woID / durationMin' }, 400);
+        const Fields = [{ fieldID: 186, fieldValue: duration }];
+        const ed = await vpost(token, '/data/WorkOrders/', { method: '2', objectID: String(woID), Fields });
+        const ok = ed.errNo === 0;
+        console.log(`[dispatch][AUDIT] execute duration wo=${woID} -> ${duration}min (field 186, method 2) errNo=${ed.errNo}`);
+        await audit({ franchiseID, action: 'duration', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan }, fieldsWritten: { method: 2, objectID: String(woID), Fields }, vonigoErrno: ed.errNo, success: ok, result: { errMsg: ed.errMsg || null, errors: ed.Errors || null } });
+        return json({ success: ok, kind: 'duration', plan, edit: { errNo: ed.errNo, errMsg: ed.errMsg || null, errors: ed.Errors || null } }, ok ? 200 : 502);
       }
       return json({ success: false, error: 'execute needs plan.kind = move | duration | cancel' }, 400);
     }
