@@ -182,7 +182,8 @@ Everything in the final plan must appear in the confirm message so the human ver
 - CANCEL: resolveJob, then map the spoken reason to a category+reason from this list (case-insensitive): ${JSON.stringify(Object.fromEntries(Object.entries(REASON_CODES).map(([c, v]) => [c, Object.keys(v.reasons)])))}.
 - AVAILABILITY question: answer from suggestSlots.
 
-TO FINISH: if (and only if) you have a concrete MOVE or CANCEL plan ready to confirm, call the "respond" tool with intent (move|cancel) + the plan. For an AVAILABILITY answer or a CLARIFYING question, just reply in plain, concise text — and to help the user decide, SHOW the relevant options: route CODES (e.g. MA1REG, MA6REG — never raw route ID numbers) and the open times. Resolve route codes via your tools' route names.`;
+TO FINISH: if (and only if) you have a concrete MOVE or CANCEL plan ready to confirm, call the "respond" tool with intent (move|cancel) + the plan. For an AVAILABILITY answer or a CLARIFYING question, reply in plain text and SHOW the options (route CODES like MA1REG/MA6REG — never raw route ID numbers — and the open times) to help the user decide.
+FORMAT for a NARROW PHONE SCREEN: NEVER use markdown tables or "|" pipe characters. Use short lines or simple "•" bullets, ONE job/option per line, e.g. "• 12:00 PM · Dennis, Charles · Lakeville 02347 · 90 min (Job 855649)". Lead with a one-line summary, then the bulleted list. Keep it brief.`;
   // Seed with prior plain-text turns (conversation memory) so "that job"/"it" resolves.
   const messages: any[] = [];
   for (const h of (Array.isArray(history) ? history.slice(-6) : [])) {
@@ -228,7 +229,8 @@ TO FINISH: if (and only if) you have a concrete MOVE or CANCEL plan ready to con
       jt = end >= 0 ? jt.slice(st, end + 1) : jt.slice(st);
     }
     // If it's JSON (a plan), use it; otherwise it's a natural-language clarify/availability answer — show it.
-    try { return JSON.parse(jt); } catch { return { intent: 'info', message: text.replace(/\*\*/g, '').replace(/\s*\n\s*/g, ' ').trim() || 'Okay.' }; }
+    // Plain-text clarify/availability: keep line breaks (so bullet lists render), strip markdown bold + stray table pipes.
+    try { return JSON.parse(jt); } catch { return { intent: 'info', message: text.replace(/\*\*/g, '').replace(/^\s*\|.*\|\s*$/gm, '').replace(/\n{3,}/g, '\n\n').trim() || 'Okay.' }; }
   }
   return { intent: 'error', message: 'Too many steps resolving the command.' };
 }
