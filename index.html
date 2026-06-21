@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.0 | 2026-06-21">
+  <meta name="crewlogic-version" content="v5.46.1 | 2026-06-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7523,11 +7523,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // ── Manage Jobs (voice dispatcher) ────────────────────────────────────────
-    let _mjPlan = null, _mjRec = null, _mjListening = false;
+    let _mjPlan = null, _mjRec = null, _mjListening = false, _mjHistory = [], _mjGotResult = false;
     function mjSpeechOK() { return !!(window.SpeechRecognition || window.webkitSpeechRecognition); }
     function mjEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
     function mjReset() {
-      _mjPlan = null;
+      _mjPlan = null; _mjHistory = [];
       if (_mjRec) { try { _mjRec.stop(); } catch (e) {} }
       _mjListening = false;
       const t = document.getElementById('mjTextInput'); if (t) t.value = '';
@@ -7545,10 +7545,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!mjSpeechOK()) { if (s) s.textContent = 'Voice not supported — type below'; return; }
       if (_mjListening) { if (_mjRec) { try { _mjRec.stop(); } catch (e) {} } mjMicUI(false); return; }
       const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-      _mjRec = new SR(); _mjRec.lang = 'en-US'; _mjRec.interimResults = false; _mjRec.maxAlternatives = 1;
-      _mjRec.onresult = (e) => { const txt = e.results[0][0].transcript; mjMicUI(false); mjHandle(txt); };
-      _mjRec.onerror = () => { mjMicUI(false); if (s) s.textContent = "Didn't catch that — try again"; };
-      _mjRec.onend = () => { mjMicUI(false); };
+      _mjRec = new SR(); _mjRec.lang = 'en-US'; _mjRec.interimResults = true; _mjRec.maxAlternatives = 1;
+      _mjGotResult = false;
+      const tr = document.getElementById('mjTranscript');
+      _mjRec.onresult = (e) => {
+        let interim = '', final = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) final += t; else interim += t; }
+        if (tr) { tr.style.display = 'block'; tr.textContent = '“' + (final || interim) + '”'; }
+        if (final.trim()) { _mjGotResult = true; mjMicUI(false); try { _mjRec.stop(); } catch (e2) {} mjHandle(final.trim()); }
+      };
+      _mjRec.onerror = (ev) => { mjMicUI(false); if (s) s.textContent = (ev && ev.error === 'not-allowed') ? 'Mic permission blocked — allow it or type below' : "Didn't catch that — tap and speak again, or type"; };
+      _mjRec.onend = () => { mjMicUI(false); if (!_mjGotResult && s) s.textContent = "Didn't catch that — tap and speak again, or type"; };
       try { _mjRec.start(); mjMicUI(true); } catch (e) { mjMicUI(false); }
     }
     function mjSendText() { const t = document.getElementById('mjTextInput'); const v = (t.value || '').trim(); if (!v) return; t.value = ''; mjHandle(v); }
@@ -7564,8 +7571,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function mjSendCommand(transcript) {
       const r = document.getElementById('mjResult'); _mjPlan = null;
       r.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline" style="display:inline-block;"></span>Thinking…</div>';
-      const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'command', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, transcript });
+      const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'command', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, transcript, history: _mjHistory });
       if (!data || !data.success) { r.innerHTML = '<div style="color:#ff6b6b;font-size:13px;">' + mjEsc((data && data.error) || 'Something went wrong.') + '</div>'; return; }
+      // keep short conversation memory so "that job" / "it" resolves on the next command
+      _mjHistory.push({ role: 'user', text: transcript });
+      if (data.message) _mjHistory.push({ role: 'assistant', text: data.message });
+      if (_mjHistory.length > 8) _mjHistory = _mjHistory.slice(-8);
       mjRenderResult(data);
     }
     function mjCard(title, rows) {
@@ -7598,6 +7609,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       r.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline" style="display:inline-block;"></span>' + (plan.kind === 'cancel' ? 'Cancelling…' : 'Moving…') + '</div>';
       const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'execute', franchiseID: currentUser.franchiseID, plan });
       if (data && data.success) {
+        _mjHistory = []; // task complete — start a fresh conversation
         r.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--accent-green,#00E785);border-radius:var(--radius);padding:14px 16px;font-size:14px;color:var(--text-primary);">✅ ' + (plan.kind === 'cancel' ? 'Job cancelled.' : ('Moved to ' + mjEsc(plan.toRouteCode || '') + ' · ' + mjEsc(plan.startLabel || '') + '.')) + '</div>';
       } else {
         const msg = (data && (data.error || (data.move && data.move.errMsg) || (data.cancel && data.cancel.errMsg))) || 'The change could not be completed.';

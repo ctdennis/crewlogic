@@ -146,7 +146,7 @@ async function suggestSlotsFn(token: string, franchiseID: string, dayID: string,
 }
 
 // Claude tool-use loop. READ-only tools; returns a structured {intent, message, plan?} — NEVER executes a write.
-async function runCommand(token: string, franchiseID: string, dayID: string, todayDayID: string, transcript: string) {
+async function runCommand(token: string, franchiseID: string, dayID: string, todayDayID: string, transcript: string, history: any[] = []) {
   if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not configured');
   const tools = [
     { name: 'resolveJob', description: 'Find the job the user means on a route. Address by stop position (1-based within the route), time (minutes-from-midnight), or jobID.', input_schema: { type: 'object', properties: { route: { type: 'string', description: 'route code e.g. MA1REG, or number "1"' }, position: { type: 'number' }, timeMin: { type: 'number' }, jobID: { type: 'string' }, dayID: { type: 'string', description: 'YYYYMMDD; default = the working day' } }, required: [] } },
@@ -168,7 +168,14 @@ When done, output ONLY a JSON object (no prose, no markdown) with this shape:
 - move plan: {"kind":"move","woID","jobLabel","fromLabel","toRouteCode","dayID","startTime","startLabel","durationMin","zip","zoned":true|false}  (use the route CODE, not a number)
 - cancel plan: {"kind":"cancel","jobID","jobLabel","category","reason","comments"}
 - availability/clarify/error: omit plan; put the answer/question in message.`;
-  const messages: any[] = [{ role: 'user', content: transcript }];
+  // Seed with prior plain-text turns (conversation memory) so "that job"/"it" resolves.
+  const messages: any[] = [];
+  for (const h of (Array.isArray(history) ? history.slice(-6) : [])) {
+    const role = h.role === 'assistant' ? 'assistant' : 'user';
+    const text = String(h.text || h.content || '').slice(0, 800);
+    if (text) messages.push({ role, content: text });
+  }
+  messages.push({ role: 'user', content: transcript });
   for (let i = 0; i < 6; i++) {
     const res = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: MODEL, max_tokens: 1024, system, tools, messages }) });
     const data = await res.json();
@@ -274,7 +281,7 @@ Deno.serve(async (req: Request) => {
       const transcript = String(body.transcript || '').trim();
       if (!transcript) return json({ success: false, error: 'transcript required' }, 400);
       const dayID = String(body.dayID || easternDayID(0));
-      const result = await runCommand(token, franchiseID, dayID, easternDayID(0), transcript);
+      const result = await runCommand(token, franchiseID, dayID, easternDayID(0), transcript, body.history || []);
       return json({ success: true, ...result });
     }
 
