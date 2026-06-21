@@ -63,10 +63,10 @@ Model: a capable tier (Sonnet+; reason/route codes are identifier-grade — no f
 3. Reconcile request vs availability: if the requested slot is open → propose it; if closed/taken → offer nearest open alternatives; if 0 slots that day → tell Owner the route has no openings that day and offer another day (do NOT say "unserved" — #90 covers all RI + SE-MA).
 4. (Optional) acquire a **lock** on the chosen slot to hold it through confirmation.
 5. **Confirm** the resolved route + day + time.
-6. Execute the appointment move — **WorkOrder edit (method 2)** rewriting date (185)/time (9082)/route relation. *(WRITE PATH TO VALIDATE — see Open Items.)* Release lock; read back.
+6. Execute the move — **PROVEN flow (P0 spike 2026-06-21):** mint a lock on the target slot (`/resources/availability/` method 2 → `Ids.lockID`), then `/data/WorkOrders/` **method 16** `{objectID, lockID}`. (A plain method-2 field edit of 9082/185 is a silent no-op — appointment is scheduler-managed.) Read back to confirm. Verified moving bogus WO 985575 9→11 AM.
 
 ## Open items to validate before/during build
-- **MOVE write path:** confirm editing the WorkOrder appointment (date/time/route) via method 2 actually reschedules (the edit pattern is proven on Jobs field 978; not yet on WO appointment fields). One read-only-then-careful-write spike on the cleared **RE-SCD** route.
+- ~~**MOVE write path**~~ **RESOLVED (P0 spike 2026-06-21):** move = lock (availability method 2 → lockID) + `/data/WorkOrders/` method 16 `{objectID, lockID}`. Field-edit doesn't work. Verified on bogus WO 985575 (9→11 AM).
 - **Full cancel picklist:** enumerate field 974 categories (Customer Initiated / Pricing / Scheduling) + field 975 reason optionIDs per category (only Scheduling→"Customer not ready" 10133/10129 captured so far).
 - **Client Contact field:** UI marks it required on cancel; appears to map to the client relation — confirm whether method 4 needs it explicitly.
 - **Job addressing grammar:** stop-number vs time vs client-name vs jobID; default day = today unless stated.
@@ -77,7 +77,7 @@ Model: a capable tier (Sonnet+; reason/route codes are identifier-grade — no f
 - Never auto-execute from a single parse; never fabricate reason/route codes.
 
 ## Phasing
-- **P0 spike:** validate the MOVE write on RE-SCD; pull full cancel picklist.
+- **P0 spike:** ✅ MOVE write proven (lock + method 16, bogus WO 985575). Remaining P0: pull full cancel reason picklist (974 categories + 975 reasons).
 - **P1:** edge fn `crewlogic-dispatch` (tool agent) + cancel flow end-to-end (confirm + audit + dry-run).
 - **P2:** move flow (zoning suggest + lock + WO edit).
 - **P3:** PWA mic UI + read-back; owner-override toggle.
