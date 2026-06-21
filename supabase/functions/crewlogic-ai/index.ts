@@ -191,6 +191,17 @@ DIMENSIONAL CALCULATIONS - when explicit measurements are given, always calculat
 - Fill defaults: empty=5%, quarter=25%, half=50%, three-quarters=75%, packed=100%
 - Convert inches to feet before calculating
 
+SCALE REFERENCE (REQUIRED before estimating any pile, debris, or open-area volume from a photo):
+Find a known-size object in frame and use it to estimate the REAL dimensions in feet. Do NOT guess dimensions without an anchor.
+  Cinder/concrete block 16x8x8 in (~0.59 cu ft) · standard brick 8x3.6x2.25 in (~0.04 cu ft) · 5-gallon bucket (~1.0 cu ft) · standard door 80x36 in · interior step/curb ~7 in tall · adult person ~6 ft tall · standard trash can ~4 cu ft
+
+MATERIAL / DEBRIS PILES (masonry, brick, concrete, stone, dirt, gravel, sand, soil, mulch, brush, demolition debris):
+A pile is a HEAP, not a filled box. Two methods — prefer COUNT when units are countable:
+  (A) COUNT method (best for masonry/brick/block): roughly count the visible blocks/bricks, multiply by unit volume (cinder block ~0.59 cu ft, brick ~0.04 cu ft). A pile holds MORE than the visible surface count, so multiply the visible-face count by ~2-3x for depth. Example: ~40 visible cinder blocks x ~2.5 depth x 0.59 = ~59 cu ft (~1/8 truck).
+  (B) HEAP-ENVELOPE method: estimate (L ft x W ft x AVERAGE-height ft) then x 0.5 for a mound. Use AVERAGE height (a pile's average height is far less than its peak — usually 1-2 ft for a yard pile), NOT the peak.
+You MUST anchor L/W/H to the SCALE REFERENCE (a cinder block is 1.33 ft long — count how many blocks span the pile's width/length). State the reference, the counts, and your L/W/H in the reasoning field.
+SANITY CHECK: a single residential debris pile a few feet across is almost always 1/8-1/2 truck. If you compute MORE than 3/4 truck for one visible yard pile, you have over-read the dimensions — RE-CHECK against the cinder-block scale and revise DOWN. Do NOT inflate, do NOT round up.
+
 ESTIMATING FURNITURE FROM PHOTOS (no measurements given):
 When you cannot measure but can see furniture, anchor each visible item to these typical volumes, then SUM them. These reflect full bounding-box volume (the same basis the estimator's manual calculator uses):
   Item                            Truck %   Cubic ft   Cubic yd
@@ -211,7 +222,7 @@ The Truck % column is approximate — always compute truck % as (item cubic ft /
 When furniture is involved, estimate slightly HIGH rather than low — an under-filled truck means a costly return trip.
 
 CONFIDENCE & ROUNDING:
-- If items are partially hidden, stacked, or the photo angle obscures depth, assume MORE volume than the visible face suggests and set confidence to "low" or "medium".
+- If items are partially hidden, stacked, or the photo angle obscures depth, assume MORE volume than the visible face suggests and set confidence to "low" or "medium". EXCEPTION: a fully-visible outdoor pile or material heap — you can see the whole thing, so estimate the ACTUAL heap volume (see MATERIAL/DEBRIS PILES) and do NOT inflate.
 - For furniture-heavy loads, round the final truckVolume UP to the nearest standard fraction when between two values.
 
 DWELLING TYPE INFERENCE — IMPORTANT:
