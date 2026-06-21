@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.10 | 2026-06-21">
+  <meta name="crewlogic-version" content="v5.46.11 | 2026-06-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7695,7 +7695,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function mjMicUI(on) {
       _mjListening = on;
       const b = document.getElementById('mjMicBtn'); if (b) { b.style.transform = on ? 'scale(1.08)' : 'scale(1)'; b.style.background = on ? 'var(--accent-yellow,#f59e0b)' : 'var(--accent-green,#00E785)'; }
-      const s = document.getElementById('mjMicStatus'); if (s) s.textContent = on ? 'Listening… tap to stop' : (mjSpeechOK() ? 'Tap to speak' : 'Voice not supported — type below');
+      const s = document.getElementById('mjMicStatus'); if (s) s.textContent = on ? 'Listening… tap when done to send' : (mjSpeechOK() ? 'Tap to speak' : 'Voice not supported — type below');
     }
     function mjToggleMic() {
       const s = document.getElementById('mjMicStatus');
@@ -7703,18 +7703,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (_mjListening) { if (_mjRec) { try { _mjRec.stop(); } catch (e) {} } mjMicUI(false); return; }
       const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
       _mjRec = new SR(); _mjRec.lang = 'en-US'; _mjRec.interimResults = true; _mjRec.maxAlternatives = 1;
+      try { _mjRec.continuous = true; } catch (e) {} // push-to-talk: keep listening THROUGH pauses; submit on the user's tap-to-stop, not on a detected pause
       _mjGotResult = false;
-      let _capture = ''; // best text seen so far (final OR latest interim)
+      let _capture = '', _final = ''; // _final = accumulated finalized text; _capture = _final + current interim
       const tr = document.getElementById('mjTranscript');
       _mjRec.onresult = (e) => {
-        let interim = '', final = '';
-        for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) final += t; else interim += t; }
-        if (final.trim() || interim.trim()) _capture = (final.trim() || interim.trim());
-        if (tr) { tr.style.display = 'block'; tr.textContent = '“' + _capture + '”'; }
-        if (final.trim()) { _mjGotResult = true; mjMicUI(false); try { _mjRec.stop(); } catch (e2) {} mjHandle(final.trim()); }
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) _final += t + ' '; else interim += t; }
+        _capture = (_final + interim).trim();
+        if (_capture && tr) { tr.style.display = 'block'; tr.textContent = '“' + _capture + '”'; }
       };
       _mjRec.onerror = (ev) => { mjMicUI(false); if (s && ev && ev.error === 'not-allowed') s.textContent = 'Mic permission blocked — allow it or type below'; };
-      // Many browsers (esp. mobile) end without ever firing a FINAL result — fall back to the captured interim.
+      // Submit only when recognition ENDS — which now happens on the user's tap-to-stop (or a long silence),
+      // NOT on every detected sentence pause. (Mobile single-shot recognizers also end here → still works.)
       _mjRec.onend = () => {
         mjMicUI(false);
         if (!_mjGotResult) {

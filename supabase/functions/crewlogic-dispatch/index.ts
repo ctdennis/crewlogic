@@ -381,19 +381,37 @@ Deno.serve(async (req: Request) => {
         return json({ success: ok, kind: 'cancel', plan, cancel: { errNo: c.errNo, errMsg: c.errMsg || null, errors: c.Errors || null } }, ok ? 200 : 502);
       }
       if (plan.kind === 'duration') {
-        // Duration change = direct field edit of the WorkOrder duration (field 186) via method 2 (Edit) —
-        // the same proven edit pattern as the National Accounts summary write. The slot does NOT move, so
-        // we deliberately do NOT use the lock+method16 reschedule path (the same-start re-lock is rejected
-        // because the job already occupies that instant).
-        const { woID } = plan;
-        const duration = String(plan.durationMin || '');
-        if (!woID || !duration) return json({ success: false, error: 'duration plan missing woID / durationMin' }, 400);
-        const Fields = [{ fieldID: 186, fieldValue: duration }];
-        const ed = await vpost(token, '/data/WorkOrders/', { method: '2', objectID: String(woID), Fields });
-        const ok = ed.errNo === 0;
-        console.log(`[dispatch][AUDIT] execute duration wo=${woID} -> ${duration}min (field 186, method 2) errNo=${ed.errNo}`);
-        await audit({ franchiseID, action: 'duration', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan }, fieldsWritten: { method: 2, objectID: String(woID), Fields }, vonigoErrno: ed.errNo, success: ok, result: { errMsg: ed.errMsg || null, errors: ed.Errors || null } });
-        return json({ success: ok, kind: 'duration', plan, edit: { errNo: ed.errNo, errMsg: ed.errMsg || null, errors: ed.Errors || null } }, ok ? 200 : 502);
+        // Duration change is SCHEDULER-MANAGED: a method-2 field edit of 186 silently no-ops, and you
+        // cannot re-lock a slot the job already occupies. The working mechanism (proven 2026-06-21) is a
+        // TWO-STEP move that drives field 186 via the lock's duration: (A) move the job to a free staging
+        // slot at the new duration (this frees its original slot), (B) re-lock the original start at the
+        // new duration and move it back. Lock-duration sets 186; shortening is always safe; lengthening
+        // fails cleanly at step B if the original start can't fit the longer block.
+        const { woID, dayID } = plan;
+        const newDur = String(plan.durationMin || ''), origStart = String(plan.startTime), zip = String(plan.zip || '');
+        const routeID = await resolveRouteID(token, String(dayID), String(plan.routeCode || plan.routeID || ''));
+        if (!woID || !routeID || !dayID || plan.startTime == null || !newDur) return json({ success: false, error: 'duration plan missing woID / resolvable routeCode / dayID / startTime / durationMin', routeID }, 400);
+        // find a free staging slot on the same route that fits the new duration (any time but the current one)
+        const ds = dayEpoch(String(dayID)), de = ds + 79200;
+        const av = await vpost(token, '/resources/availability/', { method: '0', dateStart: String(ds), dateEnd: String(de), duration: newDur, locationID: '1', serviceTypeID: '11', routeID, pageNo: '1', pageSize: '400' });
+        const slots = (av.Availability || []).filter((s: any) => String(s.dayID) === String(dayID) && String(parseInt(s.startTime, 10)) !== origStart).map((s: any) => parseInt(s.startTime, 10)).sort((a: number, b: number) => b - a);
+        if (!slots.length) return json({ success: false, error: 'no free slot on this route to apply the change — try a different day or free up time' }, 409);
+        const staging = String(slots[0]);
+        // Step A: park the job at the staging slot at the NEW duration (sets field 186; frees the original slot)
+        const lkA = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID, zip, serviceTypeID: '11', duration: newDur, startTime: staging });
+        const lockA = lkA.Ids && (lkA.Ids.lockID || lkA.Ids.LockID);
+        if (!lockA) return json({ success: false, error: 'could not apply the duration change (staging lock failed)', lock: { errNo: lkA.errNo, errors: lkA.Errors || null } }, 409);
+        const mvA = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockA) });
+        if (mvA.errNo !== 0) { await audit({ franchiseID, action: 'duration', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan, routeID, staging, step: 'A' }, fieldsWritten: { method: 16, objectID: String(woID), lockID: String(lockA), durationMin: newDur, staging }, vonigoErrno: mvA.errNo, success: false, result: { errMsg: mvA.errMsg || null, errors: mvA.Errors || null } }); return json({ success: false, error: 'could not apply the duration change (staging move failed)', move: { errNo: mvA.errNo, errMsg: mvA.errMsg || null } }, 502); }
+        // Step B: re-lock the original start at the NEW duration and move it back
+        const lkB = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID, zip, serviceTypeID: '11', duration: newDur, startTime: origStart });
+        const lockB = lkB.Ids && (lkB.Ids.lockID || lkB.Ids.LockID);
+        if (!lockB) { await audit({ franchiseID, action: 'duration', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan, routeID, staging, step: 'B', strandedAt: staging }, fieldsWritten: { method: 16, objectID: String(woID), durationMin: newDur }, vonigoErrno: lkB.errNo, success: false, result: { errMsg: 'return lock failed', errors: lkB.Errors || null } }); return json({ success: false, error: 'duration set to ' + newDur + ' min but the original time could not be reclaimed (likely a longer block does not fit) — the job is temporarily at ' + timeLabel(+staging) + '; adjust in Vonigo', stagedAt: staging }, 409); }
+        const mvB = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockB) });
+        const ok = mvB.errNo === 0;
+        console.log(`[dispatch][AUDIT] execute duration wo=${woID} -> ${newDur}min (two-step via staging ${staging}) errNo=${mvB.errNo}`);
+        await audit({ franchiseID, action: 'duration', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan, routeID, staging, lockA, lockB }, fieldsWritten: { method: 16, objectID: String(woID), twoStep: true, durationMin: newDur, staging, origStart }, vonigoErrno: mvB.errNo, success: ok, result: { errMsg: mvB.errMsg || null, errors: mvB.Errors || null } });
+        return json({ success: ok, kind: 'duration', plan, move: { errNo: mvB.errNo, errMsg: mvB.errMsg || null, errors: mvB.Errors || null } }, ok ? 200 : 502);
       }
       return json({ success: false, error: 'execute needs plan.kind = move | duration | cancel' }, 400);
     }
