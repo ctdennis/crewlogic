@@ -183,6 +183,7 @@ Everything in the final plan must appear in the confirm message so the human ver
 - AVAILABILITY question: answer from suggestSlots.
 
 TO FINISH: if (and only if) you have a concrete MOVE or CANCEL plan ready to confirm, call the "respond" tool with intent (move|cancel) + the plan. For an AVAILABILITY answer or a CLARIFYING question, reply in plain text and SHOW the options (route CODES like MA1REG/MA6REG — never raw route ID numbers — and the open times) to help the user decide.
+YOUR PLAIN-TEXT REPLY IS SHOWN VERBATIM TO THE USER — it must contain ONLY the final answer or question. Do NOT narrate your steps or thinking: no "let me check…", "before I…", "actually…", no minutes-from-midnight math, no tool talk. Do all checking SILENTLY via the tools first, then give one clean reply.
 FORMAT for a NARROW PHONE SCREEN: NEVER use markdown tables or "|" pipe characters. Use short lines or simple "•" bullets, ONE job/option per line, e.g. "• 12:00 PM · Dennis, Charles · Lakeville 02347 · 90 min (Job 855649)". Lead with a one-line summary, then the bulleted list. Keep it brief.`;
   // Seed with prior plain-text turns (conversation memory) so "that job"/"it" resolves.
   const messages: any[] = [];
