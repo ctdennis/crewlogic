@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.45.24 | 2026-06-19">
+  <meta name="crewlogic-version" content="v5.46.0 | 2026-06-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1329,6 +1329,12 @@
             <div class="module-icon">♻️</div>
             <div class="module-name">Job Router</div>
             <div class="module-desc">Best transfer station between your truck & the next job</div>
+          </div>
+
+          <div class="module-card fade-in fade-in-delay-3" id="manageJobsCard" data-card="manageJobs" onclick="openModule('manageJobs')" style="display:none;">
+            <div class="module-icon">🎤</div>
+            <div class="module-name">Manage Jobs</div>
+            <div class="module-desc">Move or cancel jobs by voice</div>
           </div>
 
           <div class="module-card fade-in fade-in-delay-3" id="priceLookupCard" data-card="priceLookup" onclick="openModule('priceLookup')">
@@ -3612,6 +3618,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       </div>
 
       <!-- VOLUME CHECK SCREEN -->
+      <div id="manageJobsScreen" class="estimates-section">
+        <div class="estimate-list-header">
+          <div class="section-title">🎤 Manage Jobs</div>
+          <button onclick="mjReset()" style="padding:6px 12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm);font-size:12px;color:var(--text-primary);cursor:pointer;">Reset</button>
+        </div>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5;">
+          Speak a command to move or cancel a job, or ask what's available — e.g. <em>"Move the second appointment on Route 1 to Route 3,"</em> <em>"Cancel job 2 on Route 3,"</em> or <em>"What's open Thursday afternoon?"</em> CrewLogic will confirm before making any change.
+        </div>
+
+        <div style="display:flex;flex-direction:column;align-items:center;gap:12px;margin-bottom:18px;">
+          <button id="mjMicBtn" onclick="mjToggleMic()" style="width:96px;height:96px;border-radius:50%;background:var(--accent-green,#00E785);border:none;cursor:pointer;font-size:40px;box-shadow:0 2px 10px rgba(0,0,0,.4);transition:transform .1s;">🎤</button>
+          <div id="mjMicStatus" style="font-size:12px;color:var(--text-muted);min-height:16px;">Tap to speak</div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-bottom:16px;">
+          <input id="mjTextInput" type="text" placeholder="…or type a command" onkeydown="if(event.key==='Enter')mjSendText()" style="flex:1;padding:10px 12px;font-size:14px;background:var(--bg-input,#253545);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);">
+          <button onclick="mjSendText()" style="padding:10px 16px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;">Send</button>
+        </div>
+
+        <div id="mjTranscript" style="display:none;font-size:13px;color:var(--text-secondary);background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;"></div>
+        <div id="mjResult"></div>
+      </div>
+
       <div id="volumeCheckScreen" class="estimates-section">
         <div class="estimate-list-header">
           <div class="section-title">📐 Volume Check</div>
@@ -6731,6 +6760,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         disposalRouterCard.style.display = (_telematics && _vonigo) ? '' : 'none';
       }
 
+      // Manage Jobs (voice dispatcher) — move/cancel Vonigo jobs by voice. Vonigo franchise + owner.
+      const manageJobsCard = document.getElementById('manageJobsCard');
+      if (manageJobsCard) {
+        const _vonigoMJ = (currentUser.submissionTarget !== 'none' && currentUser.pricingSource !== 'native');
+        manageJobsCard.style.display = (currentUser.role === 'owner' && _vonigoMJ) ? '' : 'none';
+      }
+
       // Job Plan pulls the day's schedule/work-orders from the CRM (Vonigo). Native tenants
       // have no scheduling source, so hide it. Cache-safe: hide only when submission_target is
       // explicitly 'none' (undefined on a stale session stays Vonigo → card shown).
@@ -6794,7 +6830,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       'disposalRouterScreen',
       'storageScreen', 'storageResultsScreen',
       'mattressScreen', 'mattressResultsScreen',
-      'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'jobPlanScreen', 'trucksScreen', 'subscriptionAdminScreen', 'usageDashboardScreen'
+      'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'subscriptionAdminScreen', 'usageDashboardScreen'
     ];
 
     function hideAll() {
@@ -7486,6 +7522,89 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
     }
 
+    // ── Manage Jobs (voice dispatcher) ────────────────────────────────────────
+    let _mjPlan = null, _mjRec = null, _mjListening = false;
+    function mjSpeechOK() { return !!(window.SpeechRecognition || window.webkitSpeechRecognition); }
+    function mjEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+    function mjReset() {
+      _mjPlan = null;
+      if (_mjRec) { try { _mjRec.stop(); } catch (e) {} }
+      _mjListening = false;
+      const t = document.getElementById('mjTextInput'); if (t) t.value = '';
+      const tr = document.getElementById('mjTranscript'); if (tr) { tr.style.display = 'none'; tr.textContent = ''; }
+      const r = document.getElementById('mjResult'); if (r) r.innerHTML = '';
+      mjMicUI(false);
+    }
+    function mjMicUI(on) {
+      _mjListening = on;
+      const b = document.getElementById('mjMicBtn'); if (b) { b.style.transform = on ? 'scale(1.08)' : 'scale(1)'; b.style.background = on ? 'var(--accent-yellow,#f59e0b)' : 'var(--accent-green,#00E785)'; }
+      const s = document.getElementById('mjMicStatus'); if (s) s.textContent = on ? 'Listening… tap to stop' : (mjSpeechOK() ? 'Tap to speak' : 'Voice not supported — type below');
+    }
+    function mjToggleMic() {
+      const s = document.getElementById('mjMicStatus');
+      if (!mjSpeechOK()) { if (s) s.textContent = 'Voice not supported — type below'; return; }
+      if (_mjListening) { if (_mjRec) { try { _mjRec.stop(); } catch (e) {} } mjMicUI(false); return; }
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      _mjRec = new SR(); _mjRec.lang = 'en-US'; _mjRec.interimResults = false; _mjRec.maxAlternatives = 1;
+      _mjRec.onresult = (e) => { const txt = e.results[0][0].transcript; mjMicUI(false); mjHandle(txt); };
+      _mjRec.onerror = () => { mjMicUI(false); if (s) s.textContent = "Didn't catch that — try again"; };
+      _mjRec.onend = () => { mjMicUI(false); };
+      try { _mjRec.start(); mjMicUI(true); } catch (e) { mjMicUI(false); }
+    }
+    function mjSendText() { const t = document.getElementById('mjTextInput'); const v = (t.value || '').trim(); if (!v) return; t.value = ''; mjHandle(v); }
+    function mjHandle(transcript) {
+      const tr = document.getElementById('mjTranscript'); tr.style.display = 'block'; tr.textContent = '“' + transcript + '”';
+      const low = transcript.toLowerCase().trim();
+      if (_mjPlan) {
+        if (/^(yes|yeah|yep|confirm|do it|go ahead|proceed|correct)\b/.test(low)) { mjExecute(); return; }
+        if (/^(no|nope|cancel|never ?mind|stop|don'?t)\b/.test(low)) { mjCancelPlan(); return; }
+      }
+      mjSendCommand(transcript);
+    }
+    async function mjSendCommand(transcript) {
+      const r = document.getElementById('mjResult'); _mjPlan = null;
+      r.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline" style="display:inline-block;"></span>Thinking…</div>';
+      const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'command', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, transcript });
+      if (!data || !data.success) { r.innerHTML = '<div style="color:#ff6b6b;font-size:13px;">' + mjEsc((data && data.error) || 'Something went wrong.') + '</div>'; return; }
+      mjRenderResult(data);
+    }
+    function mjCard(title, rows) {
+      let h = '<div style="background:var(--bg-card);border:1px solid var(--accent-green,#00E785);border-radius:var(--radius);padding:14px 16px;">';
+      h += '<div style="font-weight:700;font-size:14px;margin-bottom:10px;color:var(--text-primary);">' + mjEsc(title) + '</div>';
+      for (const [k, v] of rows) h += '<div style="display:flex;gap:8px;font-size:13px;margin-bottom:6px;"><span style="color:var(--text-muted);min-width:46px;">' + mjEsc(k) + '</span><span style="color:var(--text-primary);">' + mjEsc(v) + '</span></div>';
+      h += '<div style="display:flex;gap:10px;margin-top:12px;"><button onclick="mjExecute()" style="flex:1;padding:11px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;">Confirm</button><button onclick="mjCancelPlan()" style="flex:1;padding:11px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:var(--radius-sm);cursor:pointer;">Cancel</button></div>';
+      h += '<div style="text-align:center;font-size:11px;color:var(--text-muted);margin-top:6px;">…or say “yes” / “no”</div></div>';
+      return h;
+    }
+    function mjRenderResult(data) {
+      const r = document.getElementById('mjResult');
+      if (data.intent === 'move' && data.plan) {
+        const p = data.plan; _mjPlan = p;
+        r.innerHTML = mjCard('Confirm move', [['Job', p.jobLabel || ''], ['From', p.fromLabel || ''], ['To', (p.toRouteCode || '') + ' · ' + (p.startLabel || '') + (p.zoned === false ? '  ⚠ owner override (not zoned for ' + (p.zip || '') + ')' : '')]]);
+        return;
+      }
+      if (data.intent === 'cancel' && data.plan) {
+        const p = data.plan; _mjPlan = p;
+        r.innerHTML = mjCard('Confirm cancel', [['Job', p.jobLabel || ''], ['Reason', (p.category || '') + ' · ' + (p.reason || '')], ['Notes', p.comments || '—']]);
+        return;
+      }
+      r.innerHTML = '<div style="font-size:14px;color:var(--text-secondary);background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;line-height:1.5;">' + mjEsc(data.message || '') + '</div>';
+    }
+    function mjCancelPlan() { _mjPlan = null; document.getElementById('mjResult').innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Cancelled — nothing was changed.</div>'; }
+    async function mjExecute() {
+      if (!_mjPlan) return;
+      const plan = _mjPlan; _mjPlan = null;
+      const r = document.getElementById('mjResult');
+      r.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline" style="display:inline-block;"></span>' + (plan.kind === 'cancel' ? 'Cancelling…' : 'Moving…') + '</div>';
+      const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'execute', franchiseID: currentUser.franchiseID, plan });
+      if (data && data.success) {
+        r.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--accent-green,#00E785);border-radius:var(--radius);padding:14px 16px;font-size:14px;color:var(--text-primary);">✅ ' + (plan.kind === 'cancel' ? 'Job cancelled.' : ('Moved to ' + mjEsc(plan.toRouteCode || '') + ' · ' + mjEsc(plan.startLabel || '') + '.')) + '</div>';
+      } else {
+        const msg = (data && (data.error || (data.move && data.move.errMsg) || (data.cancel && data.cancel.errMsg))) || 'The change could not be completed.';
+        r.innerHTML = '<div style="color:#ff6b6b;font-size:13px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;">⚠ ' + mjEsc(msg) + '</div>';
+      }
+    }
+
     function openModule(module) {
       // If in estimate editor with unsaved changes OR a discardable throwaway draft, prompt
       // first (same condition as promptSaveBeforeLeaving, so both exit paths behave alike).
@@ -7533,6 +7652,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('headerTitle').textContent = 'Job Router';
         currentScreen = 'disposalRouter';
         initDisposalRouter();
+        return;
+      }
+      if (module === 'manageJobs') {
+        document.getElementById('manageJobsScreen').classList.add('active');
+        document.getElementById('headerTitle').textContent = 'Manage Jobs';
+        currentScreen = 'manageJobs';
+        mjReset();
         return;
       }
 
