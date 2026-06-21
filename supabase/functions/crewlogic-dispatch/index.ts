@@ -29,13 +29,18 @@ const supa = () => createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUP
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const MODEL = 'claude-sonnet-4-6';
 
-// Cancel reason picklist (Job field 974 category / 975 reason). Labels from the Vonigo UI;
-// optionIDs filled as confirmed (only 2 known so far — the rest are a quick Vonigo-config lookup).
-// null optionID => not yet configured (execute returns which one to fill). NOT prices — stable enums.
+// Cancel reason picklist (Job field 974 category / 975 reason). optionIDs HARVESTED 2026-06-21 from
+// 140 already-cancelled #90 jobs (read /data/Jobs/ objectID+isCompleteObject → Job[0].Fields 974/975).
+// Vonigo treats 974/975 as INDEPENDENT dropdowns (historical data pairs the same reason under several
+// categories), so any valid category+reason optionID pairing is accepted by method 4. We send the
+// screenshot-correct pairing below. null optionID => never used historically, not yet captured (execute
+// returns which one to fill). NOT prices — stable enums.
 const REASON_CODES: Record<string, { categoryOptionID: number | null; reasons: Record<string, number | null> }> = {
-  'customer initiated': { categoryOptionID: null, reasons: { 'customer decided to keep the items': null, 'customer removed items themselves': null, 'duplicate booking': null, 'no contact with customer': null, 'service no longer required': null } },
-  'pricing': { categoryOptionID: null, reasons: { 'customer thought we were free': null, 'price concerns': null, 'used alternative company': null } },
-  'scheduling': { categoryOptionID: 10133, reasons: { 'customer not ready': 10129, 'date no longer works for customer': null } },
+  'customer initiated': { categoryOptionID: 10131, reasons: { 'customer decided to keep the items': 11335, 'customer removed items themselves': 26317, 'duplicate booking': 26319, 'no contact with customer': 21343, 'service no longer required': 10125 } },
+  'pricing': { categoryOptionID: 10132, reasons: { 'customer thought we were free': null, 'price concerns': 10126, 'used alternative company': 26320 } },
+  'scheduling': { categoryOptionID: 10133, reasons: { 'customer not ready': 10129, 'date no longer works for customer': 10127 } },
+  // Admin-only category (harvested): By System Admin = 10130, reason "Test Booking" = 12018. Not exposed
+  // to the dispatcher's spoken-reason mapping (not a customer-facing cancel reason).
 };
 
 // dayID "YYYYMMDD" → naive-Eastern midnight epoch (Vonigo convention for WorkOrder date fields).

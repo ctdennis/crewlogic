@@ -1,4 +1,6 @@
-// DEV-ONLY: find cancel-reason picklist (Job fields 974 category / 975 reason options). READ-ONLY. Deleted after use.
+// DEV-ONLY harvest: scrape cancel-reason optionIDs (Job 974 category / 975 reason) from jobs that
+// were ALREADY cancelled. A cancelled job's /data/Jobs/ read (objectID + isCompleteObject) carries
+// the optionIDs the operator picked. READ-ONLY (no writes). Deleted after use.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const TENANT_ID = '946a4535-aa61-45b6-a6fb-9190ff546d41';
@@ -24,46 +26,86 @@ Deno.serve(async (req: Request) => {
     const auth = await (await fetch(au.toString())).json();
     if (auth.errNo !== 0) return json({ error: 'auth failed' }, 502);
     const tok = auth.securityToken;
-    const post = async (path: string, payload: any) => { try { const res = await fetch(VONIGO_BASE + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ securityToken: tok, ...payload }) }); const txt = await res.text(); try { return JSON.parse(txt); } catch { return { _nonjson: true, _len: txt.length }; } } catch (e) { return { _err: (e as Error).message }; } };
+    const post = async (path: string, payload: any) => { const res = await fetch(VONIGO_BASE + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ securityToken: tok, ...payload }) }); const txt = await res.text(); try { return JSON.parse(txt); } catch { return { _nonjson: true, _len: txt.length }; } };
+    const gf = (f: any[], id: number) => (f.find((x: any) => (x.fieldID ?? x.fieldId) === id) || {});
 
-    // STEP 1: list all objects (names + IDs) so we find the Jobs object
-    const objList = await post('/system/objects/', {});
-    const objs: any[] = objList.Objects || objList.objects || [];
-    const objIndex = objs.map((o: any) => ({ name: o.name || o.objectName, objectID: o.objectID ?? o.objectTypeID, fieldCount: (o.Fields || o.fields || []).length }));
+    // FOCUSED single-job test: read one job several ways to find the path that returns 974/975.
+    if (body.testJob) {
+      const j = String(body.testJob);
+      const variants = [
+        ['method1+complete', { method: '1', objectID: j, isCompleteObject: 'true' }],
+        ['method1', { method: '1', objectID: j }],
+        ['objectID+complete', { objectID: j, isCompleteObject: 'true' }],
+        ['objectID', { objectID: j }],
+      ];
+      const out: any[] = [];
+      for (const [label, payload] of variants as any) {
+        const d = await post('/data/Jobs/', payload);
+        const f = (d.Jobs && d.Jobs[0] && d.Jobs[0].Fields) || d.Fields || (d.Job && d.Job.Fields) || [];
+        out.push({ label, errNo: d.errNo, errMsg: d.errMsg, topKeys: Object.keys(d).filter((k) => k !== 'securityToken'), fieldCount: f.length, jobKeys: d.Job ? Object.keys(d.Job) : null, jobSample: d.Job ? JSON.stringify(d.Job).slice(0, 1600) : null, f974: gf(f, 974), f975: gf(f, 975), f973: gf(f, 973) });
+      }
+      return json({ testJob: j, variants: out });
+    }
 
-    // STEP 2: pull the Jobs object COMPLETE (fields + options). Try by name match.
-    const jobsObj = objs.find((o: any) => /^jobs?$/i.test(o.name || o.objectName || ''));
-    const jobsObjectID = jobsObj ? (jobsObj.objectID ?? jobsObj.objectTypeID) : null;
+    // 1) Sweep WorkOrders over a wide past window; bucket by status; collect cancelled jobIDs.
+    const now = Math.floor(Date.now() / 1000);
+    const dayWindow = Number(body.days || 180);
+    const ds = now - dayWindow * 86400, de = now + 7 * 86400;
+    const statusBuckets: Record<string, number> = {};
+    const candidateJobIDs = new Set<string>();
+    let woTotal = 0;
+    let woCancelSample: any = null; // first cancelled WO's own fieldIDs — does it carry 974/975 directly?
+    const categories: Record<string, string> = {};
+    const reasons: Record<string, { label: string; cat: string }> = {};
+    for (let page = 1; page <= 6; page++) {
+      const r = await post('/data/WorkOrders/', { franchiseID, pageNo: String(page), pageSize: '400', isCompleteObject: 'true', dateMode: '3', dateStart: String(ds), dateEnd: String(de) });
+      const wos = r.WorkOrders || [];
+      if (!wos.length) break;
+      woTotal += wos.length;
+      for (const w of wos) {
+        const f = w.Fields || [], rel = w.Relations || [];
+        const st = String(gf(f, 181).fieldValue || '').trim() || '(blank)';
+        statusBuckets[st] = (statusBuckets[st] || 0) + 1;
+        if (/cancel/i.test(st)) {
+          const jr = rel.find((x: any) => x.relationType === 'job'); if (jr) candidateJobIDs.add(String(jr.objectID));
+          // does the WorkOrder itself echo the cancel reason fields?
+          const w974 = gf(f, 974), w975 = gf(f, 975);
+          if ((w974.optionID ?? 0) || (w975.optionID ?? 0)) {
+            if (w974.optionID) categories[String(w974.optionID)] = String(w974.fieldValue || '');
+            if (w975.optionID) reasons[String(w975.optionID)] = { label: String(w975.fieldValue || ''), cat: String(w974.fieldValue || '') };
+          }
+          if (!woCancelSample) woCancelSample = { woID: String(w.objectID), fieldIDs: f.map((x: any) => x.fieldID ?? x.fieldId) };
+        }
+      }
+      if (wos.length < 400) break;
+    }
 
-    const fetchComplete = async (oid: any) => {
-      const d = await post('/system/objects/', { objectID: String(oid), isCompleteObject: 'true' });
-      const o = (d.Objects || d.objects || [])[0] || d.Object || null;
-      const flds = (o?.Fields || o?.fields || []);
-      // find cancel category/reason fields by id OR by name
-      const pick = flds.filter((f: any) => {
-        const id = f.fieldID ?? f.fieldId;
-        const nm = (f.name || f.fieldName || '').toLowerCase();
-        return [974, 975, 973].includes(id) || /cancel|reason|category/.test(nm);
-      });
-      return { errNo: d.errNo, fieldTotal: flds.length, pick: pick.map((f: any) => ({ fieldID: f.fieldID ?? f.fieldId, name: f.name || f.fieldName, options: (f.Options || f.options || []).map((op: any) => ({ id: op.optionID ?? op.id, label: op.name || op.label || op.value })) })) };
-    };
+    // 2) Also seed the known cancelled job + any caller-supplied IDs.
+    for (const id of [String(body.knownJobID || '854161'), ...(Array.isArray(body.jobIDs) ? body.jobIDs.map(String) : [])]) candidateJobIDs.add(id);
 
-    // STEP 3: dump RAW shape of complete Job object so we see where fields/options actually live
-    const rawComplete = await post('/system/objects/', { objectID: '10', isCompleteObject: 'true' });
-    const rawObj = (rawComplete.Objects || rawComplete.objects || [])[0] || null;
-    const rawShape = { topKeys: Object.keys(rawComplete), objKeys: rawObj ? Object.keys(rawObj) : null, objSample: JSON.stringify(rawObj).slice(0, 1200) };
+    // 3) Read each candidate cancelled job; extract 974/975/973 (value + optionID).
+    const ids = Array.from(candidateJobIDs).slice(0, Number(body.maxJobs || 140));
+    const perJob: any[] = [];
+    let readErrors = 0; let firstReadSample: any = null;
+    for (const jobID of ids) {
+      const d = await post('/data/Jobs/', { objectID: jobID, isCompleteObject: 'true' });
+      const f = (d.Job && d.Job[0] && d.Job[0].Fields) || (d.Jobs && d.Jobs[0] && d.Jobs[0].Fields) || d.Fields || [];
+      if (!firstReadSample) firstReadSample = { jobID, errNo: d.errNo, topKeys: Object.keys(d).filter((k) => k !== 'securityToken'), fieldCount: f.length };
+      if (!f.length) { readErrors++; continue; }
+      const c974 = gf(f, 974), c975 = gf(f, 975), c973 = gf(f, 973);
+      const catLabel = String(c974.fieldValue || ''), catID = c974.optionID ?? 0;
+      const rLabel = String(c975.fieldValue || ''), rID = c975.optionID ?? 0;
+      if (catID) categories[String(catID)] = catLabel;
+      if (rID) reasons[String(rID)] = { label: rLabel, cat: catLabel };
+      perJob.push({ jobID, category: catLabel, categoryOptionID: catID, reason: rLabel, reasonOptionID: rID, comments: String(c973.fieldValue || '') });
+    }
 
-    // STEP 4: read a LIVE (non-cancelled) job — its Fields[] often carries each field's full Options list.
-    const jobID = String(body.jobID || '855649'); // bogus test job (not cancelled → no -2012)
-    const read = await post('/data/Jobs/', { method: '1', objectID: jobID });
-    const flds = (read.Fields || read.fields || []);
-    const target = flds.filter((f: any) => [974, 975, 973].includes(f.fieldID ?? f.fieldId));
-    const dump = target.map((f: any) => ({
-      fieldID: f.fieldID ?? f.fieldId,
-      name: f.name || f.fieldName,
-      value: f.value ?? f.optionID,
-      options: (f.Options || f.options || []).map((op: any) => ({ id: op.optionID ?? op.id, label: op.name || op.label || op.value })),
-    }));
-    return json({ note: 'read live job → fields 974/975/973 + option lists', jobID, errNo: read.errNo, errMsg: read.errMsg, fieldTotal: flds.length, dump, allFieldIDs: flds.map((f: any) => f.fieldID ?? f.fieldId) });
+    return json({
+      note: 'harvested cancel-reason optionIDs from already-cancelled jobs',
+      window_days: dayWindow, workOrdersScanned: woTotal, statusBuckets,
+      cancelledJobsFound: candidateJobIDs.size, jobsRead: ids.length, readErrors,
+      woCancelSample, firstReadSample,
+      categories, reasons, perJob,
+    });
   } catch (e) { return json({ error: (e as Error).message }, 500); }
 });
