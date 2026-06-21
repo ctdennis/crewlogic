@@ -121,28 +121,37 @@ async function resolveJobFn(token: string, franchiseID: string, dayID: string, s
   if (matches.length === 1) return { resolved: matches[0] };
   return { resolved: null, ambiguous: matches.length > 1, candidates: matches.slice(0, 8) };
 }
-// route CODE (MA3ALL / "Route 3") -> numeric routeID, for a given day.
-async function getRouteMap(token: string, dayID: string): Promise<Record<string, string>> {
+// Route maps for a day: toId (CODE/"Route 3" -> numeric id) and toCode (id -> display code like MA3ALL).
+async function getRouteMap(token: string, dayID: string): Promise<{ toId: Record<string, string>; toCode: Record<string, string> }> {
   const r = await vpost(token, '/resources/routes/', { method: '-1', isCompleteObject: 'true', dayID });
-  const m: Record<string, string> = {};
-  for (const x of (r.Routes || [])) { const id = String(x.objectID); if (x.title) m[String(x.title).toUpperCase()] = id; if (x.name) { m[String(x.name).toUpperCase()] = id; const num = String(x.name).match(/(\d+)/); if (num) m['ROUTE ' + num[1]] = id; } }
-  return m;
+  const toId: Record<string, string> = {}, toCode: Record<string, string> = {};
+  for (const x of (r.Routes || [])) {
+    const id = String(x.objectID);
+    if (x.title) { toId[String(x.title).toUpperCase()] = id; toCode[id] = String(x.title); }
+    if (x.name) { toId[String(x.name).toUpperCase()] = id; const num = String(x.name).match(/(\d+)/); if (num) toId['ROUTE ' + num[1]] = id; if (!toCode[id]) toCode[id] = String(x.name); }
+  }
+  return { toId, toCode };
+}
+function pickRouteID(toId: Record<string, string>, route?: string): string | undefined {
+  if (!route) return undefined;
+  if (/^\d+$/.test(route)) return route;
+  return toId[route.toUpperCase()] || toId['ROUTE ' + route.replace(/\D/g, '')];
 }
 async function resolveRouteID(token: string, dayID: string, route?: string): Promise<string | undefined> {
   if (!route) return undefined;
-  if (/^\d+$/.test(route)) return route; // already an ID
-  const m = await getRouteMap(token, dayID);
-  return m[route.toUpperCase()] || m['ROUTE ' + route.replace(/\D/g, '')];
+  if (/^\d+$/.test(route)) return route;
+  const { toId } = await getRouteMap(token, dayID);
+  return pickRouteID(toId, route);
 }
 async function suggestSlotsFn(token: string, franchiseID: string, dayID: string, durationMin: number, zip?: string, route?: string, serviceTypeID = '11') {
   const ds = dayEpoch(dayID), de = ds + 79200;
-  const routeID = await resolveRouteID(token, dayID, route);
+  const { toId, toCode } = await getRouteMap(token, dayID);
+  const routeID = pickRouteID(toId, route);
   const p: any = { method: '0', dateStart: String(ds), dateEnd: String(de), duration: String(durationMin), locationID: '1', serviceTypeID, pageNo: '1', pageSize: '400' };
   if (zip) p.zip = String(zip);
   if (routeID) p.routeID = String(routeID);
-  const codeOf: Record<string, string> = {};
   const a = await vpost(token, '/resources/availability/', p);
-  return (a.Availability || []).filter((s: any) => String(s.dayID) === dayID).map((s: any) => ({ routeID: String(s.routeID), startTime: parseInt(s.startTime, 10), label: timeLabel(parseInt(s.startTime, 10)) }));
+  return (a.Availability || []).filter((s: any) => String(s.dayID) === dayID).map((s: any) => ({ routeID: String(s.routeID), routeCode: toCode[String(s.routeID)] || String(s.routeID), startTime: parseInt(s.startTime, 10), label: timeLabel(parseInt(s.startTime, 10)) }));
 }
 
 // Claude tool-use loop. READ-only tools; returns a structured {intent, message, plan?} — NEVER executes a write.
@@ -152,6 +161,7 @@ async function runCommand(token: string, franchiseID: string, dayID: string, tod
     { name: 'resolveJob', description: 'Find the job the user means on a route. Address by stop position (1-based within the route), time (minutes-from-midnight), or jobID.', input_schema: { type: 'object', properties: { route: { type: 'string', description: 'route code e.g. MA1REG, or number "1"' }, position: { type: 'number' }, timeMin: { type: 'number' }, jobID: { type: 'string' }, dayID: { type: 'string', description: 'YYYYMMDD; default = the working day' } }, required: [] } },
     { name: 'listRouteJobs', description: 'List jobs on a route (or all routes) for a day, with times/durations/zip.', input_schema: { type: 'object', properties: { route: { type: 'string' }, dayID: { type: 'string' } }, required: [] } },
     { name: 'suggestSlots', description: 'Open booking slots for a day. Pass zip for the job\'s ZONED routes (normal); omit zip for ALL routes (owner override). route (code like MA3ALL or "Route 3") to check one route.', input_schema: { type: 'object', properties: { dayID: { type: 'string' }, durationMin: { type: 'number' }, zip: { type: 'string' }, route: { type: 'string', description: 'route code e.g. MA3ALL or "Route 3"' } }, required: ['durationMin'] } },
+    { name: 'respond', description: 'Call this ONLY when you have a concrete MOVE or CANCEL plan ready for the user to confirm — include the plan object. For availability answers or clarifying questions, do NOT call respond; just reply in plain text.', input_schema: { type: 'object', properties: { intent: { type: 'string', enum: ['move', 'cancel'] }, message: { type: 'string', description: 'one short sentence confirming what will happen' }, plan: { type: 'object', description: 'MOVE: {kind:"move",woID,jobLabel,fromLabel,toRouteCode,dayID,startTime,startLabel,durationMin,zip,zoned}. CANCEL: {kind:"cancel",jobID,jobLabel,category,reason,comments}.' } }, required: ['intent', 'message', 'plan'] } },
   ];
   // Server-computed day table (TZ-correct) so the AI never does date math — it just looks up day names.
   const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -159,18 +169,20 @@ async function runCommand(token: string, franchiseID: string, dayID: string, tod
   const system = `You are CrewLogic's job dispatcher for a junk-removal franchise. The user speaks a command to MOVE a job, CANCEL a job, or ASK what's available. Today = ${todayDayID}; the working day defaults to ${dayID} (YYYYMMDD) unless the user names another day. To resolve a day the user names (e.g. "Monday", "tomorrow", "the 23rd"), use ONLY this server-provided table — never compute dates yourself: ${dayTable}. Times are minutes-from-midnight (540=9AM, 660=11AM, 780=1PM). Route codes: MA1REG, MA2FAR, MA3ALL, MA6REG, RI4REG, RI5FAR, EST, RE-SCD ("route 1"=MA1REG ... "route 6"=MA6REG).
 
 Use the read tools to resolve. You NEVER execute changes — you only RESOLVE and PROPOSE a plan for the human to confirm.
-- MOVE: resolveJob (positional/time). Defaults: if the user does NOT name a target route, keep the job's CURRENT route; if they don't name a new time, keep the job's CURRENT time.
-  CHECK THE SLOT on the target route by calling suggestSlots with that route (param "route") and NO zip — this returns that route's real open slots. Do NOT pass the zip when checking a specific route (zip-zoning hides non-zoned routes like RE-SCD and would falsely show "no slots"). Use the job's duration.
-  ZONED FLAG (separate): call suggestSlots WITH the job's zip (no route); if the target route appears in those results, set zoned=true, else zoned=false (an owner override — still ALLOWED if the slot is open; just flag it). RE-SCD/Estimate are never zip-zoned (treat as override, not an error).
-  If the requested time isn't open on that route, offer the nearest open times ON THAT ROUTE.
+
+GUARDRAIL — NEVER GUESS the JOB, ROUTE, DAY, or TIME. If the user did not clearly specify one, ASK a clarifying question (intent "clarify") — do not pick for them. Specifically:
+- JOB: resolve only by an EXACT unambiguous match (stop position / time / jobID). If zero or MORE THAN ONE job matches, ASK which — never assume.
+- ROUTE: if the user does not name a target route, ASK (keep current vs a different/zoned route) — never choose a route yourself.
+- DAY / TIME: the ONLY allowed defaults are keep-current — if no new TIME is given keep the job's current time; if no new DAY is given keep the job's current day. These are not guesses, and they are ALWAYS shown in the confirm. Do not invent any other day/time.
+Everything in the final plan must appear in the confirm message so the human verifies before anything changes.
+- MOVE: resolveJob (positional/time). TIME default: if no new time is named, keep the job's CURRENT time. Always use the job's duration. TWO cases for the target ROUTE:
+  (a) User NAMES a route: use it. Check open slots via suggestSlots(route=that route, NO zip) — never pass the zip when checking a NAMED route (zip-zoning hides non-zoned routes like RE-SCD and would falsely show "no slots"). Set zoned by calling suggestSlots(zip=job's zip): zoned=true if the named route appears in those, else zoned=false (owner OVERRIDE — still allowed if the slot is open; flag it). RE-SCD/Estimate are never zoned.
+  (b) User does NOT name a target route: ASK FIRST (intent "clarify") whether to keep the job on its CURRENT route or move it to a different (zoned) route — e.g. "Keep this on RE-SCD, or move it to one of its zoned routes?" You MAY note which zoned routes have the requested time open (from suggestSlots WITH the job's zip). Do NOT pick a route yourself yet. After the user answers: "same/keep" -> check the CURRENT route (suggestSlots route=current, NO zip) and propose; "different/zoned/move it" -> use the zoned routes (suggestSlots with the zip): if exactly ONE has the time open propose it, if MULTIPLE ask which, if NONE offer the nearest open times.
+  If the requested time isn't open, offer the nearest open times.
 - CANCEL: resolveJob, then map the spoken reason to a category+reason from this list (case-insensitive): ${JSON.stringify(Object.fromEntries(Object.entries(REASON_CODES).map(([c, v]) => [c, Object.keys(v.reasons)])))}.
 - AVAILABILITY question: answer from suggestSlots.
 
-When done, output ONLY a JSON object (no prose, no markdown) with this shape:
-{"intent":"move|cancel|availability|clarify|error","message":"<one short sentence for the user>","plan":{...}}
-- move plan: {"kind":"move","woID","jobLabel","fromLabel","toRouteCode","dayID","startTime","startLabel","durationMin","zip","zoned":true|false}  (use the route CODE, not a number)
-- cancel plan: {"kind":"cancel","jobID","jobLabel","category","reason","comments"}
-- availability/clarify/error: omit plan; put the answer/question in message.`;
+TO FINISH: if (and only if) you have a concrete MOVE or CANCEL plan ready to confirm, call the "respond" tool with intent (move|cancel) + the plan. For an AVAILABILITY answer or a CLARIFYING question, just reply in plain, concise text — and to help the user decide, SHOW the relevant options: route CODES (e.g. MA1REG, MA6REG — never raw route ID numbers) and the open times. Resolve route codes via your tools' route names.`;
   // Seed with prior plain-text turns (conversation memory) so "that job"/"it" resolves.
   const messages: any[] = [];
   for (const h of (Array.isArray(history) ? history.slice(-6) : [])) {
@@ -184,10 +196,13 @@ When done, output ONLY a JSON object (no prose, no markdown) with this shape:
     const data = await res.json();
     if (data.type === 'error' || !data.content) throw new Error('Anthropic error: ' + JSON.stringify(data).slice(0, 200));
     messages.push({ role: 'assistant', content: data.content });
+    // Terminal: the AI called respond() with its final structured answer.
+    const respondBlock = data.content.find((b: any) => b.type === 'tool_use' && b.name === 'respond');
+    if (respondBlock) return respondBlock.input || { intent: 'error', message: 'No answer produced.' };
     if (data.stop_reason === 'tool_use') {
       const results: any[] = [];
       for (const block of data.content) {
-        if (block.type !== 'tool_use') continue;
+        if (block.type !== 'tool_use' || block.name === 'respond') continue;
         const a = block.input || {};
         const d = String(a.dayID || dayID);
         let out: any;
@@ -204,8 +219,16 @@ When done, output ONLY a JSON object (no prose, no markdown) with this shape:
     }
     // final text → parse JSON
     const text = (data.content.find((b: any) => b.type === 'text') || {}).text || '';
-    const m = text.match(/\{[\s\S]*\}/);
-    try { return JSON.parse(m ? m[0] : text); } catch { return { intent: 'error', message: 'Could not parse response', raw: text.slice(0, 300) }; }
+    // Robust extract: strip fences, take the first BALANCED {...} (handles leading/trailing prose).
+    let jt = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const st = jt.indexOf('{');
+    if (st >= 0) {
+      let depth = 0, inStr = false, esc = false, end = -1;
+      for (let i = st; i < jt.length; i++) { const c = jt[i]; if (esc) { esc = false; continue; } if (c === '\\') { esc = true; continue; } if (c === '"') { inStr = !inStr; continue; } if (inStr) continue; if (c === '{') depth++; else if (c === '}') { depth--; if (depth === 0) { end = i; break; } } }
+      jt = end >= 0 ? jt.slice(st, end + 1) : jt.slice(st);
+    }
+    // If it's JSON (a plan), use it; otherwise it's a natural-language clarify/availability answer — show it.
+    try { return JSON.parse(jt); } catch { return { intent: 'info', message: text.replace(/\*\*/g, '').replace(/\s*\n\s*/g, ' ').trim() || 'Okay.' }; }
   }
   return { intent: 'error', message: 'Too many steps resolving the command.' };
 }
