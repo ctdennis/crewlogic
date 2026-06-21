@@ -45,6 +45,9 @@ The screen is a thin conversational confirm layer, not a form. Three artifacts:
 PWA mic (Web Speech) → transcript
   → edge fn `crewlogic-dispatch`: a Claude TOOL-USING agent (server-side, franchise Vonigo creds never leave server)
      tools: listRouteJobs, resolveJob, suggestMoveSlots, cancelReasonCodes, cancelJob, moveJob
+     ── tools are REUSABLE server-side units (not buried in the voice handler) so a future
+        Real Route Optimizer can call moveJob / suggestMoveSlots / listRouteJobs directly.
+        listRouteJobs returns GEOCODED lat/lon + duration per job (route-opt needs drive-time).
   → agent disambiguates via read tools, asks Owner only what it can't infer
   → agent proposes resolved action → Owner CONFIRMS (voice/tap) → agent executes write → reads back result + writes audit row
 ```
