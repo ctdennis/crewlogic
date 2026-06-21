@@ -26,6 +26,17 @@ const F = { status: 181, client: 183, address: 184, date: 185, duration: 186, ti
 
 const json = (d: unknown, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
 const supa = () => createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
+const MODEL = 'claude-sonnet-4-6';
+
+// Cancel reason picklist (Job field 974 category / 975 reason). Labels from the Vonigo UI;
+// optionIDs filled as confirmed (only 2 known so far — the rest are a quick Vonigo-config lookup).
+// null optionID => not yet configured (execute returns which one to fill). NOT prices — stable enums.
+const REASON_CODES: Record<string, { categoryOptionID: number | null; reasons: Record<string, number | null> }> = {
+  'customer initiated': { categoryOptionID: null, reasons: { 'customer decided to keep the items': null, 'customer removed items themselves': null, 'duplicate booking': null, 'no contact with customer': null, 'service no longer required': null } },
+  'pricing': { categoryOptionID: null, reasons: { 'customer thought we were free': null, 'price concerns': null, 'used alternative company': null } },
+  'scheduling': { categoryOptionID: 10133, reasons: { 'customer not ready': 10129, 'date no longer works for customer': null } },
+};
 
 // dayID "YYYYMMDD" → naive-Eastern midnight epoch (Vonigo convention for WorkOrder date fields).
 function dayEpoch(dayID: string): number {
@@ -38,6 +49,12 @@ function timeLabel(min: number): string {
   return `${h12}:${String(m).padStart(2, '0')} ${ap}`;
 }
 function zipOf(address: string): string { const m = String(address || '').match(/\b(\d{5})\b/); return m ? m[1] : ''; }
+function easternDayID(offset = 0): string {
+  const s = new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const m = s.match(/(\d{2})\/(\d{2})\/(\d{4})/); if (!m) return '';
+  const dt = new Date(Date.UTC(+m[3], +m[1] - 1, +m[2] + offset));
+  return `${dt.getUTCFullYear()}${String(dt.getUTCMonth() + 1).padStart(2, '0')}${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
 function shortRoute(name: string): string { const m = String(name || '').match(/\(([^)]+)\)/); return m ? m[1] : String(name || '').trim(); }
 
 async function vonigoAuth(franchiseID: string): Promise<{ token: string } | { error: string }> {
@@ -92,6 +109,95 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
   jobs.sort((a: any, b: any) => a.timeMin - b.timeMin);
   if (withCoords) await Promise.all(jobs.map(async (j: any) => { if (j.address) { const g = await geocode(j.address); if (g) { j.lat = g.lat; j.lon = g.lon; } } }));
   return jobs;
+}
+
+// Standalone tool fns (shared by the action router AND the Claude executor).
+async function resolveJobFn(token: string, franchiseID: string, dayID: string, sel: { route?: string; position?: number; timeMin?: number; jobID?: string }) {
+  const jobs = await listRouteJobs(token, franchiseID, dayID, sel.route, false);
+  let matches = jobs;
+  if (sel.jobID) matches = jobs.filter((j: any) => j.jobID === String(sel.jobID));
+  else if (Number.isFinite(sel.timeMin as number)) matches = jobs.filter((j: any) => j.timeMin === Number(sel.timeMin));
+  else if (Number.isFinite(sel.position as number)) { const p = Number(sel.position); matches = jobs[p - 1] ? [jobs[p - 1]] : []; }
+  if (matches.length === 1) return { resolved: matches[0] };
+  return { resolved: null, ambiguous: matches.length > 1, candidates: matches.slice(0, 8) };
+}
+// route CODE (MA3ALL / "Route 3") -> numeric routeID, for a given day.
+async function getRouteMap(token: string, dayID: string): Promise<Record<string, string>> {
+  const r = await vpost(token, '/resources/routes/', { method: '-1', isCompleteObject: 'true', dayID });
+  const m: Record<string, string> = {};
+  for (const x of (r.Routes || [])) { const id = String(x.objectID); if (x.title) m[String(x.title).toUpperCase()] = id; if (x.name) { m[String(x.name).toUpperCase()] = id; const num = String(x.name).match(/(\d+)/); if (num) m['ROUTE ' + num[1]] = id; } }
+  return m;
+}
+async function resolveRouteID(token: string, dayID: string, route?: string): Promise<string | undefined> {
+  if (!route) return undefined;
+  if (/^\d+$/.test(route)) return route; // already an ID
+  const m = await getRouteMap(token, dayID);
+  return m[route.toUpperCase()] || m['ROUTE ' + route.replace(/\D/g, '')];
+}
+async function suggestSlotsFn(token: string, franchiseID: string, dayID: string, durationMin: number, zip?: string, route?: string, serviceTypeID = '11') {
+  const ds = dayEpoch(dayID), de = ds + 79200;
+  const routeID = await resolveRouteID(token, dayID, route);
+  const p: any = { method: '0', dateStart: String(ds), dateEnd: String(de), duration: String(durationMin), locationID: '1', serviceTypeID, pageNo: '1', pageSize: '400' };
+  if (zip) p.zip = String(zip);
+  if (routeID) p.routeID = String(routeID);
+  const codeOf: Record<string, string> = {};
+  const a = await vpost(token, '/resources/availability/', p);
+  return (a.Availability || []).filter((s: any) => String(s.dayID) === dayID).map((s: any) => ({ routeID: String(s.routeID), startTime: parseInt(s.startTime, 10), label: timeLabel(parseInt(s.startTime, 10)) }));
+}
+
+// Claude tool-use loop. READ-only tools; returns a structured {intent, message, plan?} — NEVER executes a write.
+async function runCommand(token: string, franchiseID: string, dayID: string, todayDayID: string, transcript: string) {
+  if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not configured');
+  const tools = [
+    { name: 'resolveJob', description: 'Find the job the user means on a route. Address by stop position (1-based within the route), time (minutes-from-midnight), or jobID.', input_schema: { type: 'object', properties: { route: { type: 'string', description: 'route code e.g. MA1REG, or number "1"' }, position: { type: 'number' }, timeMin: { type: 'number' }, jobID: { type: 'string' }, dayID: { type: 'string', description: 'YYYYMMDD; default = the working day' } }, required: [] } },
+    { name: 'listRouteJobs', description: 'List jobs on a route (or all routes) for a day, with times/durations/zip.', input_schema: { type: 'object', properties: { route: { type: 'string' }, dayID: { type: 'string' } }, required: [] } },
+    { name: 'suggestSlots', description: 'Open booking slots for a day. Pass zip for the job\'s ZONED routes (normal); omit zip for ALL routes (owner override). route (code like MA3ALL or "Route 3") to check one route.', input_schema: { type: 'object', properties: { dayID: { type: 'string' }, durationMin: { type: 'number' }, zip: { type: 'string' }, route: { type: 'string', description: 'route code e.g. MA3ALL or "Route 3"' } }, required: ['durationMin'] } },
+  ];
+  // Server-computed day table (TZ-correct) so the AI never does date math — it just looks up day names.
+  const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const dayTable = Array.from({ length: 14 }, (_, k) => { const id = easternDayID(k); const dt = new Date(Date.UTC(+id.slice(0, 4), +id.slice(4, 6) - 1, +id.slice(6, 8))); return `${id}=${WD[dt.getUTCDay()]} ${+id.slice(4, 6)}/${+id.slice(6, 8)}${k === 0 ? '(today)' : k === 1 ? '(tomorrow)' : ''}`; }).join(', ');
+  const system = `You are CrewLogic's job dispatcher for a junk-removal franchise. The user speaks a command to MOVE a job, CANCEL a job, or ASK what's available. Today = ${todayDayID}; the working day defaults to ${dayID} (YYYYMMDD) unless the user names another day. To resolve a day the user names (e.g. "Monday", "tomorrow", "the 23rd"), use ONLY this server-provided table — never compute dates yourself: ${dayTable}. Times are minutes-from-midnight (540=9AM, 660=11AM, 780=1PM). Route codes: MA1REG, MA2FAR, MA3ALL, MA6REG, RI4REG, RI5FAR, EST, RE-SCD ("route 1"=MA1REG ... "route 6"=MA6REG).
+
+Use the read tools to resolve. You NEVER execute changes — you only RESOLVE and PROPOSE a plan for the human to confirm.
+- MOVE: resolveJob (positional/time). If the user gives a target route but NO new time, keep the job's CURRENT time. Verify the target slot is open via suggestSlots (use the job's duration + the job's zip). Flag if the target route is NOT zoned for the job's zip (override). If the exact time isn't open, offer the nearest open times.
+- CANCEL: resolveJob, then map the spoken reason to a category+reason from this list (case-insensitive): ${JSON.stringify(Object.fromEntries(Object.entries(REASON_CODES).map(([c, v]) => [c, Object.keys(v.reasons)])))}.
+- AVAILABILITY question: answer from suggestSlots.
+
+When done, output ONLY a JSON object (no prose, no markdown) with this shape:
+{"intent":"move|cancel|availability|clarify|error","message":"<one short sentence for the user>","plan":{...}}
+- move plan: {"kind":"move","woID","jobLabel","fromLabel","toRouteCode","dayID","startTime","startLabel","durationMin","zip","zoned":true|false}  (use the route CODE, not a number)
+- cancel plan: {"kind":"cancel","jobID","jobLabel","category","reason","comments"}
+- availability/clarify/error: omit plan; put the answer/question in message.`;
+  const messages: any[] = [{ role: 'user', content: transcript }];
+  for (let i = 0; i < 6; i++) {
+    const res = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: MODEL, max_tokens: 1024, system, tools, messages }) });
+    const data = await res.json();
+    if (data.type === 'error' || !data.content) throw new Error('Anthropic error: ' + JSON.stringify(data).slice(0, 200));
+    messages.push({ role: 'assistant', content: data.content });
+    if (data.stop_reason === 'tool_use') {
+      const results: any[] = [];
+      for (const block of data.content) {
+        if (block.type !== 'tool_use') continue;
+        const a = block.input || {};
+        const d = String(a.dayID || dayID);
+        let out: any;
+        try {
+          if (block.name === 'resolveJob') out = await resolveJobFn(token, franchiseID, d, a);
+          else if (block.name === 'listRouteJobs') out = { jobs: await listRouteJobs(token, franchiseID, d, a.route, false) };
+          else if (block.name === 'suggestSlots') out = { slots: await suggestSlotsFn(token, franchiseID, d, Number(a.durationMin || 120), a.zip, a.route) };
+          else out = { error: 'unknown tool' };
+        } catch (e) { out = { error: (e as Error).message }; }
+        results.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(out).slice(0, 6000) });
+      }
+      messages.push({ role: 'user', content: results });
+      continue;
+    }
+    // final text → parse JSON
+    const text = (data.content.find((b: any) => b.type === 'text') || {}).text || '';
+    const m = text.match(/\{[\s\S]*\}/);
+    try { return JSON.parse(m ? m[0] : text); } catch { return { intent: 'error', message: 'Could not parse response', raw: text.slice(0, 300) }; }
+  }
+  return { intent: 'error', message: 'Too many steps resolving the command.' };
 }
 
 Deno.serve(async (req: Request) => {
@@ -162,6 +268,48 @@ Deno.serve(async (req: Request) => {
       const ok = c.errNo === 0;
       console.log(`[dispatch][AUDIT] cancelJob job=${jobID} cat=${categoryOptionID} reason=${reasonOptionID} errNo=${c.errNo}`);
       return json({ success: ok, plan, cancel: { errNo: c.errNo, errMsg: c.errMsg || null, errors: c.Errors || null } }, ok ? 200 : 502);
+    }
+
+    if (action === 'command') {
+      const transcript = String(body.transcript || '').trim();
+      if (!transcript) return json({ success: false, error: 'transcript required' }, 400);
+      const dayID = String(body.dayID || easternDayID(0));
+      const result = await runCommand(token, franchiseID, dayID, easternDayID(0), transcript);
+      return json({ success: true, ...result });
+    }
+
+    // execute a CONFIRMED plan (the only place a write happens). plan from a prior `command`.
+    if (action === 'execute') {
+      const plan = body.plan || {};
+      if (plan.kind === 'move') {
+        const { woID, dayID, startTime } = plan;
+        const duration = String(plan.durationMin || 90), zip = String(plan.zip || ''), serviceTypeID = String(plan.serviceTypeID || '11');
+        const toRouteID = await resolveRouteID(token, String(dayID), String(plan.toRouteCode || plan.toRouteID || ''));
+        if (!woID || !toRouteID || !dayID || startTime == null) return json({ success: false, error: 'move plan missing woID / resolvable toRouteCode / dayID / startTime', toRouteID }, 400);
+        const lock = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID: String(toRouteID), zip, serviceTypeID, duration, startTime: String(startTime) });
+        const lockID = lock.Ids && (lock.Ids.lockID || lock.Ids.LockID);
+        if (!lockID) return json({ success: false, error: 'target slot no longer available', lock: { errNo: lock.errNo, errors: lock.Errors || null } }, 409);
+        const mv = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockID) });
+        const ok = mv.errNo === 0;
+        console.log(`[dispatch][AUDIT] execute move wo=${woID} route=${toRouteID} ${plan.startLabel} ${dayID} lock=${lockID} errNo=${mv.errNo}`);
+        return json({ success: ok, kind: 'move', plan, move: { errNo: mv.errNo, errMsg: mv.errMsg || null, errors: mv.Errors || null } }, ok ? 200 : 502);
+      }
+      if (plan.kind === 'cancel') {
+        const cat = String(plan.category || '').toLowerCase().trim();
+        const reason = String(plan.reason || '').toLowerCase().trim();
+        const catEntry = REASON_CODES[cat];
+        if (!catEntry) return json({ success: false, error: 'unknown cancel category: ' + plan.category }, 400);
+        const categoryOptionID = catEntry.categoryOptionID;
+        const reasonOptionID = catEntry.reasons[reason];
+        if (categoryOptionID == null || reasonOptionID == null) return json({ success: false, error: 'reason code not yet configured', need: { category: plan.category, reason: plan.reason, categoryOptionID, reasonOptionID }, hint: 'fill the optionID in REASON_CODES' }, 422);
+        const Fields: any[] = [{ fieldID: 974, optionID: String(categoryOptionID) }, { fieldID: 975, optionID: String(reasonOptionID) }];
+        if (plan.comments) Fields.push({ fieldID: 973, fieldValue: String(plan.comments) });
+        const c = await vpost(token, '/data/Jobs/', { method: '4', objectID: String(plan.jobID), Fields });
+        const ok = c.errNo === 0;
+        console.log(`[dispatch][AUDIT] execute cancel job=${plan.jobID} ${cat}/${reason} errNo=${c.errNo}`);
+        return json({ success: ok, kind: 'cancel', plan, cancel: { errNo: c.errNo, errMsg: c.errMsg || null, errors: c.Errors || null } }, ok ? 200 : 502);
+      }
+      return json({ success: false, error: 'execute needs plan.kind = move | cancel' }, 400);
     }
 
     return json({ success: false, error: 'unknown action: ' + action }, 400);
