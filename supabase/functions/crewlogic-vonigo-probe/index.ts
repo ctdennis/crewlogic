@@ -41,7 +41,7 @@ Deno.serve(async (req: Request) => {
       const out: any[] = [];
       for (const [label, payload] of variants as any) {
         const d = await post('/data/Jobs/', payload);
-        const f = (d.Jobs && d.Jobs[0] && d.Jobs[0].Fields) || d.Fields || (d.Job && d.Job.Fields) || [];
+        const f = (d.Job && d.Job[0] && d.Job[0].Fields) || (d.Jobs && d.Jobs[0] && d.Jobs[0].Fields) || d.Fields || (d.Job && d.Job.Fields) || [];
         out.push({ label, errNo: d.errNo, errMsg: d.errMsg, topKeys: Object.keys(d).filter((k) => k !== 'securityToken'), fieldCount: f.length, jobKeys: d.Job ? Object.keys(d.Job) : null, jobSample: d.Job ? JSON.stringify(d.Job).slice(0, 1600) : null, f974: gf(f, 974), f975: gf(f, 975), f973: gf(f, 973) });
       }
       return json({ testJob: j, variants: out });
