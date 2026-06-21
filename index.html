@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.1 | 2026-06-21">
+  <meta name="crewlogic-version" content="v5.46.2 | 2026-06-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7547,15 +7547,24 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
       _mjRec = new SR(); _mjRec.lang = 'en-US'; _mjRec.interimResults = true; _mjRec.maxAlternatives = 1;
       _mjGotResult = false;
+      let _capture = ''; // best text seen so far (final OR latest interim)
       const tr = document.getElementById('mjTranscript');
       _mjRec.onresult = (e) => {
         let interim = '', final = '';
         for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) final += t; else interim += t; }
-        if (tr) { tr.style.display = 'block'; tr.textContent = '“' + (final || interim) + '”'; }
+        if (final.trim() || interim.trim()) _capture = (final.trim() || interim.trim());
+        if (tr) { tr.style.display = 'block'; tr.textContent = '“' + _capture + '”'; }
         if (final.trim()) { _mjGotResult = true; mjMicUI(false); try { _mjRec.stop(); } catch (e2) {} mjHandle(final.trim()); }
       };
-      _mjRec.onerror = (ev) => { mjMicUI(false); if (s) s.textContent = (ev && ev.error === 'not-allowed') ? 'Mic permission blocked — allow it or type below' : "Didn't catch that — tap and speak again, or type"; };
-      _mjRec.onend = () => { mjMicUI(false); if (!_mjGotResult && s) s.textContent = "Didn't catch that — tap and speak again, or type"; };
+      _mjRec.onerror = (ev) => { mjMicUI(false); if (s && ev && ev.error === 'not-allowed') s.textContent = 'Mic permission blocked — allow it or type below'; };
+      // Many browsers (esp. mobile) end without ever firing a FINAL result — fall back to the captured interim.
+      _mjRec.onend = () => {
+        mjMicUI(false);
+        if (!_mjGotResult) {
+          if (_capture.trim()) { _mjGotResult = true; mjHandle(_capture.trim()); }
+          else if (s) s.textContent = "Didn't catch that — tap and speak again, or type";
+        }
+      };
       try { _mjRec.start(); mjMicUI(true); } catch (e) { mjMicUI(false); }
     }
     function mjSendText() { const t = document.getElementById('mjTextInput'); const v = (t.value || '').trim(); if (!v) return; t.value = ''; mjHandle(v); }
