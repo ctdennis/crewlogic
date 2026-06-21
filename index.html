@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.7 | 2026-06-21">
+  <meta name="crewlogic-version" content="v5.46.8 | 2026-06-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3644,6 +3644,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
         <div id="mjTranscript" style="display:none;font-size:13px;color:var(--text-secondary);background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;"></div>
         <div id="mjResult"></div>
+        <div id="mjTip" style="display:none;position:fixed;z-index:9999;max-width:280px;background:var(--bg-card,#1e2f40);border:1px solid var(--accent-green,#00E785);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.5);padding:10px 12px;font-size:12px;color:var(--text-primary);"></div>
       </div>
 
       <div id="volumeCheckScreen" class="estimates-section">
@@ -7636,30 +7637,61 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         laneJobs.forEach((j, n) => {
           const left = ((j.timeMin - startMin) / 60) * PXH, w = Math.max(((j.durationMin || 60) / 60) * PXH, 54);
           const name = mjEsc((String(j.client || '').split(',')[0]) || j.client || 'Job');
-          h += '<div onclick="mjShowJobDetail(\'' + mjEsc(String(j.jobID || '')) + '\')" data-jid="' + mjEsc(String(j.jobID || '')) + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:5px;bottom:5px;background:' + col + ';border-radius:6px;padding:3px 5px;overflow:hidden;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.35);">';
+          const city = mjAddrParts(j.address).city, jidA = mjEsc(String(j.jobID || ''));
+          const sub = (city || '') + (j.zip ? ((city ? ' · ' : '') + j.zip) : '');
+          h += '<div onmouseenter="mjTip(event,\'' + jidA + '\')" onmouseleave="mjTipHide()" onclick="mjTip(event,\'' + jidA + '\',true)" data-jid="' + jidA + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:5px;bottom:5px;background:' + col + ';border-radius:6px;padding:3px 5px;overflow:hidden;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.35);">';
           h += '<div style="font-size:10.5px;font-weight:700;color:#fff;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (n + 1) + '. ' + name + '</div>';
-          h += '<div style="font-size:9.5px;color:rgba(255,255,255,.92);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + mjEsc(j.timeLabel || '') + (j.zip ? (' · ' + mjEsc(j.zip)) : '') + '</div>';
+          h += '<div style="font-size:9.5px;color:rgba(255,255,255,.92);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + mjEsc(sub) + '</div>';
           h += '</div>';
         });
         h += '</div></div>';
       });
       h += '</div></div>';
-      h += '<div id="mjDetail" style="margin-top:10px;font-size:12px;color:var(--text-muted);">Tap a job for details.</div>';
+      h += '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);">Hover (desktop) or tap (mobile) a job for details.</div>';
       r.innerHTML = h;
     }
-    function mjShowJobDetail(jobID) {
-      const j = _mjBoardByID[String(jobID)], d = document.getElementById('mjDetail'); if (!j || !d) return;
-      document.querySelectorAll('#mjResult [data-jid]').forEach(b => { b.style.outline = (b.getAttribute('data-jid') === String(jobID)) ? '2px solid var(--accent-green,#00E785)' : 'none'; b.style.outlineOffset = '0'; });
-      const jid = mjEsc(String(j.jobID || ''));
-      let h = '<div style="background:var(--bg-card);border:1px solid var(--accent-green,#00E785);border-radius:var(--radius);padding:12px 14px;">';
-      h += '<div style="font-weight:700;font-size:14px;color:var(--text-primary);margin-bottom:4px;"><span style="color:var(--accent-green,#00E785);">' + mjEsc(j.timeLabel || '') + '</span>&nbsp;&nbsp;' + mjEsc(j.client || '') + '</div>';
-      h += '<div style="font-size:12px;color:var(--text-muted);line-height:1.55;">' + mjEsc(j.address || '') + '<br>' + mjEsc((j.durationMin || '') + ' min') + (j.routeCode ? '  ·  ' + mjEsc(j.routeCode) : '') + (j.status ? '  ·  ' + mjEsc(j.status) : '')
-        + '<div id="mjjobph-' + jid + '" style="margin-top:5px;">Loading phone…</div>'
-        + '<div style="margin-top:4px;"><a href="https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(j.jobID || '')) + '" target="_blank" rel="noopener" style="color:#6db3ff;font-weight:600;text-decoration:none;">🔗 Job ' + jid + ' in Vonigo</a></div>'
-        + '</div></div>';
-      d.innerHTML = h;
-      if (j.jobID) mjLoadJobPhone(String(j.jobID));
+    // Parse a Vonigo service address ("123 Main St, Easton, MA 02375" / multi-line) → {street, city, zip}.
+    function mjAddrParts(addr) {
+      const s = String(addr || '').replace(/\s*\n\s*/g, ', ').replace(/\s+/g, ' ').trim();
+      const m = s.match(/^(.*?),?\s*([A-Za-z .'\-]+?),?\s+([A-Z]{2})\s+(\d{5})/);
+      if (m) return { street: m[1].replace(/,\s*$/, '').trim(), city: m[2].trim(), zip: m[4] };
+      const parts = s.split(',').map(x => x.trim()).filter(Boolean);
+      return { street: parts[0] || s, city: parts.length >= 2 ? parts[parts.length - 2] : '', zip: (s.match(/\b(\d{5})\b/) || [])[1] || '' };
     }
+    function _mjRow(k, v) { return '<div style="display:flex;gap:8px;margin-bottom:4px;"><span style="color:var(--text-muted);flex:0 0 54px;">' + mjEsc(k) + '</span><span style="color:var(--text-primary);word-break:break-word;">' + v + '</span></div>'; }
+    function mjJobInfoHTML(j, sticky) {
+      const p = mjAddrParts(j.address), jid = mjEsc(String(j.jobID || ''));
+      const n = Number(j.price), sub = Number.isFinite(n) && j.price !== '' ? ('$' + n.toFixed(2)) : (j.price ? ('$' + mjEsc(String(j.price))) : '—');
+      let h = '';
+      if (sticky) h += '<div style="text-align:right;margin:-4px -4px 2px 0;"><span onclick="mjTipForceHide()" style="cursor:pointer;color:var(--text-muted);font-size:16px;line-height:1;">×</span></div>';
+      h += _mjRow('ID', mjEsc(j.jobID || '—'));
+      h += _mjRow('Subtotal', mjEsc(sub));
+      h += _mjRow('Street', mjEsc(p.street || '—'));
+      h += _mjRow('City', mjEsc(p.city || '—'));
+      h += _mjRow('Zip', mjEsc(j.zip || p.zip || '—'));
+      h += _mjRow('Phone', '<span id="mjjobph-' + jid + '">…</span>');
+      h += '<div style="margin-top:6px;"><a href="https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(j.jobID || '')) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#6db3ff;font-weight:600;text-decoration:none;">🔗 Open in Vonigo</a></div>';
+      return h;
+    }
+    // Job tooltip — desktop hover (quick peek) + mobile tap (sticky, dismiss via × or tap-outside).
+    let _mjTipSticky = false;
+    function mjTip(ev, jobID, sticky) {
+      const j = _mjBoardByID[String(jobID)], tip = document.getElementById('mjTip'); if (!j || !tip) return;
+      if (sticky && ev) ev.stopPropagation();
+      _mjTipSticky = !!sticky;
+      tip.innerHTML = mjJobInfoHTML(j, sticky);
+      tip.style.display = 'block';
+      const rect = (ev && ev.currentTarget && ev.currentTarget.getBoundingClientRect) ? ev.currentTarget.getBoundingClientRect() : { left: 60, top: 120, bottom: 140 };
+      const tw = tip.offsetWidth, th = tip.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+      let left = rect.left; if (left + tw > vw - 8) left = vw - tw - 8; if (left < 8) left = 8;
+      let top = rect.bottom + 6; if (top + th > vh - 8) top = rect.top - th - 6; if (top < 8) top = 8;
+      tip.style.left = left + 'px'; tip.style.top = top + 'px';
+      if (j.jobID) mjLoadJobPhone(String(j.jobID));
+      if (sticky) setTimeout(function () { document.addEventListener('click', mjTipOutside, { once: true }); }, 0);
+    }
+    function mjTipHide() { if (_mjTipSticky) return; const t = document.getElementById('mjTip'); if (t) t.style.display = 'none'; }
+    function mjTipForceHide() { _mjTipSticky = false; const t = document.getElementById('mjTip'); if (t) t.style.display = 'none'; }
+    function mjTipOutside(e) { const t = document.getElementById('mjTip'); if (t && t.contains(e.target)) { document.addEventListener('click', mjTipOutside, { once: true }); return; } mjTipForceHide(); }
     function mjMicUI(on) {
       _mjListening = on;
       const b = document.getElementById('mjMicBtn'); if (b) { b.style.transform = on ? 'scale(1.08)' : 'scale(1)'; b.style.background = on ? 'var(--accent-yellow,#f59e0b)' : 'var(--accent-green,#00E785)'; }
