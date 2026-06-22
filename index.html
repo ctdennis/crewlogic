@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.19 | 2026-06-22">
+  <meta name="crewlogic-version" content="v5.46.20 | 2026-06-22">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7631,7 +7631,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!jobs.length) { r.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-size:13px;color:var(--text-muted);">No jobs scheduled for ' + mjEsc(data.dayLabel || 'this day') + '.</div>'; return; }
       _mjBoardByID = {}; jobs.forEach(j => { if (j.jobID) _mjBoardByID[String(j.jobID)] = j; });
       const routes = [...new Set(jobs.map(j => j.routeCode || '?'))].sort();
-      const PXH = 100, LW = 58, ROW = 50;
+      const PXH = 82, LW = 52, ROW = 46;
       let minT = Infinity, maxT = -Infinity;
       jobs.forEach(j => { if (Number.isFinite(j.timeMin)) { minT = Math.min(minT, j.timeMin); maxT = Math.max(maxT, j.timeMin + (j.durationMin || 60)); } });
       const originH = Number.isFinite(minT) ? Math.max(5, Math.min(7, Math.floor(minT / 60))) : 7;
@@ -7642,25 +7642,27 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       h += '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);-webkit-overflow-scrolling:touch;">';
       h += '<div style="position:relative;min-width:' + (LW + trackW) + 'px;">';
       // time header
-      h += '<div style="display:flex;height:22px;border-bottom:1px solid var(--border);">';
+      h += '<div style="display:flex;height:20px;border-bottom:1px solid var(--border);">';
       h += '<div style="position:sticky;left:0;z-index:3;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);"></div>';
       h += '<div style="position:relative;width:' + trackW + 'px;">';
-      for (let hh = originH; hh < endH; hh++) h += '<div style="position:absolute;left:' + ((hh - originH) * PXH) + 'px;top:5px;font-size:10px;color:var(--text-muted);">' + mjEsc(mjHourLabel(hh)) + '</div>';
+      for (let hh = originH; hh < endH; hh++) h += '<div style="position:absolute;left:' + ((hh - originH) * PXH) + 'px;top:4px;font-size:9.5px;color:var(--text-muted);">' + mjEsc(mjHourLabel(hh)) + '</div>';
       h += '</div></div>';
       // route lanes
       routes.forEach((rc, ri) => {
         const col = mjRouteColor(ri), laneJobs = jobs.filter(j => (j.routeCode || '?') === rc);
         h += '<div style="display:flex;height:' + ROW + 'px;border-bottom:1px solid var(--border);">';
-        h += '<div style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--text-secondary);border-right:1px solid var(--border);padding:0 2px;text-align:center;word-break:break-all;">' + mjEsc(rc) + '</div>';
+        h += '<div style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:var(--text-secondary);border-right:1px solid var(--border);padding:0 2px;text-align:center;word-break:break-all;">' + mjEsc(rc) + '</div>';
         h += '<div style="position:relative;width:' + trackW + 'px;background:' + grid + ';">';
         laneJobs.forEach((j, n) => {
-          const left = ((j.timeMin - startMin) / 60) * PXH, w = Math.max(((j.durationMin || 60) / 60) * PXH, 54);
+          const left = ((j.timeMin - startMin) / 60) * PXH, w = Math.max(((j.durationMin || 60) / 60) * PXH, 52);
           const name = mjEsc((String(j.client || '').split(',')[0]) || j.client || 'Job');
           const city = mjAddrParts(j.address).city, jidA = mjEsc(String(j.jobID || ''));
           const sub = (city || '') + (j.zip ? ((city ? ' · ' : '') + j.zip) : '');
-          h += '<div onmouseenter="mjTip(event,\'' + jidA + '\')" onmouseleave="mjTipHide()" onclick="mjTip(event,\'' + jidA + '\',true)" data-jid="' + jidA + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:5px;bottom:5px;background:' + col + ';border-radius:6px;padding:3px 5px;overflow:hidden;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.35);">';
-          h += '<div style="font-size:10.5px;font-weight:700;color:#fff;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (n + 1) + '. ' + name + '</div>';
-          h += '<div style="font-size:9.5px;color:rgba(255,255,255,.92);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + mjEsc(sub) + '</div>';
+          const done = !!j.completed, bg = done ? '#5b6b7a' : col; // completed/archived → slate gray, still visible
+          h += '<div onmouseenter="mjTip(event,\'' + jidA + '\')" onmouseleave="mjTipHide()" onclick="mjTip(event,\'' + jidA + '\',true)" data-jid="' + jidA + '" title="' + (done ? 'Completed' : '') + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:3px;bottom:3px;background:' + bg + ';opacity:' + (done ? '0.72' : '1') + ';border-radius:5px;padding:2px 5px;overflow:hidden;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.3);">';
+          h += '<div style="font-size:10px;font-weight:700;color:#fff;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (n + 1) + '. ' + (done ? '✓ ' : '') + name + '</div>';
+          h += '<div style="font-size:9px;color:rgba(255,255,255,.9);line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + mjEsc(sub) + '</div>';
+          h += '<div style="font-size:8.5px;color:rgba(255,255,255,.72);line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">#' + jidA + '</div>';
           h += '</div>';
         });
         h += '</div></div>';
@@ -7671,8 +7673,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const nowMin = _np.minutesOfDay;
         if (nowMin >= startMin && nowMin <= endH * 60) {
           const nx = LW + ((nowMin - startMin) / 60) * PXH, laneH = ROW * routes.length;
-          h += '<div title="Now" style="position:absolute;left:' + (nx - 3) + 'px;top:14px;width:8px;height:8px;border-radius:50%;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
-          h += '<div title="Now" style="position:absolute;left:' + nx + 'px;top:22px;width:2px;height:' + laneH + 'px;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
+          h += '<div title="Now" style="position:absolute;left:' + (nx - 3) + 'px;top:12px;width:8px;height:8px;border-radius:50%;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
+          h += '<div title="Now" style="position:absolute;left:' + nx + 'px;top:20px;width:2px;height:' + laneH + 'px;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
         }
       }
       h += '</div></div>';

@@ -139,12 +139,13 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
     const jobRel = rel.find((x: any) => x.relationType === 'job'); const routeRel = rel.find((x: any) => x.relationType === 'route');
     const addr = gf(f, F.address).fieldValue || '';
     const timeMin = parseInt(gf(f, F.time).fieldValue || '0', 10);
-    return { jobID: jobRel ? String(jobRel.objectID) : null, woID: String(w.objectID), route: routeRel ? routeRel.name : '', routeCode: shortRoute(routeRel ? routeRel.name : ''), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: gf(f, F.status).fieldValue || '', statusOptionID: gf(f, F.status).optionID || 0, lat: null as number | null, lon: null as number | null };
+    const statusVal = gf(f, F.status).fieldValue || '';
+    return { jobID: jobRel ? String(jobRel.objectID) : null, woID: String(w.objectID), route: routeRel ? routeRel.name : '', routeCode: shortRoute(routeRel ? routeRel.name : ''), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), lat: null as number | null, lon: null as number | null };
   }).filter((j: any) => j.jobID
-    // hide non-active jobs by STATUS TEXT (robust to Vonigo's many optionIDs): plain "Cancelled" is 162,
-    // but a same-day cancel is "Cancelled - Today" (different optionID) and there's "Archived"/"Completed"
-    // too — all should drop off the dispatch board, leaving only Open/bookable jobs.
-    && j.statusOptionID !== 162 && !/cancel|archiv|complet/i.test(String(j.status || ''))
+    // hide CANCELLED only — plain "Cancelled" (optionID 162) AND same-day "Cancelled - Today" (different
+    // optionID, caught by the text test). COMPLETED/ARCHIVED jobs are KEPT (flagged completed → grayed on
+    // the board so a finished job stays visible on the schedule). URGENTCB lane excluded.
+    && j.statusOptionID !== 162 && !/cancel/i.test(String(j.status || ''))
     && !/URGENTCB/i.test(j.route));
   if (route) { const rc = route.toUpperCase(); jobs = jobs.filter((j: any) => j.routeCode.toUpperCase() === rc || j.route.toUpperCase().includes(rc)); }
   jobs.sort((a: any, b: any) => a.timeMin - b.timeMin);
