@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.20 | 2026-06-22">
+  <meta name="crewlogic-version" content="v5.46.21 | 2026-06-22">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7631,13 +7631,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!jobs.length) { r.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-size:13px;color:var(--text-muted);">No jobs scheduled for ' + mjEsc(data.dayLabel || 'this day') + '.</div>'; return; }
       _mjBoardByID = {}; jobs.forEach(j => { if (j.jobID) _mjBoardByID[String(j.jobID)] = j; });
       const routes = [...new Set(jobs.map(j => j.routeCode || '?'))].sort();
-      const PXH = 82, LW = 52, ROW = 46;
+      const PXH = 66, LW = 52, ROW = 38;
       let minT = Infinity, maxT = -Infinity;
       jobs.forEach(j => { if (Number.isFinite(j.timeMin)) { minT = Math.min(minT, j.timeMin); maxT = Math.max(maxT, j.timeMin + (j.durationMin || 60)); } });
       const originH = Number.isFinite(minT) ? Math.max(5, Math.min(7, Math.floor(minT / 60))) : 7;
       const endH = Number.isFinite(maxT) ? Math.min(21, Math.max(17, Math.ceil(maxT / 60))) : 17;
       const startMin = originH * 60, hours = Math.max(1, endH - originH), trackW = hours * PXH;
-      const grid = 'repeating-linear-gradient(to right, transparent 0, transparent ' + (PXH - 1) + 'px, var(--border) ' + (PXH - 1) + 'px, var(--border) ' + PXH + 'px)';
+      const halfPx = PXH / 2; // faint half-hour tick + solid hour line (hour layer listed first = on top)
+      const grid = 'repeating-linear-gradient(to right, transparent 0, transparent ' + (PXH - 1) + 'px, var(--border) ' + (PXH - 1) + 'px, var(--border) ' + PXH + 'px), repeating-linear-gradient(to right, transparent 0, transparent ' + (halfPx - 1) + 'px, rgba(255,255,255,0.06) ' + (halfPx - 1) + 'px, rgba(255,255,255,0.06) ' + halfPx + 'px)';
       let h = '<div style="margin-bottom:8px;font-weight:700;font-size:13px;color:var(--text-primary);">' + mjEsc(hdr) + '</div>';
       h += '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);-webkit-overflow-scrolling:touch;">';
       h += '<div style="position:relative;min-width:' + (LW + trackW) + 'px;">';
@@ -7654,15 +7655,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         h += '<div style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:var(--text-secondary);border-right:1px solid var(--border);padding:0 2px;text-align:center;word-break:break-all;">' + mjEsc(rc) + '</div>';
         h += '<div style="position:relative;width:' + trackW + 'px;background:' + grid + ';">';
         laneJobs.forEach((j, n) => {
-          const left = ((j.timeMin - startMin) / 60) * PXH, w = Math.max(((j.durationMin || 60) / 60) * PXH, 52);
+          const left = ((j.timeMin - startMin) / 60) * PXH, w = Math.max(((j.durationMin || 60) / 60) * PXH, 50);
           const name = mjEsc((String(j.client || '').split(',')[0]) || j.client || 'Job');
           const city = mjAddrParts(j.address).city, jidA = mjEsc(String(j.jobID || ''));
-          const sub = (city || '') + (j.zip ? ((city ? ' · ' : '') + j.zip) : '');
           const done = !!j.completed, bg = done ? '#5b6b7a' : col; // completed/archived → slate gray, still visible
           h += '<div onmouseenter="mjTip(event,\'' + jidA + '\')" onmouseleave="mjTipHide()" onclick="mjTip(event,\'' + jidA + '\',true)" data-jid="' + jidA + '" title="' + (done ? 'Completed' : '') + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:3px;bottom:3px;background:' + bg + ';opacity:' + (done ? '0.72' : '1') + ';border-radius:5px;padding:2px 5px;overflow:hidden;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.3);">';
-          h += '<div style="font-size:10px;font-weight:700;color:#fff;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (n + 1) + '. ' + (done ? '✓ ' : '') + name + '</div>';
-          h += '<div style="font-size:9px;color:rgba(255,255,255,.9);line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + mjEsc(sub) + '</div>';
-          h += '<div style="font-size:8.5px;color:rgba(255,255,255,.72);line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">#' + jidA + '</div>';
+          h += '<div style="font-size:10px;font-weight:700;color:#fff;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (n + 1) + '. ' + (done ? '✓ ' : '') + name + (city ? ' <span style="font-weight:500;color:rgba(255,255,255,.82);">' + mjEsc(city) + '</span>' : '') + '</div>';
+          h += '<div style="font-size:9px;color:rgba(255,255,255,.82);line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (j.zip ? mjEsc(j.zip) : '') + (j.zip && j.jobID ? ' · ' : '') + '#' + jidA + '</div>';
           h += '</div>';
         });
         h += '</div></div>';
