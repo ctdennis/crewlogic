@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.24 | 2026-06-22">
+  <meta name="crewlogic-version" content="v5.46.25 | 2026-06-22">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3627,7 +3627,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         <!-- Quick-pick the next 5 days (+ calendar) → lists that day's jobs (all routes), same collapsible view as the AI -->
         <div id="mjDateStrip" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:14px;-webkit-overflow-scrolling:touch;"></div>
 
-        <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5;">
+        <div id="mjHelp" style="display:none;position:fixed;z-index:9999;max-width:300px;background:var(--bg-card,#1e2f40);border:1px solid var(--border);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.5);padding:12px 14px;font-size:13px;color:var(--text-muted);line-height:1.5;">
           Speak a command to move, reschedule, or cancel a job, or ask what's available — e.g. <em>"Move the second appointment on Route 1 to Route 3,"</em> <em>"Change the Route 1 estimate tomorrow to one hour,"</em> <em>"Cancel job 2 on Route 3,"</em> or <em>"What's open Thursday afternoon?"</em> CrewLogic will confirm before making any change.
         </div>
 
@@ -7592,8 +7592,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const label = i === 0 ? 'Today' : (i === 1 ? 'Tomorrow' : mjDayLabelFromID(id).split(' ')[0]);
         h += '<button class="mj-date-chip" data-dayid="' + id + '" onclick="mjSelectDate(\'' + id + '\',this)" style="' + chipCss + '">' + mjEsc(label) + '</button>';
       }
+      // help "?" at the end of the row — hover (desktop) / tap (mobile) reveals the command instructions.
+      h += '<button onmouseenter="mjHelpShow(event)" onmouseleave="mjHelpHide()" onclick="mjHelpToggle(event)" title="How to use" style="flex:0 0 auto;align-self:center;width:30px;height:30px;border-radius:50%;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-secondary);font-size:14px;font-weight:700;cursor:pointer;">?</button>';
       strip.innerHTML = h;
     }
+    let _mjHelpSticky = false;
+    function mjHelpShow(ev) {
+      const el = document.getElementById('mjHelp'); if (!el) return;
+      el.style.display = 'block';
+      const rect = (ev && ev.currentTarget && ev.currentTarget.getBoundingClientRect) ? ev.currentTarget.getBoundingClientRect() : { left: 60, top: 120, bottom: 140 };
+      const tw = el.offsetWidth, th = el.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+      let left = rect.left; if (left + tw > vw - 8) left = vw - tw - 8; if (left < 8) left = 8;
+      let top = rect.bottom + 6; if (top + th > vh - 8) top = rect.top - th - 6; if (top < 8) top = 8;
+      el.style.left = left + 'px'; el.style.top = top + 'px';
+    }
+    function mjHelpHide() { if (_mjHelpSticky) return; const el = document.getElementById('mjHelp'); if (el) el.style.display = 'none'; }
+    function mjHelpForceHide() { _mjHelpSticky = false; const el = document.getElementById('mjHelp'); if (el) el.style.display = 'none'; }
+    function mjHelpToggle(ev) {
+      if (ev) ev.stopPropagation();
+      if (_mjHelpSticky) { mjHelpForceHide(); return; }
+      _mjHelpSticky = true; mjHelpShow(ev);
+      setTimeout(function () { document.addEventListener('click', mjHelpOutside, { once: true }); }, 0);
+    }
+    function mjHelpOutside(e) { const el = document.getElementById('mjHelp'); if (el && el.contains(e.target)) { document.addEventListener('click', mjHelpOutside, { once: true }); return; } mjHelpForceHide(); }
     function mjPickDate(val) {
       if (!val) return;
       const id = String(val).replace(/-/g, '');
