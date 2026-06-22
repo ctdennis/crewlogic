@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.22 | 2026-06-22">
+  <meta name="crewlogic-version" content="v5.46.23 | 2026-06-22">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3626,7 +3626,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
         <!-- Quick-pick the next 5 days (+ calendar) → lists that day's jobs (all routes), same collapsible view as the AI -->
         <div id="mjDateStrip" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:14px;-webkit-overflow-scrolling:touch;"></div>
-        <input type="date" id="mjDatePicker" onchange="mjPickDate(this.value)" style="position:fixed;left:-9999px;width:1px;height:1px;opacity:0;" aria-hidden="true">
 
         <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5;">
           Speak a command to move, reschedule, or cancel a job, or ask what's available — e.g. <em>"Move the second appointment on Route 1 to Route 3,"</em> <em>"Change the Route 1 estimate tomorrow to one hour,"</em> <em>"Cancel job 2 on Route 3,"</em> or <em>"What's open Thursday afternoon?"</em> CrewLogic will confirm before making any change.
@@ -7580,19 +7579,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function mjBuildDateStrip() {
       const strip = document.getElementById('mjDateStrip'); if (!strip) return;
       const today = mjNowParts().dayID; // franchise-local today
-      let h = '';
+      const chipCss = 'flex:0 0 auto;padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;';
+      // Calendar picker FIRST in the row — a real <input type=date> overlaid transparently on a 📅 pill so a
+      // tap reliably opens the native picker (the prior off-screen input + showPicker() was a no-op).
+      let h = '<div style="position:relative;flex:0 0 auto;">'
+        + '<span style="' + chipCss + 'display:inline-block;font-size:15px;line-height:1;">📅</span>'
+        + '<input type="date" id="mjDatePicker" onchange="mjPickDate(this.value)" onclick="try{this.showPicker&&this.showPicker()}catch(e){}" style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;border:0;padding:0;margin:0;">'
+        + '</div>';
       for (let i = 0; i < 5; i++) {
         const id = mjAddDays(today, i);
-        const label = i === 0 ? 'Today' : (i === 1 ? 'Tomorrow' : mjDayLabelFromID(id));
-        h += '<button class="mj-date-chip" data-dayid="' + id + '" onclick="mjSelectDate(\'' + id + '\',this)" style="flex:0 0 auto;padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">' + mjEsc(label) + '</button>';
+        // weekday-only for the dated chips (Wed/Thu/Fri) — drop the M/D to keep the row narrow.
+        const label = i === 0 ? 'Today' : (i === 1 ? 'Tomorrow' : mjDayLabelFromID(id).split(' ')[0]);
+        h += '<button class="mj-date-chip" data-dayid="' + id + '" onclick="mjSelectDate(\'' + id + '\',this)" style="' + chipCss + '">' + mjEsc(label) + '</button>';
       }
-      h += '<button onclick="mjOpenDatePicker()" title="Pick a date" style="flex:0 0 auto;padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-size:15px;cursor:pointer;">📅</button>';
       strip.innerHTML = h;
-    }
-    function mjOpenDatePicker() {
-      const p = document.getElementById('mjDatePicker'); if (!p) return;
-      if (p.showPicker) { try { p.showPicker(); return; } catch (e) {} }
-      p.click();
     }
     function mjPickDate(val) {
       if (!val) return;
