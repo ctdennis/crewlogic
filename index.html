@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.13 | 2026-06-21">
+  <meta name="crewlogic-version" content="v5.46.14 | 2026-06-22">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -3644,7 +3644,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
         <div id="mjTranscript" style="display:none;font-size:13px;color:var(--text-secondary);background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;"></div>
         <div id="mjResult"></div>
-        <div id="mjTip" style="display:none;position:fixed;z-index:9999;max-width:280px;background:var(--bg-card,#1e2f40);border:1px solid var(--accent-green,#00E785);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.5);padding:10px 12px;font-size:12px;color:var(--text-primary);"></div>
+        <div id="mjTip" style="display:none;position:fixed;z-index:9999;max-width:280px;max-height:70vh;overflow-y:auto;background:var(--bg-card,#1e2f40);border:1px solid var(--accent-green,#00E785);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.5);padding:10px 12px;font-size:12px;color:var(--text-primary);"></div>
       </div>
 
       <div id="volumeCheckScreen" class="estimates-section">
@@ -7659,6 +7659,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return { street: parts[0] || s, city: parts.length >= 2 ? parts[parts.length - 2] : '', zip: (s.match(/\b(\d{5})\b/) || [])[1] || '' };
     }
     function _mjRow(k, v) { return '<div style="display:flex;gap:8px;margin-bottom:4px;"><span style="color:var(--text-muted);flex:0 0 54px;">' + mjEsc(k) + '</span><span style="color:var(--text-primary);word-break:break-word;">' + v + '</span></div>'; }
+    function _mjBlock(k, v) { return '<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--border);"><div style="color:var(--text-muted);margin-bottom:2px;">' + mjEsc(k) + '</div><div style="color:var(--text-primary);white-space:pre-wrap;word-break:break-word;">' + v + '</div></div>'; }
     function mjJobInfoHTML(j, sticky) {
       const p = mjAddrParts(j.address), jid = mjEsc(String(j.jobID || ''));
       const n = Number(j.price), sub = Number.isFinite(n) && j.price !== '' ? ('$' + n.toFixed(2)) : (j.price ? ('$' + mjEsc(String(j.price))) : '—');
@@ -7670,6 +7671,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       h += _mjRow('City', mjEsc(p.city || '—'));
       h += _mjRow('Zip', mjEsc(j.zip || p.zip || '—'));
       h += _mjRow('Phone', '<span id="mjjobph-' + jid + '">…</span>');
+      if (j.summary && String(j.summary).trim()) h += _mjBlock('Summary', mjEsc(String(j.summary).trim()));
+      if (j.items && String(j.items).trim()) h += _mjBlock('Item(s) List', mjEsc(String(j.items).trim()));
       h += '<div style="margin-top:6px;"><a href="https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(j.jobID || '')) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#6db3ff;font-weight:600;text-decoration:none;">🔗 Open in Vonigo</a></div>';
       return h;
     }

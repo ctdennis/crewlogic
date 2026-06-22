@@ -22,7 +22,7 @@ const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers
 const TENANT_ID = '946a4535-aa61-45b6-a6fb-9190ff546d41';
 const VONIGO_BASE = 'https://junkluggers.vonigo.com/api/v1';
 // WorkOrder fieldIDs
-const F = { status: 181, client: 183, address: 184, date: 185, duration: 186, time: 9082, price: 813 };
+const F = { status: 181, client: 183, address: 184, date: 185, duration: 186, time: 9082, price: 813, summary: 200, items: 10336 };
 
 const json = (d: unknown, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
 const supa = () => createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -122,7 +122,7 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
     const jobRel = rel.find((x: any) => x.relationType === 'job'); const routeRel = rel.find((x: any) => x.relationType === 'route');
     const addr = gf(f, F.address).fieldValue || '';
     const timeMin = parseInt(gf(f, F.time).fieldValue || '0', 10);
-    return { jobID: jobRel ? String(jobRel.objectID) : null, woID: String(w.objectID), route: routeRel ? routeRel.name : '', routeCode: shortRoute(routeRel ? routeRel.name : ''), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', status: gf(f, F.status).fieldValue || '', statusOptionID: gf(f, F.status).optionID || 0, lat: null as number | null, lon: null as number | null };
+    return { jobID: jobRel ? String(jobRel.objectID) : null, woID: String(w.objectID), route: routeRel ? routeRel.name : '', routeCode: shortRoute(routeRel ? routeRel.name : ''), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: gf(f, F.status).fieldValue || '', statusOptionID: gf(f, F.status).optionID || 0, lat: null as number | null, lon: null as number | null };
   }).filter((j: any) => j.jobID && j.statusOptionID !== 162 && !/URGENTCB/i.test(j.route));
   if (route) { const rc = route.toUpperCase(); jobs = jobs.filter((j: any) => j.routeCode.toUpperCase() === rc || j.route.toUpperCase().includes(rc)); }
   jobs.sort((a: any, b: any) => a.timeMin - b.timeMin);
