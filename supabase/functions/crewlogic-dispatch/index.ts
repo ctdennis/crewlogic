@@ -140,7 +140,12 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
     const addr = gf(f, F.address).fieldValue || '';
     const timeMin = parseInt(gf(f, F.time).fieldValue || '0', 10);
     return { jobID: jobRel ? String(jobRel.objectID) : null, woID: String(w.objectID), route: routeRel ? routeRel.name : '', routeCode: shortRoute(routeRel ? routeRel.name : ''), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: gf(f, F.status).fieldValue || '', statusOptionID: gf(f, F.status).optionID || 0, lat: null as number | null, lon: null as number | null };
-  }).filter((j: any) => j.jobID && j.statusOptionID !== 162 && !/URGENTCB/i.test(j.route));
+  }).filter((j: any) => j.jobID
+    // hide non-active jobs by STATUS TEXT (robust to Vonigo's many optionIDs): plain "Cancelled" is 162,
+    // but a same-day cancel is "Cancelled - Today" (different optionID) and there's "Archived"/"Completed"
+    // too — all should drop off the dispatch board, leaving only Open/bookable jobs.
+    && j.statusOptionID !== 162 && !/cancel|archiv|complet/i.test(String(j.status || ''))
+    && !/URGENTCB/i.test(j.route));
   if (route) { const rc = route.toUpperCase(); jobs = jobs.filter((j: any) => j.routeCode.toUpperCase() === rc || j.route.toUpperCase().includes(rc)); }
   jobs.sort((a: any, b: any) => a.timeMin - b.timeMin);
   if (withCoords) await Promise.all(jobs.map(async (j: any) => { if (j.address) { const g = await geocode(j.address); if (g) { j.lat = g.lat; j.lon = g.lon; } } }));
