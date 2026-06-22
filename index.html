@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.28 | 2026-06-22">
+  <meta name="crewlogic-version" content="v5.46.29 | 2026-06-22">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7648,6 +7648,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // mobile day board. Built from the SAME listRouteJobs data; tapping a block opens its detail below.
     function mjHourLabel(h) { const ap = h < 12 ? 'AM' : 'PM', h12 = (h % 12) === 0 ? 12 : h % 12; return h12 + ' ' + ap; }
     function mjRouteColor(i) { const P = ['#c026d3', '#2563eb', '#0891b2', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0d9488', '#db2777', '#4f46e5']; return P[i % P.length]; }
+    // Pill BODY color by Vonigo LABEL (field 201). Vonigo's standard (global, not per-franchise) label colors,
+    // eyeballed 2026-06-22; "done" labels (245/9996/9993) render gray anyway. None/unknown → New Appointment
+    // blue (active default). Route is conveyed by the lane, not the body color.
+    function mjLabelColor(opt) { const M = { 245: '#6cc070', 9996: '#7fae8a', 9993: '#e0492e', 9984: '#45b6e6', 9981: '#1f4e79', 9975: '#2f9e78', 9973: '#9b59b6', 9971: '#e85fa0', 9970: '#9a8fa6', 247: '#c79fd6', 249: '#aab3bd' }; return M[opt] || '#45b6e6'; }
+    // Left-stripe color by PRICING ZONE. Vonigo's per-franchise zone colors are NOT API-readable, so this is a
+    // stable CrewLogic palette keyed deterministically to the zone id (consistent per franchise; flags a job
+    // whose zone is unusual for its lane). Zone NAME is shown in the tooltip.
+    function mjZoneColor(zoneID) { if (!zoneID) return 'transparent'; const P = ['#22c55e', '#eab308', '#ec4899', '#3b82f6', '#f97316', '#a855f7', '#06b6d4', '#ef4444', '#84cc16', '#14b8a6']; let n = 0; const s = String(zoneID); for (let i = 0; i < s.length; i++) n = (n * 31 + s.charCodeAt(i)) >>> 0; return P[n % P.length]; }
     let _mjBoardByID = {};
     function mjRenderBoard(data) {
       const r = document.getElementById('mjResult'); const jobs = data.jobs || [];
@@ -7674,7 +7682,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       h += '</div></div>';
       // route lanes
       routes.forEach((rc, ri) => {
-        const col = mjRouteColor(ri), laneJobs = jobs.filter(j => (j.routeCode || '?') === rc);
+        const laneJobs = jobs.filter(j => (j.routeCode || '?') === rc);
         h += '<div style="display:flex;height:' + ROW + 'px;border-bottom:1px solid var(--border);">';
         h += '<div style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:var(--text-secondary);border-right:1px solid var(--border);padding:0 2px;text-align:center;word-break:break-all;">' + mjEsc(rc) + '</div>';
         h += '<div style="position:relative;width:' + trackW + 'px;background:' + grid + ';">';
@@ -7682,8 +7690,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const left = ((j.timeMin - startMin) / 60) * PXH, w = Math.max(((j.durationMin || 60) / 60) * PXH, 50);
           const name = mjEsc((String(j.client || '').split(',')[0]) || j.client || 'Job');
           const city = mjAddrParts(j.address).city, jidA = mjEsc(String(j.jobID || ''));
-          const done = (!!j.completed || !!j.labelDone), bg = done ? '#5b6b7a' : col; // completed/archived OR a "done" label (Estimate Completed / Lost) → slate gray
-          h += '<div onmouseenter="mjTip(event,\'' + jidA + '\')" onmouseleave="mjTipHide()" onclick="mjTip(event,\'' + jidA + '\',true)" data-jid="' + jidA + '" title="' + (done ? 'Completed' : '') + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:3px;bottom:3px;background:' + bg + ';opacity:' + (done ? '0.72' : '1') + ';border-radius:5px;padding:2px 5px;overflow:hidden;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.3);">';
+          // Body = label color (Vonigo parity); gray when done. Left stripe = pricing zone (inset box-shadow).
+          const done = (!!j.completed || !!j.labelDone), bg = done ? '#5b6b7a' : mjLabelColor(j.labelOpt), zoneStripe = mjZoneColor(j.zoneID);
+          h += '<div onmouseenter="mjTip(event,\'' + jidA + '\')" onmouseleave="mjTipHide()" onclick="mjTip(event,\'' + jidA + '\',true)" data-jid="' + jidA + '" title="' + (done ? 'Completed' : '') + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:3px;bottom:3px;background:' + bg + ';opacity:' + (done ? '0.72' : '1') + ';border-radius:5px;padding:2px 5px 2px 9px;overflow:hidden;cursor:pointer;box-shadow:inset 5px 0 0 0 ' + zoneStripe + ',0 1px 2px rgba(0,0,0,.3);">';
           h += '<div style="font-size:10px;font-weight:700;color:#fff;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (n + 1) + '. ' + (done ? '✓ ' : '') + name + (city ? ' <span style="font-weight:500;color:rgba(255,255,255,.82);">' + mjEsc(city) + '</span>' : '') + '</div>';
           h += '<div style="font-size:9px;color:rgba(255,255,255,.82);line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (j.zip ? mjEsc(j.zip) : '') + (j.zip && j.jobID ? ' · ' : '') + '#' + jidA + '</div>';
           h += '</div>';
@@ -7727,6 +7736,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       h += _mjRow('Street', mjEsc(p.street || '—'));
       h += _mjRow('City', mjEsc(p.city || '—'));
       h += _mjRow('Zip', mjEsc(j.zip || p.zip || '—'));
+      if (j.zoneName) h += _mjRow('Zone', '<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:' + mjZoneColor(j.zoneID) + ';margin-right:5px;vertical-align:middle;"></span>' + mjEsc(j.zoneName));
       h += _mjRow('Phone', '<span id="mjjobph-' + jid + '">…</span>');
       if (j.summary && String(j.summary).trim()) h += _mjBlock('Summary', mjEsc(String(j.summary).trim()));
       if (j.items && String(j.items).trim()) h += _mjBlock('Item(s) List', mjEsc(String(j.items).trim()));
