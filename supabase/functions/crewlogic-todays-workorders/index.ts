@@ -364,12 +364,13 @@ Deno.serve(async (req: Request) => {
       // Sort by appointment time ascending
       .sort((a, b) => a.time - b.time);
 
-    // Geocode OPEN jobs (only when asked) so the truck map can drop house pins.
+    // Geocode jobs (only when asked) so the truck map can drop house pins. Includes COMPLETED jobs now
+    // (they render grayed on the map), so geocode every job with an address — not just open ones.
     // Cache-first via geocode_cache; misses go to the free US Census Geocoder and
     // are written back (including "not found", so bad addresses aren't retried).
     if (includeCoords) {
-      const open = workOrders.filter((w) => !w.isComplete && w.address);
-      await Promise.all(open.map(async (w) => {
+      const toGeocode = workOrders.filter((w) => w.address);
+      await Promise.all(toGeocode.map(async (w) => {
         const oneLine = w.address.replace(/\n/g, ', ').replace(/\s+/g, ' ').trim();
         const key = oneLine.toLowerCase();
         try {
