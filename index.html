@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.29 | 2026-06-22">
+  <meta name="crewlogic-version" content="v5.46.30 | 2026-06-22">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7628,6 +7628,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     async function mjSelectDate(dayID, chipEl) {
       document.querySelectorAll('#mjDateStrip .mj-date-chip').forEach(c => mjChipActive(c, c === chipEl));
+      _mjBoardDayID = dayID; // remember the shown day so a command without an explicit date defaults to it
       _mjPlan = null;
       const r = document.getElementById('mjResult');
       r.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline" style="display:inline-block;"></span>Loading jobs…</div>';
@@ -7657,6 +7658,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // whose zone is unusual for its lane). Zone NAME is shown in the tooltip.
     function mjZoneColor(zoneID) { if (!zoneID) return 'transparent'; const P = ['#22c55e', '#eab308', '#ec4899', '#3b82f6', '#f97316', '#a855f7', '#06b6d4', '#ef4444', '#84cc16', '#14b8a6']; let n = 0; const s = String(zoneID); for (let i = 0; i < s.length; i++) n = (n * 31 + s.charCodeAt(i)) >>> 0; return P[n % P.length]; }
     let _mjBoardByID = {};
+    let _mjBoardDayID = ''; // the day tab currently shown — passed as the voice/text command's default working day
     function mjRenderBoard(data) {
       const r = document.getElementById('mjResult'); const jobs = data.jobs || [];
       const hdr = (data.dayLabel || '') + ' — ' + jobs.length + ' job' + (jobs.length !== 1 ? 's' : '');
@@ -7807,7 +7809,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function mjSendCommand(transcript) {
       const r = document.getElementById('mjResult'); _mjPlan = null;
       r.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline" style="display:inline-block;"></span>Thinking…</div>';
-      const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'command', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, transcript, history: _mjHistory });
+      const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'command', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, transcript, history: _mjHistory, dayID: _mjBoardDayID || '' });
       if (!data || !data.success) { r.innerHTML = '<div style="color:#ff6b6b;font-size:13px;">' + mjEsc((data && data.error) || 'Something went wrong.') + '</div>'; return; }
       // keep short conversation memory so "that job" / "it" / "Melissa's job" resolves on the next command
       _mjHistory.push({ role: 'user', text: transcript });
