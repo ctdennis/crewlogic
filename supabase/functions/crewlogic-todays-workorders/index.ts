@@ -58,6 +58,11 @@ const F_DATE_SERVICE = 185;
 const F_TIME_MINUTES = 9082; // minutes from midnight of the appointment
 const F_PRICE = 813;
 const F_ITEMS = 10336; // customer-facing items list (safe to display)
+const F_LABEL = 201;   // appointment label/category (drives the Vonigo schedule pill color)
+// Field-201 LABEL optionIDs that mean a job is "done" → render gray (mapped from Vonigo 2026-06-22):
+// 245=Estimate Completed (Job), 9996=Estimate Completed (Est. Only), 9993=Lost. Converted labels
+// (9975 Job / 9970 Est.Only) and National Account (9981) stay ACTIVE until status Archived.
+const GRAY_LABELS = new Set([245, 9996, 9993]);
 // Fields exposed only when `includePlanData: true` — these are internal/
 // confidential and should NEVER be returned for the customer-facing picker.
 const F_NOTES = 200; // customer situation, safety, VIP, lugger-only context
@@ -341,9 +346,9 @@ Deno.serve(async (req: Request) => {
           dateService,
           price,
           isComplete: statusOptionID === STATUS_COMPLETED || statusOptionID === STATUS_ARCHIVED,
-          // ESTIMATE-route job with a quote relation = estimate performed ("done for the day") even though
-          // its status stays Open. Scoped to the estimate route so regular jobs aren't affected.
-          estimateDone: /estimate/i.test(routeRel?.name || '') && relations.some((r) => r.relationType === 'quote'),
+          // labelDone: field-201 label marks it "done" (Estimate Completed Job/Est.Only, or Lost) even with
+          // status Open → render gray. (Converted/National-Account labels gray only on Archived = isComplete.)
+          labelDone: GRAY_LABELS.has(getField(fields, F_LABEL)?.optionID || 0),
           lat: null as number | null,
           lon: null as number | null,
         };

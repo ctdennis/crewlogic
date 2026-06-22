@@ -22,7 +22,11 @@ const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers
 const TENANT_ID = '946a4535-aa61-45b6-a6fb-9190ff546d41';
 const VONIGO_BASE = 'https://junkluggers.vonigo.com/api/v1';
 // WorkOrder fieldIDs
-const F = { status: 181, client: 183, address: 184, date: 185, duration: 186, time: 9082, price: 813, summary: 200, items: 10336 };
+const F = { status: 181, client: 183, address: 184, date: 185, duration: 186, time: 9082, price: 813, summary: 200, items: 10336, label: 201 };
+// Field-201 LABEL optionIDs that mean a job is "done" → render gray. Mapped from Vonigo 2026-06-22:
+// 245=Estimate Completed (Job), 9996=Estimate Completed (Est. Only), 9993=Lost. (Converted labels 9975/9970
+// stay ACTIVE until status Archived; National Account also grays only on Archived — handled by status.)
+const GRAY_LABELS = new Set([245, 9996, 9993]);
 
 const json = (d: unknown, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
 const supa = () => createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -141,11 +145,11 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
     const timeMin = parseInt(gf(f, F.time).fieldValue || '0', 10);
     const statusVal = gf(f, F.status).fieldValue || '';
     const rname = routeRel ? routeRel.name : '';
-    // An ESTIMATE-route job with a quote relation = estimate performed (a quote was produced) → "done"
-    // even though its status stays Open. Scoped to the estimate route so regular jobs (which can carry a
-    // booking quote) are unaffected.
-    const estimateDone = (/estimate/i.test(rname) || shortRoute(rname) === 'EST') && rel.some((x: any) => x.relationType === 'quote');
-    return { jobID: jobRel ? String(jobRel.objectID) : null, woID: String(w.objectID), route: rname, routeCode: shortRoute(rname), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), estimateDone, lat: null as number | null, lon: null as number | null };
+    // labelDone: the field-201 label marks a job "done" (Estimate Completed Job/Est.Only, or Lost) even
+    // though its status stays Open. Visual gray = completed(status) OR labelDone; `completed` alone still
+    // gates the AI write-decline (status-Open label-done jobs are still movable).
+    const labelDone = GRAY_LABELS.has(gf(f, F.label).optionID || 0);
+    return { jobID: jobRel ? String(jobRel.objectID) : null, woID: String(w.objectID), route: rname, routeCode: shortRoute(rname), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), labelDone, lat: null as number | null, lon: null as number | null };
   }).filter((j: any) => j.jobID
     // hide CANCELLED only — plain "Cancelled" (optionID 162) AND same-day "Cancelled - Today" (different
     // optionID, caught by the text test). COMPLETED/ARCHIVED jobs are KEPT (flagged completed → grayed on
