@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.23 | 2026-06-22">
+  <meta name="crewlogic-version" content="v5.46.24 | 2026-06-22">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7693,8 +7693,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function mjJobInfoHTML(j, sticky) {
       const p = mjAddrParts(j.address), jid = mjEsc(String(j.jobID || ''));
       const idLink = j.jobID ? '<a href="https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(j.jobID)) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#6db3ff;font-weight:600;text-decoration:none;">' + jid + ' 🔗</a>' : '—';
+      // Full customer name — pill only shows the last name, so surface the whole name here. Vonigo stores
+      // "Last, First"; reformat the clean 2-part case to natural "First Last", else show as-is.
+      let full = String(j.client || '').trim(); const _cp = full.split(','); if (_cp.length === 2) full = _cp[1].trim() + ' ' + _cp[0].trim();
       let h = '';
       if (sticky) h += '<div style="text-align:right;margin:-4px -4px 2px 0;"><span onclick="mjTipForceHide()" style="cursor:pointer;color:var(--text-muted);font-size:16px;line-height:1;">×</span></div>';
+      if (full) h += _mjRow('Name', mjEsc(full));
       h += _mjRow('Job', idLink);
       h += _mjRow('Street', mjEsc(p.street || '—'));
       h += _mjRow('City', mjEsc(p.city || '—'));
