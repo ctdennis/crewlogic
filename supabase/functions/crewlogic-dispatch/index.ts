@@ -55,6 +55,8 @@ function timeLabel(min: number): string {
   return `${h12}:${String(m).padStart(2, '0')} ${ap}`;
 }
 function zipOf(address: string): string { const m = String(address || '').match(/\b(\d{5})\b/); return m ? m[1] : ''; }
+// minutes → friendly length ("1 hr", "90 min", "1 hr 30 min") for user-facing error/confirm copy.
+function durLabel(min: unknown): string { const m = parseInt(String(min), 10); if (!Number.isFinite(m) || m <= 0) return String(min) + ' min'; const h = Math.floor(m / 60), r = m % 60; if (h && r) return `${h} hr ${r} min`; if (h) return `${h} hr`; return `${r} min`; }
 function easternDayID(offset = 0): string {
   const s = new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
   const m = s.match(/(\d{2})\/(\d{2})\/(\d{4})/); if (!m) return '';
@@ -196,7 +198,7 @@ Everything in the final plan must appear in the confirm message so the human ver
 - MOVE: resolveJob (positional/time). TIME default: if no new time is named, keep the job's CURRENT time. DURATION: use the job's CURRENT duration UNLESS the user ALSO changes it in the same command (e.g. "move it to Route 3 and make it one hour") — then parse the NEW duration to minutes and use THAT for both the availability/slot-fit check (suggestSlots durationMin = new) AND the plan's durationMin. ALWAYS set fromDurationMin = the job's current duration so a change is shown on the confirm. (A move + duration change is ONE move — the target slot just gets booked at the new length; no separate duration step.) TWO cases for the target ROUTE:
   (a) User NAMES a route: use it. Check open slots via suggestSlots(route=that route, NO zip) — never pass the zip when checking a NAMED route (zip-zoning hides non-zoned routes like RE-SCD and would falsely show "no slots"). Set zoned by calling suggestSlots(zip=job's zip): zoned=true if the named route appears in those, else zoned=false (owner OVERRIDE — still allowed if the slot is open; flag it). RE-SCD/Estimate are never zoned.
   (b) User does NOT name a target route: ASK FIRST (intent "clarify") whether to keep the job on its CURRENT route or move it to a different (zoned) route — e.g. "Keep this on RE-SCD, or move it to one of its zoned routes?" You MAY note which zoned routes have the requested time open (from suggestSlots WITH the job's zip). Do NOT pick a route yourself yet. After the user answers: "same/keep" -> check the CURRENT route (suggestSlots route=current, NO zip) and propose; "different/zoned/move it" -> use the zoned routes (suggestSlots with the zip): if exactly ONE has the time open propose it, if MULTIPLE ask which, if NONE offer the nearest open times.
-  If the requested time isn't open, offer the nearest open times.
+  If the requested time isn't open for the needed duration: FIRST check (suggestSlots at a SHORTER duration, e.g. 60) whether the job would fit there if shortened — if so, OFFER to move it AND shorten it to fit in one go (e.g. "Route 3 at 9 only has 1 hour open — want me to move it there and shorten it to 1 hour?"). If the user says yes, build a MOVE plan with durationMin = the shorter length. Otherwise, offer the nearest open times that DO fit the full duration.
 - DURATION change ("change/shorten/lengthen the duration to X", "make it one hour", "cut it to 90 minutes"): resolveJob to identify the EXACT job (same JOB rule — resolve only on an unambiguous match, else ASK). KEEP the job's CURRENT route, day, and start time (do not move it). Parse the new length to MINUTES ("one hour"/"an hour"=60, "90 minutes"/"an hour and a half"=90, "two hours"=120, "45 minutes"=45). Build a DURATION plan with woID = the WorkOrder id, routeCode/dayID/startTime = the job's CURRENT values, fromDurationMin = the job's current duration, durationMin = the NEW minutes, and the job's zip. Lengthening can fail if the longer slot isn't open — that's fine, it will be reported on execute.
 - CANCEL: resolveJob, then map the spoken reason to a category+reason from this list (case-insensitive): ${JSON.stringify(Object.fromEntries(Object.entries(REASON_CODES).map(([c, v]) => [c, Object.keys(v.reasons)])))}.
 - LISTING jobs ("what jobs are on RE-SCD tomorrow", "what's on route 3"): call showJobs(route, dayID) — the app renders a clean expandable list. Do NOT list them in text and do NOT call listRouteJobs for this.
@@ -278,7 +280,7 @@ Deno.serve(async (req: Request) => {
     const franchiseID = String(body.franchiseID || '');
     if (!franchiseID) return json({ success: false, error: 'franchiseID required' }, 400);
     const auth = await vonigoAuth(franchiseID);
-    if ('error' in auth) return json({ success: false, error: auth.error }, 502);
+    if ('error' in auth) { console.error('[dispatch] vonigo auth failed:', auth.error); return json({ success: false, error: 'Couldn’t reach the scheduling system — please try again in a moment.' }, 502); }
     const token = auth.token;
 
     if (action === 'listRouteJobs') {
@@ -357,28 +359,30 @@ Deno.serve(async (req: Request) => {
         if (!woID || !toRouteID || !dayID || startTime == null) return json({ success: false, error: 'move plan missing woID / resolvable toRouteCode / dayID / startTime', toRouteID }, 400);
         const lock = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID: String(toRouteID), zip, serviceTypeID, duration, startTime: String(startTime) });
         const lockID = lock.Ids && (lock.Ids.lockID || lock.Ids.LockID);
-        if (!lockID) return json({ success: false, error: 'target slot no longer available', lock: { errNo: lock.errNo, errors: lock.Errors || null } }, 409);
+        if (!lockID) { console.error('[dispatch] move lock failed:', JSON.stringify({ errNo: lock.errNo, errors: lock.Errors || null })); return json({ success: false, error: `That time isn’t open for the full ${durLabel(duration)} on ${plan.toRouteCode || 'that route'} — pick another slot, or shorten the job to fit.` }, 409); }
         const mv = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockID) });
         const ok = mv.errNo === 0;
         console.log(`[dispatch][AUDIT] execute move wo=${woID} route=${toRouteID} ${plan.startLabel} ${dayID} lock=${lockID} errNo=${mv.errNo}`);
+        if (!ok) console.error('[dispatch] move commit failed:', JSON.stringify({ errNo: mv.errNo, errMsg: mv.errMsg, errors: mv.Errors || null }));
         await audit({ franchiseID, action: 'move', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan, toRouteID, lockID }, fieldsWritten: { method: 16, objectID: String(woID), lockID: String(lockID) }, vonigoErrno: mv.errNo, success: ok, result: { errMsg: mv.errMsg || null, errors: mv.Errors || null } });
-        return json({ success: ok, kind: 'move', plan, move: { errNo: mv.errNo, errMsg: mv.errMsg || null, errors: mv.Errors || null } }, ok ? 200 : 502);
+        return json({ success: ok, kind: 'move', plan, ...(ok ? {} : { error: 'The move couldn’t be completed — that slot may have just been taken. Try another slot.' }) }, ok ? 200 : 502);
       }
       if (plan.kind === 'cancel') {
         const cat = String(plan.category || '').toLowerCase().trim();
         const reason = String(plan.reason || '').toLowerCase().trim();
         const catEntry = REASON_CODES[cat];
-        if (!catEntry) return json({ success: false, error: 'unknown cancel category: ' + plan.category }, 400);
+        if (!catEntry) { console.error('[dispatch] cancel unknown category:', plan.category); return json({ success: false, error: 'That cancel reason isn’t available — please pick another reason.' }, 400); }
         const categoryOptionID = catEntry.categoryOptionID;
         const reasonOptionID = catEntry.reasons[reason];
-        if (categoryOptionID == null || reasonOptionID == null) return json({ success: false, error: 'reason code not yet configured', need: { category: plan.category, reason: plan.reason, categoryOptionID, reasonOptionID }, hint: 'fill the optionID in REASON_CODES' }, 422);
+        if (categoryOptionID == null || reasonOptionID == null) { console.error('[dispatch] cancel reason not configured:', JSON.stringify({ category: plan.category, reason: plan.reason, categoryOptionID, reasonOptionID })); return json({ success: false, error: 'That cancel reason isn’t set up yet — please pick another reason.' }, 422); }
         const Fields: any[] = [{ fieldID: 974, optionID: String(categoryOptionID) }, { fieldID: 975, optionID: String(reasonOptionID) }];
         if (plan.comments) Fields.push({ fieldID: 973, fieldValue: String(plan.comments) });
         const c = await vpost(token, '/data/Jobs/', { method: '4', objectID: String(plan.jobID), Fields });
         const ok = c.errNo === 0;
         console.log(`[dispatch][AUDIT] execute cancel job=${plan.jobID} ${cat}/${reason} errNo=${c.errNo}`);
+        if (!ok) console.error('[dispatch] cancel failed:', JSON.stringify({ errNo: c.errNo, errMsg: c.errMsg, errors: c.Errors || null }));
         await audit({ franchiseID, action: 'cancel', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { jobID: String(plan.jobID), category: cat, reason, categoryOptionID, reasonOptionID, comments: plan.comments || null }, fieldsWritten: { method: 4, objectID: String(plan.jobID), Fields }, vonigoErrno: c.errNo, success: ok, result: { errMsg: c.errMsg || null, errors: c.Errors || null } });
-        return json({ success: ok, kind: 'cancel', plan, cancel: { errNo: c.errNo, errMsg: c.errMsg || null, errors: c.Errors || null } }, ok ? 200 : 502);
+        return json({ success: ok, kind: 'cancel', plan, ...(ok ? {} : { error: 'The cancellation couldn’t be completed — please try again.' }) }, ok ? 200 : 502);
       }
       if (plan.kind === 'duration') {
         // Duration change is SCHEDULER-MANAGED: a method-2 field edit of 186 silently no-ops, and you
@@ -395,23 +399,24 @@ Deno.serve(async (req: Request) => {
         const ds = dayEpoch(String(dayID)), de = ds + 79200;
         const av = await vpost(token, '/resources/availability/', { method: '0', dateStart: String(ds), dateEnd: String(de), duration: newDur, locationID: '1', serviceTypeID: '11', routeID, pageNo: '1', pageSize: '400' });
         const slots = (av.Availability || []).filter((s: any) => String(s.dayID) === String(dayID) && String(parseInt(s.startTime, 10)) !== origStart).map((s: any) => parseInt(s.startTime, 10)).sort((a: number, b: number) => b - a);
-        if (!slots.length) return json({ success: false, error: 'no free slot on this route to apply the change — try a different day or free up time' }, 409);
+        if (!slots.length) { console.error('[dispatch] duration: no staging slot', JSON.stringify({ routeID, dayID, newDur })); return json({ success: false, error: `No room on ${plan.routeCode || 'that route'} to set it to ${durLabel(newDur)} — try a different day, or free up time first.` }, 409); }
         const staging = String(slots[0]);
         // Step A: park the job at the staging slot at the NEW duration (sets field 186; frees the original slot)
         const lkA = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID, zip, serviceTypeID: '11', duration: newDur, startTime: staging });
         const lockA = lkA.Ids && (lkA.Ids.lockID || lkA.Ids.LockID);
-        if (!lockA) return json({ success: false, error: 'could not apply the duration change (staging lock failed)', lock: { errNo: lkA.errNo, errors: lkA.Errors || null } }, 409);
+        if (!lockA) { console.error('[dispatch] duration staging lock failed:', JSON.stringify({ errNo: lkA.errNo, errors: lkA.Errors || null })); return json({ success: false, error: 'Couldn’t apply the duration change right now — please try again, or adjust it in Vonigo.' }, 409); }
         const mvA = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockA) });
-        if (mvA.errNo !== 0) { await audit({ franchiseID, action: 'duration', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan, routeID, staging, step: 'A' }, fieldsWritten: { method: 16, objectID: String(woID), lockID: String(lockA), durationMin: newDur, staging }, vonigoErrno: mvA.errNo, success: false, result: { errMsg: mvA.errMsg || null, errors: mvA.Errors || null } }); return json({ success: false, error: 'could not apply the duration change (staging move failed)', move: { errNo: mvA.errNo, errMsg: mvA.errMsg || null } }, 502); }
+        if (mvA.errNo !== 0) { console.error('[dispatch] duration staging move failed:', JSON.stringify({ errNo: mvA.errNo, errMsg: mvA.errMsg, errors: mvA.Errors || null })); await audit({ franchiseID, action: 'duration', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan, routeID, staging, step: 'A' }, fieldsWritten: { method: 16, objectID: String(woID), lockID: String(lockA), durationMin: newDur, staging }, vonigoErrno: mvA.errNo, success: false, result: { errMsg: mvA.errMsg || null, errors: mvA.Errors || null } }); return json({ success: false, error: 'Couldn’t apply the duration change — please try again.' }, 502); }
         // Step B: re-lock the original start at the NEW duration and move it back
         const lkB = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID, zip, serviceTypeID: '11', duration: newDur, startTime: origStart });
         const lockB = lkB.Ids && (lkB.Ids.lockID || lkB.Ids.LockID);
-        if (!lockB) { await audit({ franchiseID, action: 'duration', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan, routeID, staging, step: 'B', strandedAt: staging }, fieldsWritten: { method: 16, objectID: String(woID), durationMin: newDur }, vonigoErrno: lkB.errNo, success: false, result: { errMsg: 'return lock failed', errors: lkB.Errors || null } }); return json({ success: false, error: 'duration set to ' + newDur + ' min but the original time could not be reclaimed (likely a longer block does not fit) — the job is temporarily at ' + timeLabel(+staging) + '; adjust in Vonigo', stagedAt: staging }, 409); }
+        if (!lockB) { console.error('[dispatch] duration return-lock failed (job parked):', JSON.stringify({ errNo: lkB.errNo, errors: lkB.Errors || null, stagedAt: staging })); await audit({ franchiseID, action: 'duration', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan, routeID, staging, step: 'B', strandedAt: staging }, fieldsWritten: { method: 16, objectID: String(woID), durationMin: newDur }, vonigoErrno: lkB.errNo, success: false, result: { errMsg: 'return lock failed', errors: lkB.Errors || null } }); return json({ success: false, error: `Can’t extend to ${durLabel(newDur)} at ${plan.startLabel || timeLabel(+origStart)} — something’s booked right after. Pick a shorter length or a slot with more room. (The job is temporarily at ${timeLabel(+staging)} — adjust in Vonigo.)`, stagedAt: staging }, 409); }
         const mvB = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockB) });
         const ok = mvB.errNo === 0;
         console.log(`[dispatch][AUDIT] execute duration wo=${woID} -> ${newDur}min (two-step via staging ${staging}) errNo=${mvB.errNo}`);
+        if (!ok) console.error('[dispatch] duration final move failed:', JSON.stringify({ errNo: mvB.errNo, errMsg: mvB.errMsg, errors: mvB.Errors || null }));
         await audit({ franchiseID, action: 'duration', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan, routeID, staging, lockA, lockB }, fieldsWritten: { method: 16, objectID: String(woID), twoStep: true, durationMin: newDur, staging, origStart }, vonigoErrno: mvB.errNo, success: ok, result: { errMsg: mvB.errMsg || null, errors: mvB.Errors || null } });
-        return json({ success: ok, kind: 'duration', plan, move: { errNo: mvB.errNo, errMsg: mvB.errMsg || null, errors: mvB.Errors || null } }, ok ? 200 : 502);
+        return json({ success: ok, kind: 'duration', plan, ...(ok ? {} : { error: `Couldn’t set it to ${durLabel(newDur)} — please try again.` }) }, ok ? 200 : 502);
       }
       return json({ success: false, error: 'execute needs plan.kind = move | duration | cancel' }, 400);
     }
@@ -420,6 +425,6 @@ Deno.serve(async (req: Request) => {
   } catch (e) {
     const err = e as Error;
     console.error('[dispatch] error:', err?.stack || err?.message || String(e));
-    return json({ success: false, error: err.message || String(e) }, 500);
+    return json({ success: false, error: 'Something went wrong handling that command — please try again.' }, 500);
   }
 });
