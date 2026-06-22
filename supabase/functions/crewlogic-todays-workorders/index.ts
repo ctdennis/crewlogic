@@ -354,8 +354,9 @@ Deno.serve(async (req: Request) => {
           itemLocations: parseItemLocations(getField(fields, F_ITEM_LOCATIONS)?.fieldValue || ''),
         };
       })
-      // Filter out cancelled jobs
-      .filter((wo) => wo.statusOptionID !== STATUS_CANCELLED)
+      // Filter out cancelled jobs — plain "Cancelled" (162) AND same-day "Cancelled - Today" (163, a
+      // different optionID); match by status text so all cancelled variants drop (completed jobs are KEPT).
+      .filter((wo) => wo.statusOptionID !== STATUS_CANCELLED && !/cancel/i.test(String(wo.status || '')))
       // Filter out Urgent Call Back (UCB) route jobs
       .filter((wo) => !/URGENTCB/i.test(wo.route))
       // Require a jobID
