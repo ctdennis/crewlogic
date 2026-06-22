@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.14 | 2026-06-22">
+  <meta name="crewlogic-version" content="v5.46.15 | 2026-06-22">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7621,7 +7621,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const grid = 'repeating-linear-gradient(to right, transparent 0, transparent ' + (PXH - 1) + 'px, var(--border) ' + (PXH - 1) + 'px, var(--border) ' + PXH + 'px)';
       let h = '<div style="margin-bottom:8px;font-weight:700;font-size:13px;color:var(--text-primary);">' + mjEsc(hdr) + '</div>';
       h += '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);-webkit-overflow-scrolling:touch;">';
-      h += '<div style="min-width:' + (LW + trackW) + 'px;">';
+      h += '<div style="position:relative;min-width:' + (LW + trackW) + 'px;">';
       // time header
       h += '<div style="display:flex;height:22px;border-bottom:1px solid var(--border);">';
       h += '<div style="position:sticky;left:0;z-index:3;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);"></div>';
@@ -7646,6 +7646,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         });
         h += '</div></div>';
       });
+      // current-time marker (only when viewing TODAY and the clock is within the visible hours)
+      const _now = new Date();
+      if (data.dayID && String(data.dayID) === mjDayID(_now)) {
+        const nowMin = _now.getHours() * 60 + _now.getMinutes();
+        if (nowMin >= startMin && nowMin <= endH * 60) {
+          const nx = LW + ((nowMin - startMin) / 60) * PXH, laneH = ROW * routes.length;
+          h += '<div title="Now" style="position:absolute;left:' + (nx - 3) + 'px;top:14px;width:8px;height:8px;border-radius:50%;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
+          h += '<div title="Now" style="position:absolute;left:' + nx + 'px;top:22px;width:2px;height:' + laneH + 'px;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
+        }
+      }
       h += '</div></div>';
       h += '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);">Hover (desktop) or tap (mobile) a job for details.</div>';
       r.innerHTML = h;
@@ -7662,18 +7672,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _mjBlock(k, v) { return '<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--border);"><div style="color:var(--text-muted);margin-bottom:2px;">' + mjEsc(k) + '</div><div style="color:var(--text-primary);white-space:pre-wrap;word-break:break-word;">' + v + '</div></div>'; }
     function mjJobInfoHTML(j, sticky) {
       const p = mjAddrParts(j.address), jid = mjEsc(String(j.jobID || ''));
-      const n = Number(j.price), sub = Number.isFinite(n) && j.price !== '' ? ('$' + n.toFixed(2)) : (j.price ? ('$' + mjEsc(String(j.price))) : '—');
+      const idLink = j.jobID ? '<a href="https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(j.jobID)) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#6db3ff;font-weight:600;text-decoration:none;">' + jid + ' 🔗</a>' : '—';
       let h = '';
       if (sticky) h += '<div style="text-align:right;margin:-4px -4px 2px 0;"><span onclick="mjTipForceHide()" style="cursor:pointer;color:var(--text-muted);font-size:16px;line-height:1;">×</span></div>';
-      h += _mjRow('ID', mjEsc(j.jobID || '—'));
-      h += _mjRow('Subtotal', mjEsc(sub));
+      h += _mjRow('Job', idLink);
       h += _mjRow('Street', mjEsc(p.street || '—'));
       h += _mjRow('City', mjEsc(p.city || '—'));
       h += _mjRow('Zip', mjEsc(j.zip || p.zip || '—'));
       h += _mjRow('Phone', '<span id="mjjobph-' + jid + '">…</span>');
       if (j.summary && String(j.summary).trim()) h += _mjBlock('Summary', mjEsc(String(j.summary).trim()));
       if (j.items && String(j.items).trim()) h += _mjBlock('Item(s) List', mjEsc(String(j.items).trim()));
-      h += '<div style="margin-top:6px;"><a href="https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(j.jobID || '')) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#6db3ff;font-weight:600;text-decoration:none;">🔗 Open in Vonigo</a></div>';
       return h;
     }
     // Job tooltip — desktop hover (quick peek) + mobile tap (sticky, dismiss via × or tap-outside).
