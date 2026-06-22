@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.16 | 2026-06-22">
+  <meta name="crewlogic-version" content="v5.46.17 | 2026-06-22">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7547,6 +7547,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Calls the deterministic crewlogic-dispatch listRouteJobs (no AI), then renders via the SAME
     // 'jobs' branch of mjRenderResult that the AI uses — so the collapsible list is identical.
     function mjDayID(d) { return '' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0'); }
+    // Franchise-timezone helpers — the schedule board ("today", date chips, now-line) must follow the
+    // FRANCHISE's zone, not the viewer's device. Mirrors crewlogic-dispatch resolveTimezone/STATE_TZ.
+    const _MJ_STATE_TZ = { AL: 'America/Chicago', AK: 'America/Anchorage', AZ: 'America/Phoenix', AR: 'America/Chicago', CA: 'America/Los_Angeles', CO: 'America/Denver', CT: 'America/New_York', DE: 'America/New_York', DC: 'America/New_York', FL: 'America/New_York', GA: 'America/New_York', HI: 'Pacific/Honolulu', ID: 'America/Boise', IL: 'America/Chicago', IN: 'America/Indiana/Indianapolis', IA: 'America/Chicago', KS: 'America/Chicago', KY: 'America/New_York', LA: 'America/Chicago', ME: 'America/New_York', MD: 'America/New_York', MA: 'America/New_York', MI: 'America/Detroit', MN: 'America/Chicago', MS: 'America/Chicago', MO: 'America/Chicago', MT: 'America/Denver', NE: 'America/Chicago', NV: 'America/Los_Angeles', NH: 'America/New_York', NJ: 'America/New_York', NM: 'America/Denver', NY: 'America/New_York', NC: 'America/New_York', ND: 'America/Chicago', OH: 'America/New_York', OK: 'America/Chicago', OR: 'America/Los_Angeles', PA: 'America/New_York', RI: 'America/New_York', SC: 'America/New_York', SD: 'America/Chicago', TN: 'America/Chicago', TX: 'America/Chicago', UT: 'America/Denver', VT: 'America/New_York', VA: 'America/New_York', WA: 'America/Los_Angeles', WV: 'America/New_York', WI: 'America/Chicago', WY: 'America/Denver' };
+    function mjFranchiseTz() {
+      const cs = (typeof currentUser !== 'undefined' && currentUser && currentUser.costSettings) || {};
+      const ex = String(cs.officeTimezone || '').trim(); if (ex) return ex;
+      const st = String(cs.officeState || (typeof currentUser !== 'undefined' && currentUser && currentUser.officeState) || '').trim().toUpperCase();
+      return _MJ_STATE_TZ[st] || 'America/New_York';
+    }
+    // {dayID, minutesOfDay} for "now" in the franchise tz (falls back to device clock if Intl fails).
+    function mjNowParts() {
+      try {
+        const p = {};
+        new Intl.DateTimeFormat('en-US', { timeZone: mjFranchiseTz(), year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date()).forEach(x => p[x.type] = x.value);
+        let hh = parseInt(p.hour, 10); if (hh === 24) hh = 0;
+        return { dayID: '' + p.year + p.month + p.day, minutesOfDay: hh * 60 + parseInt(p.minute, 10) };
+      } catch (e) { const d = new Date(); return { dayID: mjDayID(d), minutesOfDay: d.getHours() * 60 + d.getMinutes() }; }
+    }
+    function mjAddDays(dayID, k) { const y = +dayID.slice(0, 4), mo = +dayID.slice(4, 6) - 1, d = +dayID.slice(6, 8); const dt = new Date(Date.UTC(y, mo, d + k)); return '' + dt.getUTCFullYear() + String(dt.getUTCMonth() + 1).padStart(2, '0') + String(dt.getUTCDate()).padStart(2, '0'); }
     function mjDayLabelFromID(dayID) {
       const y = +String(dayID).slice(0, 4), mo = +String(dayID).slice(4, 6) - 1, d = +String(dayID).slice(6, 8);
       const dt = new Date(y, mo, d);
@@ -7560,11 +7579,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function mjBuildDateStrip() {
       const strip = document.getElementById('mjDateStrip'); if (!strip) return;
-      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const today = mjNowParts().dayID; // franchise-local today
       let h = '';
       for (let i = 0; i < 5; i++) {
-        const d = new Date(today); d.setDate(today.getDate() + i);
-        const id = mjDayID(d);
+        const id = mjAddDays(today, i);
         const label = i === 0 ? 'Today' : (i === 1 ? 'Tomorrow' : mjDayLabelFromID(id));
         h += '<button class="mj-date-chip" data-dayid="' + id + '" onclick="mjSelectDate(\'' + id + '\',this)" style="flex:0 0 auto;padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">' + mjEsc(label) + '</button>';
       }
@@ -7647,10 +7665,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         });
         h += '</div></div>';
       });
-      // current-time marker (only when viewing TODAY and the clock is within the visible hours)
-      const _now = new Date();
-      if (data.dayID && String(data.dayID) === mjDayID(_now)) {
-        const nowMin = _now.getHours() * 60 + _now.getMinutes();
+      // current-time marker (only when viewing the franchise's TODAY and the clock is within visible hours)
+      const _np = mjNowParts();
+      if (data.dayID && String(data.dayID) === _np.dayID) {
+        const nowMin = _np.minutesOfDay;
         if (nowMin >= startMin && nowMin <= endH * 60) {
           const nx = LW + ((nowMin - startMin) / 60) * PXH, laneH = ROW * routes.length;
           h += '<div title="Now" style="position:absolute;left:' + (nx - 3) + 'px;top:14px;width:8px;height:8px;border-radius:50%;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';

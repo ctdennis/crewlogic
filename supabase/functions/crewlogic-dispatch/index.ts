@@ -57,11 +57,28 @@ function timeLabel(min: number): string {
 function zipOf(address: string): string { const m = String(address || '').match(/\b(\d{5})\b/); return m ? m[1] : ''; }
 // minutes → friendly length ("1 hr", "90 min", "1 hr 30 min") for user-facing error/confirm copy.
 function durLabel(min: unknown): string { const m = parseInt(String(min), 10); if (!Number.isFinite(m) || m <= 0) return String(min) + ' min'; const h = Math.floor(m / 60), r = m % 60; if (h && r) return `${h} hr ${r} min`; if (h) return `${h} hr`; return `${r} min`; }
-function easternDayID(offset = 0): string {
-  const s = new Date().toLocaleString('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
+// US state → IANA tz (mirror of crewlogic-route-disposal STATE_TZ). Split states (e.g. TX — El Paso is
+// Mountain while the rest is Central) MUST carry an explicit cost_settings.officeTimezone; the map only
+// gives the state's predominant zone.
+const STATE_TZ: Record<string, string> = { AL: 'America/Chicago', AK: 'America/Anchorage', AZ: 'America/Phoenix', AR: 'America/Chicago', CA: 'America/Los_Angeles', CO: 'America/Denver', CT: 'America/New_York', DE: 'America/New_York', DC: 'America/New_York', FL: 'America/New_York', GA: 'America/New_York', HI: 'Pacific/Honolulu', ID: 'America/Boise', IL: 'America/Chicago', IN: 'America/Indiana/Indianapolis', IA: 'America/Chicago', KS: 'America/Chicago', KY: 'America/New_York', LA: 'America/Chicago', ME: 'America/New_York', MD: 'America/New_York', MA: 'America/New_York', MI: 'America/Detroit', MN: 'America/Chicago', MS: 'America/Chicago', MO: 'America/Chicago', MT: 'America/Denver', NE: 'America/Chicago', NV: 'America/Los_Angeles', NH: 'America/New_York', NJ: 'America/New_York', NM: 'America/Denver', NY: 'America/New_York', NC: 'America/New_York', ND: 'America/Chicago', OH: 'America/New_York', OK: 'America/Chicago', OR: 'America/Los_Angeles', PA: 'America/New_York', RI: 'America/New_York', SC: 'America/New_York', SD: 'America/Chicago', TN: 'America/Chicago', TX: 'America/Chicago', UT: 'America/Denver', VT: 'America/New_York', VA: 'America/New_York', WA: 'America/Los_Angeles', WV: 'America/New_York', WI: 'America/Chicago', WY: 'America/Denver' };
+// "today + offset" as YYYYMMDD in a given IANA tz (DST-safe via Intl). Replaces the old hardcoded-Eastern
+// easternDayID so "today"/the day table are correct for non-ET franchises (e.g. #54 MT, #109 PT).
+function dayIDInTz(tz: string, offset = 0): string {
+  const s = new Date().toLocaleString('en-US', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
   const m = s.match(/(\d{2})\/(\d{2})\/(\d{4})/); if (!m) return '';
   const dt = new Date(Date.UTC(+m[3], +m[1] - 1, +m[2] + offset));
   return `${dt.getUTCFullYear()}${String(dt.getUTCMonth() + 1).padStart(2, '0')}${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+// Resolve a franchise's IANA tz from cost_settings: explicit officeTimezone → state map → Eastern default.
+async function franchiseTz(franchiseID: string): Promise<string> {
+  try {
+    const sb = supa();
+    const { data: fr } = await sb.from('franchises').select('cost_settings').eq('external_id', franchiseID).eq('tenant_id', TENANT_ID).single();
+    const cs: any = (fr && fr.cost_settings) || {};
+    const ex = String(cs.officeTimezone || '').trim(); if (ex) return ex;
+    const st = String(cs.officeState || '').trim().toUpperCase();
+    return STATE_TZ[st] || 'America/New_York';
+  } catch { return 'America/New_York'; }
 }
 function shortRoute(name: string): string { const m = String(name || '').match(/\(([^)]+)\)/); return m ? m[1] : String(name || '').trim(); }
 
@@ -174,7 +191,7 @@ async function suggestSlotsFn(token: string, franchiseID: string, dayID: string,
 }
 
 // Claude tool-use loop. READ-only tools; returns a structured {intent, message, plan?} — NEVER executes a write.
-async function runCommand(token: string, franchiseID: string, dayID: string, todayDayID: string, transcript: string, history: any[] = []) {
+async function runCommand(token: string, franchiseID: string, dayID: string, todayDayID: string, transcript: string, history: any[] = [], tz = 'America/New_York') {
   if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not configured');
   const tools = [
     { name: 'resolveJob', description: 'Find the job the user means on a route. Address by stop position (1-based within the route), time (minutes-from-midnight), or jobID.', input_schema: { type: 'object', properties: { route: { type: 'string', description: 'route code e.g. MA1REG, or number "1"' }, position: { type: 'number' }, timeMin: { type: 'number' }, jobID: { type: 'string' }, dayID: { type: 'string', description: 'YYYYMMDD; default = the working day' } }, required: [] } },
@@ -185,7 +202,7 @@ async function runCommand(token: string, franchiseID: string, dayID: string, tod
   ];
   // Server-computed day table (TZ-correct) so the AI never does date math — it just looks up day names.
   const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const dayTable = Array.from({ length: 14 }, (_, k) => { const id = easternDayID(k); const dt = new Date(Date.UTC(+id.slice(0, 4), +id.slice(4, 6) - 1, +id.slice(6, 8))); return `${id}=${WD[dt.getUTCDay()]} ${+id.slice(4, 6)}/${+id.slice(6, 8)}${k === 0 ? '(today)' : k === 1 ? '(tomorrow)' : ''}`; }).join(', ');
+  const dayTable = Array.from({ length: 14 }, (_, k) => { const id = dayIDInTz(tz, k); const dt = new Date(Date.UTC(+id.slice(0, 4), +id.slice(4, 6) - 1, +id.slice(6, 8))); return `${id}=${WD[dt.getUTCDay()]} ${+id.slice(4, 6)}/${+id.slice(6, 8)}${k === 0 ? '(today)' : k === 1 ? '(tomorrow)' : ''}`; }).join(', ');
   const system = `You are CrewLogic's job dispatcher for a junk-removal franchise. The user speaks a command to MOVE a job, change a job's DURATION, CANCEL a job, or ASK what's available. Today = ${todayDayID}; the working day defaults to ${dayID} (YYYYMMDD) unless the user names another day. To resolve a day the user names (e.g. "Monday", "tomorrow", "the 23rd"), use ONLY this server-provided table — never compute dates yourself: ${dayTable}. Times are minutes-from-midnight (540=9AM, 660=11AM, 780=1PM). Route codes: MA1REG, MA2FAR, MA3ALL, MA6REG, RI4REG, RI5FAR, EST, RE-SCD ("route 1"=MA1REG ... "route 6"=MA6REG).
 
 Use the read tools to resolve. You NEVER execute changes — you only RESOLVE and PROPOSE a plan for the human to confirm.
@@ -344,8 +361,10 @@ Deno.serve(async (req: Request) => {
     if (action === 'command') {
       const transcript = String(body.transcript || '').trim();
       if (!transcript) return json({ success: false, error: 'transcript required' }, 400);
-      const dayID = String(body.dayID || easternDayID(0));
-      const result = await runCommand(token, franchiseID, dayID, easternDayID(0), transcript, body.history || []);
+      const tz = await franchiseTz(franchiseID);
+      const today = dayIDInTz(tz, 0);
+      const dayID = String(body.dayID || today);
+      const result = await runCommand(token, franchiseID, dayID, today, transcript, body.history || [], tz);
       return json({ success: true, ...result });
     }
 
