@@ -341,6 +341,9 @@ Deno.serve(async (req: Request) => {
           dateService,
           price,
           isComplete: statusOptionID === STATUS_COMPLETED || statusOptionID === STATUS_ARCHIVED,
+          // ESTIMATE-route job with a quote relation = estimate performed ("done for the day") even though
+          // its status stays Open. Scoped to the estimate route so regular jobs aren't affected.
+          estimateDone: /estimate/i.test(routeRel?.name || '') && relations.some((r) => r.relationType === 'quote'),
           lat: null as number | null,
           lon: null as number | null,
         };

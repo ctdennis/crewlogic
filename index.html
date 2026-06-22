@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.26 | 2026-06-22">
+  <meta name="crewlogic-version" content="v5.46.27 | 2026-06-22">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7404,7 +7404,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           routeStop[rkey] = (routeStop[rkey] || 0) + 1;
           const n = routeStop[rkey];           // stop number within this route
           const baseColor = colorFor(rkey);    // memoize the route's color even for completed stops
-          const done = !!j.isComplete;         // completed/archived → gray marker (kept on the map, not dropped)
+          const done = !!j.isComplete || !!j.estimateDone; // completed/archived OR a done estimate (quote produced) → gray marker
           const color = done ? '#5b6b7a' : baseColor;
           const icon = L.divIcon({
             className: 'job-stop-marker',
@@ -7682,7 +7682,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const left = ((j.timeMin - startMin) / 60) * PXH, w = Math.max(((j.durationMin || 60) / 60) * PXH, 50);
           const name = mjEsc((String(j.client || '').split(',')[0]) || j.client || 'Job');
           const city = mjAddrParts(j.address).city, jidA = mjEsc(String(j.jobID || ''));
-          const done = !!j.completed, bg = done ? '#5b6b7a' : col; // completed/archived → slate gray, still visible
+          const done = (!!j.completed || !!j.estimateDone), bg = done ? '#5b6b7a' : col; // completed/archived OR done estimate → slate gray, still visible
           h += '<div onmouseenter="mjTip(event,\'' + jidA + '\')" onmouseleave="mjTipHide()" onclick="mjTip(event,\'' + jidA + '\',true)" data-jid="' + jidA + '" title="' + (done ? 'Completed' : '') + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:3px;bottom:3px;background:' + bg + ';opacity:' + (done ? '0.72' : '1') + ';border-radius:5px;padding:2px 5px;overflow:hidden;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.3);">';
           h += '<div style="font-size:10px;font-weight:700;color:#fff;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (n + 1) + '. ' + (done ? '✓ ' : '') + name + (city ? ' <span style="font-weight:500;color:rgba(255,255,255,.82);">' + mjEsc(city) + '</span>' : '') + '</div>';
           h += '<div style="font-size:9px;color:rgba(255,255,255,.82);line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (j.zip ? mjEsc(j.zip) : '') + (j.zip && j.jobID ? ' · ' : '') + '#' + jidA + '</div>';

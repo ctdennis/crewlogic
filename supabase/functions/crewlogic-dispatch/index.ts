@@ -140,7 +140,12 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
     const addr = gf(f, F.address).fieldValue || '';
     const timeMin = parseInt(gf(f, F.time).fieldValue || '0', 10);
     const statusVal = gf(f, F.status).fieldValue || '';
-    return { jobID: jobRel ? String(jobRel.objectID) : null, woID: String(w.objectID), route: routeRel ? routeRel.name : '', routeCode: shortRoute(routeRel ? routeRel.name : ''), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), lat: null as number | null, lon: null as number | null };
+    const rname = routeRel ? routeRel.name : '';
+    // An ESTIMATE-route job with a quote relation = estimate performed (a quote was produced) → "done"
+    // even though its status stays Open. Scoped to the estimate route so regular jobs (which can carry a
+    // booking quote) are unaffected.
+    const estimateDone = (/estimate/i.test(rname) || shortRoute(rname) === 'EST') && rel.some((x: any) => x.relationType === 'quote');
+    return { jobID: jobRel ? String(jobRel.objectID) : null, woID: String(w.objectID), route: rname, routeCode: shortRoute(rname), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), estimateDone, lat: null as number | null, lon: null as number | null };
   }).filter((j: any) => j.jobID
     // hide CANCELLED only — plain "Cancelled" (optionID 162) AND same-day "Cancelled - Today" (different
     // optionID, caught by the text test). COMPLETED/ARCHIVED jobs are KEPT (flagged completed → grayed on
