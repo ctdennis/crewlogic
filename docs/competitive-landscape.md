@@ -122,6 +122,48 @@ estimating is the least-served capability** among the horizontals — it's Quote
 
 ---
 
+## 7. QuoteIQ head-to-head — gap analysis (the one direct rival)
+
+They overlap on AI estimating but **target different buyers**: QuoteIQ = the full **front office for a
+standalone hauler**; CrewLogic = the **AI + ops layer on top of an existing CRM (Vonigo)**. They only truly
+collide in the **native (non-Vonigo)** market. Pricing on QuoteIQ tiers varies across sources (recent
+repricing/renames) — treat features as stable, prices as re-verify.
+
+### Shared ground (both do)
+AI photo→volume→price + truck-load tier pricing. **Different emphasis:** QuoteIQ's is a **customer self-serve
+lead funnel** (text a photo / 24-7 website **InstaQuote** → instant price); CrewLogic's is **operator/estimator-
+driven** (transcript + areas + photos → Vonigo workflow + PDF proposal). QuoteIQ estimating = a *sales* tool;
+CrewLogic estimating = an *ops/accuracy* tool.
+
+### Where QuoteIQ is AHEAD (gaps for CrewLogic) — almost all FRONT-OFFICE
+- **Customer self-serve instant quote (InstaQuote, 24/7 on the website)** — lead-gen funnel CrewLogic lacks ← biggest gap
+- **Online booking / customer self-scheduling** (InstaSchedule)
+- **Invoicing + payment collection** (card/ACH/Apple/Google Pay) + recurring billing + tips
+- **Full CRM** (contacts, Pipelines deal tracking, history) + **ClientHub** customer portal
+- **Reviews/reputation** (Review Multiplier) and **marketing automation** (email/SMS campaigns, AI website builder)
+- **Job costing/expense module** (dump fees, fuel, labor → per-load profit)
+- **AI Before/After image render** + 4K photo docs (QuoteIQ Cam); **24/7 AI Virtual Call Team** (AI receptionist books jobs)
+- Misc: e-signatures, QuickBooks (Pro+; one review disputes depth), MapMeasure, time tracking, inventory
+- **BUT for franchises these mostly don't matter — Vonigo already provides booking/invoicing/payments/CRM.** They matter for the **native** market.
+
+### Where CrewLogic is OUTSIDE QuoteIQ (differentiators) — almost all OPS + integration
+- **Vonigo integration** — additive layer vs QuoteIQ's rip-and-replace CRM. **The decisive one for franchises** (QuoteIQ structurally can't be a layer on Vonigo).
+- **Voice dispatch (Manage Jobs)** — move/cancel/resize against the *live schedule* with zone + availability logic. (QuoteIQ has "AI Autopilot" NL CRM commands — broader but not schedule-aware dispatch; CrewLogic is deeper on dispatch.)
+- **Live telematics map (Motive + LinxUp)** — real ELD/GPS *hardware* integration. QuoteIQ's GPS = phone-based crew location only. Deeper.
+- **Job Router** — truck→dump→next-job **disposal-site recommender**. QuoteIQ optimizes pickup routes but not disposal-site selection.
+- **Job Plan** — AI morning crew brief. QuoteIQ has none.
+- **National Accounts** AI crew-warning summary (corporate-account handling) — niche, QuoteIQ none.
+- **Yard Signs gamification** (placement tracking + crew leaderboard) — QuoteIQ has reviews, not a signs lead-gen game.
+- **Per-location pricing** (vs QuoteIQ's per-user bands) — cheaper for multi-crew.
+
+### Strategic read
+- **Franchise / Vonigo buyer → CrewLogic wins by default:** QuoteIQ can't layer on Vonigo, and the front-office "gaps" are already covered by Vonigo. CrewLogic's ops depth (voice dispatch, real telematics, disposal routing, crew brief, National Accounts) is unmatched here.
+- **Native / non-Vonigo buyer → they collide, and CrewLogic is currently the WEAKER standalone:** it lacks the front office (booking, invoicing, payments, full CRM, marketing, reviews) that QuoteIQ ships. CrewLogic's native wedge is **AI estimating + the ops tools**, not an all-in-one CRM.
+- **Highest-leverage gap to close (if chasing native):** a **customer-facing self-serve instant-quote widget** (an InstaQuote equivalent). CrewLogic already has the AI estimating engine — exposing it customer-facing is the single highest-value gap-closer: it's both the **revenue/lead-gen lever** and QuoteIQ's headline feature. Everything else QuoteIQ has (invoicing/payments/marketing/reviews) is a much bigger build and is already covered for the franchise market by Vonigo.
+
+### Reviewer-noted QuoteIQ weaknesses (use in positioning)
+Mobile-first with **limited web portal**; **basic reporting/analytics**; quote templates weak for **complex/specialized forms**; **tight user limits** at lower tiers; QuickBooks depth questioned. (mowingmagic, todaytesting, linktly 2026 reviews.)
+
 ## Sources
 QuoteIQ: myquoteiq.com (pricing/best-software/CRM pages), Capterra QuoteIQ · WhatShouldICharge: whatshouldicharge.app ·
 Vonigo: Capterra, GetApp, Tekpon, fieldservicesoftware.io · Jobber/Housecall: Tekpon pricing (JSON-LD, dateModified
