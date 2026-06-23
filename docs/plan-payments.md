@@ -17,6 +17,17 @@ against cost-to-serve. This doc is the approval artifact; no Stripe code lands u
 4. **AI overage (v1) = soft cap + upgrade nudge** — never block a crew mid-job; metered overage later.
 5. **Prices (dollars) are NOT in this doc** — they live in DB / Stripe per the pricing-never-in-code
    rule. This doc locks the *structure* + a target margin; owner sets dollars in DB/Stripe.
+6. **Processor = Stripe** (decided 2026-06-23). Rationale: hosted Checkout + Customer Portal = least
+   code + PCI offloaded, and first-class subscription/trial/proration/usage billing. Owner uses **STAX**
+   (Junkluggers operating payments) and has used **Authorize.net** (cheaper per-txn) — those win on fee
+   for high-volume *customer* charges, but at SaaS volume (few franchises, recurring) the fee delta is a
+   few $/mo and is dwarfed by Stripe's build/compliance savings. Revisit only if CrewLogic ever processes
+   high volume. STAX/Authorize.net stay on operating payments.
+7. **Seats: Starter 2 · Pro 5 · Enterprise unlimited** (decided 2026-06-23). **Enforcement v1 = soft cap
+   + generous hard ceiling**: at/under count = normal; over count, under ceiling (~2× tier) = add freely +
+   nudge + owner upsell flag; at ceiling = block (abuse guard). **Time-locked temp seats (5-day auto-expire)
+   = v2 candidate** — deferred because it needs per-franchise temp-seat-day accounting / churn probe to stop
+   create-delete gaming; build that in from the start when real demand appears, don't bolt it on.
 
 ---
 
@@ -45,7 +56,8 @@ not Vonigo) but is a Pro feature, so a native company would upgrade to Pro to ge
 | | **Starter** | **Pro** *(most popular)* | **Enterprise** |
 |---|---|---|---|
 | Target | small / independent (native funnel) | established single location | multi-location / group |
-| Seats (estimators) | 1–2 | up to ~5 | unlimited |
+| Seats (estimators) | 2 | 5 | unlimited |
+| Seat enforcement | soft + hard ceiling (~2×) | soft + hard ceiling (~2×) | n/a |
 | AI estimates / mo (soft cap) | ~50 | ~250 | custom |
 | Support | email | priority | dedicated |
 
@@ -129,7 +141,8 @@ memory `route-optimizer-rearchitecture`.
 
 ## 7. Open items
 
-- [ ] Owner sets actual **prices** (DB/Stripe) + final **AI allowance** numbers (size from metering).
-- [ ] Confirm seat enforcement model (hard limit vs. soft) — default soft for v1.
-- [ ] Stripe account / API keys (test + live) provisioned (secrets gated).
+- [ ] Owner sets actual **prices** (DB/Stripe) + final **AI allowance** numbers (size from metering). *(still open — owner)*
+- [x] Seat enforcement model — **decided 2026-06-23: soft + hard ceiling; counts 2/5/∞** (see §1.7). Time-lock temp seat = v2.
+- [x] Processor — **decided 2026-06-23: Stripe** (see §1.6).
+- [ ] Stripe account / API keys (test + live) provisioned (secrets gated). *(owner action when ready)*
 - [ ] Route Optimizer re-architecture is a **separate project** (own Hub row), not part of this.
