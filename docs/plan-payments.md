@@ -35,32 +35,54 @@ against cost-to-serve. This doc is the approval artifact; no Stripe code lands u
 
 ## 3. Tier matrix
 
-Seats = estimators per franchise. AI estimates/mo = soft cap (warn + upgrade nudge on exceed).
-**Numbers below are placeholders** to be sized from metering before launch.
+Aligned to the actual home-page feature cards (2026-06-23). Two independent axes:
+**(a) who can use it** — Native (non-Junkluggers) vs Junkluggers franchisee — and **(b) which tier
+unlocks it**. They're orthogonal: e.g. Where Are My Trucks works for a native company (it's telematics,
+not Vonigo) but is a Pro feature, so a native company would upgrade to Pro to get it.
+
+**Tier attributes** (numbers are placeholders — sized from prod metering before launch):
 
 | | **Starter** | **Pro** *(most popular)* | **Enterprise** |
 |---|---|---|---|
 | Target | small / independent (native funnel) | established single location | multi-location / group |
 | Seats (estimators) | 1–2 | up to ~5 | unlimited |
 | AI estimates / mo (soft cap) | ~50 | ~250 | custom |
-| Core estimating (AI Photo Analyzer, volume check, estimate editor, PDF proposals) | ✓ | ✓ | ✓ |
-| Native price book / Price Lookup | ✓ | ✓ | ✓ |
-| Customer call / SMS | ✓ | ✓ | ✓ |
-| Yard Signs game | ✓ | ✓ | ✓ |
-| Vonigo / CRM connect | — | ✓ | ✓ |
-| Job Plan (AI) | — | ✓ | ✓ |
-| Live Trucks (telematics map) | — | ✓ | ✓ |
-| Route Optimizer | — | *coming soon* | *coming soon / custom* |
-| National Accounts (future) | — | — | ✓ |
 | Support | email | priority | dedicated |
+
+**Feature matrix** (home-page cards; "Native" = usable by a non-Junkluggers company, "JL" = Junkluggers franchisee):
+
+| Feature (home card) | Native | JL | Starter | Pro | Enterprise |
+|---|---|---|---|---|---|
+| 📝 Estimates | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 📐 Volume Check | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 💲 Price Lookup | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 🪧 Yard Signs | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 🚚 Where Are My Trucks? | ✓ | ✓ | — | ✓ | ✓ |
+| 📋 Job Plan (AI brief) | — | ✓ | — | ✓ | ✓ |
+| 🎤 Manage Jobs (voice dispatcher) | — | ✓ | — | ✓ | ✓ |
+| ♻️ Job Router (disposal recommender) | —¹ | ✓ | — | ✓ | ✓ |
+| 🔌 Vonigo / CRM connect | — | ✓ | — | ✓ | ✓ |
+| 🏢 National Accounts | — | ✓ | — | — | ✓ |
+
+**Telematics = Motive AND LinxUp** — Where Are My Trucks supports both providers (per-franchise creds),
+and is independent of Vonigo, so it's available to native companies too (gated to Pro by tier).
+
+¹ **Job Router is JL-only today** because its "next job" comes from the Vonigo schedule (native has no
+in-app schedule yet); it can extend to native if native scheduling ships.
+
+**National Accounts** = a Junkluggers feature for corporate/commercial accounts (Rubicon, Relocation
+Remedies, SLM, …). It AI-simplifies each account's verbose per-customer crew "warning message" into a short
+⚠️/✅ on-the-job checklist (≤60 words) and writes it to the job's Summary so crews see concise, account-
+specific instructions in Vonigo. **Trigger (owner-decided 2026-06-23): a nightly cron that sweeps the next
+day's National-Accounts bookings and stamps the slimmed message onto each.** Research done; not built. See
+Hub row + Vonigo write findings (Job field 978 Summary, Client field 9059 warning, service-type 27).
 
 **States are NOT tiers:** `Trial` (14-day, marketing/self-serve) and `Tester` (internal,
 non-expiring) live in `subscription_status`, not `subscription_tier`.
 
-**Route Optimizer is roadmap, not a launch feature** — it is single-tenant (#90-only, n8n +
-owner's Google Sheet) and needs a full re-architecture first. See the Hub row +
-memory `route-optimizer-rearchitecture`. **Live Trucks is separate and is multi-tenant-ready**
-(migration 0018, per-franchise Vault creds), so it ships as a Pro feature.
+**Route Optimizer is roadmap, not a launch feature** (left off the matrix) — it is single-tenant
+(#90-only, n8n + owner's Google Sheet) and needs a full re-architecture first. See the Hub row +
+memory `route-optimizer-rearchitecture`.
 
 ---
 
