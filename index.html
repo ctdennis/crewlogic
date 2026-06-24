@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.1 | 2026-06-24">
+  <meta name="crewlogic-version" content="v5.47.2 | 2026-06-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1993,6 +1993,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <button class="btn-surface" onclick="showUsageDashboard()" style="padding:6px 14px;font-size:12px;font-weight:700;">Open dashboard</button>
           </div>
 
+          <!-- Billing -->
+          <div class="settings-card fade-in fade-in-delay-4">
+            <div class="settings-card-title">Billing</div>
+            <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">
+              Manage your CrewLogicAI subscription — update your card or cancel anytime.
+            </div>
+            <button class="btn-surface" onclick="openBillingPortal()" style="padding:8px 16px;font-size:13px;font-weight:700;">Manage billing</button>
+          </div>
+
           <!-- Account -->
           <div class="settings-card fade-in fade-in-delay-4">
             <div class="settings-card-title">Account</div>
@@ -3943,6 +3952,31 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (data && data.url) { window.location.href = data.url; return; }
       alert((data && data.error) || 'Could not open billing. Please try again.');
     }
+    // Post-checkout return: Stripe redirects back with ?billing=success. The webhook may not have
+    // committed before the redirect, so poll the live status a few times and re-resolve access — a
+    // just-paid customer lands in the app instead of a lingering paywall, with no manual refresh.
+    function maybeFinalizeBillingReturn() {
+      if (!/[?&]billing=success/.test(location.search)) return;
+      try { history.replaceState(null, '', location.pathname); } catch (e) {}
+      if (!currentUser || !currentUser.email) return;
+      var tries = 0;
+      (function poll() {
+        tries++;
+        supabaseFetch('/rest/v1/profiles?select=franchises(subscription_status,subscription_tier,tenants(subscription_status))&email=eq.' + encodeURIComponent(currentUser.email))
+          .then(function (rows) {
+            var ACCESS = ['active', 'trialing', 'tester', 'pro', 'enterprise'];
+            var fr = (rows && rows[0] && rows[0].franchises) || {}, tn = fr.tenants || {};
+            var fs = fr.subscription_status, ft = fr.subscription_tier, ts = tn.subscription_status;
+            var resolved = fs ? fs : (ACCESS.indexOf(ft) !== -1 ? ft : (ACCESS.indexOf(ts) !== -1 ? ts : (ft || ts || 'trialing')));
+            if (ACCESS.indexOf(resolved) !== -1) {
+              currentUser.subscriptionStatus = resolved;
+              storage.set(SESSION_KEY, JSON.stringify(currentUser));
+              showApp();
+            } else if (tries < 6) { setTimeout(poll, 1500); }
+          })
+          .catch(function () { if (tries < 6) setTimeout(poll, 1500); });
+      })();
+    }
 
     // Super-admin Edge Function calls (crewlogic-admin). Sends the logged-in user's Supabase
     // JWT so the function can verify the caller is the super-admin (the anon key alone won't pass
@@ -4705,6 +4739,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                 }
               }).catch(() => {});
             showApp();
+            maybeFinalizeBillingReturn();
             return;
           }
         } catch(e) {}
