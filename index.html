@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.2 | 2026-06-24">
+  <meta name="crewlogic-version" content="v5.47.3 | 2026-06-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -16357,30 +16357,36 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Total trucks from volume charges
       const totalTrucks = parseFloat(est.totalTrucks) || 0;
 
-      // Find full truck price from estimate's own priceBlocks
+      // Volume rate lookup — MUST mirror the live estimate engine (volumeRateFor): honor THIS estimate's
+      // own per-tier overrides (est.volumeRateOverrides) first, else the price-book rate. The PDF previously
+      // read ONLY the book rate, so a per-truck override (e.g. a raised full-truck price) never reached the
+      // customer PDF — undercharging vs the on-screen total + Vonigo. See rule pricing-change-full-path.
       const estVolBlock = (est.priceBlocks || []).find(b => b.name && b.name.toLowerCase().includes('volume'));
-      const fullTruckItemPDF = estVolBlock ? estVolBlock.items.find(i => i.name && i.name.toLowerCase().includes('full')) : null;
-      const pricePerTruck = fullTruckItemPDF ? parseFloat(fullTruckItemPDF.value) : 0;
-
-      // Helper to find item in est.priceBlocks by fraction
       const findEstVolItem = (frac) => {
         if (!estVolBlock) return null;
-        const labels = {0:'Included',0.125:'1/8',0.25:'1/4',0.375:'3/8',0.5:'1/2',0.625:'5/8',0.75:'3/4',0.875:'7/8',1.0:'Full'};
+        const labels = {0:'Included',0.0625:'Minimum',0.125:'1/8',0.25:'1/4',0.375:'3/8',0.5:'1/2',0.625:'5/8',0.75:'3/4',0.875:'7/8',1.0:'Full'};
         const label = labels[frac];
         return label ? estVolBlock.items.find(i => i.name && i.name.includes(label)) : null;
       };
+      const pdfRateFor = (frac) => {
+        const ov = est.volumeRateOverrides, key = String(frac);
+        if (ov && ov[key] != null && ov[key] !== '') { const v = parseFloat(ov[key]); if (!isNaN(v) && v >= 0) return v; }
+        const item = findEstVolItem(frac);
+        return item ? parseFloat(item.value) : 0;
+      };
+      const pricePerTruck = pdfRateFor(1.0);
 
-      // Calculate volume pricing based on split flag
+      // Calculate volume pricing based on split flag — use the SAME tier rounding as the live engine
+      // (roundToNearestVolumeTier, incl. the Minimum 1/16 tier) so PDF total == on-screen total == Vonigo.
       const pdfSplit = !!est.splitPricing;
       let pdfVolumePrice, pdfVolumeLines;
       if (pdfSplit && totalTrucks > 0) {
         const whole = Math.floor(totalTrucks);
-        const partial = Math.round((totalTrucks - whole) * 8) / 8;
-        const partialItem = partial > 0 ? findEstVolItem(partial) : null;
-        const fractionLabels = {0.125:'1/8',0.25:'1/4',0.375:'3/8',0.5:'1/2',0.625:'5/8',0.75:'3/4',0.875:'7/8'};
+        const partial = roundToNearestVolumeTier(Math.round((totalTrucks - whole) * 1000) / 1000);
+        const fractionLabels = {0.0625:'Minimum',0.125:'1/8',0.25:'1/4',0.375:'3/8',0.5:'1/2',0.625:'5/8',0.75:'3/4',0.875:'7/8'};
         pdfVolumeLines = [];
         if (whole > 0) pdfVolumeLines.push({ label: whole + ' Full Truck' + (whole > 1 ? 's' : ''), qty: whole, rate: pricePerTruck, total: whole * pricePerTruck });
-        if (partial > 0 && partialItem) pdfVolumeLines.push({ label: fractionLabels[partial] + ' Truckload', qty: 1, rate: parseFloat(partialItem.value), total: parseFloat(partialItem.value) });
+        if (partial > 0) { const pr = pdfRateFor(partial); pdfVolumeLines.push({ label: (fractionLabels[partial] || String(partial)) + ' Truckload', qty: 1, rate: pr, total: pr }); }
         pdfVolumePrice = pdfVolumeLines.reduce((s, l) => s + l.total, 0);
       } else {
         pdfVolumeLines = null;
