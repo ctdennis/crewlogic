@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.0 | 2026-06-24">
+  <meta name="crewlogic-version" content="v5.47.1 | 2026-06-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4641,7 +4641,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           if (session && session.email) {
             currentUser = session;
             // Refresh costSettings + role + tier from Supabase in background (may have changed since cache)
-            supabaseFetch('/rest/v1/profiles?select=role,home_card_order,franchises(id,external_id,franchise_name,subscription_tier,cost_settings,tenant_id,tenants(trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(session.email))
+            supabaseFetch('/rest/v1/profiles?select=role,home_card_order,franchises(id,external_id,franchise_name,subscription_tier,subscription_status,cost_settings,tenant_id,tenants(subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(session.email))
               .then(rows => {
                 if (rows && rows[0]) {
                   if (rows[0].role) currentUser.role = rows[0].role;
@@ -4673,6 +4673,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                   if (rows[0].franchises?.subscription_tier) {
                     currentUser.subscriptionTier = rows[0].franchises.subscription_tier;
                   }
+                  // Re-resolve ACCESS status from the live DB — the cached subscriptionStatus goes stale
+                  // (a Stripe payment flips it to 'active', or an admin cancels). Mirrors the gate in
+                  // buildSessionFromSupabaseAuth: franchise.subscription_status is authoritative, then a
+                  // granting tier, then tenant status. If it changed, re-render so a just-paid customer
+                  // isn't stuck on the paywall (and a cancel takes effect on next load).
+                  (function () {
+                    var ACCESS = ['active', 'trialing', 'tester', 'pro', 'enterprise'];
+                    var fr = rows[0].franchises || {}, tn = fr.tenants || {};
+                    var fs = fr.subscription_status, ft = fr.subscription_tier, ts = tn.subscription_status;
+                    var resolved = fs ? fs : (ACCESS.indexOf(ft) !== -1 ? ft : (ACCESS.indexOf(ts) !== -1 ? ts : (ft || ts || 'trialing')));
+                    if (resolved && resolved !== currentUser.subscriptionStatus) {
+                      currentUser.subscriptionStatus = resolved;
+                      storage.set(SESSION_KEY, JSON.stringify(currentUser));
+                      showApp(); // re-evaluate access now that the live status is in
+                    }
+                  })();
                   if (rows[0].franchises?.cost_settings) {
                     currentUser.costSettings = rows[0].franchises.cost_settings;
                     // Re-extract contact fields from latest cost_settings
