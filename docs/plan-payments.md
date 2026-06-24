@@ -17,18 +17,26 @@ horizontal "Contractor CRM"** — so the edge is **ops/labor depth** (AI route-a
 rotation/fairness — see `feature-grid-vs-quoteiq.md`), not breadth. Play = **ship round 1 fast, then rapidly
 build shortfalls + value-adds** to get a foothold before the coming micro-app wave (~3–6 mo).
 
-**Round 1 = the minimum to start charging:**
-- **One launch plan at $29.99/mo per location** (matches QuoteIQ entry). Price lives in **Stripe**, not code.
-- **No feature-gating** in round 1 — every paid account gets the current feature set.
-- **Stripe self-serve:** Checkout (trial→paid off the existing `#paywallScreen`) + webhook→edge fn + Customer
-  Portal + the 4 Stripe columns (migration **0025**, applied to dev 2026-06-24).
-- **Flip `ENFORCE_TRIAL=true`** (index.html ~3855) so the 14-day trial actually gates after expiry.
+**Billing infra (DONE, dormant in prod 2026-06-24):** Stripe self-serve Checkout + webhook→edge fn + Customer
+Portal + the 4 Stripe columns (migration 0025); `crewlogic-billing` deployed to prod inert; frontend behind the
+`BILLING_ENABLED` master switch (prod OFF). See `docs/stripe-setup.md`.
 
-**Deferred to round 2+ ("rapidly build"):** 3-tier matrix + feature-gating + seat enforcement (§1.7); the
-**customer self-serve instant-quote widget** (the #1 QuoteIQ gap, and the horizontal wedge); **AI route-aware
-scheduling**; **AI crew rotation/fairness staffing**; invoicing/marketing/reviews; multi-vertical templating.
+**SCOPE CHANGE (owner 2026-06-24): gate features BEFORE release.** Round 1 is NOT a single ungated plan — launch
+ships the FINAL tier grid (§3). The gate is one line: **native (Starter, $29.99) vs Vonigo (Pro, $TBD)**;
+**Enterprise = scale** (same features as Pro, higher limits — features get "loaded up" later as we build).
+So the **pre-release build** now includes feature-gating:
+- **Feature-gating by `subscription_tier`** — Starter unlocks the standalone tools; Pro unlocks the Vonigo/ops
+  features (+ the National Accounts Settings toggle).
+- **Stripe prices per offered tier** (Starter $29.99 set; Pro $TBD) + a tier picker on the paywall.
+- **Seat + AI-estimate soft caps** per tier (§1.7); photo-storage cap for Enterprise scaling.
+- Then flip `ENFORCE_TRIAL=true` + `BILLING_ENABLED=true` to go live.
 
-§§1–7 below remain the fuller design that round 2 builds toward.
+**Strategic priority (owner 2026-06-24): PARITY WITH QUOTEIQ.** After gating, the build order is closing the
+QuoteIQ feature gaps (`competitive-landscape.md` §7 / `feature-grid-vs-quoteiq.md`) — #1 = **customer self-serve
+instant quote**, then booking / invoicing-payments / reviews / CRM as warranted — plus the ops/labor
+differentiators (AI scheduling, crew rotation). New features later "load up" the **Enterprise** tier.
+
+§§1–7 below are the fuller design the build executes toward.
 
 ---
 
@@ -68,46 +76,51 @@ scheduling**; **AI crew rotation/fairness staffing**; invoicing/marketing/review
 
 ---
 
-## 3. Tier matrix
+## 3. Tier matrix — FINAL (locked 2026-06-24)
 
-Aligned to the actual home-page feature cards (2026-06-23). Two independent axes:
-**(a) who can use it** — Native (non-Junkluggers) vs Junkluggers franchisee — and **(b) which tier
-unlocks it**. They're orthogonal: e.g. Where Are My Trucks works for a native company (it's telematics,
-not Vonigo) but is a Pro feature, so a native company would upgrade to Pro to get it.
+**The feature gate is ONE line: native (Starter) vs Vonigo (Pro+).** Starter = the standalone AI-estimating
+tools (no Vonigo); Pro = those PLUS every Vonigo/telematics ops feature. **Enterprise is a SCALE tier, not a
+feature tier** — identical features to Pro, differentiated only by higher LIMITS (seats, AI estimates, photo
+storage) + dedicated support, priced on volume. Second axis: **Native** (a non-Junkluggers company) can use the
+Starter set + telematics; Vonigo features require a Junkluggers/Vonigo connection.
 
-**Tier attributes** (numbers are placeholders — sized from prod metering before launch):
+**Feature matrix** (built features; Pro & Enterprise share ALL features):
+
+| Feature (home card) | Native | Starter | Pro | Enterprise |
+|---|---|---|---|---|
+| 📝 Estimates (AI photo→price, editor, PDF) | ✓ | ✓ | ✓ | ✓ |
+| 📐 Volume Check | ✓ | ✓ | ✓ | ✓ |
+| 💲 Price Lookup | ✓ | ✓ | ✓ | ✓ |
+| 🪧 Yard Signs | ✓ | ✓ | ✓ | ✓ |
+| 🔌 Vonigo / CRM connect | — | — | ✓ | ✓ |
+| 🎤 Manage Jobs (voice dispatcher) | — | — | ✓ | ✓ |
+| 📋 Job Plan (AI brief) | — | — | ✓ | ✓ |
+| ♻️ Job Router (disposal recommender) | —¹ | — | ✓ | ✓ |
+| 🚚 Where Are My Trucks? (telematics) | ✓² | — | ✓ | ✓ |
+| 🏢 National Accounts (Settings on/off toggle) | — | — | ✓ | ✓ |
+
+**Tier attributes** — the **Pro→Enterprise differentiator is SCALE** (numbers placeholders, sized from metering):
 
 | | **Starter** | **Pro** *(most popular)* | **Enterprise** |
 |---|---|---|---|
-| Target | small / independent (native funnel) | established single location | multi-location / group |
-| Seats (estimators) | 2 | 5 | unlimited |
-| Seat enforcement | soft + hard ceiling (~2×) | soft + hard ceiling (~2×) | n/a |
-| AI estimates / mo (soft cap) | ~50 | ~250 | custom |
+| Target | small / independent (native) | established single location | high-volume / multi-location |
+| Feature set | standalone tools | full (Vonigo + ops + NA) | **same as Pro** |
+| Seats (estimators) | 2 | 5 | unlimited / custom |
+| AI estimates / mo (soft cap) | ~50 | ~250 | custom (high) |
+| Photo storage | Starter cap | Pro cap | custom (high) |
 | Support | email | priority | dedicated |
+| Price/mo (per location) | **$29.99** | TBD | custom (volume) |
 
-**Feature matrix** (home-page cards; "Native" = usable by a non-Junkluggers company, "JL" = Junkluggers franchisee):
-
-| Feature (home card) | Native | JL | Starter | Pro | Enterprise |
-|---|---|---|---|---|---|
-| 📝 Estimates | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 📐 Volume Check | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 💲 Price Lookup | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 🪧 Yard Signs | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 🚚 Where Are My Trucks? | ✓ | ✓ | — | ✓ | ✓ |
-| 📋 Job Plan (AI brief) | — | ✓ | — | ✓ | ✓ |
-| 🎤 Manage Jobs (voice dispatcher) | — | ✓ | — | ✓ | ✓ |
-| ♻️ Job Router (disposal recommender) | —¹ | ✓ | — | ✓ | ✓ |
-| 🔌 Vonigo / CRM connect | — | ✓ | — | ✓ | ✓ |
-| 🏢 National Accounts | — | ✓ | — | — | ✓ |
-
-**Telematics = Motive AND LinxUp** — Where Are My Trucks supports both providers (per-franchise creds),
-and is independent of Vonigo, so it's available to native companies too (gated to Pro by tier).
+¹ **Job Router is JL-only today** (its "next job" comes from the Vonigo schedule; native has no in-app schedule yet).
+² **Where Are My Trucks** is telematics (Motive AND LinxUp), independent of Vonigo — native-capable, but a Pro
+feature (so a native co. wanting it would be on Pro). The one feature that's native-capable yet Pro-gated.
 
 ¹ **Job Router is JL-only today** because its "next job" comes from the Vonigo schedule (native has no
 in-app schedule yet); it can extend to native if native scheduling ships.
 
-**National Accounts** = a Junkluggers feature for corporate/commercial accounts (Rubicon, Relocation
-Remedies, SLM, …). It AI-simplifies each account's verbose per-customer crew "warning message" into a short
+**National Accounts** = a **Pro+ feature with a Settings on/off toggle** (owner 2026-06-24: a nice-to-have, not
+a tier-pusher — so it lives in the Vonigo tiers, NOT gated to Enterprise). For Junkluggers corporate/commercial
+accounts (Rubicon, Relocation Remedies, SLM, …). It AI-simplifies each account's verbose per-customer crew "warning message" into a short
 ⚠️/✅ on-the-job checklist (≤60 words) and writes it to the job's Summary so crews see concise, account-
 specific instructions in Vonigo. **Trigger (owner-decided 2026-06-23): a nightly cron that sweeps the next
 day's National-Accounts bookings and stamps the slimmed message onto each.** Research done; not built. See
