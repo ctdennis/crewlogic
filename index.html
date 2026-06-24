@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.46.30 | 2026-06-22">
+  <meta name="crewlogic-version" content="v5.47.0 | 2026-06-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1207,10 +1207,12 @@
       <div style="font-size:28px;font-weight:800;color:var(--accent-green);margin-bottom:4px;">CrewLogicAI</div>
       <div style="font-size:14px;color:var(--text-muted);margin-bottom:32px;">Junkluggers Field Ops</div>
       <div style="background:var(--bg-card);border-radius:var(--radius);padding:24px;border:1px solid var(--border);margin-bottom:24px;">
-        <div style="font-size:32px;margin-bottom:16px;">🚧</div>
-        <div style="font-size:18px;font-weight:700;color:var(--text-primary);margin-bottom:12px;">Under Construction</div>
-        <div style="font-size:14px;color:var(--text-muted);line-height:1.7;margin-bottom:20px;">Interested in being a guest tester? Reach out to Charles Dennis.</div>
-        <a href="tel:7742812800" style="display:block;background:var(--accent-green);color:var(--accent-text);font-weight:700;font-size:16px;padding:14px 24px;border-radius:var(--radius-sm);text-decoration:none;margin-bottom:8px;">📞 (774) 281-2800</a>
+        <div style="font-size:32px;margin-bottom:12px;">🚀</div>
+        <div id="paywallTitle" style="font-size:18px;font-weight:700;color:var(--text-primary);margin-bottom:8px;">Start your subscription</div>
+        <div id="paywallMessage" style="font-size:14px;color:var(--text-muted);line-height:1.7;margin-bottom:6px;"></div>
+        <div style="font-size:14px;color:var(--text-muted);margin-bottom:18px;">CrewLogicAI — <span style="color:var(--text-primary);font-weight:800;">$29.99</span>/month per location</div>
+        <button id="subscribeBtn" onclick="startCheckout()" style="display:block;width:100%;background:var(--accent-green);color:var(--accent-text);font-weight:700;font-size:16px;padding:14px 24px;border:none;border-radius:var(--radius-sm);cursor:pointer;margin-bottom:10px;">Subscribe — $29.99/mo</button>
+        <div style="font-size:12px;color:var(--text-muted);">Questions? <a href="tel:7742812800" style="color:var(--accent-green);text-decoration:none;">(774) 281-2800</a></div>
       </div>
       <div style="font-size:12px;color:var(--text-muted);">Signed in as <span id="paywallEmail" style="color:var(--text-secondary);"></span> · <a href="#" onclick="signOut();return false;" style="color:var(--accent-green);">Sign out</a></div>
     </div>
@@ -3909,6 +3911,37 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       } catch (_e) {
         return { success: false, error: 'The server returned an unexpected response (HTTP ' + res.status + '). Please try again.' };
       }
+    }
+
+    // Billing (Stripe) Edge Function calls. Sends the logged-in user's Supabase JWT so the billing
+    // fn can resolve the caller -> their franchise (the anon key alone won't identify the user).
+    async function billingCall(action, payload) {
+      const token = await _supabaseUserToken();
+      const res = await fetch(EDGE_BASE + '/crewlogic-billing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (token || EDGE_ANON_KEY), 'apikey': EDGE_ANON_KEY },
+        body: JSON.stringify({ action, ...(payload || {}) })
+      });
+      const text = await res.text();
+      try { return JSON.parse(text); } catch (_e) { return { error: 'Unexpected response (HTTP ' + res.status + '). Please try again.' }; }
+    }
+    // Paywall "Subscribe" → Stripe Checkout (hosted). On success Stripe returns to the app; the webhook
+    // flips subscription_status='active' so the next session rebuild grants access.
+    async function startCheckout() {
+      const btn = document.getElementById('subscribeBtn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Redirecting…'; }
+      try {
+        const data = await billingCall('createCheckoutSession', { returnUrl: window.location.origin });
+        if (data && data.url) { window.location.href = data.url; return; }
+        alert((data && data.error) || 'Could not start checkout. Please try again.');
+      } catch (_e) { alert('Could not start checkout. Please try again.'); }
+      if (btn) { btn.disabled = false; btn.textContent = 'Subscribe — $29.99/mo'; }
+    }
+    // Settings "Manage billing" → Stripe Customer Portal (update card / cancel).
+    async function openBillingPortal() {
+      const data = await billingCall('createPortalSession', { returnUrl: window.location.origin });
+      if (data && data.url) { window.location.href = data.url; return; }
+      alert((data && data.error) || 'Could not open billing. Please try again.');
     }
 
     // Super-admin Edge Function calls (crewlogic-admin). Sends the logged-in user's Supabase
