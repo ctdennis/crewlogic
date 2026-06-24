@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.3 | 2026-06-24">
+  <meta name="crewlogic-version" content="v5.47.4 | 2026-06-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1206,13 +1206,21 @@
     <div style="width:100%;max-width:400px;text-align:center;">
       <div style="font-size:28px;font-weight:800;color:var(--accent-green);margin-bottom:4px;">CrewLogicAI</div>
       <div style="font-size:14px;color:var(--text-muted);margin-bottom:32px;">Junkluggers Field Ops</div>
-      <div style="background:var(--bg-card);border-radius:var(--radius);padding:24px;border:1px solid var(--border);margin-bottom:24px;">
+      <!-- Subscribe card — shown only when BILLING_ENABLED (toggled in showApp). -->
+      <div id="paywallBillingCard" style="display:none;background:var(--bg-card);border-radius:var(--radius);padding:24px;border:1px solid var(--border);margin-bottom:24px;">
         <div style="font-size:32px;margin-bottom:12px;">🚀</div>
         <div id="paywallTitle" style="font-size:18px;font-weight:700;color:var(--text-primary);margin-bottom:8px;">Start your subscription</div>
         <div id="paywallMessage" style="font-size:14px;color:var(--text-muted);line-height:1.7;margin-bottom:6px;"></div>
         <div style="font-size:14px;color:var(--text-muted);margin-bottom:18px;">CrewLogicAI — <span style="color:var(--text-primary);font-weight:800;">$29.99</span>/month per location</div>
         <button id="subscribeBtn" onclick="startCheckout()" style="display:block;width:100%;background:var(--accent-green);color:var(--accent-text);font-weight:700;font-size:16px;padding:14px 24px;border:none;border-radius:var(--radius-sm);cursor:pointer;margin-bottom:10px;">Subscribe — $29.99/mo</button>
         <div style="font-size:12px;color:var(--text-muted);">Questions? <a href="tel:7742812800" style="color:var(--accent-green);text-decoration:none;">(774) 281-2800</a></div>
+      </div>
+      <!-- Contact card — shown when billing is dormant (BILLING_ENABLED=false). The pre-billing default. -->
+      <div id="paywallContactCard" style="display:none;background:var(--bg-card);border-radius:var(--radius);padding:24px;border:1px solid var(--border);margin-bottom:24px;">
+        <div style="font-size:32px;margin-bottom:16px;">🚧</div>
+        <div style="font-size:18px;font-weight:700;color:var(--text-primary);margin-bottom:12px;">Under Construction</div>
+        <div style="font-size:14px;color:var(--text-muted);line-height:1.7;margin-bottom:20px;">Interested in being a guest tester? Reach out to Charles Dennis.</div>
+        <a href="tel:7742812800" style="display:block;background:var(--accent-green);color:var(--accent-text);font-weight:700;font-size:16px;padding:14px 24px;border-radius:var(--radius-sm);text-decoration:none;margin-bottom:8px;">📞 (774) 281-2800</a>
       </div>
       <div style="font-size:12px;color:var(--text-muted);">Signed in as <span id="paywallEmail" style="color:var(--text-secondary);"></span> · <a href="#" onclick="signOut();return false;" style="color:var(--accent-green);">Sign out</a></div>
     </div>
@@ -1993,8 +2001,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <button class="btn-surface" onclick="showUsageDashboard()" style="padding:6px 14px;font-size:12px;font-weight:700;">Open dashboard</button>
           </div>
 
-          <!-- Billing -->
-          <div class="settings-card fade-in fade-in-delay-4">
+          <!-- Billing (hidden until BILLING_ENABLED — toggled in showApp) -->
+          <div class="settings-card fade-in fade-in-delay-4" id="billingSettingsCard" style="display:none;">
             <div class="settings-card-title">Billing</div>
             <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">
               Manage your CrewLogicAI subscription — update your card or cancel anytime.
@@ -3864,6 +3872,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // "enforce new users, grandfather existing testers" — with no migration or allow-list.
     const TRIAL_DAYS = 14;
     const ENFORCE_TRIAL = false; // false = countdown banner only, never blocks. Flip to enforce.
+    // Billing master switch — gates the customer-facing subscribe / manage-billing UI. The full Stripe
+    // stack (schema, crewlogic-billing fn, live secrets, webhook) ships to prod DORMANT: dev=on (for
+    // testing), prod=off until launch. Flip to `true` (e.g. `const BILLING_ENABLED = true;`) when ready to
+    // advertise + take subscriptions — no other change needed. While false: the paywall shows the original
+    // contact card (no Subscribe button) and the Settings "Manage billing" link is hidden.
+    const BILLING_ENABLED = IS_DEV_ENV; // dev: ON · prod: OFF until launch.
     function trialState(user) {
       const u = user || currentUser;
       if (!u || u.subscriptionStatus !== 'trialing' || !u.trialEndsAt) return { applies: false };
@@ -6792,6 +6806,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (_trialExpired) hasAccess = false;
       if (!hasAccess) {
         document.getElementById('paywallScreen').style.display = 'flex';
+        // Toggle the subscribe card vs the original contact card on the billing master switch.
+        const _billCard = document.getElementById('paywallBillingCard');
+        const _contactCard = document.getElementById('paywallContactCard');
+        if (_billCard) _billCard.style.display = BILLING_ENABLED ? 'block' : 'none';
+        if (_contactCard) _contactCard.style.display = BILLING_ENABLED ? 'none' : 'block';
         if (document.getElementById('paywallEmail')) document.getElementById('paywallEmail').textContent = currentUser.email || '';
         const msg = _trialExpired
           ? 'Your free trial has ended. Subscribe to keep using CrewLogicAI.'
@@ -6805,6 +6824,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
       document.getElementById('paywallScreen').style.display = 'none';
       document.getElementById('appShell').classList.add('active');
+      // Settings "Manage billing" card — visible only when billing is live.
+      const _billSettings = document.getElementById('billingSettingsCard');
+      if (_billSettings) _billSettings.style.display = BILLING_ENABLED ? 'block' : 'none';
 
       // Apply this franchise's brand color to the app theme (falls back to default green)
       const brandHex = (currentUser.costSettings && currentUser.costSettings.brandColor) || DEFAULT_BRAND_COLOR;
