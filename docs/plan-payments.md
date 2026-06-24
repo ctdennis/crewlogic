@@ -8,6 +8,30 @@ against cost-to-serve. This doc is the approval artifact; no Stripe code lands u
 
 ---
 
+## 0. ROUND 1 — launch scope (decided 2026-06-24)
+
+**Strategy shift (owner):** the franchise market is small (~100 Junkluggers); the real opportunity is the
+**thousands of independent blue-collar businesses** needing a quoting engine. CrewLogic goes **horizontal**
+(the brand/engine travel; junk is the beachhead). Caveat from `competitive-landscape.md`: **QuoteIQ is already a
+horizontal "Contractor CRM"** — so the edge is **ops/labor depth** (AI route-aware scheduling, crew
+rotation/fairness — see `feature-grid-vs-quoteiq.md`), not breadth. Play = **ship round 1 fast, then rapidly
+build shortfalls + value-adds** to get a foothold before the coming micro-app wave (~3–6 mo).
+
+**Round 1 = the minimum to start charging:**
+- **One launch plan at $29.99/mo per location** (matches QuoteIQ entry). Price lives in **Stripe**, not code.
+- **No feature-gating** in round 1 — every paid account gets the current feature set.
+- **Stripe self-serve:** Checkout (trial→paid off the existing `#paywallScreen`) + webhook→edge fn + Customer
+  Portal + the 4 Stripe columns (migration **0025**, applied to dev 2026-06-24).
+- **Flip `ENFORCE_TRIAL=true`** (index.html ~3855) so the 14-day trial actually gates after expiry.
+
+**Deferred to round 2+ ("rapidly build"):** 3-tier matrix + feature-gating + seat enforcement (§1.7); the
+**customer self-serve instant-quote widget** (the #1 QuoteIQ gap, and the horizontal wedge); **AI route-aware
+scheduling**; **AI crew rotation/fairness staffing**; invoicing/marketing/reviews; multi-vertical templating.
+
+§§1–7 below remain the fuller design that round 2 builds toward.
+
+---
+
 ## 1. Locked decisions (owner)
 
 1. **Billing unit = franchise location** (matches the schema's billing entity).
