@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.11 | 2026-06-25">
+  <meta name="crewlogic-version" content="v5.47.12 | 2026-06-25">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -6822,6 +6822,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.getElementById('paywallScreen').style.display = 'none';
       showLogin();
     }
+    // Load the franchise's per-franchise telematics status (owner-only, non-secret) and refine the
+    // Job Router card gate — it needs telematics actually connected, not just "is an owner."
+    async function _applyTelematicsGate() {
+      try {
+        const data = await edgeFunctionCall('crewlogic-settings', { action: 'getTelematics', franchiseInternalID: currentUser.franchiseInternalID });
+        currentUser.telematicsConfigured = !!(data && data.configured);
+      } catch (_e) { /* leave cached value as-is */ }
+      const card = document.getElementById('disposalRouterCard');
+      if (card) {
+        const _vonigo = (currentUser.submissionTarget !== 'none' && currentUser.pricingSource !== 'native');
+        card.style.display = (currentUser.telematicsConfigured && _vonigo) ? '' : 'none';
+      }
+    }
     function showApp() {
       document.getElementById('loginScreen').style.display = 'none';
 
@@ -6888,20 +6901,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Route Optimizer only available for franchise 90
       const routerCard = document.getElementById('routerCard');
       if (routerCard) routerCard.style.display = (String(currentUser.franchiseID) === '90' && currentUser.role === 'owner') ? '' : 'none';
-      // "Where are my trucks?" — telematics (Linxup/Motive). Gated to #90 owner for Phase 1 (the
-      // franchise whose Linxup account the global LINXUP_API_KEY belongs to); Phase 2 = per-franchise provider.
+      // "Where are my trucks?" — per-franchise telematics (Motive/Linxup). Shown to ANY owner; if they
+      // haven't connected a provider yet, the trucks screen prompts them to Settings → Trucks. Creds are
+      // per-franchise (stored in Vault, resolved by crewlogic-trucks via franchiseID) — not #90-only.
       const trucksCard = document.getElementById('trucksCard');
       if (trucksCard) trucksCard.style.display = (currentUser.role === 'owner') ? '' : 'none';
 
-      // Job Router (R1) — recommends the best transfer station between the truck's live
-      // position and the next job. Gated to telematics-connected (mirrors trucksCard's owner/Phase-1
-      // telematics signal) AND a Vonigo franchise (endpoint = today's Vonigo jobs; native excluded).
+      // Job Router (R1) — recommends the best transfer station between the truck's LIVE position and the
+      // next job, so it requires telematics ACTUALLY connected (not just "is an owner") AND a Vonigo
+      // franchise (endpoint = today's Vonigo jobs; native excluded). The cached flag drives first paint;
+      // _applyTelematicsGate() below loads the per-franchise status and corrects it.
       const disposalRouterCard = document.getElementById('disposalRouterCard');
       if (disposalRouterCard) {
-        const _telematics = (currentUser.role === 'owner'); // same Phase-1 telematics signal trucksCard uses
         const _vonigo = (currentUser.submissionTarget !== 'none' && currentUser.pricingSource !== 'native');
-        disposalRouterCard.style.display = (_telematics && _vonigo) ? '' : 'none';
+        disposalRouterCard.style.display = (currentUser.telematicsConfigured && _vonigo) ? '' : 'none';
       }
+      if (currentUser.role === 'owner') _applyTelematicsGate(); // load per-franchise telematics status → refine the gate
 
       // Manage Jobs (voice dispatcher) — move/cancel Vonigo jobs by voice. Available to ANY user on a
       // Vonigo-connected franchise (owners AND estimators/guests/testers), not owner-only.
