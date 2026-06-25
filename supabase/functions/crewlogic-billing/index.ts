@@ -195,6 +195,21 @@ Deno.serve(async (req: Request) => {
   try {
     if (action === "ping") return json({ ok: true, hasSecret: !!STRIPE_SECRET_KEY, hasWebhook: !!STRIPE_WEBHOOK_SECRET, prices: { starter: !!STRIPE_PRICE.starter, pro: !!STRIPE_PRICE.pro, enterprise: !!STRIPE_PRICE.enterprise } });
 
+    // Public pricing for the paywall tier picker — live amounts from Stripe (so display can't drift from
+    // the real price; no caller auth needed, it's just pricing). Returns cents per tier.
+    if (action === "getPrices") {
+      try {
+        const stripe = getStripe();
+        const out: Record<string, { amount: number | null; currency: string; interval: string | undefined }> = {};
+        for (const t of ["starter", "pro", "enterprise"]) {
+          if (!STRIPE_PRICE[t]) continue;
+          const p = await stripe.prices.retrieve(STRIPE_PRICE[t]);
+          out[t] = { amount: p.unit_amount, currency: p.currency, interval: p.recurring?.interval };
+        }
+        return json({ ok: true, prices: out });
+      } catch (e) { console.error("[billing] getPrices:", (e as Error).message); return json({ ok: false, prices: {} }); }
+    }
+
     // Temp dev diagnostic: validates the secret key + that a tier price resolves (default starter).
     if (action === "verify") {
       try {
