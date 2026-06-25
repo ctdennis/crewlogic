@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.8 | 2026-06-25">
+  <meta name="crewlogic-version" content="v5.47.9 | 2026-06-25">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7194,6 +7194,49 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     const _expandedTrucks = new Set(); // which truck cards are expanded (by index; survives auto-refresh)
     function _truckEsc(s) { return String(s == null ? '' : s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c])); }
     let _trucksJobsData = []; // latest loaded job overlay (for the "job under truck" badge proximity check)
+    // Toggleable overlay layer groups (trucks / jobs / cost-section sites / truck home) + the layers control.
+    let _truckLayer = null, _jobLayer = null, _disposalLayer = null, _recyclingLayer = null, _donationLayer = null, _homeLayer = null, _sitesGeocoded = false;
+    // Geocode the cost-section sites + truck home (once per session) and place them on their layer groups.
+    async function renderSiteMarkers() {
+      if (_sitesGeocoded || !_trucksMap) return;
+      const cs = currentUser.costSettings;
+      if (!cs) return; // cost settings not loaded yet — retry on the next call (loadJobMarkers)
+      const types = [
+        { layer: _disposalLayer, sites: cs.disposalSites || [], emoji: '🗑️', color: '#8b5cf6', label: 'Disposal' },
+        { layer: _recyclingLayer, sites: cs.recyclingSites || [], emoji: '♻️', color: '#10b981', label: 'Recycling' },
+        { layer: _donationLayer, sites: cs.donationSites || [], emoji: '🎁', color: '#ec4899', label: 'Donation' },
+      ];
+      const addrList = [];
+      types.forEach(t => (t.sites || []).forEach(s => { if (s && s.address) addrList.push(s.address); }));
+      const home = (cs.truckHome || '').trim();
+      if (home) addrList.push(home);
+      if (!addrList.length) { _sitesGeocoded = true; return; }
+      const coordsByAddr = {};
+      try {
+        const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'geocodeAddresses', addresses: addrList });
+        (data.results || []).forEach(r => { if (r.lat != null) coordsByAddr[r.address] = r; });
+      } catch (_e) { return; } // leave _sitesGeocoded false so a later open retries
+      const mkIcon = (emoji, color) => L.divIcon({ className: 'site-marker', html: '<div style="background:' + color + ';width:24px;height:24px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;font-size:13px;line-height:1;">' + emoji + '</div>', iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -14] });
+      types.forEach(t => {
+        if (!t.layer) return;
+        t.layer.clearLayers();
+        (t.sites || []).forEach(s => {
+          const c = s && s.address && coordsByAddr[s.address];
+          if (!c) return;
+          L.marker([c.lat, c.lon], { icon: mkIcon(t.emoji, t.color) })
+            .bindPopup('<div style="font-size:13px;line-height:1.5;"><b>' + t.emoji + ' ' + _truckEsc(s.name || t.label) + '</b><br>' + _truckEsc(s.address) + '</div>')
+            .addTo(t.layer);
+        });
+      });
+      if (home && coordsByAddr[home] && _homeLayer) {
+        _homeLayer.clearLayers();
+        const c = coordsByAddr[home];
+        L.marker([c.lat, c.lon], { icon: mkIcon('🏠', '#f59e0b'), zIndexOffset: 900 })
+          .bindPopup('<div style="font-size:13px;line-height:1.5;"><b>🏠 Truck home</b><br>' + _truckEsc(home) + '</div>')
+          .addTo(_homeLayer);
+      }
+      _sitesGeocoded = true;
+    }
     // Great-circle distance in meters (truck ↔ job co-location test).
     function _distM(la1, lo1, la2, lo2) {
       const R = 6371000, t = Math.PI / 180;
@@ -7487,9 +7530,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const _satPlaces = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 20 });
         const _hybridLayer = L.layerGroup([_satImgHybrid, _satRoads, _satPlaces]);
         _streetLayer.addTo(_trucksMap); // default = street
-        L.control.layers({ 'Street': _streetLayer, 'Satellite': _satLayer, 'Hybrid (streets)': _hybridLayer }, null, { position: 'topright', collapsed: false }).addTo(_trucksMap);
+        // Overlay groups (toggle via the layers control; can all be on at once). Trucks/Jobs/Truck home
+        // default ON; the cost-section sites default OFF (flip on as needed).
+        _truckLayer = L.layerGroup().addTo(_trucksMap);
+        _jobLayer = L.layerGroup().addTo(_trucksMap);
+        _homeLayer = L.layerGroup().addTo(_trucksMap);
+        _disposalLayer = L.layerGroup();
+        _recyclingLayer = L.layerGroup();
+        _donationLayer = L.layerGroup();
+        L.control.layers(
+          { 'Street': _streetLayer, 'Satellite': _satLayer, 'Hybrid (streets)': _hybridLayer },
+          { '🚚 Trucks': _truckLayer, '📍 Jobs': _jobLayer, '🏠 Truck home': _homeLayer, '🗑️ Disposal': _disposalLayer, '♻️ Recycling': _recyclingLayer, '🎁 Donation': _donationLayer },
+          { position: 'topright', collapsed: false }
+        ).addTo(_trucksMap);
+        renderSiteMarkers(); // geocode + place the cost-section sites + truck home (async, once)
       }
-      _truckMarkers.forEach(m => _trucksMap.removeLayer(m));
+      if (_truckLayer) _truckLayer.clearLayers(); else _truckMarkers.forEach(m => _trucksMap.removeLayer(m));
       _truckMarkers = [];
       const pts = [];
       trucks.forEach((t, i) => {
@@ -7527,7 +7583,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + (nearJobs.length ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;color:#F59E0B;font-weight:700;font-size:12px;">🏠 At ' + nearJobs.length + ' job' + (nearJobs.length > 1 ? 's' : '') + ' here</div>' + nearJobs.map(j => '<div style="font-size:12px;color:#cdd6df;">' + _truckEsc(j.clientName || 'Job') + (j._routeShort ? ' · ' + _truckEsc(j._routeShort) : '') + '</div>').join('') : '')
           + ((t.lat != null && t.lon != null) ? '<div style="margin-top:8px;"><button onclick="mtMeasureStart(' + i + ')" style="width:100%;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:#fff;font-weight:700;font-size:12px;padding:7px;border-radius:6px;cursor:pointer;">📏 Distance to a job</button></div>' : '')
           + '</div>';
-        const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: 1000 }).addTo(_trucksMap).bindPopup(pop); // trucks above job houses
+        const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: 1000 }).addTo(_truckLayer || _trucksMap).bindPopup(pop); // trucks above job houses
         _truckMarkers.push(m);
         pts.push([t.lat, t.lon]);
       });
@@ -7577,7 +7633,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const data = await edgeFunctionCall('crewlogic-todays-workorders', { franchiseID: currentUser.franchiseID, dayOffset: _trucksJobDay, includeCoords: true });
         // Server returns jobs sorted by appointment time → this IS each route's stop order.
         const jobs = (data.workOrders || []).filter(j => j.lat != null && j.lon != null); // keep completed (shown grayed); cancelled is filtered server-side
-        _jobMarkers.forEach(m => _trucksMap.removeLayer(m));
+        if (_jobLayer) _jobLayer.clearLayers(); else _jobMarkers.forEach(m => _trucksMap.removeLayer(m));
         _jobMarkers = [];
         _jobPhones = {}; // reset phone cache for this fresh job set
         const routeColor = {}; let colorIdx = 0;
@@ -7631,7 +7687,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
             + itemsHtml
             + '</div>';
-          const m = L.marker([j.lat, j.lon], { icon, opacity: done ? 0.6 : 1 }).addTo(_trucksMap).bindPopup(pop);
+          const m = L.marker([j.lat, j.lon], { icon, opacity: done ? 0.6 : 1 }).addTo(_jobLayer || _trucksMap).bindPopup(pop);
           m.on('popupopen', () => _prefetchJobPhone(j.jobID).then(ph => _renderJobPhoneSlot(j.jobID, ph)));
           m.on('click', () => { if (_measureFrom) _measureToJob(j); }); // measure-to-job mode: tap a job after a truck
           _jobMarkers.push(m);
@@ -7643,6 +7699,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // render before jobs load on first paint). fit=false so this doesn't re-zoom the map.
         _trucksJobsData = jobs;
         if (_trucksData && _trucksData.length) renderTrucks(_trucksData, false);
+        renderSiteMarkers(); // retry site/home geocode now that cost settings are surely loaded (guarded)
         // Refit the map to show trucks AND jobs together.
         const allPts = [];
         _truckMarkers.forEach(m => allPts.push(m.getLatLng()));

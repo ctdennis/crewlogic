@@ -311,6 +311,17 @@ Deno.serve(async (req: Request) => {
     const action = String(body.action || '');
     if (action === 'ping') return json({ success: true, ok: true, version: '0.1' });
 
+    // Batch forward-geocode (cache-first, free Census) — no Vonigo auth needed. Used to place the
+    // cost-section sites (disposal/recycling/donation) + truck-home on the Where-Are-My-Trucks map.
+    if (action === 'geocodeAddresses') {
+      const addrs = Array.isArray(body.addresses) ? body.addresses.map((a: unknown) => String(a || '')) : [];
+      const results = await Promise.all(addrs.map(async (a) => {
+        const g = a.trim() ? await geocode(a) : null;
+        return { address: a, lat: g?.lat ?? null, lon: g?.lon ?? null };
+      }));
+      return json({ success: true, results });
+    }
+
     const franchiseID = String(body.franchiseID || '');
     if (!franchiseID) return json({ success: false, error: 'franchiseID required' }, 400);
     const auth = await vonigoAuth(franchiseID);
