@@ -49,11 +49,11 @@ differentiators (AI scheduling, crew rotation). New features later "load up" the
 4. **Usage caps + metered overage (owner-finalized 2026-06-25).** Each tier *includes* monthly caps
    (estimates + photos). **Caps are adjustable per franchise INDEPENDENT of tier** — a customer can raise a
    cap without upgrading the whole plan. Each franchise has an **automatic-overage toggle**:
-   - **ON** → exceeding a cap auto-charges overage **blocks** (e.g. ~$10 = +25 estimates + +50 photos) via
-     Stripe metered/usage billing — no interruption.
+   - **ON** → exceeding a cap auto-charges **one bundled overage block = ~$10 for +25 estimates AND +50 photos**
+     (a single capacity pack covering both meters) via Stripe metered/usage billing — no interruption.
    - **OFF** → **hard-stop** at the cap (customer must raise the cap or upgrade to continue).
-   **Email warnings** to the customer at **80% / 90% (10% left) / 95% (5% left)** of included usage. Metering
-   uses the live `usage_events` backbone. (Exact caps / block size / thresholds: §3 + open items.)
+   **Email warnings** at **80% / 90% (10% left) / 95% (5% left)** of included usage, on **BOTH estimates and
+   photos** (each meter warned independently). Metering uses the live `usage_events` backbone.
 5. **Prices (dollars) are NOT in this doc** — they live in DB / Stripe per the pricing-never-in-code
    rule. This doc locks the *structure* + a target margin; owner sets dollars in DB/Stripe.
 6. **Processor = Stripe** (decided 2026-06-23). Rationale: hosted Checkout + Customer Portal = least
@@ -113,16 +113,15 @@ Starter set + telematics; Vonigo features require a Junkluggers/Vonigo connectio
 | Target | small / independent (native) | established single location | high-volume / multi-location |
 | Feature set | standalone tools | full (Vonigo + ops + NA) | **same as Pro** |
 | Seats (estimators) | 2 | 5 | unlimited / custom |
-| Estimates / mo (included) | 250 | *TBD (>250)* | *TBD (high)* |
-| Photos / mo (included) | 500 | *TBD (>500)* | *TBD (high)* |
+| Estimates / mo (included) | 250 | 750 | 2,500 |
+| Photos / mo (included) | 500 | 1,500 | 5,000 |
 | Support | email | priority | dedicated |
 | **Price/mo (per location)** | **$29.99** | **$59.99** | **$129.99** |
 
 **Usage caps are adjustable per franchise INDEPENDENT of tier**, and each franchise has an **automatic-overage
-toggle** (ON → auto-charge overage blocks ~$10 = +25 estimates + +50 photos; OFF → hard-stop at cap), with
-email warnings at 80% / 90% / 95% of included usage (see §1.4). Starter caps (250 est / 500 photos) are
-owner-stated 2026-06-25; Pro/Enterprise included caps + the overage block size + warning thresholds are open
-(below) — sized from metering before launch.
+toggle** (ON → auto-charge **one bundled block** = ~$10 for **+25 estimates AND +50 photos**; OFF → hard-stop at
+cap), with email warnings at **80% / 90% / 95%** of included usage on **BOTH estimates and photos** (see §1.4).
+All caps/prices owner-finalized 2026-06-25; refine from metering after launch if needed.
 
 ¹ **Job Router is JL-only today** (its "next job" comes from the Vonigo schedule; native has no in-app schedule yet).
 ² **Where Are My Trucks** is telematics (Motive AND LinxUp), independent of Vonigo — native-capable, but a Pro
@@ -189,9 +188,9 @@ memory `route-optimizer-rearchitecture`.
 ## 7. Open items
 
 - [x] **Tier prices — decided 2026-06-25: Starter $29.99 · Pro $59.99 · Enterprise $129.99** (per location). Set in Stripe.
-- [ ] **Final included caps** — Starter = 250 estimates / 500 photos (owner-stated); **Pro + Enterprise estimate/photo caps still open** (owner; size from metering).
-- [ ] **Overage block size** — confirm (~$10 = +25 estimates + +50 photos; one bundled block, or separate estimate/photo blocks?).
-- [ ] **Warning thresholds** — confirm 80% / 90% (10% left) / 95% (5% left) of included usage, and whether photos warn too (vs estimates only).
+- [x] **Included caps — decided 2026-06-25:** Starter 250 est / 500 photos · Pro 750 / 1,500 · Enterprise 2,500 / 5,000.
+- [x] **Overage block — decided 2026-06-25:** ONE bundled block ~$10 = +25 estimates AND +50 photos.
+- [x] **Warnings — decided 2026-06-25:** 80% / 90% / 95% of included, on BOTH estimates and photos.
 - [x] Seat enforcement model — **decided 2026-06-23: soft + hard ceiling; counts 2/5/∞** (see §1.7). Time-lock temp seat = v2.
 - [x] Processor — **decided 2026-06-23: Stripe** (see §1.6).
 - [ ] Stripe account / API keys (test + live) provisioned (secrets gated). *(owner action when ready)*
