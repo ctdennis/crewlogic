@@ -29,7 +29,21 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
-const STRIPE_PRICE_ID = Deno.env.get("STRIPE_PRICE_ID") || "";
+// Tier → Stripe price id. Starter falls back to the legacy STRIPE_PRICE_ID for back-compat.
+const STRIPE_PRICE: Record<string, string> = {
+  starter: Deno.env.get("STRIPE_PRICE_STARTER") || Deno.env.get("STRIPE_PRICE_ID") || "",
+  pro: Deno.env.get("STRIPE_PRICE_PRO") || "",
+  enterprise: Deno.env.get("STRIPE_PRICE_ENTERPRISE") || "",
+};
+function priceForTier(tier: unknown): string {
+  const t = String(tier || "starter").toLowerCase();
+  return STRIPE_PRICE[t] || STRIPE_PRICE.starter;
+}
+// Reverse map (price id → tier) so the webhook can set franchises.subscription_tier from the paid price.
+function tierForPrice(priceId: string): string | null {
+  for (const t of ["starter", "pro", "enterprise"]) if (STRIPE_PRICE[t] && STRIPE_PRICE[t] === priceId) return t;
+  return null;
+}
 const STRIPE_WEBHOOK_SECRET = Deno.env.get("STRIPE_WEBHOOK_SECRET") || "";
 
 // Lazy init: don't construct Stripe at module load (an empty STRIPE_SECRET_KEY throws and kills the
@@ -133,22 +147,26 @@ async function handleWebhook(req: Request): Promise<Response> {
         priceId = sub.items.data[0]?.price?.id || null;
         periodEnd = (sub as any).current_period_end || null;
       }
+      const tier = tierForPrice(priceId || "") || (obj.metadata?.tier ? String(obj.metadata.tier) : null);
       if (fid) await sbPatch(`/rest/v1/franchises?id=eq.${encodeURIComponent(fid)}`, {
         subscription_status: "active", stripe_subscription_id: subId || null,
         stripe_customer_id: typeof obj.customer === "string" ? obj.customer : obj.customer?.id,
         stripe_price_id: priceId, subscription_current_period_end: isoOrNull(periodEnd),
+        ...(tier ? { subscription_tier: tier } : {}),
       });
     } else if (event.type === "customer.subscription.updated") {
       const fid = await franchiseIdForEvent(obj);
+      const upPrice = obj.items?.data?.[0]?.price?.id || null;
+      const upTier = tierForPrice(upPrice || "");
       if (fid) await sbPatch(`/rest/v1/franchises?id=eq.${encodeURIComponent(fid)}`, {
         subscription_status: mapStatus(obj.status), stripe_subscription_id: obj.id,
-        stripe_price_id: obj.items?.data?.[0]?.price?.id || null,
-        subscription_current_period_end: isoOrNull(obj.current_period_end),
+        stripe_price_id: upPrice, subscription_current_period_end: isoOrNull(obj.current_period_end),
+        ...(upTier ? { subscription_tier: upTier } : {}),
       });
     } else if (event.type === "customer.subscription.deleted") {
       const fid = await franchiseIdForEvent(obj);
       if (fid) await sbPatch(`/rest/v1/franchises?id=eq.${encodeURIComponent(fid)}`, {
-        subscription_status: "canceled", stripe_subscription_id: null,
+        subscription_status: "canceled", stripe_subscription_id: null, subscription_tier: "free",
       });
     } else if (event.type === "invoice.payment_failed") {
       const fid = await franchiseIdForEvent(obj);
@@ -175,12 +193,12 @@ Deno.serve(async (req: Request) => {
   const returnUrl = String(body.returnUrl || "").slice(0, 500);
 
   try {
-    if (action === "ping") return json({ ok: true, hasPrice: !!STRIPE_PRICE_ID, hasSecret: !!STRIPE_SECRET_KEY, hasWebhook: !!STRIPE_WEBHOOK_SECRET });
+    if (action === "ping") return json({ ok: true, hasSecret: !!STRIPE_SECRET_KEY, hasWebhook: !!STRIPE_WEBHOOK_SECRET, prices: { starter: !!STRIPE_PRICE.starter, pro: !!STRIPE_PRICE.pro, enterprise: !!STRIPE_PRICE.enterprise } });
 
-    // Temp dev diagnostic: validates the secret key (auth to Stripe) + that the price resolves.
+    // Temp dev diagnostic: validates the secret key + that a tier price resolves (default starter).
     if (action === "verify") {
       try {
-        const p = await getStripe().prices.retrieve(STRIPE_PRICE_ID);
+        const p = await getStripe().prices.retrieve(priceForTier(body.tier));
         return json({ ok: true, amount: p.unit_amount, currency: p.currency, interval: p.recurring?.interval, active: p.active });
       } catch (e) {
         console.error("[billing] verify failed:", (e as Error).message);
@@ -200,13 +218,15 @@ Deno.serve(async (req: Request) => {
         return json({ url: ps.url });
       }
 
-      if (!STRIPE_PRICE_ID) { console.error("[billing] STRIPE_PRICE_ID not set"); return json({ error: "Billing isn’t configured yet." }, 500); }
+      const tier = String(body.tier || "starter").toLowerCase();
+      const priceId = priceForTier(tier);
+      if (!priceId) { console.error(`[billing] no price for tier ${tier}`); return json({ error: "Billing isn’t configured yet." }, 500); }
       const customer = await ensureCustomer(who.franchise, who.email);
-      const meta = { franchise_id: who.franchise.id, external_id: who.franchise.external_id || "", tenant_id: who.franchise.tenant_id };
+      const meta = { franchise_id: who.franchise.id, external_id: who.franchise.external_id || "", tenant_id: who.franchise.tenant_id, tier };
       const session = await stripe.checkout.sessions.create({
         mode: "subscription",
         customer,
-        line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
+        line_items: [{ price: priceId, quantity: 1 }],
         success_url: returnUrl + (returnUrl.includes("?") ? "&" : "?") + "billing=success",
         cancel_url: returnUrl + (returnUrl.includes("?") ? "&" : "?") + "billing=cancel",
         allow_promotion_codes: true,
