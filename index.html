@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.9 | 2026-06-25">
+  <meta name="crewlogic-version" content="v5.47.10 | 2026-06-25">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7202,9 +7202,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const cs = currentUser.costSettings;
       if (!cs) return; // cost settings not loaded yet — retry on the next call (loadJobMarkers)
       const types = [
-        { layer: _disposalLayer, sites: cs.disposalSites || [], emoji: '🗑️', color: '#8b5cf6', label: 'Disposal' },
-        { layer: _recyclingLayer, sites: cs.recyclingSites || [], emoji: '♻️', color: '#10b981', label: 'Recycling' },
-        { layer: _donationLayer, sites: cs.donationSites || [], emoji: '🎁', color: '#ec4899', label: 'Donation' },
+        { layer: _disposalLayer, sites: cs.disposalSites || [], emoji: '🗑️', color: '#8b5cf6', label: 'Disposal', costSuffix: '/ton' },
+        { layer: _recyclingLayer, sites: cs.recyclingSites || [], emoji: '♻️', color: '#10b981', label: 'Recycling', costSuffix: '/ton (revenue)' },
+        { layer: _donationLayer, sites: cs.donationSites || [], emoji: '🎁', color: '#ec4899', label: 'Donation', costSuffix: '' },
       ];
       const addrList = [];
       types.forEach(t => (t.sites || []).forEach(s => { if (s && s.address) addrList.push(s.address); }));
@@ -7216,23 +7216,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'geocodeAddresses', addresses: addrList });
         (data.results || []).forEach(r => { if (r.lat != null) coordsByAddr[r.address] = r; });
       } catch (_e) { return; } // leave _sitesGeocoded false so a later open retries
-      const mkIcon = (emoji, color) => L.divIcon({ className: 'site-marker', html: '<div style="background:' + color + ';width:24px;height:24px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;font-size:13px;line-height:1;">' + emoji + '</div>', iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -14] });
+      const mkIcon = (emoji, color, size) => { const sz = size || 26; return L.divIcon({ className: 'site-marker', html: '<div style="background:' + color + ';width:' + sz + 'px;height:' + sz + 'px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-size:' + Math.round(sz * 0.55) + 'px;line-height:1;">' + emoji + '</div>', iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2], popupAnchor: [0, -(sz / 2) - 2] }); };
+      const dirLink = (addr) => '<a href="https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(addr) + '&travelmode=driving" target="_blank" rel="noopener" style="color:var(--accent-green,#00E785);text-decoration:none;font-weight:600;">Get directions →</a>';
       types.forEach(t => {
         if (!t.layer) return;
         t.layer.clearLayers();
         (t.sites || []).forEach(s => {
           const c = s && s.address && coordsByAddr[s.address];
           if (!c) return;
-          L.marker([c.lat, c.lon], { icon: mkIcon(t.emoji, t.color) })
-            .bindPopup('<div style="font-size:13px;line-height:1.5;"><b>' + t.emoji + ' ' + _truckEsc(s.name || t.label) + '</b><br>' + _truckEsc(s.address) + '</div>')
+          const costLine = (t.costSuffix && s.cost != null && s.cost !== '') ? '<br><span style="color:#6e8194;">$' + _truckEsc(String(s.cost)) + t.costSuffix + '</span>' : '';
+          L.marker([c.lat, c.lon], { icon: mkIcon(t.emoji, t.color, 26) })
+            .bindPopup('<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + t.emoji + ' ' + _truckEsc(s.name || t.label) + '</b><br>' + _truckEsc(s.address) + costLine + '<br>' + dirLink(s.address) + '</div>')
             .addTo(t.layer);
         });
       });
       if (home && coordsByAddr[home] && _homeLayer) {
         _homeLayer.clearLayers();
         const c = coordsByAddr[home];
-        L.marker([c.lat, c.lon], { icon: mkIcon('🏠', '#f59e0b'), zIndexOffset: 900 })
-          .bindPopup('<div style="font-size:13px;line-height:1.5;"><b>🏠 Truck home</b><br>' + _truckEsc(home) + '</div>')
+        L.marker([c.lat, c.lon], { icon: mkIcon('🏠', '#f59e0b', 38), zIndexOffset: 900 })
+          .bindPopup('<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>🏠 Truck home</b><br>' + _truckEsc(home) + '<br>' + dirLink(home) + '</div>')
           .addTo(_homeLayer);
       }
       _sitesGeocoded = true;
@@ -7539,7 +7541,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _recyclingLayer = L.layerGroup();
         _donationLayer = L.layerGroup();
         L.control.layers(
-          { 'Street': _streetLayer, 'Satellite': _satLayer, 'Hybrid (streets)': _hybridLayer },
+          { 'Street': _streetLayer, 'Hybrid (streets)': _hybridLayer },
           { '🚚 Trucks': _truckLayer, '📍 Jobs': _jobLayer, '🏠 Truck home': _homeLayer, '🗑️ Disposal': _disposalLayer, '♻️ Recycling': _recyclingLayer, '🎁 Donation': _donationLayer },
           { position: 'topright', collapsed: false }
         ).addTo(_trucksMap);
