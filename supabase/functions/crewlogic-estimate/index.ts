@@ -765,20 +765,24 @@ async function handlePointDistance(body: Record<string, unknown>): Promise<Respo
   const origin = String(body.origin || "").trim();
   const dest = String(body.dest || "").trim();
   if (!origin || !dest) return jsonResponse({ success: false, error: "origin and dest required (as 'lat,lon')" }, 400);
+  // departure_time=now + traffic_model gives duration_in_traffic (live/predictive traffic) for a live ETA.
   const url = `https://maps.googleapis.com/maps/api/distancematrix/json` +
-    `?origins=${encodeURIComponent(origin)}&destinations=${encodeURIComponent(dest)}&units=imperial&key=${apiKey}`;
+    `?origins=${encodeURIComponent(origin)}&destinations=${encodeURIComponent(dest)}` +
+    `&units=imperial&departure_time=now&traffic_model=best_guess&key=${apiKey}`;
   const res = await fetch(url);
   if (!res.ok) return jsonResponse({ success: false, error: `Google Maps API ${res.status}` }, 502);
-  const data = await res.json() as { status: string; rows?: Array<{ elements: Array<{ status: string; distance?: { value: number; text: string }; duration?: { value: number; text: string } }> }>; error_message?: string };
+  const data = await res.json() as { status: string; rows?: Array<{ elements: Array<{ status: string; distance?: { value: number; text: string }; duration?: { value: number; text: string }; duration_in_traffic?: { value: number; text: string } }> }>; error_message?: string };
   if (data.status !== "OK") return jsonResponse({ success: false, error: `Google Maps API: ${data.status}` }, 502);
   const cell = data.rows?.[0]?.elements?.[0];
   if (!cell || cell.status !== "OK" || !cell.distance || !cell.duration) return jsonResponse({ success: false, error: "No route found" });
+  const dur = cell.duration_in_traffic || cell.duration; // prefer traffic-aware time when present
   return jsonResponse({
     success: true,
     miles: Math.round((cell.distance.value / 1609.344) * 10) / 10,
-    minutes: Math.round(cell.duration.value / 60),
+    minutes: Math.round(dur.value / 60),
     distanceText: cell.distance.text,
-    durationText: cell.duration.text,
+    durationText: dur.text,
+    inTraffic: !!cell.duration_in_traffic, // true = ETA reflects current traffic
   });
 }
 
