@@ -757,9 +757,35 @@ function jsonResponse(data: unknown, status: number = 200): Response {
   });
 }
 
+// HANDLER: pointDistance — generic origin→dest driving distance + ETA (lat,lon strings).
+// Used by the Where-Are-My-Trucks "measure to a job" tap (truck location → a job marker).
+async function handlePointDistance(body: Record<string, unknown>): Promise<Response> {
+  const apiKey = Deno.env.get("GOOGLE_MAPS_API_KEY") || Deno.env.get("GOOGLE_GEOCODING_API_KEY");
+  if (!apiKey) return jsonResponse({ success: false, error: "GOOGLE_MAPS_API_KEY not configured" }, 500);
+  const origin = String(body.origin || "").trim();
+  const dest = String(body.dest || "").trim();
+  if (!origin || !dest) return jsonResponse({ success: false, error: "origin and dest required (as 'lat,lon')" }, 400);
+  const url = `https://maps.googleapis.com/maps/api/distancematrix/json` +
+    `?origins=${encodeURIComponent(origin)}&destinations=${encodeURIComponent(dest)}&units=imperial&key=${apiKey}`;
+  const res = await fetch(url);
+  if (!res.ok) return jsonResponse({ success: false, error: `Google Maps API ${res.status}` }, 502);
+  const data = await res.json() as { status: string; rows?: Array<{ elements: Array<{ status: string; distance?: { value: number; text: string }; duration?: { value: number; text: string } }> }>; error_message?: string };
+  if (data.status !== "OK") return jsonResponse({ success: false, error: `Google Maps API: ${data.status}` }, 502);
+  const cell = data.rows?.[0]?.elements?.[0];
+  if (!cell || cell.status !== "OK" || !cell.distance || !cell.duration) return jsonResponse({ success: false, error: "No route found" });
+  return jsonResponse({
+    success: true,
+    miles: Math.round((cell.distance.value / 1609.344) * 10) / 10,
+    minutes: Math.round(cell.duration.value / 60),
+    distanceText: cell.distance.text,
+    durationText: cell.duration.text,
+  });
+}
+
 const ACTION_HANDLERS: Record<string, (body: Record<string, unknown>) => Promise<Response>> = {
   save: handleSave,
   calcDistances: handleCalcDistances,
+  pointDistance: handlePointDistance,
   searchClients: handleSearchClients,
   delete: handleDelete,
   submitQuote: handleSubmitQuote,

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.5 | 2026-06-25">
+  <meta name="crewlogic-version" content="v5.47.6 | 2026-06-25">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7193,6 +7193,48 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _trucksMap = null, _truckMarkers = [], _jobMarkers = [], _trucksRefreshTimer = null, _trucksJobDay = 0, _trucksLookahead = false, _lookaheadMarkers = [], _trucksData = [];
     const _expandedTrucks = new Set(); // which truck cards are expanded (by index; survives auto-refresh)
     function _truckEsc(s) { return String(s == null ? '' : s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c])); }
+    // ── "Measure to a job" (tap a truck's "Distance to a job", then tap a job) ──
+    // Next job isn't the closest, so the owner picks the job; we draw a line + show driving distance + ETA.
+    let _measureFrom = null, _measureLine = null;
+    function _mtBanner(text) {
+      let b = document.getElementById('mtMeasureBanner');
+      if (!b) {
+        b = document.createElement('div');
+        b.id = 'mtMeasureBanner'; b.onclick = mtMeasureCancel;
+        b.style.cssText = 'position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:99998;background:#0f1923;color:#fff;border:1px solid var(--accent-green,#00E785);border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;box-shadow:0 3px 12px rgba(0,0,0,.4);cursor:pointer;max-width:92vw;text-align:center;';
+        document.body.appendChild(b);
+      }
+      b.textContent = text; b.style.display = 'block';
+    }
+    function mtMeasureStart(i) {
+      const t = (_trucksData || [])[i];
+      if (!t || t.lat == null || t.lon == null) { alert('That truck has no current location.'); return; }
+      _measureFrom = { lat: t.lat, lon: t.lon, label: (i + 1) + '. ' + (t.name || 'Truck') };
+      if (_trucksMap) _trucksMap.closePopup();
+      _mtBanner('📏 Tap a job to measure from ' + _measureFrom.label + '  ·  tap here to cancel');
+    }
+    function mtMeasureCancel() {
+      _measureFrom = null;
+      const b = document.getElementById('mtMeasureBanner'); if (b) b.style.display = 'none';
+      if (_measureLine && _trucksMap) { _trucksMap.removeLayer(_measureLine); _measureLine = null; }
+    }
+    async function _measureToJob(j) {
+      if (!_measureFrom || j.lat == null || j.lon == null || !_trucksMap) return;
+      const from = _measureFrom;
+      if (_measureLine) { _trucksMap.removeLayer(_measureLine); _measureLine = null; }
+      _measureLine = L.polyline([[from.lat, from.lon], [j.lat, j.lon]], { color: '#00E785', weight: 3, dashArray: '7,6', opacity: 0.9 }).addTo(_trucksMap);
+      _measureFrom = null;
+      const b = document.getElementById('mtMeasureBanner'); if (b) b.style.display = 'none';
+      const popup = L.popup({ offset: [0, -10] }).setLatLng([j.lat, j.lon]).setContent('<div style="font-size:13px;">Measuring…</div>').openOn(_trucksMap);
+      try {
+        const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: from.lat + ',' + from.lon, dest: j.lat + ',' + j.lon });
+        const dest = _truckEsc(j.clientName || 'Job');
+        const html = (data && data.success)
+          ? '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(data.distanceText) + ' · ~' + _truckEsc(data.durationText) + ' drive'
+          : 'Could not measure distance — try again.';
+        popup.setContent('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
+      } catch (_e) { popup.setContent('<div style="font-size:13px;">Could not measure distance.</div>'); }
+    }
     // Nearest live truck (by name) to a point — for job/look-ahead popups. Returns {name, mi} or null.
     function _nearestTruck(lat, lon) {
       let best = null;
@@ -7446,18 +7488,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (t.lat == null || t.lon == null) return;
         const active = _truckActive(t);
         const color = active ? '#00E785' : '#6e8194';
+        // Round marker: colored circle (green active / gray stale) with the truck number; a direction arrow
+        // rotated to the heading (course over ground) shows only while moving — heading is stale when parked.
+        const moving = t.speed != null && t.speed > 0 && t.bearingDeg != null;
+        const arrow = moving ? '<path d="M20 1.5 L24.5 9 L15.5 9 Z" fill="' + color + '" stroke="#fff" stroke-width="1.2" transform="rotate(' + t.bearingDeg + ' 20 20)"/>' : '';
         const icon = L.divIcon({
           className: 'truck-num-marker',
-          // Side-view box-truck silhouette; color = green (active) / gray (stale); number on the cargo box.
-          html: '<svg width="38" height="30" viewBox="0 0 38 30" style="filter:drop-shadow(0 1px 3px rgba(0,0,0,.55));">'
-            + '<rect x="1.5" y="6" width="21" height="14" rx="1.5" fill="' + color + '" stroke="#fff" stroke-width="1.4"/>'
-            + '<path d="M22.5 9 L29.5 9 L35 14.5 L35 20 L22.5 20 Z" fill="' + color + '" stroke="#fff" stroke-width="1.4"/>'
-            + '<path d="M24.8 11 L28.6 11 L31.8 14.2 L24.8 14.2 Z" fill="#ffffff" opacity="0.9"/>'
-            + '<circle cx="9" cy="21.5" r="3.3" fill="#15212c" stroke="#fff" stroke-width="1.2"/>'
-            + '<circle cx="29" cy="21.5" r="3.3" fill="#15212c" stroke="#fff" stroke-width="1.2"/>'
-            + '<text x="11.8" y="16.4" text-anchor="middle" font-size="9.5" font-weight="800" fill="#06121d" font-family="sans-serif">' + (i + 1) + '</text>'
+          html: '<svg width="40" height="40" viewBox="0 0 40 40" style="filter:drop-shadow(0 1px 3px rgba(0,0,0,.55));">'
+            + arrow
+            + '<circle cx="20" cy="20" r="11" fill="' + color + '" stroke="#fff" stroke-width="2"/>'
+            + '<text x="20" y="24.3" text-anchor="middle" font-size="12" font-weight="800" fill="#06121d" font-family="sans-serif">' + (i + 1) + '</text>'
             + '</svg>',
-          iconSize: [38, 30], iconAnchor: [19, 17], popupAnchor: [0, -16]
+          iconSize: [40, 40], iconAnchor: [20, 20], popupAnchor: [0, -18]
         });
         const veh = [t.year, t.make, t.model].filter(Boolean).join(' ');
         const move = [(t.speed != null ? t.speed + ' mph' : ''), (t.heading || '')].filter(Boolean).join(' ');
@@ -7468,6 +7510,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + '<br>' + _truckEsc([_truckStatusLabel(t), move].filter(Boolean).join(' · '))
           + (t.lastUpdate ? '<br><span style="color:#6e8194;">' + _truckEsc(_truckTimeAgo(t.lastUpdate)) + '</span>' : '')
           + (t.vin ? '<br><span style="color:#6e8194;font-size:11px;">VIN ' + _truckEsc(t.vin) + '</span>' : '')
+          + ((t.lat != null && t.lon != null) ? '<div style="margin-top:8px;"><button onclick="mtMeasureStart(' + i + ')" style="width:100%;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:#fff;font-weight:700;font-size:12px;padding:7px;border-radius:6px;cursor:pointer;">📏 Distance to a job</button></div>' : '')
           + '</div>';
         const m = L.marker([t.lat, t.lon], { icon }).addTo(_trucksMap).bindPopup(pop);
         _truckMarkers.push(m);
@@ -7574,6 +7617,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: done ? 0.6 : 1 }).addTo(_trucksMap).bindPopup(pop);
           m.on('popupopen', () => _prefetchJobPhone(j.jobID).then(ph => _renderJobPhoneSlot(j.jobID, ph)));
+          m.on('click', () => { if (_measureFrom) _measureToJob(j); }); // measure-to-job mode: tap a job after a truck
           _jobMarkers.push(m);
           jobPts.push([j.lat, j.lon]);
         });

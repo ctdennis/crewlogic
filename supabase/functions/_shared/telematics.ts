@@ -18,7 +18,8 @@ export interface Truck {
   lat: number | null;
   lon: number | null;
   speed: number | null;
-  heading: string | null;
+  heading: string | null;       // cardinal (N/NE/…) for display
+  bearingDeg: number | null;    // course over ground in degrees (for the map arrow); null when unknown/parked
   status: string | null;
   lastUpdate: number | null; // ms since epoch
   make: string | null;
@@ -47,6 +48,15 @@ function bearingToCompass(deg: number | null | undefined): string | null {
   if (deg == null || isNaN(deg)) return null;
   const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
   return dirs[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
+}
+// Inverse: a numeric-or-cardinal heading → degrees (for providers that only give a compass string).
+function headingToDegrees(h: string | number | null | undefined): number | null {
+  if (h == null) return null;
+  const n = typeof h === "number" ? h : parseFloat(String(h));
+  if (!isNaN(n)) return ((n % 360) + 360) % 360;
+  const map: Record<string, number> = { N: 0, NNE: 22.5, NE: 45, ENE: 67.5, E: 90, ESE: 112.5, SE: 135, SSE: 157.5, S: 180, SSW: 202.5, SW: 225, WSW: 247.5, W: 270, WNW: 292.5, NW: 315, NNW: 337.5 };
+  const key = String(h).trim().toUpperCase();
+  return key in map ? map[key] : null;
 }
 interface MotiveCurrentLocation {
   lat?: number;
@@ -94,6 +104,7 @@ function fromMotive(data: { vehicles?: MotiveVehicleEntry[] }): Truck[] {
         lon: loc?.lon ?? null,
         speed: loc?.speed != null ? Math.round(loc.speed) : null,
         heading: bearingToCompass(loc?.bearing),
+        bearingDeg: loc?.bearing ?? null,
         status: loc?.type ? String(loc.type) : null,
         lastUpdate: isNaN(located) ? null : located,
         make: veh.make ?? null,
@@ -137,6 +148,7 @@ function fromLinxup(data: { data?: { locations?: LinxupLocation[] } }): Truck[] 
       lon: l.longitude ?? null,
       speed: l.speed ?? null,
       heading: l.heading ?? null,
+      bearingDeg: headingToDegrees(l.heading),
       status: l.status ?? null,
       lastUpdate: l.date ?? null,
       make: l.make ?? null,
