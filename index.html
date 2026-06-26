@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.35 | 2026-06-26">
+  <meta name="crewlogic-version" content="v5.47.36 | 2026-06-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7989,6 +7989,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _mjBoardDayID = ''; // the day tab currently shown — passed as the voice/text command's default working day
     function mjRenderBoard(data, container, axis) {
       const r = container || document.getElementById('mjResult'); const jobs = data.jobs || [];
+      const dnd = !!container; // drag-to-move is a dashboard feature (two boards); single Manage Jobs board stays read/voice
       // Prefer the full route set from boardGrid (ALL routes incl. empty/closed, with open slots); fall
       // back to deriving lanes from jobs (legacy callers) with no availability layer.
       let routesData = data.routes;
@@ -8044,9 +8045,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const laneJobs = (rt.jobs || []);
         const open = (rt.open || []);
         const blockedRow = !laneJobs.length && !open.length; // closed/blocked for the day → all gray
+        // drop-target wiring (dashboard only): open slot [min,label] pairs (snap targets) + occupied [start,end] ranges (conflict)
+        const dropAttrs = dnd
+          ? ' class="mj-lane" data-day="' + mjEsc(String(data.dayID || '')) + '" data-routeid="' + mjEsc(String(rt.id || '')) + '" data-routecode="' + mjEsc(rc) + '" data-start="' + startMin + '" data-pxh="' + PXH + '" data-open="' + mjEsc(JSON.stringify(open.map(s => [s.startTime, s.label || '']))) + '" data-jobs="' + mjEsc(JSON.stringify(laneJobs.map(j => [j.timeMin, j.timeMin + (j.durationMin || 60)]))) + '" ondragover="dashDragOver(event)" ondrop="dashDrop(event)"'
+          : '';
         h += '<div style="display:flex;height:' + ROW + 'px;border-bottom:1px solid var(--border);">';
         h += '<div style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:var(--text-secondary);border-right:1px solid var(--border);padding:0 2px;text-align:center;word-break:break-all;">' + mjEsc(rc) + '</div>';
-        h += '<div style="position:relative;width:' + trackW + 'px;">';
+        h += '<div' + dropAttrs + ' style="position:relative;width:' + trackW + 'px;">';
         // blocked-default base tint (whole lane not bookable unless an open band overrides) — light gray
         h += '<div style="position:absolute;inset:0;background:rgba(255,255,255,0.14);pointer-events:none;"></div>';
         // open availability bands (white = bookable) — 30-min slot step; consecutive slots tile together
@@ -8063,7 +8068,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const city = mjAddrParts(j.address).city, jidA = mjEsc(String(j.jobID || ''));
           // Body = label color (Vonigo parity); gray when done. Left stripe = pricing zone (inset box-shadow).
           const done = (!!j.completed || !!j.labelDone), bg = done ? '#5b6b7a' : mjLabelColor(j.labelOpt), zoneStripe = mjZoneColor(j.zoneID);
-          h += '<div onmouseenter="mjTip(event,\'' + jidA + '\')" onmouseleave="mjTipHide()" onclick="mjTip(event,\'' + jidA + '\',true)" data-jid="' + jidA + '" title="' + (done ? 'Completed' : '') + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:3px;bottom:3px;background:' + bg + ';opacity:' + (done ? '0.72' : '1') + ';border-radius:5px;padding:2px 5px 2px 9px;overflow:hidden;cursor:pointer;box-shadow:inset 5px 0 0 0 ' + zoneStripe + ',0 1px 2px rgba(0,0,0,.3);">';
+          const canDrag = dnd && !done;
+          const dragAttrs = canDrag ? ' draggable="true" ondragstart="dashDragStart(event)" ondragend="dashClearDragGhost()" data-wo="' + mjEsc(String(j.woID || '')) + '" data-dur="' + (j.durationMin || 90) + '" data-zip="' + mjEsc(String(j.zip || '')) + '" data-client="' + mjEsc(String(j.client || '')) + '" data-day="' + mjEsc(String(data.dayID || '')) + '" data-route="' + mjEsc(rc) + '" data-tlabel="' + mjEsc(String(j.timeLabel || '')) + '" data-tmin="' + (j.timeMin != null ? j.timeMin : '') + '"' : '';
+          h += '<div' + dragAttrs + ' onmouseenter="mjTip(event,\'' + jidA + '\')" onmouseleave="mjTipHide()" onclick="mjTip(event,\'' + jidA + '\',true)" data-jid="' + jidA + '" title="' + (canDrag ? 'Drag to move' : (done ? 'Completed — adjust in Vonigo' : '')) + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:3px;bottom:3px;background:' + bg + ';opacity:' + (done ? '0.72' : '1') + ';border-radius:5px;padding:2px 5px 2px 9px;overflow:hidden;cursor:' + (canDrag ? 'grab' : 'pointer') + ';box-shadow:inset 5px 0 0 0 ' + zoneStripe + ',0 1px 2px rgba(0,0,0,.3);">';
           h += '<div style="font-size:10px;font-weight:700;color:#fff;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (n + 1) + '. ' + (done ? '✓ ' : '') + name + (city ? ' <span style="font-weight:500;color:rgba(255,255,255,.82);">' + mjEsc(city) + '</span>' : '') + '</div>';
           h += '<div style="font-size:9px;color:rgba(255,255,255,.82);line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (j.zip ? mjEsc(j.zip) : '') + (j.zip && j.jobID ? ' · ' : '') + '#' + jidA + '</div>';
           h += '</div>';
@@ -8204,6 +8211,89 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Voice / text command entry points — wired to the move pipeline + confirm modal in Phase 2.
     function dashMic() { const r = document.getElementById('dashCmdResult'); if (r) r.textContent = 'Voice moves arrive in the next step.'; }
     function dashSendCmd() { const r = document.getElementById('dashCmdResult'); if (r) r.textContent = 'Command moves arrive in the next step.'; }
+
+    // ===== Phase 2: cross-day move via drag-to-slot (shared confirm modal + execute) =====
+    let _dragMove = null; // {woID, jobID, dur, zip, client, fromDay, fromRoute, fromTlabel, fromTmin}
+    function _minLabel(m) { let hh = Math.floor(m / 60), mm = ((m % 60) + 60) % 60; const ap = hh < 12 || hh >= 24 ? 'AM' : 'PM'; let h12 = hh % 12; if (h12 === 0) h12 = 12; return h12 + ':' + String(mm).padStart(2, '0') + ' ' + ap; }
+    function dashDragStart(ev) {
+      const el = ev.currentTarget, d = el.dataset;
+      if (!d.wo) { ev.preventDefault(); return; }
+      _dragMove = { woID: d.wo, jobID: d.jid, dur: parseInt(d.dur, 10) || 90, zip: d.zip || '', client: d.client || 'job', fromDay: d.day || '', fromRoute: d.route || '', fromTlabel: d.tlabel || '', fromTmin: d.tmin === '' ? null : parseInt(d.tmin, 10) };
+      try { ev.dataTransfer.setData('text/plain', d.wo); ev.dataTransfer.effectAllowed = 'move'; } catch (e) {}
+      el.style.opacity = '0.45';
+      mjTipForceHide();
+    }
+    function dashDragOver(ev) { if (_dragMove) { ev.preventDefault(); try { ev.dataTransfer.dropEffect = 'move'; } catch (e) {} } }
+    function dashDrop(ev) {
+      if (!_dragMove) return;
+      ev.preventDefault();
+      const lane = ev.currentTarget, d = lane.dataset;
+      const rect = lane.getBoundingClientRect();
+      const start = +d.start, pxh = +d.pxh;
+      const rawMin = Math.round((start + ((ev.clientX - rect.left) / pxh) * 60) / 30) * 30; // 30-min granularity
+      let open = []; try { open = JSON.parse(d.open || '[]'); } catch (e) {}
+      let jobsR = []; try { jobsR = JSON.parse(d.jobs || '[]'); } catch (e) {}
+      // snap to the nearest OPEN slot start; if none, keep the rounded drop time (flagged not-open)
+      let toMin = rawMin, toLabel = '', isOpen = false;
+      if (open.length) { let best = open[0]; open.forEach(o => { if (Math.abs(o[0] - rawMin) < Math.abs(best[0] - rawMin)) best = o; }); toMin = best[0]; toLabel = best[1] || _minLabel(best[0]); isOpen = true; }
+      if (!toLabel) toLabel = _minLabel(toMin);
+      const dur = _dragMove.dur || 90;
+      const conflict = jobsR.some(r => toMin < r[1] && (toMin + dur) > r[0]);
+      // no-op: dropped on its own current slot
+      if (_dragMove.fromDay === d.day && _dragMove.fromRoute === d.routecode && _dragMove.fromTmin === toMin) { dashClearDragGhost(); return; }
+      dashMoveModal(Object.assign({}, _dragMove, { toDay: d.day, toRouteCode: d.routecode, toRouteID: d.routeid, toMin, toLabel, open: isOpen && !conflict, conflict }));
+      dashClearDragGhost();
+    }
+    function dashClearDragGhost() { document.querySelectorAll('.mj-lane [draggable]').forEach(el => el.style.opacity = ''); }
+    function dashMoveModal(spec) {
+      _dragMove = spec; // hold the resolved spec for the confirm
+      let ov = document.getElementById('dashMoveOverlay');
+      if (!ov) { ov = document.createElement('div'); ov.id = 'dashMoveOverlay'; document.body.appendChild(ov); }
+      ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(3,8,14,0.62);display:flex;align-items:center;justify-content:center;';
+      const fromDayLbl = _dashDayLabel(spec.fromDay), toDayLbl = _dashDayLabel(spec.toDay);
+      const status = spec.open
+        ? '<div style="color:var(--accent-green,#00E785);font-weight:700;font-size:13px;">✓ Open slot</div>'
+        : '<div style="color:#ffb454;font-weight:700;font-size:13px;">⚠ ' + (spec.conflict ? 'Slot occupied' : 'No open slot here') + ' — move anyway?</div>';
+      ov.innerHTML = '<div style="background:var(--bg-card,#1e2f40);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.5);padding:18px 20px;max-width:380px;width:92%;font-size:13px;color:var(--text-primary);">'
+        + '<div style="font-size:15px;font-weight:800;margin-bottom:10px;">Move job</div>'
+        + '<div style="margin-bottom:8px;font-weight:700;">' + mjEsc(spec.client || 'Job') + (spec.jobID ? ' <span style="color:var(--text-muted);font-weight:500;">#' + mjEsc(String(spec.jobID)) + '</span>' : '') + '</div>'
+        + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin-bottom:10px;">'
+        +   '<span style="color:var(--text-muted);">From</span><span>' + mjEsc(spec.fromRoute || '—') + ' · ' + mjEsc(fromDayLbl) + (spec.fromTlabel ? ' · ' + mjEsc(spec.fromTlabel) : '') + '</span>'
+        +   '<span style="color:var(--text-muted);">To</span><span style="font-weight:700;">' + mjEsc(spec.toRouteCode || '—') + ' · ' + mjEsc(toDayLbl) + ' · ' + mjEsc(spec.toLabel) + '</span>'
+        + '</div>'
+        + status
+        + '<div id="dashMoveErr" style="color:#ff6b6b;font-size:12px;margin-top:6px;min-height:1px;"></div>'
+        + '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px;">'
+        +   '<button onclick="dashMoveClose()" style="padding:9px 16px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;font-weight:600;cursor:pointer;">Cancel</button>'
+        +   '<button id="dashMoveConfirmBtn" onclick="dashMoveExecute()" style="padding:9px 18px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;font-weight:800;cursor:pointer;">Confirm move</button>'
+        + '</div></div>';
+      ov.style.display = 'flex';
+      ov.onclick = (e) => { if (e.target === ov) dashMoveClose(); };
+    }
+    function dashMoveClose() { const ov = document.getElementById('dashMoveOverlay'); if (ov) ov.style.display = 'none'; _dragMove = null; }
+    async function dashMoveExecute() {
+      const spec = _dragMove; if (!spec) return;
+      const btn = document.getElementById('dashMoveConfirmBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Moving…'; }
+      const plan = { kind: 'move', woID: spec.woID, dayID: spec.toDay, startTime: spec.toMin, durationMin: spec.dur, zip: spec.zip || '', toRouteCode: spec.toRouteCode, serviceTypeID: '11', startLabel: spec.toLabel };
+      let res = null;
+      try { res = await edgeFunctionCall('crewlogic-dispatch', { action: 'execute', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, plan, commandText: 'drag move', actorEmail: currentUser.email }); } catch (e) { res = { success: false, error: 'Network error — try again.' }; }
+      if (res && res.success) {
+        dashMoveClose();
+        _dashToast('Moved ' + (spec.client || 'job') + ' → ' + spec.toRouteCode + ' · ' + _dashDayLabel(spec.toDay) + ' ' + spec.toLabel);
+        dashLoadBoards();
+      } else {
+        const e = document.getElementById('dashMoveErr'); if (e) e.textContent = (res && res.error) || 'Move failed — try again.';
+        if (btn) { btn.disabled = false; btn.textContent = 'Confirm move'; }
+      }
+    }
+    function _dashToast(msg) {
+      let t = document.getElementById('dashToast');
+      if (!t) { t = document.createElement('div'); t.id = 'dashToast'; document.body.appendChild(t); }
+      t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:100001;background:#0f1923;color:#fff;border:1px solid var(--accent-green,#00E785);border-radius:10px;padding:10px 16px;font-size:13px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.45);';
+      t.textContent = '✓ ' + msg; t.style.display = 'block';
+      clearTimeout(_dashToastT); _dashToastT = setTimeout(() => { if (t) t.style.display = 'none'; }, 4000);
+    }
+    let _dashToastT = null;
     // Parse a Vonigo service address ("123 Main St, Easton, MA 02375" / multi-line) → {street, city, zip}.
     function mjAddrParts(addr) {
       const s = String(addr || '').replace(/\s*\n\s*/g, ', ').replace(/\s+/g, ' ').trim();
