@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.28 | 2026-06-26">
+  <meta name="crewlogic-version" content="v5.47.29 | 2026-06-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7398,6 +7398,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       };
       setBtn(document.getElementById('trucksDayTodayBtn'), _trucksJobDay === 0);
       setBtn(document.getElementById('trucksDayTomorrowBtn'), _trucksJobDay === 1);
+      setBtn(document.getElementById('dashTrucksTodayBtn'), _trucksJobDay === 0); // dashboard map mirror
+      setBtn(document.getElementById('dashTrucksTomorrowBtn'), _trucksJobDay === 1);
     }
     function setTrucksJobDay(offset) {
       _trucksJobDay = offset;
@@ -7412,12 +7414,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function toggleTrucksLookahead() {
       _trucksLookahead = !_trucksLookahead;
-      const btn = document.getElementById('trucksLookaheadBtn');
-      if (btn) {
-        btn.style.background = _trucksLookahead ? 'var(--accent-green,#00E785)' : 'var(--bg-input,#1e2f40)';
-        btn.style.color = _trucksLookahead ? '#06121d' : 'var(--text-muted,#6e8194)';
-        btn.style.fontWeight = _trucksLookahead ? '700' : '600';
-      }
+      ['trucksLookaheadBtn', 'dashTrucksLookaheadBtn'].forEach(id => { // style both the trucks screen + dashboard buttons
+        const btn = document.getElementById(id);
+        if (btn) {
+          btn.style.background = _trucksLookahead ? 'var(--accent-green,#00E785)' : 'var(--bg-input,#1e2f40)';
+          btn.style.color = _trucksLookahead ? '#06121d' : 'var(--text-muted,#6e8194)';
+          btn.style.fontWeight = _trucksLookahead ? '700' : '600';
+        }
+      });
       loadLookaheadDots();
     }
     async function loadLookaheadDots() {
@@ -8111,7 +8115,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<div style="border:1px solid var(--border);border-radius:var(--radius);padding:8px;background:var(--bg-card);min-width:0;">' + dashDayPickerHTML('src', _dashSrcDay) + '<div id="dashSrcBoard"></div></div>'
         +   '<div style="border:1px solid var(--border);border-radius:var(--radius);padding:8px;background:var(--bg-card);min-width:0;">' + dashDayPickerHTML('dest', _dashDestDay) + '<div id="dashDestBoard"></div></div>'
         + '</div>'
-        // map on the BOTTOM
+        // map on the BOTTOM — with the same Jobs day-toggle + 3-day look-ahead controls as Where Are My Trucks
+        + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;">'
+        +   '<span style="font-size:13px;font-weight:700;color:var(--text-primary);">🚚 Trucks</span>'
+        +   '<span style="font-size:12px;color:var(--text-muted);">Jobs:</span>'
+        +   '<div style="display:inline-flex;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;">'
+        +     '<button id="dashTrucksTodayBtn" onclick="setTrucksJobDay(0)" style="font-size:13px;padding:6px 14px;background:var(--accent-green,#00E785);color:#06121d;border:none;cursor:pointer;font-weight:700;">Today</button>'
+        +     '<button id="dashTrucksTomorrowBtn" onclick="setTrucksJobDay(1)" style="font-size:13px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:none;cursor:pointer;font-weight:600;">Tomorrow</button>'
+        +   '</div>'
+        +   '<button id="dashTrucksLookaheadBtn" onclick="toggleTrucksLookahead()" title="Show jobs for the next 3 days as gray dots" style="font-size:12px;padding:6px 12px;background:var(--bg-input,#1e2f40);color:var(--text-muted);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;white-space:nowrap;">◌ +3 days</button>'
+        +   '<button onclick="showTrucks()" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🔄 Refresh</button>'
+        + '</div>'
         + '<div id="dashMapPane" style="height:55vh;min-height:420px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);"></div>';
       dashLoadBoards();
       dashMountMap();
@@ -8120,7 +8134,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function dashMountMap() {
       if (!document.getElementById('dashMapPane')) return;
       _ensureTrucksMapFresh('dashMapPane'); // rebuild the map into the (freshly re-rendered) dashboard pane
-      _trucksJobDay = 0;                     // dashboard map = today's trucks + jobs
+      _trucksJobDay = 0;                     // dashboard map = today's trucks + jobs (matches the rendered toggle)
+      _trucksLookahead = false;              // +3-day look-ahead off by default (matches the rendered button)
       showTrucks();
       _startTrucksAutoRefresh();
       setTimeout(() => { if (_trucksMap) _trucksMap.invalidateSize(); }, 150); // correct sizing after layout settles
