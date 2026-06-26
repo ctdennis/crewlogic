@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.21 | 2026-06-26">
+  <meta name="crewlogic-version" content="v5.47.22 | 2026-06-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8073,33 +8073,50 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!_dashSrcDay) _dashSrcDay = today;
       if (!_dashDestDay) _dashDestDay = mjAddDays(today, 1);
       scr.innerHTML =
-        '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
-        +   '<div style="font-size:16px;font-weight:800;color:var(--text-primary);">🗺️ Dispatch</div>'
-        +   '<div style="font-size:12px;color:var(--text-muted);">Two days side by side — move jobs by voice (Manage Jobs) or drag (coming next).</div>'
+        // toolbar: title + voice mic + text command (wired in Phase 2) + result
+        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">'
+        +   '<div style="font-size:16px;font-weight:800;color:var(--text-primary);white-space:nowrap;">🗺️ Dispatch</div>'
+        +   '<button id="dashMicBtn" onclick="dashMic()" title="Voice command" style="width:38px;height:38px;flex:0 0 auto;border-radius:50%;background:var(--accent-green);color:var(--accent-text);border:none;cursor:pointer;font-size:17px;">🎤</button>'
+        +   '<input id="dashCmdInput" type="text" placeholder="…or type a command — e.g. “move the 2nd job on MA1REG to tomorrow at 10”" onkeydown="if(event.key===\'Enter\')dashSendCmd()" style="flex:1;min-width:240px;padding:9px 12px;font-size:13px;background:var(--bg-input,#253545);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);">'
+        +   '<div id="dashCmdResult" style="flex:0 0 auto;font-size:12px;color:var(--text-muted);"></div>'
         + '</div>'
-        + '<div id="dashMapPane" style="height:55vh;min-height:420px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:10px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;">🚚 Truck map — wiring next</div>'
-        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start;">'
+        // schedules on TOP (two boards, route-aligned)
+        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start;margin-bottom:12px;">'
         +   '<div style="border:1px solid var(--border);border-radius:var(--radius);padding:8px;background:var(--bg-card);min-width:0;">' + dashDayPickerHTML('src', _dashSrcDay) + '<div id="dashSrcBoard"></div></div>'
         +   '<div style="border:1px solid var(--border);border-radius:var(--radius);padding:8px;background:var(--bg-card);min-width:0;">' + dashDayPickerHTML('dest', _dashDestDay) + '<div id="dashDestBoard"></div></div>'
-        + '</div>';
-      dashLoadBoard('src', _dashSrcDay);
-      dashLoadBoard('dest', _dashDestDay);
+        + '</div>'
+        // map on the BOTTOM
+        + '<div id="dashMapPane" style="height:55vh;min-height:420px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;">🚚 Truck map — wiring next</div>';
+      dashLoadBoards();
     }
     function dashShiftDay(side, delta) {
       if (side === 'src') _dashSrcDay = mjAddDays(_dashSrcDay, delta); else _dashDestDay = mjAddDays(_dashDestDay, delta);
       renderDashboard();
     }
-    async function dashLoadBoard(side, dayID) {
-      const container = document.getElementById(side === 'src' ? 'dashSrcBoard' : 'dashDestBoard');
-      if (!container) return;
-      container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">Loading…</div>';
+    async function dashFetchDay(dayID) {
       const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'boardGrid', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, dayID });
-      if (!data || !data.success) { container.innerHTML = '<div style="color:#ff6b6b;font-size:12px;padding:8px;">' + mjEsc((data && data.error) || 'Could not load the schedule.') + '</div>'; return; }
-      const routesData = (data.routes || []).slice().sort((a, b) => String(a.code || '').localeCompare(String(b.code || '')));
+      return (data && data.success) ? data : { routes: [], _err: (data && data.error) || 'Could not load the schedule.' };
+    }
+    // Load BOTH days, union their routes, and render both boards with the SAME aligned route rows — so
+    // every route is present on both (gray when inactive that day) and rows line up for cross-day drag.
+    async function dashLoadBoards() {
+      const srcC = document.getElementById('dashSrcBoard'), destC = document.getElementById('dashDestBoard');
+      [srcC, destC].forEach(c => { if (c) c.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">Loading…</div>'; });
+      const [src, dest] = await Promise.all([dashFetchDay(_dashSrcDay), dashFetchDay(_dashDestDay)]);
+      const codes = [...new Set([...(src.routes || []).map(r => r.code), ...(dest.routes || []).map(r => r.code)])].sort();
+      const align = (dayRoutes) => codes.map(c => (dayRoutes || []).find(r => r.code === c) || { id: c, code: c, name: c, jobs: [], open: [] });
+      dashRenderBoard(_dashSrcDay, align(src.routes), srcC);
+      dashRenderBoard(_dashDestDay, align(dest.routes), destC);
+    }
+    function dashRenderBoard(dayID, routesData, container) {
+      if (!container) return;
       const jobs = [];
       routesData.forEach(rt => (rt.jobs || []).forEach(j => jobs.push(Object.assign({}, j, { routeCode: rt.code, route: rt.name }))));
       mjRenderBoard({ dayID, dayLabel: _dashDayLabel(dayID), routes: routesData, jobs }, container);
     }
+    // Voice / text command entry points — wired to the move pipeline + confirm modal in Phase 2.
+    function dashMic() { const r = document.getElementById('dashCmdResult'); if (r) r.textContent = 'Voice moves arrive in the next step.'; }
+    function dashSendCmd() { const r = document.getElementById('dashCmdResult'); if (r) r.textContent = 'Command moves arrive in the next step.'; }
     // Parse a Vonigo service address ("123 Main St, Easton, MA 02375" / multi-line) → {street, city, zip}.
     function mjAddrParts(addr) {
       const s = String(addr || '').replace(/\s*\n\s*/g, ', ').replace(/\s+/g, ' ').trim();
