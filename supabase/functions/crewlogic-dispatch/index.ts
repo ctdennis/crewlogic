@@ -184,6 +184,18 @@ async function getRouteMap(token: string, dayID: string): Promise<{ toId: Record
   }
   return { toId, toCode };
 }
+// All routes for a day WITH active flag + display code — for the availability board (incl. empty routes).
+// Vonigo returns isActive as a STRING ("true"/"false"); a route closed for a specific day still appears
+// here (isActive may be "true") but simply has no availability that day — which is what renders it gray.
+async function getRoutesFull(token: string, dayID: string) {
+  const r = await vpost(token, '/resources/routes/', { method: '-1', isCompleteObject: 'true', dayID });
+  return (r.Routes || []).map((x: any) => ({
+    id: String(x.objectID),
+    name: String(x.name || x.title || ''),
+    code: shortRoute(String(x.title || x.name || x.objectID)),
+    isActive: String(x.isActive).toLowerCase() !== 'false',
+  }));
+}
 function pickRouteID(toId: Record<string, string>, route?: string): string | undefined {
   if (!route) return undefined;
   if (/^\d+$/.test(route)) return route;
@@ -331,6 +343,28 @@ Deno.serve(async (req: Request) => {
     if (action === 'listRouteJobs') {
       const jobs = await listRouteJobs(token, franchiseID, String(body.dayID), body.route ? String(body.route) : undefined, body.withCoords !== false);
       return json({ success: true, dayID: body.dayID, count: jobs.length, jobs });
+    }
+
+    // boardGrid (Phase 0): per-route grid for a day = jobs (occupied) + open availability slots.
+    // Blocked/gray is implicit: a route with no open slots AND no jobs is closed/blocked for the day;
+    // gaps between are not bookable. Availability already excludes manual blocks, so no BookOffs needed.
+    if (action === 'boardGrid') {
+      const dayID = String(body.dayID);
+      const durationMin = Number(body.durationMin) || 120; // open-slot fit uses the standard job length
+      const [routes, jobs, openSlots] = await Promise.all([
+        getRoutesFull(token, dayID),
+        listRouteJobs(token, franchiseID, dayID, undefined, false),
+        suggestSlotsFn(token, franchiseID, dayID, durationMin).catch(() => []),
+      ]);
+      const byId: Record<string, any> = {};
+      for (const r of routes) byId[r.id] = { id: r.id, code: r.code, name: r.name, isActive: r.isActive, jobs: [], open: [] };
+      for (const j of jobs) {
+        const k = j.routeID; if (!k) continue;
+        if (!byId[k]) byId[k] = { id: k, code: j.routeCode, name: j.route, isActive: true, jobs: [], open: [] };
+        byId[k].jobs.push({ woID: j.woID, jobID: j.jobID, client: j.client, timeMin: j.timeMin, durationMin: j.durationMin, timeLabel: j.timeLabel, status: j.status, completed: j.completed, labelDone: j.labelDone, zip: j.zip, address: j.address });
+      }
+      for (const s of openSlots) { const k = String(s.routeID); if (byId[k]) byId[k].open.push({ startTime: s.startTime, label: s.label }); }
+      return json({ success: true, dayID, durationMin, routes: Object.values(byId) });
     }
 
     if (action === 'resolveJob') {
