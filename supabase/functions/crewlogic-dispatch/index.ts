@@ -376,6 +376,7 @@ Deno.serve(async (req: Request) => {
       return json({ success: true, dayID, durationMin, routes: Object.values(byId) });
     }
 
+
     if (action === 'resolveJob') {
       const dayID = String(body.dayID);
       const jobs = await listRouteJobs(token, franchiseID, dayID, body.route ? String(body.route) : undefined, false);
