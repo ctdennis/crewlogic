@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.37 | 2026-06-26">
+  <meta name="crewlogic-version" content="v5.47.38 | 2026-06-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8224,8 +8224,43 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       mjRenderBoard({ dayID, dayLabel: _dashDayLabel(dayID), routes: routesData, jobs }, container, axis);
     }
     // Voice / text command entry points — wired to the move pipeline + confirm modal in Phase 2.
-    function dashMic() { const r = document.getElementById('dashCmdResult'); if (r) r.textContent = 'Voice moves arrive in the next step.'; }
-    function dashSendCmd() { const r = document.getElementById('dashCmdResult'); if (r) r.textContent = 'Command moves arrive in the next step.'; }
+    // ===== Phase 2: voice / text command on the dashboard → same confirm modal =====
+    let _dashRec = null, _dashListening = false, _dashHistory = [];
+    function _dashCmdMsg(m) { const r = document.getElementById('dashCmdResult'); if (r) r.textContent = m || ''; }
+    function dashMic() {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) { _dashCmdMsg('Voice not supported — type a command'); return; }
+      const btn = document.getElementById('dashMicBtn');
+      if (_dashListening) { if (_dashRec) { try { _dashRec.stop(); } catch (e) {} } return; }
+      _dashRec = new SR(); _dashRec.lang = 'en-US'; _dashRec.interimResults = true; try { _dashRec.continuous = true; } catch (e) {}
+      let final = '', got = false;
+      _dashRec.onresult = (e) => { let interim = ''; for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) final += t + ' '; else interim += t; } _dashRec._cap = (final + interim).trim(); _dashCmdMsg(_dashRec._cap ? '“' + _dashRec._cap + '”' : 'Listening…'); };
+      _dashRec.onerror = () => { _dashListening = false; if (btn) btn.style.background = 'var(--accent-green,#00E785)'; };
+      _dashRec.onend = () => { _dashListening = false; if (btn) btn.style.background = 'var(--accent-green,#00E785)'; if (!got) { const cap = (_dashRec._cap || '').trim(); if (cap) { got = true; dashCommand(cap); } } };
+      try { _dashRec.start(); _dashListening = true; if (btn) btn.style.background = 'var(--accent-yellow,#f59e0b)'; _dashCmdMsg('Listening… tap the mic to send'); } catch (e) { _dashListening = false; }
+    }
+    function dashSendCmd() { const t = document.getElementById('dashCmdInput'); const v = (t.value || '').trim(); if (!v) return; t.value = ''; dashCommand(v); }
+    // Send a transcript to the AI dispatcher (working day = the SOURCE board's day). A move plan opens the
+    // shared confirm modal; if the resolved target day ≠ the destination board's day, the modal flags it.
+    async function dashCommand(transcript) {
+      _dashCmdMsg('Thinking…');
+      let data = null;
+      try { data = await edgeFunctionCall('crewlogic-dispatch', { action: 'command', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, transcript, history: _dashHistory, dayID: _dashSrcDay || '' }); } catch (e) { data = { success: false, error: 'Network error — try again.' }; }
+      if (!data || !data.success) { _dashCmdMsg((data && data.error) || 'Something went wrong.'); return; }
+      _dashHistory.push({ role: 'user', text: transcript }); if (data.message) _dashHistory.push({ role: 'assistant', text: data.message }); if (_dashHistory.length > 8) _dashHistory = _dashHistory.slice(-8);
+      if (data.intent === 'move' && data.plan) {
+        const p = data.plan; _dashCmdMsg('');
+        dashMoveModal({
+          woID: p.woID, jobID: p.jobID, client: p.jobLabel || 'job', dur: p.durationMin, zip: p.zip,
+          fromText: p.fromLabel || '', fromDay: _dashSrcDay,
+          toDay: p.dayID, toRouteCode: p.toRouteCode, toMin: p.startTime, toLabel: p.startLabel,
+          open: true, conflict: false, dayMismatch: String(p.dayID) !== String(_dashDestDay), _plan: p,
+        });
+        return;
+      }
+      // clarify / jobs / availability answer → surface the AI's text (the dispatcher already day-aware)
+      _dashCmdMsg(data.message || (data.intent === 'jobs' ? ('Found ' + ((data.jobs || []).length) + ' job(s) — see the boards.') : 'Done.'));
+    }
 
     // ===== Phase 2: cross-day move via drag-to-slot (shared confirm modal + execute) =====
     let _dragMove = null; // {woID, jobID, dur, zip, client, fromDay, fromRoute, fromTlabel, fromTmin}
@@ -8266,17 +8301,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!ov) { ov = document.createElement('div'); ov.id = 'dashMoveOverlay'; document.body.appendChild(ov); }
       ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(3,8,14,0.62);display:flex;align-items:center;justify-content:center;';
       const fromDayLbl = _dashDayLabel(spec.fromDay), toDayLbl = _dashDayLabel(spec.toDay);
+      const fromCell = spec.fromText ? mjEsc(spec.fromText) : (mjEsc(spec.fromRoute || '—') + ' · ' + mjEsc(fromDayLbl) + (spec.fromTlabel ? ' · ' + mjEsc(spec.fromTlabel) : ''));
       const status = spec.open
         ? '<div style="color:var(--accent-green,#00E785);font-weight:700;font-size:13px;">✓ Open slot</div>'
         : '<div style="color:#ffb454;font-weight:700;font-size:13px;">⚠ ' + (spec.conflict ? 'Slot occupied' : 'No open slot here') + ' — move anyway?</div>';
+      // Voice day-mismatch guard: spoken target day differs from the destination board's shown day.
+      const mismatch = spec.dayMismatch
+        ? '<div style="margin-top:8px;padding:7px 10px;background:rgba(245,158,11,0.14);border:1px solid #ffb454;border-radius:8px;color:#ffb454;font-size:12px;">⚠ Moving to <b>' + mjEsc(toDayLbl) + '</b> — the destination board shows <b>' + mjEsc(_dashDayLabel(_dashDestDay)) + '</b>. Confirm the day.</div>'
+        : '';
       ov.innerHTML = '<div style="background:var(--bg-card,#1e2f40);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.5);padding:18px 20px;max-width:380px;width:92%;font-size:13px;color:var(--text-primary);">'
         + '<div style="font-size:15px;font-weight:800;margin-bottom:10px;">Move job</div>'
         + '<div style="margin-bottom:8px;font-weight:700;">' + mjEsc(spec.client || 'Job') + (spec.jobID ? ' <span style="color:var(--text-muted);font-weight:500;">#' + mjEsc(String(spec.jobID)) + '</span>' : '') + '</div>'
         + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin-bottom:10px;">'
-        +   '<span style="color:var(--text-muted);">From</span><span>' + mjEsc(spec.fromRoute || '—') + ' · ' + mjEsc(fromDayLbl) + (spec.fromTlabel ? ' · ' + mjEsc(spec.fromTlabel) : '') + '</span>'
+        +   '<span style="color:var(--text-muted);">From</span><span>' + fromCell + '</span>'
         +   '<span style="color:var(--text-muted);">To</span><span style="font-weight:700;">' + mjEsc(spec.toRouteCode || '—') + ' · ' + mjEsc(toDayLbl) + ' · ' + mjEsc(spec.toLabel) + '</span>'
         + '</div>'
-        + status
+        + status + mismatch
         + '<div id="dashMoveErr" style="color:#ff6b6b;font-size:12px;margin-top:6px;min-height:1px;"></div>'
         + '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px;">'
         +   '<button onclick="dashMoveClose()" style="padding:9px 16px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;font-weight:600;cursor:pointer;">Cancel</button>'
@@ -8289,9 +8329,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function dashMoveExecute() {
       const spec = _dragMove; if (!spec) return;
       const btn = document.getElementById('dashMoveConfirmBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Moving…'; }
-      const plan = { kind: 'move', woID: spec.woID, dayID: spec.toDay, startTime: spec.toMin, durationMin: spec.dur, zip: spec.zip || '', toRouteCode: spec.toRouteCode, serviceTypeID: '11', startLabel: spec.toLabel };
+      // voice path carries the full runCommand plan (_plan); drag path builds the plan from the resolved spec
+      const plan = spec._plan || { kind: 'move', woID: spec.woID, dayID: spec.toDay, startTime: spec.toMin, durationMin: spec.dur, zip: spec.zip || '', toRouteCode: spec.toRouteCode, serviceTypeID: '11', startLabel: spec.toLabel };
       let res = null;
-      try { res = await edgeFunctionCall('crewlogic-dispatch', { action: 'execute', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, plan, commandText: 'drag move', actorEmail: currentUser.email }); } catch (e) { res = { success: false, error: 'Network error — try again.' }; }
+      try { res = await edgeFunctionCall('crewlogic-dispatch', { action: 'execute', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, plan, commandText: spec._plan ? 'voice move' : 'drag move', actorEmail: currentUser.email }); } catch (e) { res = { success: false, error: 'Network error — try again.' }; }
       if (res && res.success) {
         const fromDay = spec.fromDay, toDay = spec.toDay; // capture before close nulls _dragMove
         dashMoveClose();
