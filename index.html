@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.12 | 2026-06-25">
+  <meta name="crewlogic-version" content="v5.47.13 | 2026-06-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7912,9 +7912,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _mjPlan = null;
       const r = document.getElementById('mjResult');
       r.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline" style="display:inline-block;"></span>Loading jobs…</div>';
-      const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'listRouteJobs', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, dayID, withCoords: false });
-      if (!data || !data.success) { r.innerHTML = '<div style="color:#ff6b6b;font-size:13px;">' + mjEsc((data && data.error) || 'Could not load jobs.') + '</div>'; return; }
-      const dayLabel = mjDayLabelFromID(dayID), jobs = data.jobs || [];
+      // boardGrid returns ALL routes for the day (incl. empty/closed ones) with jobs (occupied) + open
+      // availability slots — so the board shows blocked vs open vs occupied, not just routes that have jobs.
+      const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'boardGrid', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, dayID });
+      if (!data || !data.success) { r.innerHTML = '<div style="color:#ff6b6b;font-size:13px;">' + mjEsc((data && data.error) || 'Could not load the schedule.') + '</div>'; return; }
+      const dayLabel = mjDayLabelFromID(dayID);
+      const routesData = (data.routes || []).slice().sort((a, b) => String(a.code || '').localeCompare(String(b.code || '')));
+      // Flatten jobs (stamping routeCode/route) for _mjBoardByID + the AI conversation memory.
+      const jobs = [];
+      routesData.forEach(rt => (rt.jobs || []).forEach(j => jobs.push(Object.assign({}, j, { routeCode: rt.code, route: rt.name }))));
       // Mirror the AI's conversation memory, grouped BY ROUTE with per-route position #s, so a follow-up
       // voice command ("move the 2nd job on MA1REG to Route 3" / "that New Bedford job") resolves correctly.
       const byRoute = {};
@@ -7923,7 +7929,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _mjHistory.push({ role: 'user', text: 'Show all jobs on ' + dayLabel });
       _mjHistory.push({ role: 'assistant', text: 'Jobs on ' + dayLabel + ' by route — ' + (memParts.join(' | ') || 'none') });
       if (_mjHistory.length > 8) _mjHistory = _mjHistory.slice(-8);
-      mjRenderBoard({ dayID, dayLabel, jobs });
+      mjRenderBoard({ dayID, dayLabel, routes: routesData, jobs });
     }
     // Schedule-board view (route lanes × time, colored job blocks) — CrewLogic take on the Vonigo
     // mobile day board. Built from the SAME listRouteJobs data; tapping a block opens its detail below.
@@ -7941,19 +7947,33 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _mjBoardDayID = ''; // the day tab currently shown — passed as the voice/text command's default working day
     function mjRenderBoard(data) {
       const r = document.getElementById('mjResult'); const jobs = data.jobs || [];
-      const hdr = (data.dayLabel || '') + ' — ' + jobs.length + ' job' + (jobs.length !== 1 ? 's' : '');
-      if (!jobs.length) { r.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-size:13px;color:var(--text-muted);">No jobs scheduled for ' + mjEsc(data.dayLabel || 'this day') + '.</div>'; return; }
+      // Prefer the full route set from boardGrid (ALL routes incl. empty/closed, with open slots); fall
+      // back to deriving lanes from jobs (legacy callers) with no availability layer.
+      let routesData = data.routes;
+      if (!routesData) {
+        const codes = [...new Set(jobs.map(j => j.routeCode || '?'))].sort();
+        routesData = codes.map(c => ({ code: c, jobs: jobs.filter(j => (j.routeCode || '?') === c), open: [] }));
+      }
+      const hdr = (data.dayLabel || '') + ' — ' + jobs.length + ' job' + (jobs.length !== 1 ? 's' : '') + ' · ' + routesData.length + ' route' + (routesData.length !== 1 ? 's' : '');
+      if (!routesData.length) { r.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-size:13px;color:var(--text-muted);">No routes for ' + mjEsc(data.dayLabel || 'this day') + '.</div>'; return; }
       _mjBoardByID = {}; jobs.forEach(j => { if (j.jobID) _mjBoardByID[String(j.jobID)] = j; });
-      const routes = [...new Set(jobs.map(j => j.routeCode || '?'))].sort();
       const PXH = 66, LW = 52, ROW = 38;
       let minT = Infinity, maxT = -Infinity;
-      jobs.forEach(j => { if (Number.isFinite(j.timeMin)) { minT = Math.min(minT, j.timeMin); maxT = Math.max(maxT, j.timeMin + (j.durationMin || 60)); } });
+      routesData.forEach(rt => {
+        (rt.jobs || []).forEach(j => { if (Number.isFinite(j.timeMin)) { minT = Math.min(minT, j.timeMin); maxT = Math.max(maxT, j.timeMin + (j.durationMin || 60)); } });
+        (rt.open || []).forEach(s => { if (Number.isFinite(s.startTime)) { minT = Math.min(minT, s.startTime); maxT = Math.max(maxT, s.startTime + 30); } });
+      });
       const originH = Number.isFinite(minT) ? Math.max(5, Math.min(7, Math.floor(minT / 60))) : 7;
       const endH = Number.isFinite(maxT) ? Math.min(21, Math.max(17, Math.ceil(maxT / 60))) : 17;
       const startMin = originH * 60, hours = Math.max(1, endH - originH), trackW = hours * PXH;
       const halfPx = PXH / 2; // faint half-hour tick + solid hour line (hour layer listed first = on top)
       const grid = 'repeating-linear-gradient(to right, transparent 0, transparent ' + (PXH - 1) + 'px, var(--border) ' + (PXH - 1) + 'px, var(--border) ' + PXH + 'px), repeating-linear-gradient(to right, transparent 0, transparent ' + (halfPx - 1) + 'px, rgba(255,255,255,0.12) ' + (halfPx - 1) + 'px, rgba(255,255,255,0.12) ' + halfPx + 'px)';
-      let h = '<div style="margin-bottom:8px;font-weight:700;font-size:13px;color:var(--text-primary);">' + mjEsc(hdr) + '</div>';
+      let h = '<div style="margin-bottom:6px;font-weight:700;font-size:13px;color:var(--text-primary);">' + mjEsc(hdr) + '</div>';
+      // legend: open (bookable) vs blocked/closed vs job
+      h += '<div style="display:flex;gap:14px;align-items:center;margin-bottom:6px;font-size:10.5px;color:var(--text-muted);flex-wrap:wrap;">'
+        + '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:rgba(0,231,133,0.22);border:1px solid rgba(0,231,133,0.5);"></span>Open to book</span>'
+        + '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:rgba(110,129,148,0.18);"></span>Blocked / closed</span>'
+        + '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:#45b6e6;"></span>Job</span></div>';
       h += '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);-webkit-overflow-scrolling:touch;">';
       h += '<div style="position:relative;min-width:' + (LW + trackW) + 'px;">';
       // time header
@@ -7962,12 +7982,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       h += '<div style="position:relative;width:' + trackW + 'px;background:' + grid + ';">';
       for (let hh = originH; hh < endH; hh++) h += '<div style="position:absolute;left:' + ((hh - originH) * PXH) + 'px;top:4px;font-size:9.5px;color:var(--text-muted);background:var(--bg-card);padding:0 3px;">' + mjEsc(mjHourLabel(hh)) + '</div>';
       h += '</div></div>';
-      // route lanes
-      routes.forEach((rc, ri) => {
-        const laneJobs = jobs.filter(j => (j.routeCode || '?') === rc);
+      // route lanes — ALL routes (empty/closed included). Base = blocked-gray; green bands = open slots.
+      routesData.forEach((rt) => {
+        const rc = rt.code || '?';
+        const laneJobs = (rt.jobs || []);
+        const open = (rt.open || []);
+        const blockedRow = !laneJobs.length && !open.length; // closed/blocked for the day → all gray
         h += '<div style="display:flex;height:' + ROW + 'px;border-bottom:1px solid var(--border);">';
-        h += '<div style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:var(--text-secondary);border-right:1px solid var(--border);padding:0 2px;text-align:center;word-break:break-all;">' + mjEsc(rc) + '</div>';
+        h += '<div style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:' + (blockedRow ? 'var(--text-muted)' : 'var(--text-secondary)') + ';border-right:1px solid var(--border);padding:0 2px;text-align:center;word-break:break-all;">' + mjEsc(rc) + '</div>';
         h += '<div style="position:relative;width:' + trackW + 'px;background:' + grid + ';">';
+        // blocked-default base tint (whole lane not bookable unless an open band overrides)
+        h += '<div style="position:absolute;inset:0;background:rgba(110,129,148,0.16);pointer-events:none;"></div>';
+        // open availability bands (green, bookable) — 30-min slot step; consecutive slots tile together
+        open.forEach(s => {
+          if (!Number.isFinite(s.startTime)) return;
+          const ol = ((s.startTime - startMin) / 60) * PXH;
+          h += '<div title="Open ' + mjEsc(s.label || '') + '" style="position:absolute;left:' + ol + 'px;width:' + halfPx + 'px;top:0;bottom:0;background:rgba(0,231,133,0.18);pointer-events:none;"></div>';
+        });
         laneJobs.forEach((j, n) => {
           const left = ((j.timeMin - startMin) / 60) * PXH, w = Math.max(((j.durationMin || 60) / 60) * PXH, 50);
           const name = mjEsc((String(j.client || '').split(',')[0]) || j.client || 'Job');
@@ -7986,7 +8017,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (data.dayID && String(data.dayID) === _np.dayID) {
         const nowMin = _np.minutesOfDay;
         if (nowMin >= startMin && nowMin <= endH * 60) {
-          const nx = LW + ((nowMin - startMin) / 60) * PXH, laneH = ROW * routes.length;
+          const nx = LW + ((nowMin - startMin) / 60) * PXH, laneH = ROW * routesData.length;
           h += '<div title="Now" style="position:absolute;left:' + (nx - 3) + 'px;top:12px;width:8px;height:8px;border-radius:50%;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
           h += '<div title="Now" style="position:absolute;left:' + nx + 'px;top:20px;width:2px;height:' + laneH + 'px;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
         }
