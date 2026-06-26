@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.15 | 2026-06-26">
+  <meta name="crewlogic-version" content="v5.47.16 | 2026-06-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7945,8 +7945,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function mjZoneColor(zoneID) { if (!zoneID) return 'transparent'; const P = ['#22c55e', '#eab308', '#ec4899', '#3b82f6', '#f97316', '#a855f7', '#06b6d4', '#ef4444', '#84cc16', '#14b8a6']; let n = 0; const s = String(zoneID); for (let i = 0; i < s.length; i++) n = (n * 31 + s.charCodeAt(i)) >>> 0; return P[n % P.length]; }
     let _mjBoardByID = {};
     let _mjBoardDayID = ''; // the day tab currently shown — passed as the voice/text command's default working day
-    function mjRenderBoard(data) {
-      const r = document.getElementById('mjResult'); const jobs = data.jobs || [];
+    function mjRenderBoard(data, container) {
+      const r = container || document.getElementById('mjResult'); const jobs = data.jobs || [];
       // Prefer the full route set from boardGrid (ALL routes incl. empty/closed, with open slots); fall
       // back to deriving lanes from jobs (legacy callers) with no availability layer.
       let routesData = data.routes;
@@ -7956,7 +7956,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
       const hdr = (data.dayLabel || '') + ' — ' + jobs.length + ' job' + (jobs.length !== 1 ? 's' : '') + ' · ' + routesData.length + ' route' + (routesData.length !== 1 ? 's' : '');
       if (!routesData.length) { r.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-size:13px;color:var(--text-muted);">No routes for ' + mjEsc(data.dayLabel || 'this day') + '.</div>'; return; }
-      _mjBoardByID = {}; jobs.forEach(j => { if (j.jobID) _mjBoardByID[String(j.jobID)] = j; });
+      if (!container) _mjBoardByID = {}; // single-board screen resets; dashboard boards accumulate (job IDs unique)
+      jobs.forEach(j => { if (j.jobID) _mjBoardByID[String(j.jobID)] = j; });
       const PXH = 66, LW = 52, ROW = 38;
       let minT = Infinity, maxT = -Infinity;
       routesData.forEach(rt => {
