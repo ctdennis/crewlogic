@@ -191,12 +191,16 @@ async function getRoutesFull(token: string, _dayID: string) {
   // No dayID → the FULL franchise route master list (all routes, like Vonigo's board), not just the
   // routes scheduled that day. Jobs + availability are still per-day; a route with neither renders gray.
   const r = await vpost(token, '/resources/routes/', { method: '-1', isCompleteObject: 'true' });
-  return (r.Routes || []).map((x: any) => ({
-    id: String(x.objectID),
-    name: String(x.name || x.title || ''),
-    code: shortRoute(String(x.title || x.name || x.objectID)),
-    isActive: String(x.isActive).toLowerCase() !== 'false',
-  }));
+  // Active routes only (drops Inactive/legacy like FOLLOW + stale RI-TTH), in Vonigo's own order
+  // (which matches the franchise's Routes config screen — do NOT re-sort downstream).
+  return (r.Routes || [])
+    .map((x: any) => ({
+      id: String(x.objectID),
+      name: String(x.name || x.title || ''),
+      code: shortRoute(String(x.title || x.name || x.objectID)),
+      isActive: String(x.isActive).toLowerCase() !== 'false',
+    }))
+    .filter((rt: any) => rt.isActive);
 }
 function pickRouteID(toId: Record<string, string>, route?: string): string | undefined {
   if (!route) return undefined;

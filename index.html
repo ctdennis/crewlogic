@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.24 | 2026-06-26">
+  <meta name="crewlogic-version" content="v5.47.25 | 2026-06-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7947,7 +7947,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'boardGrid', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, dayID });
       if (!data || !data.success) { r.innerHTML = '<div style="color:#ff6b6b;font-size:13px;">' + mjEsc((data && data.error) || 'Could not load the schedule.') + '</div>'; return; }
       const dayLabel = mjDayLabelFromID(dayID);
-      const routesData = (data.routes || []).slice().sort((a, b) => String(a.code || '').localeCompare(String(b.code || '')));
+      const routesData = (data.routes || []).slice(); // preserve Vonigo's route order (config-screen order)
       // Flatten jobs (stamping routeCode/route) for _mjBoardByID + the AI conversation memory.
       const jobs = [];
       routesData.forEach(rt => (rt.jobs || []).forEach(j => jobs.push(Object.assign({}, j, { routeCode: rt.code, route: rt.name }))));
@@ -8133,7 +8133,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const srcC = document.getElementById('dashSrcBoard'), destC = document.getElementById('dashDestBoard');
       [srcC, destC].forEach(c => { if (c) c.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">Loading…</div>'; });
       const [src, dest] = await Promise.all([dashFetchDay(_dashSrcDay), dashFetchDay(_dashDestDay)]);
-      const codes = [...new Set([...(src.routes || []).map(r => r.code), ...(dest.routes || []).map(r => r.code)])].sort();
+      const codes = []; [...(src.routes || []), ...(dest.routes || [])].forEach(r => { if (r && r.code && !codes.includes(r.code)) codes.push(r.code); }); // preserve Vonigo's route order
       const align = (dayRoutes) => codes.map(c => (dayRoutes || []).find(r => r.code === c) || { id: c, code: c, name: c, jobs: [], open: [] });
       const srcR = align(src.routes), destR = align(dest.routes);
       const axis = _dashSharedAxis([srcR, destR]); // one time scale for both → aligned columns + equal size
