@@ -201,6 +201,9 @@ async function getRoutesFull(token: string, _dayID: string) {
       isActive: String(x.isActive).toLowerCase() !== 'false',
     }))
     .filter((rt: any) => rt.isActive);
+  // Note: /resources/routes returns routes already in the franchise's appearance order (matches the
+  // Vonigo Routes config screen), so we preserve this order downstream rather than re-sorting. Vonigo
+  // does NOT expose the numeric "Appearance Order"/"Booking Priority" as named API fields.
 }
 function pickRouteID(toId: Record<string, string>, route?: string): string | undefined {
   if (!route) return undefined;
