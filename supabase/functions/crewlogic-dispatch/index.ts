@@ -187,8 +187,10 @@ async function getRouteMap(token: string, dayID: string): Promise<{ toId: Record
 // All routes for a day WITH active flag + display code — for the availability board (incl. empty routes).
 // Vonigo returns isActive as a STRING ("true"/"false"); a route closed for a specific day still appears
 // here (isActive may be "true") but simply has no availability that day — which is what renders it gray.
-async function getRoutesFull(token: string, dayID: string) {
-  const r = await vpost(token, '/resources/routes/', { method: '-1', isCompleteObject: 'true', dayID });
+async function getRoutesFull(token: string, _dayID: string) {
+  // No dayID → the FULL franchise route master list (all routes, like Vonigo's board), not just the
+  // routes scheduled that day. Jobs + availability are still per-day; a route with neither renders gray.
+  const r = await vpost(token, '/resources/routes/', { method: '-1', isCompleteObject: 'true' });
   return (r.Routes || []).map((x: any) => ({
     id: String(x.objectID),
     name: String(x.name || x.title || ''),
