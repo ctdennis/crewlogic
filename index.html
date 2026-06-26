@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.23 | 2026-06-26">
+  <meta name="crewlogic-version" content="v5.47.24 | 2026-06-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7975,7 +7975,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function mjZoneColor(zoneID) { if (!zoneID) return 'transparent'; const P = ['#22c55e', '#eab308', '#ec4899', '#3b82f6', '#f97316', '#a855f7', '#06b6d4', '#ef4444', '#84cc16', '#14b8a6']; let n = 0; const s = String(zoneID); for (let i = 0; i < s.length; i++) n = (n * 31 + s.charCodeAt(i)) >>> 0; return P[n % P.length]; }
     let _mjBoardByID = {};
     let _mjBoardDayID = ''; // the day tab currently shown — passed as the voice/text command's default working day
-    function mjRenderBoard(data, container) {
+    function mjRenderBoard(data, container, axis) {
       const r = container || document.getElementById('mjResult'); const jobs = data.jobs || [];
       // Prefer the full route set from boardGrid (ALL routes incl. empty/closed, with open slots); fall
       // back to deriving lanes from jobs (legacy callers) with no availability layer.
@@ -7989,13 +7989,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!container) _mjBoardByID = {}; // single-board screen resets; dashboard boards accumulate (job IDs unique)
       jobs.forEach(j => { if (j.jobID) _mjBoardByID[String(j.jobID)] = j; });
       const PXH = 66, LW = 52, ROW = 38;
-      let minT = Infinity, maxT = -Infinity;
-      routesData.forEach(rt => {
-        (rt.jobs || []).forEach(j => { if (Number.isFinite(j.timeMin)) { minT = Math.min(minT, j.timeMin); maxT = Math.max(maxT, j.timeMin + (j.durationMin || 60)); } });
-        (rt.open || []).forEach(s => { if (Number.isFinite(s.startTime)) { minT = Math.min(minT, s.startTime); maxT = Math.max(maxT, s.startTime + 30); } });
-      });
-      const originH = Number.isFinite(minT) ? Math.max(5, Math.min(7, Math.floor(minT / 60))) : 7;
-      const endH = Number.isFinite(maxT) ? Math.min(21, Math.max(17, Math.ceil(maxT / 60))) : 17;
+      // axis (originH/endH) may be supplied so two boards share ONE time scale (aligned columns + equal
+      // width/height for cross-day drag); otherwise derive it from this board's own jobs + open slots.
+      let originH, endH;
+      if (axis && Number.isFinite(axis.originH) && Number.isFinite(axis.endH)) {
+        originH = axis.originH; endH = axis.endH;
+      } else {
+        let minT = Infinity, maxT = -Infinity;
+        routesData.forEach(rt => {
+          (rt.jobs || []).forEach(j => { if (Number.isFinite(j.timeMin)) { minT = Math.min(minT, j.timeMin); maxT = Math.max(maxT, j.timeMin + (j.durationMin || 60)); } });
+          (rt.open || []).forEach(s => { if (Number.isFinite(s.startTime)) { minT = Math.min(minT, s.startTime); maxT = Math.max(maxT, s.startTime + 30); } });
+        });
+        originH = Number.isFinite(minT) ? Math.max(5, Math.min(7, Math.floor(minT / 60))) : 7;
+        endH = Number.isFinite(maxT) ? Math.min(21, Math.max(17, Math.ceil(maxT / 60))) : 17;
+      }
       const startMin = originH * 60, hours = Math.max(1, endH - originH), trackW = hours * PXH;
       const halfPx = PXH / 2; // faint half-hour tick + solid hour line (hour layer listed first = on top)
       const grid = 'repeating-linear-gradient(to right, transparent 0, transparent ' + (PXH - 1) + 'px, var(--border) ' + (PXH - 1) + 'px, var(--border) ' + PXH + 'px), repeating-linear-gradient(to right, transparent 0, transparent ' + (halfPx - 1) + 'px, rgba(255,255,255,0.12) ' + (halfPx - 1) + 'px, rgba(255,255,255,0.12) ' + halfPx + 'px)';
@@ -8128,14 +8135,28 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const [src, dest] = await Promise.all([dashFetchDay(_dashSrcDay), dashFetchDay(_dashDestDay)]);
       const codes = [...new Set([...(src.routes || []).map(r => r.code), ...(dest.routes || []).map(r => r.code)])].sort();
       const align = (dayRoutes) => codes.map(c => (dayRoutes || []).find(r => r.code === c) || { id: c, code: c, name: c, jobs: [], open: [] });
-      dashRenderBoard(_dashSrcDay, align(src.routes), srcC);
-      dashRenderBoard(_dashDestDay, align(dest.routes), destC);
+      const srcR = align(src.routes), destR = align(dest.routes);
+      const axis = _dashSharedAxis([srcR, destR]); // one time scale for both → aligned columns + equal size
+      dashRenderBoard(_dashSrcDay, srcR, srcC, axis);
+      dashRenderBoard(_dashDestDay, destR, destC, axis);
     }
-    function dashRenderBoard(dayID, routesData, container) {
+    // Shared time axis (originH/endH) across both days so both boards have identical columns + dimensions.
+    function _dashSharedAxis(routeSets) {
+      let minT = Infinity, maxT = -Infinity;
+      routeSets.forEach(rs => (rs || []).forEach(rt => {
+        (rt.jobs || []).forEach(j => { if (Number.isFinite(j.timeMin)) { minT = Math.min(minT, j.timeMin); maxT = Math.max(maxT, j.timeMin + (j.durationMin || 60)); } });
+        (rt.open || []).forEach(s => { if (Number.isFinite(s.startTime)) { minT = Math.min(minT, s.startTime); maxT = Math.max(maxT, s.startTime + 30); } });
+      }));
+      return {
+        originH: Number.isFinite(minT) ? Math.max(5, Math.min(7, Math.floor(minT / 60))) : 7,
+        endH: Number.isFinite(maxT) ? Math.min(21, Math.max(17, Math.ceil(maxT / 60))) : 17,
+      };
+    }
+    function dashRenderBoard(dayID, routesData, container, axis) {
       if (!container) return;
       const jobs = [];
       routesData.forEach(rt => (rt.jobs || []).forEach(j => jobs.push(Object.assign({}, j, { routeCode: rt.code, route: rt.name }))));
-      mjRenderBoard({ dayID, dayLabel: _dashDayLabel(dayID), routes: routesData, jobs }, container);
+      mjRenderBoard({ dayID, dayLabel: _dashDayLabel(dayID), routes: routesData, jobs }, container, axis);
     }
     // Voice / text command entry points — wired to the move pipeline + confirm modal in Phase 2.
     function dashMic() { const r = document.getElementById('dashCmdResult'); if (r) r.textContent = 'Voice moves arrive in the next step.'; }
