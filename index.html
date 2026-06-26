@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.22 | 2026-06-26">
+  <meta name="crewlogic-version" content="v5.47.23 | 2026-06-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7223,6 +7223,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     // ===== "Where are my trucks?" — telematics truck locations (Linxup/Motive via crewlogic-trucks) =====
     let _trucksMap = null, _truckMarkers = [], _jobMarkers = [], _trucksRefreshTimer = null, _trucksJobDay = 0, _trucksLookahead = false, _lookaheadMarkers = [], _trucksData = [];
+    let _trucksMapEl = 'trucksMap'; // which container the trucks map mounts into ('trucksMap' screen | 'dashMapPane' dashboard)
+    // Drop + rebuild the trucks map if it's stale (container detached, e.g. dashboard re-rendered) or the
+    // target container changed — so the same map machinery (markers, layers, measure) serves both contexts.
+    function _ensureTrucksMapFresh(elId) {
+      const stale = _trucksMap && (_trucksMapEl !== elId || !document.body.contains(_trucksMap.getContainer()));
+      if (stale) {
+        try { _trucksMap.remove(); } catch (e) {}
+        _trucksMap = null; _truckLayer = _jobLayer = _homeLayer = _disposalLayer = _recyclingLayer = _donationLayer = null; _sitesGeocoded = false;
+      }
+      _trucksMapEl = elId;
+    }
     const _expandedTrucks = new Set(); // which truck cards are expanded (by index; survives auto-refresh)
     function _truckEsc(s) { return String(s == null ? '' : s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c])); }
     let _trucksJobsData = []; // latest loaded job overlay (for the "job under truck" badge proximity check)
@@ -7364,8 +7375,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _startTrucksAutoRefresh() {
       _stopTrucksAutoRefresh();
       _trucksRefreshTimer = setInterval(() => {
-        const scr = document.getElementById('trucksScreen');
-        if (currentScreen === 'trucks' && scr && scr.style.display !== 'none') {
+        // Keep refreshing on the trucks screen OR the dispatch dashboard (both host the live map).
+        const onTrucks = currentScreen === 'trucks' && (document.getElementById('trucksScreen') || {}).style?.display !== 'none';
+        const onDash = currentScreen === 'dashboard' && document.getElementById('dashMapPane');
+        if (onTrucks || onDash) {
           showTrucks(true); // silent refresh — no loading flash, no map re-fit
         } else {
           _stopTrucksAutoRefresh();
@@ -7552,7 +7565,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
       if (typeof L === 'undefined') return;
       if (!_trucksMap) {
-        _trucksMap = L.map('trucksMap', { zoomControl: true, attributionControl: true }).setView([41.86, -70.92], 12);
+        _trucksMap = L.map(_trucksMapEl, { zoomControl: true, attributionControl: true }).setView([41.86, -70.92], 12);
         const _streetLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
           attribution: '© OpenStreetMap contributors © CARTO', subdomains: 'abcd', maxZoom: 20
         });
@@ -8086,8 +8099,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<div style="border:1px solid var(--border);border-radius:var(--radius);padding:8px;background:var(--bg-card);min-width:0;">' + dashDayPickerHTML('dest', _dashDestDay) + '<div id="dashDestBoard"></div></div>'
         + '</div>'
         // map on the BOTTOM
-        + '<div id="dashMapPane" style="height:55vh;min-height:420px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;">🚚 Truck map — wiring next</div>';
+        + '<div id="dashMapPane" style="height:55vh;min-height:420px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);"></div>';
       dashLoadBoards();
+      dashMountMap();
+    }
+    // Mount the live trucks map (same machinery as the Where-Are-My-Trucks screen) into the dashboard pane.
+    function dashMountMap() {
+      if (!document.getElementById('dashMapPane')) return;
+      _ensureTrucksMapFresh('dashMapPane'); // rebuild the map into the (freshly re-rendered) dashboard pane
+      _trucksJobDay = 0;                     // dashboard map = today's trucks + jobs
+      showTrucks();
+      _startTrucksAutoRefresh();
+      setTimeout(() => { if (_trucksMap) _trucksMap.invalidateSize(); }, 150); // correct sizing after layout settles
     }
     function dashShiftDay(side, delta) {
       if (side === 'src') _dashSrcDay = mjAddDays(_dashSrcDay, delta); else _dashDestDay = mjAddDays(_dashDestDay, delta);
@@ -8352,6 +8375,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _trucksLookahead = false; // look-ahead off by default each visit
         const _laBtn = document.getElementById('trucksLookaheadBtn');
         if (_laBtn) { _laBtn.style.background = 'var(--bg-input,#1e2f40)'; _laBtn.style.color = 'var(--text-muted,#6e8194)'; _laBtn.style.fontWeight = '600'; }
+        _ensureTrucksMapFresh('trucksMap'); // map lives in the trucks screen here (rebuild if it was on the dashboard)
         showTrucks();
         _startTrucksAutoRefresh();
         return;
