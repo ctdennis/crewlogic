@@ -369,7 +369,7 @@ Deno.serve(async (req: Request) => {
       for (const j of jobs) {
         const k = j.routeID; if (!k) continue;
         if (!byId[k]) byId[k] = { id: k, code: j.routeCode, name: j.route, isActive: true, jobs: [], open: [] };
-        byId[k].jobs.push({ woID: j.woID, jobID: j.jobID, client: j.client, timeMin: j.timeMin, durationMin: j.durationMin, timeLabel: j.timeLabel, status: j.status, completed: j.completed, labelDone: j.labelDone, labelOpt: j.labelOpt, zoneID: j.zoneID, zoneName: j.zoneName, zip: j.zip, address: j.address, routeCode: j.routeCode });
+        byId[k].jobs.push({ woID: j.woID, jobID: j.jobID, client: j.client, timeMin: j.timeMin, durationMin: j.durationMin, timeLabel: j.timeLabel, status: j.status, completed: j.completed, labelDone: j.labelDone, labelOpt: j.labelOpt, zoneID: j.zoneID, zoneName: j.zoneName, zip: j.zip, address: j.address, routeCode: j.routeCode, price: j.price });
       }
       for (const s of openSlots) { const k = String(s.routeID); if (byId[k]) byId[k].open.push({ startTime: s.startTime, label: s.label }); }
       // Emit in getRoutesFull's sequence order — NOT Object.values(byId), which JS reorders by the
