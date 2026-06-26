@@ -184,26 +184,25 @@ async function getRouteMap(token: string, dayID: string): Promise<{ toId: Record
   }
   return { toId, toCode };
 }
-// All routes for a day WITH active flag + display code — for the availability board (incl. empty routes).
-// Vonigo returns isActive as a STRING ("true"/"false"); a route closed for a specific day still appears
-// here (isActive may be "true") but simply has no availability that day — which is what renders it gray.
+// Full franchise route list for the board. WITHOUT isCompleteObject the endpoint returns the FLAT shape
+// that carries `sequence` (= Vonigo appearance order), `bookingPriority`, `routeStatus`, and the route's
+// timeStart/timeEnd window. We filter to Active (drops Inactive FOLLOW + Deleted RI-TTH) and sort by
+// `sequence` so the board matches the franchise's Vonigo schedule-board order (per-franchise).
 async function getRoutesFull(token: string, _dayID: string) {
-  // No dayID → the FULL franchise route master list (all routes, like Vonigo's board), not just the
-  // routes scheduled that day. Jobs + availability are still per-day; a route with neither renders gray.
-  const r = await vpost(token, '/resources/routes/', { method: '-1', isCompleteObject: 'true' });
-  // Active routes only (drops Inactive/legacy like FOLLOW + stale RI-TTH), in Vonigo's own order
-  // (which matches the franchise's Routes config screen — do NOT re-sort downstream).
+  const r = await vpost(token, '/resources/routes/', { method: '-1' });
   return (r.Routes || [])
     .map((x: any) => ({
-      id: String(x.objectID),
-      name: String(x.name || x.title || ''),
-      code: shortRoute(String(x.title || x.name || x.objectID)),
-      isActive: String(x.isActive).toLowerCase() !== 'false',
+      id: String(x.routeID ?? x.objectID),
+      name: String(x.routeName || x.name || ''),
+      code: String(x.routeAbbr || shortRoute(String(x.routeName || x.routeID || ''))),
+      sequence: Number(x.sequence ?? 9999),
+      bookingPriority: Number(x.bookingPriority ?? 9999),
+      timeStart: Number(x.timeStart ?? 360),
+      timeEnd: Number(x.timeEnd ?? 1200),
+      isActive: Number(x.routeStatusID) === 1 && String(x.isActive).toLowerCase() === 'true',
     }))
-    .filter((rt: any) => rt.isActive);
-  // Note: /resources/routes returns routes already in the franchise's appearance order (matches the
-  // Vonigo Routes config screen), so we preserve this order downstream rather than re-sorting. Vonigo
-  // does NOT expose the numeric "Appearance Order"/"Booking Priority" as named API fields.
+    .filter((rt: any) => rt.isActive)
+    .sort((a: any, b: any) => a.sequence - b.sequence);
 }
 function pickRouteID(toId: Record<string, string>, route?: string): string | undefined {
   if (!route) return undefined;
@@ -373,7 +372,12 @@ Deno.serve(async (req: Request) => {
         byId[k].jobs.push({ woID: j.woID, jobID: j.jobID, client: j.client, timeMin: j.timeMin, durationMin: j.durationMin, timeLabel: j.timeLabel, status: j.status, completed: j.completed, labelDone: j.labelDone, labelOpt: j.labelOpt, zoneID: j.zoneID, zoneName: j.zoneName, zip: j.zip, address: j.address, routeCode: j.routeCode });
       }
       for (const s of openSlots) { const k = String(s.routeID); if (byId[k]) byId[k].open.push({ startTime: s.startTime, label: s.label }); }
-      return json({ success: true, dayID, durationMin, routes: Object.values(byId) });
+      // Emit in getRoutesFull's sequence order — NOT Object.values(byId), which JS reorders by the
+      // integer-like route-id keys. Append any job-only routes (e.g. a job on an inactive route) last.
+      const ordered = routes.map((r: any) => byId[r.id]).filter(Boolean);
+      const seen = new Set(routes.map((r: any) => r.id));
+      for (const k of Object.keys(byId)) { if (!seen.has(k)) ordered.push(byId[k]); }
+      return json({ success: true, dayID, durationMin, routes: ordered });
     }
 
 
