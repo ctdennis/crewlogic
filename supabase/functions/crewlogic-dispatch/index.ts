@@ -377,7 +377,14 @@ Deno.serve(async (req: Request) => {
       const ordered = routes.map((r: any) => byId[r.id]).filter(Boolean);
       const seen = new Set(routes.map((r: any) => r.id));
       for (const k of Object.keys(byId)) { if (!seen.has(k)) ordered.push(byId[k]); }
-      return json({ success: true, dayID, durationMin, routes: ordered });
+      // Board time-axis window from the franchise's route hours (timeStart/timeEnd, min-from-midnight) —
+      // already in the route data, no extra fetch. Lets the board span the bookable window (e.g. 6a–8p)
+      // so open slots outside the job range stay visible/droppable.
+      const starts = routes.map((r: any) => r.timeStart).filter((n: number) => Number.isFinite(n));
+      const ends = routes.map((r: any) => r.timeEnd).filter((n: number) => Number.isFinite(n));
+      const boardStartMin = starts.length ? Math.min(...starts) : null;
+      const boardEndMin = ends.length ? Math.max(...ends) : null;
+      return json({ success: true, dayID, durationMin, routes: ordered, boardStartMin, boardEndMin });
     }
 
 

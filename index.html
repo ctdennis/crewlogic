@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.26 | 2026-06-26">
+  <meta name="crewlogic-version" content="v5.47.27 | 2026-06-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7959,7 +7959,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _mjHistory.push({ role: 'user', text: 'Show all jobs on ' + dayLabel });
       _mjHistory.push({ role: 'assistant', text: 'Jobs on ' + dayLabel + ' by route — ' + (memParts.join(' | ') || 'none') });
       if (_mjHistory.length > 8) _mjHistory = _mjHistory.slice(-8);
-      mjRenderBoard({ dayID, dayLabel, routes: routesData, jobs });
+      mjRenderBoard({ dayID, dayLabel, routes: routesData, jobs, boardStartMin: data.boardStartMin, boardEndMin: data.boardEndMin });
     }
     // Schedule-board view (route lanes × time, colored job blocks) — CrewLogic take on the Vonigo
     // mobile day board. Built from the SAME listRouteJobs data; tapping a block opens its detail below.
@@ -7989,11 +7989,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!container) _mjBoardByID = {}; // single-board screen resets; dashboard boards accumulate (job IDs unique)
       jobs.forEach(j => { if (j.jobID) _mjBoardByID[String(j.jobID)] = j; });
       const PXH = 66, LW = 52, ROW = 38;
-      // axis (originH/endH) may be supplied so two boards share ONE time scale (aligned columns + equal
-      // width/height for cross-day drag); otherwise derive it from this board's own jobs + open slots.
+      // Axis (originH/endH) precedence: (1) explicit axis param (two boards sharing ONE scale for cross-day
+      // drag), (2) the franchise's route hours from the API (data.boardStartMin/EndMin — the bookable
+      // window), (3) derive from this board's own jobs + open slots.
       let originH, endH;
       if (axis && Number.isFinite(axis.originH) && Number.isFinite(axis.endH)) {
         originH = axis.originH; endH = axis.endH;
+      } else if (Number.isFinite(data.boardStartMin) && Number.isFinite(data.boardEndMin)) {
+        originH = Math.floor(data.boardStartMin / 60); endH = Math.ceil(data.boardEndMin / 60);
       } else {
         let minT = Infinity, maxT = -Infinity;
         routesData.forEach(rt => {
@@ -8136,7 +8139,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const codes = []; [...(src.routes || []), ...(dest.routes || [])].forEach(r => { if (r && r.code && !codes.includes(r.code)) codes.push(r.code); }); // preserve Vonigo's route order
       const align = (dayRoutes) => codes.map(c => (dayRoutes || []).find(r => r.code === c) || { id: c, code: c, name: c, jobs: [], open: [] });
       const srcR = align(src.routes), destR = align(dest.routes);
-      const axis = _dashSharedAxis([srcR, destR]); // one time scale for both → aligned columns + equal size
+      // One time scale for both boards (aligned columns + equal size). Prefer the franchise's route hours
+      // (boardStartMin/EndMin) spanning both days; fall back to job/slot-derived if hours are missing.
+      const sMin = [src.boardStartMin, dest.boardStartMin].filter(Number.isFinite);
+      const eMax = [src.boardEndMin, dest.boardEndMin].filter(Number.isFinite);
+      const axis = (sMin.length && eMax.length)
+        ? { originH: Math.floor(Math.min(...sMin) / 60), endH: Math.ceil(Math.max(...eMax) / 60) }
+        : _dashSharedAxis([srcR, destR]);
       dashRenderBoard(_dashSrcDay, srcR, srcC, axis);
       dashRenderBoard(_dashDestDay, destR, destC, axis);
     }
