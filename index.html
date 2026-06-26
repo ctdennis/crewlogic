@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.36 | 2026-06-26">
+  <meta name="crewlogic-version" content="v5.47.37 | 2026-06-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8105,7 +8105,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">'
         + '<span style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;">' + sideLbl + '</span>'
         + '<button onclick="dashShiftDay(\'' + side + '\',-1)" style="' + _dashNavBtnCss() + '">◀</button>'
-        + '<span style="font-size:13px;font-weight:700;color:var(--text-primary);min-width:104px;text-align:center;">' + mjEsc(_dashDayLabel(dayID)) + '</span>'
+        + '<span id="dashDayLbl-' + side + '" style="font-size:13px;font-weight:700;color:var(--text-primary);min-width:104px;text-align:center;">' + mjEsc(_dashDayLabel(dayID)) + '</span>'
         + '<button onclick="dashShiftDay(\'' + side + '\',1)" style="' + _dashNavBtnCss() + '">▶</button>'
         + '</div>';
     }
@@ -8165,7 +8165,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function dashShiftDay(side, delta) {
       if (side === 'src') _dashSrcDay = mjAddDays(_dashSrcDay, delta); else _dashDestDay = mjAddDays(_dashDestDay, delta);
-      renderDashboard();
+      const lbl = document.getElementById('dashDayLbl-' + side);
+      if (lbl) lbl.textContent = _dashDayLabel(side === 'src' ? _dashSrcDay : _dashDestDay);
+      dashReloadOne(side, true); // reload ONLY this board — no full dashboard rebuild, no map remount, no blank flash
+    }
+    // Reload a single board in place (routes are day-independent, so its route-hours axis matches the other
+    // board → they stay aligned). quiet=true keeps the old content until the new render swaps in (no blank).
+    async function dashReloadOne(side, quiet) {
+      const dayID = side === 'src' ? _dashSrcDay : _dashDestDay;
+      const container = document.getElementById(side === 'src' ? 'dashSrcBoard' : 'dashDestBoard');
+      if (!container) return;
+      if (!quiet) container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">Loading…</div>';
+      const data = await dashFetchDay(dayID);
+      const routesData = data.routes || [];
+      const axis = (Number.isFinite(data.boardStartMin) && Number.isFinite(data.boardEndMin))
+        ? { originH: Math.floor(data.boardStartMin / 60), endH: Math.ceil(data.boardEndMin / 60) } : null;
+      dashRenderBoard(dayID, routesData, container, axis);
     }
     async function dashFetchDay(dayID) {
       const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'boardGrid', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, dayID });
@@ -8278,9 +8293,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       let res = null;
       try { res = await edgeFunctionCall('crewlogic-dispatch', { action: 'execute', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, plan, commandText: 'drag move', actorEmail: currentUser.email }); } catch (e) { res = { success: false, error: 'Network error — try again.' }; }
       if (res && res.success) {
+        const fromDay = spec.fromDay, toDay = spec.toDay; // capture before close nulls _dragMove
         dashMoveClose();
-        _dashToast('Moved ' + (spec.client || 'job') + ' → ' + spec.toRouteCode + ' · ' + _dashDayLabel(spec.toDay) + ' ' + spec.toLabel);
-        dashLoadBoards();
+        _dashToast('Moved ' + (spec.client || 'job') + ' → ' + spec.toRouteCode + ' · ' + _dashDayLabel(toDay) + ' ' + spec.toLabel);
+        // reload ONLY the board(s) whose day changed — in place, no blank, no map remount
+        if (_dashSrcDay === fromDay || _dashSrcDay === toDay) dashReloadOne('src', true);
+        if (_dashDestDay === fromDay || _dashDestDay === toDay) dashReloadOne('dest', true);
       } else {
         const e = document.getElementById('dashMoveErr'); if (e) e.textContent = (res && res.error) || 'Move failed — try again.';
         if (btn) { btn.disabled = false; btn.textContent = 'Confirm move'; }
