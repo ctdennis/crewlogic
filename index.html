@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.34 | 2026-06-26">
+  <meta name="crewlogic-version" content="v5.47.35 | 2026-06-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7224,6 +7224,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // ===== "Where are my trucks?" — telematics truck locations (Linxup/Motive via crewlogic-trucks) =====
     let _trucksMap = null, _truckMarkers = [], _jobMarkers = [], _trucksRefreshTimer = null, _trucksJobDay = 0, _trucksLookahead = false, _lookaheadMarkers = [], _trucksData = [];
     let _trucksMapEl = 'trucksMap'; // which container the trucks map mounts into ('trucksMap' screen | 'dashMapPane' dashboard)
+    let _dashMapRO = null; // ResizeObserver that keeps the dashboard map sized to its pane (fixes the half-width race)
     // Drop + rebuild the trucks map if it's stale (container detached, e.g. dashboard re-rendered) or the
     // target container changed — so the same map machinery (markers, layers, measure) serves both contexts.
     function _ensureTrucksMapFresh(elId) {
@@ -8139,13 +8140,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // Mount the live trucks map (same machinery as the Where-Are-My-Trucks screen) into the dashboard pane.
     function dashMountMap() {
-      if (!document.getElementById('dashMapPane')) return;
+      const pane = document.getElementById('dashMapPane'); if (!pane) return;
       _ensureTrucksMapFresh('dashMapPane'); // rebuild the map into the (freshly re-rendered) dashboard pane
       _trucksJobDay = 0;                     // dashboard map = today's trucks + jobs (matches the rendered toggle)
       _trucksLookahead = false;              // +3-day look-ahead off by default (matches the rendered button)
       showTrucks();
       _startTrucksAutoRefresh();
-      setTimeout(() => { if (_trucksMap) _trucksMap.invalidateSize(); }, 150); // correct sizing after layout settles
+      // Fix the "half-width tiles" race: the map is created before the dashboard's wide layout finishes
+      // reflowing, so Leaflet measures a too-narrow container. invalidateSize once layout settles, AND a
+      // ResizeObserver fires the instant the pane reaches its final width (so we don't wait for a refresh).
+      const fix = () => { if (_trucksMap && _trucksMapEl === 'dashMapPane') _trucksMap.invalidateSize(); };
+      requestAnimationFrame(fix); setTimeout(fix, 250); setTimeout(fix, 700);
+      if (window.ResizeObserver) {
+        if (_dashMapRO) { try { _dashMapRO.disconnect(); } catch (e) {} }
+        _dashMapRO = new ResizeObserver(fix); _dashMapRO.observe(pane);
+      }
     }
     function dashShiftDay(side, delta) {
       if (side === 'src') _dashSrcDay = mjAddDays(_dashSrcDay, delta); else _dashDestDay = mjAddDays(_dashDestDay, delta);
