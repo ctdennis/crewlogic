@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.14 | 2026-06-26">
+  <meta name="crewlogic-version" content="v5.47.15 | 2026-06-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7968,6 +7968,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const startMin = originH * 60, hours = Math.max(1, endH - originH), trackW = hours * PXH;
       const halfPx = PXH / 2; // faint half-hour tick + solid hour line (hour layer listed first = on top)
       const grid = 'repeating-linear-gradient(to right, transparent 0, transparent ' + (PXH - 1) + 'px, var(--border) ' + (PXH - 1) + 'px, var(--border) ' + PXH + 'px), repeating-linear-gradient(to right, transparent 0, transparent ' + (halfPx - 1) + 'px, rgba(255,255,255,0.12) ' + (halfPx - 1) + 'px, rgba(255,255,255,0.12) ' + halfPx + 'px)';
+      // Dark grid for the LANE overlay — drawn ON TOP of the white(open)/gray(blocked) fills so the hour +
+      // half-hour lines stay visible in the white open spaces (the light header grid disappears on white).
+      const gridDark = 'repeating-linear-gradient(to right, transparent 0, transparent ' + (PXH - 1) + 'px, rgba(0,0,0,0.5) ' + (PXH - 1) + 'px, rgba(0,0,0,0.5) ' + PXH + 'px), repeating-linear-gradient(to right, transparent 0, transparent ' + (halfPx - 1) + 'px, rgba(0,0,0,0.26) ' + (halfPx - 1) + 'px, rgba(0,0,0,0.26) ' + halfPx + 'px)';
       let h = '<div style="margin-bottom:6px;font-weight:700;font-size:13px;color:var(--text-primary);">' + mjEsc(hdr) + '</div>';
       // legend: open (bookable) vs blocked/closed vs job
       h += '<div style="display:flex;gap:14px;align-items:center;margin-bottom:6px;font-size:10.5px;color:var(--text-muted);flex-wrap:wrap;">'
@@ -7990,7 +7993,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const blockedRow = !laneJobs.length && !open.length; // closed/blocked for the day → all gray
         h += '<div style="display:flex;height:' + ROW + 'px;border-bottom:1px solid var(--border);">';
         h += '<div style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:' + (blockedRow ? 'var(--text-muted)' : 'var(--text-secondary)') + ';border-right:1px solid var(--border);padding:0 2px;text-align:center;word-break:break-all;">' + mjEsc(rc) + '</div>';
-        h += '<div style="position:relative;width:' + trackW + 'px;background:' + grid + ';">';
+        h += '<div style="position:relative;width:' + trackW + 'px;">';
         // blocked-default base tint (whole lane not bookable unless an open band overrides) — light gray
         h += '<div style="position:absolute;inset:0;background:rgba(255,255,255,0.14);pointer-events:none;"></div>';
         // open availability bands (white = bookable) — 30-min slot step; consecutive slots tile together
@@ -7999,6 +8002,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const ol = ((s.startTime - startMin) / 60) * PXH;
           h += '<div title="Open ' + mjEsc(s.label || '') + '" style="position:absolute;left:' + ol + 'px;width:' + halfPx + 'px;top:0;bottom:0;background:rgba(255,255,255,0.92);pointer-events:none;"></div>';
         });
+        // dark grid lines ON TOP of the fills (hour + half-hour) so they read against white open spaces
+        h += '<div style="position:absolute;inset:0;background:' + gridDark + ';pointer-events:none;"></div>';
         laneJobs.forEach((j, n) => {
           const left = ((j.timeMin - startMin) / 60) * PXH, w = Math.max(((j.durationMin || 60) / 60) * PXH, 50);
           const name = mjEsc((String(j.client || '').split(',')[0]) || j.client || 'Job');
