@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.33 | 2026-06-26">
+  <meta name="crewlogic-version" content="v5.47.34 | 2026-06-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7463,6 +7463,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           // Lazy-load the clickable client phone on popup open (avoids a burst of Vonigo
           // lookups across 3 days the moment look-ahead is toggled on).
           m.on('popupopen', () => _prefetchJobPhone(j.jobID).then(ph => _renderJobPhoneSlot(j.jobID, ph)));
+          m.on('mouseover', function () { this.openPopup(); }); // hover to open (parity with the schedule board)
           m.on('click', () => { if (_measureFrom) _measureToJob(j); }); // measure-to-job mode works on look-ahead dots too
           _lookaheadMarkers.push(m);
         });
@@ -7670,8 +7671,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _renderJobPhoneSlot(jobID, phone) {
       const e = document.getElementById('jobph-' + jobID);
       if (!e) return;
+      const digits = String(phone || '').replace(/[^0-9+]/g, '');
       e.innerHTML = phone
-        ? '📞 <a href="tel:' + String(phone).replace(/[^0-9+]/g, '') + '" style="color:#2563eb;font-weight:600;text-decoration:none;">' + _truckEsc(_fmtPhone(phone)) + '</a>'
+        ? '📞 <a href="tel:' + digits + '" style="color:#2563eb;font-weight:600;text-decoration:none;">' + _truckEsc(_fmtPhone(phone)) + '</a>'
+          + ' &nbsp;·&nbsp; <a href="sms:' + digits + '" style="color:#2563eb;font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>'
         : '<span style="color:#9aa7b4;">No phone on file</span>';
     }
     function _prefetchJobPhone(jobID) {
@@ -7747,6 +7750,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: done ? 0.6 : 1 }).addTo(_jobLayer || _trucksMap).bindPopup(pop);
           m.on('popupopen', () => _prefetchJobPhone(j.jobID).then(ph => _renderJobPhoneSlot(j.jobID, ph)));
+          m.on('mouseover', function () { this.openPopup(); }); // hover to open (parity with the schedule board) — stays open so the phone/Text links are clickable
           m.on('click', () => { if (_measureFrom) _measureToJob(j); }); // measure-to-job mode: tap a job after a truck
           _jobMarkers.push(m);
           jobPts.push([j.lat, j.lon]);
