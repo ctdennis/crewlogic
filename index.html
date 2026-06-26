@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.38 | 2026-06-26">
+  <meta name="crewlogic-version" content="v5.47.39 | 2026-06-26">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8233,11 +8233,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const btn = document.getElementById('dashMicBtn');
       if (_dashListening) { if (_dashRec) { try { _dashRec.stop(); } catch (e) {} } return; }
       _dashRec = new SR(); _dashRec.lang = 'en-US'; _dashRec.interimResults = true; try { _dashRec.continuous = true; } catch (e) {}
-      let final = '', got = false;
-      _dashRec.onresult = (e) => { let interim = ''; for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) final += t + ' '; else interim += t; } _dashRec._cap = (final + interim).trim(); _dashCmdMsg(_dashRec._cap ? '“' + _dashRec._cap + '”' : 'Listening…'); };
+      let got = false;
+      const box = document.getElementById('dashCmdInput');
+      _dashRec.onresult = (e) => { let final = '', interim = ''; for (let i = 0; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) final += t + ' '; else interim += t; } if (box) box.value = (final + interim).trim(); }; // dictation fills the input box
       _dashRec.onerror = () => { _dashListening = false; if (btn) btn.style.background = 'var(--accent-green,#00E785)'; };
-      _dashRec.onend = () => { _dashListening = false; if (btn) btn.style.background = 'var(--accent-green,#00E785)'; if (!got) { const cap = (_dashRec._cap || '').trim(); if (cap) { got = true; dashCommand(cap); } } };
-      try { _dashRec.start(); _dashListening = true; if (btn) btn.style.background = 'var(--accent-yellow,#f59e0b)'; _dashCmdMsg('Listening… tap the mic to send'); } catch (e) { _dashListening = false; }
+      _dashRec.onend = () => { _dashListening = false; if (btn) btn.style.background = 'var(--accent-green,#00E785)'; _dashCmdMsg(''); if (!got) { const cap = (box && box.value || '').trim(); if (cap) { got = true; box.value = ''; dashCommand(cap); } } };
+      try { _dashRec.start(); _dashListening = true; if (btn) btn.style.background = 'var(--accent-yellow,#f59e0b)'; if (box) box.value = ''; _dashCmdMsg('Listening… tap the mic to send'); } catch (e) { _dashListening = false; }
     }
     function dashSendCmd() { const t = document.getElementById('dashCmdInput'); const v = (t.value || '').trim(); if (!v) return; t.value = ''; dashCommand(v); }
     // Send a transcript to the AI dispatcher (working day = the SOURCE board's day). A move plan opens the
