@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.52 | 2026-06-27">
+  <meta name="crewlogic-version" content="v5.47.53 | 2026-06-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8369,40 +8369,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
       return '<div style="color:var(--text-muted);font-size:12px;margin:8px 0 6px;font-weight:700;">Set duration (tap one)</div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">' + b + '</div>';
     }
-    // ---- TEMP on-screen debug log (mobile-readable) ----
-    function _dbg(m) {
-      let p = document.getElementById('dbgLog');
-      if (!p) {
-        p = document.createElement('div'); p.id = 'dbgLog';
-        p.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:200000;background:rgba(0,0,0,0.88);color:#5dff8f;font:11px/1.35 monospace;padding:5px 8px 5px;max-height:42vh;overflow:auto;white-space:pre-wrap;border-bottom:2px solid #5dff8f;';
-        p.innerHTML = '<span style="color:#fff;font-weight:bold;">DEBUG LOG</span> <span onclick="document.getElementById(\'dbgLog\').remove()" style="float:right;color:#ff6b6b;cursor:pointer;">✕ close</span><br>';
-        document.body.appendChild(p);
-      }
-      const line = document.createElement('div'); line.textContent = '• ' + m; p.appendChild(line);
-      p.scrollTop = p.scrollHeight;
-    }
-    window.addEventListener('error', function (e) { try { _dbg('JS-ERR: ' + e.message + ' @ ' + (e.filename || '').split('/').pop() + ':' + e.lineno); } catch (x) {} });
     // Capture-phase delegation: fires BEFORE the popup's bubble-phase outside-click-close, so a duration
-    // tap reliably reaches dashSetDuration on mobile regardless of hit-area/inline-handler weirdness.
+    // tap reliably reaches dashSetDuration on mobile (and never trips the popup's close listener).
     document.addEventListener('click', function (e) {
       const t = e.target, btn = t && t.closest && t.closest('[data-dur-set]');
-      const desc = t ? (t.tagName + (t.id ? '#' + t.id : '') + (t.getAttribute && t.getAttribute('data-dur-set') ? '[dur=' + t.getAttribute('data-dur-set') + ']' : '')) : '?';
-      _dbg('click → ' + desc + ' | durBtn=' + (btn ? ('YES ' + btn.getAttribute('data-dur-set')) : 'no'));
-      if (btn && !btn.disabled) { e.stopPropagation(); e.preventDefault(); _dbg('→ dashSetDuration(' + btn.getAttribute('data-dur-job') + ', ' + btn.getAttribute('data-dur-set') + ')'); dashSetDuration(btn.getAttribute('data-dur-job'), parseInt(btn.getAttribute('data-dur-set'), 10)); }
+      if (btn && !btn.disabled) { e.stopPropagation(); e.preventDefault(); dashSetDuration(btn.getAttribute('data-dur-job'), parseInt(btn.getAttribute('data-dur-set'), 10)); }
     }, true);
     function dashSetDuration(jobID, newMin) {
-      const j = _mjBoardByID[String(jobID)];
-      _dbg('dashSetDuration job=' + jobID + ' new=' + newMin + ' jFound=' + (j ? 'y' : 'n') + ' wo=' + ((j && j.woID) || '-') + ' curDur=' + (j && j.durationMin) + ' day=' + (j && j._day));
-      if (!j || !j.woID) { _dbg('ABORT: no job/woID'); return; }
-      const cur = Number(j.durationMin) || 0; if (newMin === cur) { _dbg('ABORT: same dur'); return; }
-      const client = (String(j.client || '').split(',')[0]) || j.client || 'job';
-      mjTipForceHide(); // dismiss the job detail popup
-      const longer = newMin > cur;
-      _dbg('opening confirm…');
-      if (!window.confirm('Change ' + client + ' to ' + _durLbl(newMin) + '?' + (longer ? '\n\n(Extending works only if nothing is booked right after.)' : ''))) { _dbg('confirm: cancelled'); return; }
-      _dbg('confirm: OK → execute');
-      _durChange = { woID: j.woID, jobID: String(jobID), client: client, dayID: j._day, startTime: j.timeMin, startLabel: j.timeLabel, routeCode: j.routeCode, zip: j.zip, fromMin: cur, toMin: newMin };
-      dashDurationExecute();
+      const j = _mjBoardByID[String(jobID)]; if (!j || !j.woID) return;
+      const cur = Number(j.durationMin) || 0; if (newMin === cur) return;
+      const spec = { woID: j.woID, jobID: String(jobID), client: (String(j.client || '').split(',')[0]) || j.client || 'Job', dayID: j._day, startTime: j.timeMin, startLabel: j.timeLabel, routeCode: j.routeCode, zip: j.zip, fromMin: cur, toMin: newMin };
+      mjTipForceHide();        // dismiss the job detail popup
+      dashDurationModal(spec); // styled confirm modal (Confirm/Cancel) — consistent with the move confirm
     }
     function dashDurCancel() { const w = document.getElementById('mjDurWrap'), j = _durChange && _mjBoardByID[String(_durChange.jobID)]; if (w && j) w.innerHTML = _mjDurButtonsHTML(mjEsc(String(j.jobID || '')), Number(j.durationMin) || 0); _durChange = null; }
     let _durChange = null;
@@ -8433,21 +8411,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const spec = _durChange; if (!spec) return;
       const btn = document.getElementById('mjDurConfirm') || document.getElementById('dashDurConfirmBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
       const plan = { kind: 'duration', woID: spec.woID, dayID: spec.dayID, startTime: spec.startTime, durationMin: spec.toMin, routeCode: spec.routeCode, zip: spec.zip || '', startLabel: spec.startLabel };
-      _dbg('execute → wo=' + spec.woID + ' day=' + spec.dayID + ' start=' + spec.startTime + ' newDur=' + spec.toMin + ' route=' + spec.routeCode);
       let res = null;
       try { res = await edgeFunctionCall('crewlogic-dispatch', { action: 'execute', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, plan, commandText: 'duration change', actorEmail: currentUser.email }); } catch (e) { res = { success: false, error: 'Network error — try again.' }; }
-      _dbg('execute result: ' + (res ? ('success=' + res.success + (res.error ? ' err=' + res.error : '')) : 'null'));
       if (res && res.success) {
         const day = spec.dayID, client = spec.client, toMin = spec.toMin;
-        _durChange = null; mjTipForceHide(); dashDurClose(); // close whichever surface (inline popup or modal) was used
+        dashDurClose();
         _dashToast('Set ' + client + ' to ' + _durLbl(toMin));
         if (currentScreen === 'dashboard') { if (_dashSrcDay === day) dashReloadOne('src', true); if (_dashDestDay === day) dashReloadOne('dest', true); }
         else if (_mjBoardDayID) { const _chip = document.querySelector('#mjDateStrip .mj-date-chip[data-dayid="' + _mjBoardDayID + '"]'); mjSelectDate(_mjBoardDayID, _chip || null); }
       } else {
-        const msg = (res && res.error) || 'Could not change the duration.';
-        const e = document.getElementById('mjDurErr') || document.getElementById('dashDurErr');
-        if (e) { e.textContent = msg; if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; } }
-        else { _durChange = null; window.alert(msg); } // native-confirm path → surface the error
+        const e = document.getElementById('dashDurErr'); if (e) e.textContent = (res && res.error) || 'Could not change the duration.';
+        if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; }
       }
     }
     // Desktop: drag a pill's right edge to resize (snaps to 30 min), then confirm via the same engine.
@@ -8522,7 +8496,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _mjTipSticky = !!sticky;
       tip.innerHTML = mjJobInfoHTML(j, sticky);
       tip.style.display = 'block';
-      try { _dbg('POPUP OPEN job=' + jobID + ' sticky=' + !!sticky + ' durBtns=' + tip.querySelectorAll('[data-dur-set]').length + ' woID=' + (j.woID || '-') + ' parent=' + (tip.parentElement ? tip.parentElement.tagName + (tip.parentElement.id ? '#' + tip.parentElement.id : '') : '?')); } catch (x) {}
       const rect = (ev && ev.currentTarget && ev.currentTarget.getBoundingClientRect) ? ev.currentTarget.getBoundingClientRect() : { left: 60, top: 120, bottom: 140 };
       const tw = tip.offsetWidth, th = tip.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
       let left = rect.left; if (left + tw > vw - 8) left = vw - tw - 8; if (left < 8) left = 8;
@@ -8533,7 +8506,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function mjTipHide() { if (_mjTipSticky) return; const t = document.getElementById('mjTip'); if (t) t.style.display = 'none'; }
     function mjTipForceHide() { _mjTipSticky = false; const t = document.getElementById('mjTip'); if (t) t.style.display = 'none'; }
-    function mjTipOutside(e) { const t = document.getElementById('mjTip'); if (t && t.contains(e.target)) { document.addEventListener('click', mjTipOutside, { once: true }); return; } try { _dbg('mjTipOutside → CLOSE popup (target=' + (e.target ? e.target.tagName + (e.target.getAttribute && e.target.getAttribute('data-dur-set') ? '[dur]' : '') : '?') + ')'); } catch (x) {} mjTipForceHide(); }
+    function mjTipOutside(e) { const t = document.getElementById('mjTip'); if (t && t.contains(e.target)) { document.addEventListener('click', mjTipOutside, { once: true }); return; } mjTipForceHide(); }
     function mjMicUI(on) {
       _mjListening = on;
       const b = document.getElementById('mjMicBtn'); if (b) { b.style.transform = on ? 'scale(1.08)' : 'scale(1)'; b.style.background = on ? 'var(--accent-yellow,#f59e0b)' : 'var(--accent-green,#00E785)'; }
