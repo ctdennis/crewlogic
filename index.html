@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.64 | 2026-06-27">
+  <meta name="crewlogic-version" content="v5.47.65 | 2026-06-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7791,8 +7791,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         renderSiteMarkers(); // retry site/home geocode now that cost settings are surely loaded (guarded)
         // Keep the trucks centered (owner) BUT zoom out enough to keep all jobs visible: bounds symmetric
         // around the trucks' centroid, reaching the farthest job → trucks stay mid-map, jobs on-screen.
-        const truckPts = _truckMarkers.map(m => m.getLatLng());
-        const allPts = truckPts.concat(jobPts || []);
+        // Normalize points ([lat,lng] arrays OR {lat,lng}/{lat,lon}) + drop any non-finite coords.
+        const _xy = (p) => p && (Array.isArray(p) ? { lat: +p[0], lng: +p[1] } : { lat: +p.lat, lng: +(p.lng != null ? p.lng : p.lon) });
+        const _ok = (p) => p && isFinite(p.lat) && isFinite(p.lng);
+        const truckPts = _truckMarkers.map(m => _xy(m.getLatLng())).filter(_ok);
+        const allPts = truckPts.concat((jobPts || []).map(_xy).filter(_ok));
         if (truckPts.length && allPts.length) {
           const cLat = truckPts.reduce((s, p) => s + p.lat, 0) / truckPts.length;
           const cLng = truckPts.reduce((s, p) => s + p.lng, 0) / truckPts.length;
@@ -7800,7 +7803,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           allPts.forEach(p => { dLat = Math.max(dLat, Math.abs(p.lat - cLat)); dLng = Math.max(dLng, Math.abs(p.lng - cLng)); });
           _trucksMap.fitBounds([[cLat - dLat, cLng - dLng], [cLat + dLat, cLng + dLng]], { padding: [40, 40], maxZoom: 14 });
         } else if (truckPts.length === 1) {
-          _trucksMap.setView(truckPts[0], 13);
+          _trucksMap.setView([truckPts[0].lat, truckPts[0].lng], 13);
         }
         // Legend: one colored chip per route, with its open-stop count.
         const legend = document.getElementById('trucksLegend');
