@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.54 | 2026-06-27">
+  <meta name="crewlogic-version" content="v5.47.55 | 2026-06-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7327,6 +7327,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _measureLine = L.polyline([[from.lat, from.lon], [j.lat, j.lon]], { color: '#00E785', weight: 3, dashArray: '7,6', opacity: 0.9 }).addTo(_trucksMap);
       _measureFrom = null;
       const b = document.getElementById('mtMeasureBanner'); if (b) b.style.display = 'none';
+      // Let the tapped marker's own popup open first, then override it so the measurement shows (otherwise a
+      // site/job marker's default popup covers the result — e.g. a disposal site's $/ton).
+      await new Promise(r => setTimeout(r, 70));
+      _trucksMap.closePopup();
       const popup = L.popup({ offset: [0, -10] }).setLatLng([j.lat, j.lon]).setContent('<div style="font-size:13px;">Measuring…</div>').openOn(_trucksMap);
       try {
         const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: from.lat + ',' + from.lon, dest: j.lat + ',' + j.lon });
