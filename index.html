@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.46 | 2026-06-27">
+  <meta name="crewlogic-version" content="v5.47.47 | 2026-06-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8378,9 +8378,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function dashSetDuration(jobID, newMin) {
       const j = _mjBoardByID[String(jobID)]; if (!j || !j.woID) return;
       const cur = Number(j.durationMin) || 0; if (newMin === cur) return;
-      const spec = { woID: j.woID, jobID: String(jobID), client: (String(j.client || '').split(',')[0]) || j.client || 'Job', dayID: j._day, startTime: j.timeMin, startLabel: j.timeLabel, routeCode: j.routeCode, zip: j.zip, fromMin: cur, toMin: newMin };
-      mjTipForceHide();        // dismiss the job detail popup (owner's design: dismiss → new popup)
-      dashDurationModal(spec); // fresh standalone confirmation popup
+      const client = (String(j.client || '').split(',')[0]) || j.client || 'job';
+      mjTipForceHide(); // dismiss the job detail popup
+      // Native confirm — bulletproof on mobile (no overlay/z-index/ghost-click failure modes).
+      const longer = newMin > cur;
+      if (!window.confirm('Change ' + client + ' to ' + _durLbl(newMin) + '?' + (longer ? '\n\n(Extending works only if nothing is booked right after.)' : ''))) return;
+      _durChange = { woID: j.woID, jobID: String(jobID), client: client, dayID: j._day, startTime: j.timeMin, startLabel: j.timeLabel, routeCode: j.routeCode, zip: j.zip, fromMin: cur, toMin: newMin };
+      dashDurationExecute();
     }
     function dashDurCancel() { const w = document.getElementById('mjDurWrap'), j = _durChange && _mjBoardByID[String(_durChange.jobID)]; if (w && j) w.innerHTML = _mjDurButtonsHTML(mjEsc(String(j.jobID || '')), Number(j.durationMin) || 0); _durChange = null; }
     let _durChange = null;
@@ -8420,8 +8424,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (currentScreen === 'dashboard') { if (_dashSrcDay === day) dashReloadOne('src', true); if (_dashDestDay === day) dashReloadOne('dest', true); }
         else if (_mjBoardDayID) { const _chip = document.querySelector('#mjDateStrip .mj-date-chip[data-dayid="' + _mjBoardDayID + '"]'); mjSelectDate(_mjBoardDayID, _chip || null); }
       } else {
-        const e = document.getElementById('mjDurErr') || document.getElementById('dashDurErr'); if (e) e.textContent = (res && res.error) || 'Could not change the duration.';
-        if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; }
+        const msg = (res && res.error) || 'Could not change the duration.';
+        const e = document.getElementById('mjDurErr') || document.getElementById('dashDurErr');
+        if (e) { e.textContent = msg; if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; } }
+        else { _durChange = null; window.alert(msg); } // native-confirm path → surface the error
       }
     }
     // Desktop: drag a pill's right edge to resize (snaps to 30 min), then confirm via the same engine.
