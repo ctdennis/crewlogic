@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.59 | 2026-06-27">
+  <meta name="crewlogic-version" content="v5.47.60 | 2026-06-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1398,11 +1398,11 @@
         <div style="display:flex;justify-content:space-between;align-items:center;margin:6px 0 8px;gap:10px;flex-wrap:wrap;">
           <div style="display:inline-flex;align-items:center;gap:8px;">
             <span style="font-size:12px;color:var(--text-muted,#6e8194);">Jobs:</span>
-            <div style="display:inline-flex;border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);overflow:hidden;">
-              <button id="trucksDayTodayBtn" onclick="setTrucksJobDay(0)" style="font-size:13px;padding:7px 14px;background:var(--accent-green,#00E785);color:#06121d;border:none;cursor:pointer;font-weight:700;">Today</button>
-              <button id="trucksDayTomorrowBtn" onclick="setTrucksJobDay(1)" style="font-size:13px;padding:7px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:none;cursor:pointer;font-weight:600;">Tomorrow</button>
-            </div>
-            <button id="trucksLookaheadBtn" onclick="toggleTrucksLookahead()" title="Show jobs for the next 3 days as gray dots" style="font-size:12px;padding:7px 12px;background:var(--bg-input,#1e2f40);color:var(--text-muted,#6e8194);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;white-space:nowrap;">◌ +3 days</button>
+            <button onclick="shiftTrucksJobDay(-1)" title="Previous day" style="font-size:13px;padding:7px 11px;background:var(--btn-surface,#34485d);color:var(--text-primary,#eef4fa);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:700;">◀</button>
+            <input type="date" id="trucksJobDate" onchange="setTrucksJobDate(this.value)" style="font-size:13px;padding:6px 8px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);color-scheme:dark;">
+            <button onclick="shiftTrucksJobDay(1)" title="Next day" style="font-size:13px;padding:7px 11px;background:var(--btn-surface,#34485d);color:var(--text-primary,#eef4fa);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:700;">▶</button>
+            <span id="trucksDayRel" style="font-size:12px;color:var(--text-muted,#6e8194);font-weight:600;"></span>
+            <button id="trucksLookaheadBtn" onclick="toggleTrucksLookahead()" title="Show jobs for the next 3 days from the selected day, as gray dots" style="font-size:12px;padding:7px 12px;background:var(--bg-input,#1e2f40);color:var(--text-muted,#6e8194);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;white-space:nowrap;">◌ +3 days</button>
           </div>
           <button id="trucksRefreshBtn" onclick="showTrucks()" style="font-size:13px;padding:7px 16px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;">🔄 Refresh</button>
         </div>
@@ -7394,19 +7394,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _stopTrucksAutoRefresh() {
       if (_trucksRefreshTimer) { clearInterval(_trucksRefreshTimer); _trucksRefreshTimer = null; }
     }
-    // Today/Tomorrow toggle — switches which day's JOBS overlay the (always-live) trucks.
-    function _updateTrucksDayToggle() {
-      const setBtn = (btn, on) => {
-        if (!btn) return;
-        btn.style.background = on ? 'var(--accent-green,#00E785)' : 'var(--bg-input,#1e2f40)';
-        btn.style.color = on ? '#06121d' : 'var(--text-primary,#eef4fa)';
-        btn.style.fontWeight = on ? '700' : '600';
-      };
-      setBtn(document.getElementById('trucksDayTodayBtn'), _trucksJobDay === 0);
-      setBtn(document.getElementById('trucksDayTomorrowBtn'), _trucksJobDay === 1);
-      setBtn(document.getElementById('dashTrucksTodayBtn'), _trucksJobDay === 0); // dashboard map mirror
-      setBtn(document.getElementById('dashTrucksTomorrowBtn'), _trucksJobDay === 1);
+    // Map JOB-day picker — any day (offset from the franchise's today). Trucks stay live; +3-day
+    // look-ahead extends from the SELECTED day. Date picker on the trucks screen + the dashboard map.
+    function _trucksTodayDayID() { return mjNowParts().dayID; } // YYYYMMDD in the franchise TZ
+    function _dayOffsetFromToday(dateStr) {
+      const t = _trucksTodayDayID(); const a = Date.UTC(+t.slice(0, 4), +t.slice(4, 6) - 1, +t.slice(6, 8));
+      const p = String(dateStr).split('-').map(Number); const b = Date.UTC(p[0], p[1] - 1, p[2]);
+      return Math.round((b - a) / 86400000);
     }
+    function _dateStrFromOffset(off) {
+      const t = _trucksTodayDayID(); const d = new Date(Date.UTC(+t.slice(0, 4), +t.slice(4, 6) - 1, +t.slice(6, 8)));
+      d.setUTCDate(d.getUTCDate() + (off || 0)); return d.toISOString().slice(0, 10);
+    }
+    function _trucksDayRelLabel(off) { return off === 0 ? 'Today' : off === 1 ? 'Tomorrow' : _lookaheadDayLabel(off); }
+    function _updateTrucksDayToggle() {
+      const ds = _dateStrFromOffset(_trucksJobDay), rel = _trucksDayRelLabel(_trucksJobDay);
+      ['trucksJobDate', 'dashTrucksJobDate'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ds; });
+      ['trucksDayRel', 'dashTrucksDayRel'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = rel; });
+    }
+    function setTrucksJobDate(dateStr) { if (dateStr) setTrucksJobDay(_dayOffsetFromToday(dateStr)); }
+    function shiftTrucksJobDay(delta) { setTrucksJobDay(_trucksJobDay + delta); }
+    function setTrucksJobDay(offset) {
+      _trucksJobDay = offset;
+      _updateTrucksDayToggle();
     function setTrucksJobDay(offset) {
       _trucksJobDay = offset;
       _updateTrucksDayToggle();
@@ -8159,11 +8169,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;">'
         +   '<span style="font-size:13px;font-weight:700;color:var(--text-primary);">🚚 Trucks</span>'
         +   '<span style="font-size:12px;color:var(--text-muted);">Jobs:</span>'
-        +   '<div style="display:inline-flex;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;">'
-        +     '<button id="dashTrucksTodayBtn" onclick="setTrucksJobDay(0)" style="font-size:13px;padding:6px 14px;background:var(--accent-green,#00E785);color:#06121d;border:none;cursor:pointer;font-weight:700;">Today</button>'
-        +     '<button id="dashTrucksTomorrowBtn" onclick="setTrucksJobDay(1)" style="font-size:13px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:none;cursor:pointer;font-weight:600;">Tomorrow</button>'
-        +   '</div>'
-        +   '<button id="dashTrucksLookaheadBtn" onclick="toggleTrucksLookahead()" title="Show jobs for the next 3 days as gray dots" style="font-size:12px;padding:6px 12px;background:var(--bg-input,#1e2f40);color:var(--text-muted);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;white-space:nowrap;">◌ +3 days</button>'
+        +   '<button onclick="shiftTrucksJobDay(-1)" title="Previous day" style="font-size:13px;padding:6px 11px;background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm);cursor:pointer;font-weight:700;">◀</button>'
+        +   '<input type="date" id="dashTrucksJobDate" onchange="setTrucksJobDate(this.value)" style="font-size:13px;padding:5px 8px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);color-scheme:dark;">'
+        +   '<button onclick="shiftTrucksJobDay(1)" title="Next day" style="font-size:13px;padding:6px 11px;background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm);cursor:pointer;font-weight:700;">▶</button>'
+        +   '<span id="dashTrucksDayRel" style="font-size:12px;color:var(--text-muted);font-weight:600;"></span>'
+        +   '<button id="dashTrucksLookaheadBtn" onclick="toggleTrucksLookahead()" title="Show jobs for the next 3 days from the selected day, as gray dots" style="font-size:12px;padding:6px 12px;background:var(--bg-input,#1e2f40);color:var(--text-muted);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;white-space:nowrap;">◌ +3 days</button>'
         +   '<button onclick="showTrucks()" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🔄 Refresh</button>'
         + '</div>'
         + '<div id="dashMapPane" style="height:55vh;min-height:420px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);"></div>';
@@ -8176,6 +8186,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _ensureTrucksMapFresh('dashMapPane'); // rebuild the map into the (freshly re-rendered) dashboard pane
       _trucksJobDay = 0;                     // dashboard map = today's trucks + jobs (matches the rendered toggle)
       _trucksLookahead = false;              // +3-day look-ahead off by default (matches the rendered button)
+      _updateTrucksDayToggle();              // initialize the date picker to today
       showTrucks();
       _startTrucksAutoRefresh();
       // Fix the "half-width tiles" race: the map is created before the dashboard's wide layout finishes
