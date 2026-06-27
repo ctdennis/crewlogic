@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.62 | 2026-06-27">
+  <meta name="crewlogic-version" content="v5.47.63 | 2026-06-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7789,11 +7789,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _trucksJobsData = jobs;
         if (_trucksData && _trucksData.length) renderTrucks(_trucksData, false);
         renderSiteMarkers(); // retry site/home geocode now that cost settings are surely loaded (guarded)
-        // Refit the map to show trucks AND jobs together.
-        const allPts = [];
-        _truckMarkers.forEach(m => allPts.push(m.getLatLng()));
-        jobPts.forEach(p => allPts.push(p));
-        if (allPts.length > 1) _trucksMap.fitBounds(allPts, { padding: [40, 40], maxZoom: 14 });
+        // Center the map on the TRUCKS (owner: trucks in the middle). Jobs are reachable by pan/zoom.
+        const truckPts = _truckMarkers.map(m => m.getLatLng());
+        if (truckPts.length === 1) _trucksMap.setView(truckPts[0], 13);
+        else if (truckPts.length > 1) _trucksMap.fitBounds(truckPts, { padding: [60, 60], maxZoom: 14 });
         // Legend: one colored chip per route, with its open-stop count.
         const legend = document.getElementById('trucksLegend');
         if (legend) legend.style.display = 'flex';
