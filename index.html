@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.53 | 2026-06-27">
+  <meta name="crewlogic-version" content="v5.47.54 | 2026-06-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7262,7 +7262,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       } catch (_e) { return; } // leave _sitesGeocoded false so a later open retries
       const mkIcon = (emoji, color, size) => { const sz = size || 26; return L.divIcon({ className: 'site-marker', html: '<div style="background:' + color + ';width:' + sz + 'px;height:' + sz + 'px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-size:' + Math.round(sz * 0.55) + 'px;line-height:1;">' + emoji + '</div>', iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2], popupAnchor: [0, -(sz / 2) - 2] }); };
       // In measure mode (started from a truck), tapping a site measures truck→site (same as a job).
-      const attachMeasure = (m, lat, lon, label) => m.on('click', () => { if (_measureFrom) _measureToJob({ lat: lat, lon: lon, clientName: label }); });
+      // Bind both click and mouseover so a mobile first-tap (synthesized hover) triggers it too.
+      const attachMeasure = (m, lat, lon, label) => { const go = () => { if (_measureFrom) { try { m.closePopup(); } catch (e) {} _measureToJob({ lat: lat, lon: lon, clientName: label }); } }; m.on('click', go); m.on('mouseover', go); };
       types.forEach(t => {
         if (!t.layer) return;
         t.layer.clearLayers();
@@ -7464,8 +7465,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           // Lazy-load the clickable client phone on popup open (avoids a burst of Vonigo
           // lookups across 3 days the moment look-ahead is toggled on).
           m.on('popupopen', () => _prefetchJobPhone(j.jobID).then(ph => _renderJobPhoneSlot(j.jobID, ph)));
-          m.on('mouseover', function () { this.openPopup(); }); // hover to open (parity with the schedule board)
-          m.on('click', () => { if (_measureFrom) _measureToJob(j); }); // measure-to-job mode works on look-ahead dots too
+          m.on('mouseover', function () { if (_measureFrom) { this.closePopup(); _measureToJob(j); } else this.openPopup(); }); // first-tap measures when measuring
+          m.on('click', function () { if (_measureFrom) { this.closePopup(); _measureToJob(j); } });
           _lookaheadMarkers.push(m);
         });
       });
@@ -7751,8 +7752,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: done ? 0.6 : 1 }).addTo(_jobLayer || _trucksMap).bindPopup(pop);
           m.on('popupopen', () => _prefetchJobPhone(j.jobID).then(ph => _renderJobPhoneSlot(j.jobID, ph)));
-          m.on('mouseover', function () { this.openPopup(); }); // hover to open (parity with the schedule board) — stays open so the phone/Text links are clickable
-          m.on('click', () => { if (_measureFrom) _measureToJob(j); }); // measure-to-job mode: tap a job after a truck
+          // When measuring, the FIRST interaction (mouseover on desktop, the synthesized hover on a mobile
+          // first-tap) must do the measure — otherwise mobile's "first tap = hover" opens the popup and the
+          // measure click never fires. Otherwise mouseover just opens the details popup.
+          m.on('mouseover', function () { if (_measureFrom) { this.closePopup(); _measureToJob(j); } else this.openPopup(); });
+          m.on('click', function () { if (_measureFrom) { this.closePopup(); _measureToJob(j); } });
           _jobMarkers.push(m);
           jobPts.push([j.lat, j.lon]);
         });
