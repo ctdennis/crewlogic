@@ -358,11 +358,14 @@ Deno.serve(async (req: Request) => {
     // gaps between are not bookable. Availability already excludes manual blocks, so no BookOffs needed.
     if (action === 'boardGrid') {
       const dayID = String(body.dayID);
-      const durationMin = Number(body.durationMin) || 120; // open-slot fit uses the standard job length
+      const durationMin = Number(body.durationMin) || 120; // kept for the response (move-fit reference)
+      // Board DISPLAY uses 30-min granularity = the route's RAW open time (like Vonigo), not "where a full
+      // 120-min job fits" — otherwise the ~2h before each job reads as blocked/gray. The actual move/
+      // duration writes still validate the real job length via the lock step.
       const [routes, jobs, openSlots] = await Promise.all([
         getRoutesFull(token, dayID),
         listRouteJobs(token, franchiseID, dayID, undefined, false),
-        suggestSlotsFn(token, franchiseID, dayID, durationMin).catch(() => []),
+        suggestSlotsFn(token, franchiseID, dayID, 30).catch(() => []),
       ]);
       const byId: Record<string, any> = {};
       for (const r of routes) byId[r.id] = { id: r.id, code: r.code, name: r.name, isActive: r.isActive, jobs: [], open: [] };
