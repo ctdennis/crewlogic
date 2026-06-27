@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.45 | 2026-06-27">
+  <meta name="crewlogic-version" content="v5.47.46 | 2026-06-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8358,32 +8358,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     // ===== Duration change: tap-select buttons (mobile+desktop) AND desktop right-edge drag — one engine =====
     function _durLbl(mm) { return (mm / 60) + 'h'; }
-    // Duration button row HTML (0.5h–5h, current marked) — rendered in the job popup; restorable on Cancel.
+    // Duration button row HTML (0.5h–5h, current marked). Buttons carry data attrs; a capture-phase
+    // delegated listener (below) handles the tap — robust against the popup's outside-click-close + any
+    // inline-handler quirk on mobile.
     function _mjDurButtonsHTML(jid, curMin) {
       let b = '';
       for (let mm = 30; mm <= 300; mm += 30) {
         const isCur = mm === curMin;
-        b += '<button onclick="event.stopPropagation();dashSetDuration(\'' + jid + '\',' + mm + ')"' + (isCur ? ' disabled' : '') + ' style="padding:4px 8px;font-size:11px;font-weight:700;border-radius:6px;cursor:' + (isCur ? 'default' : 'pointer') + ';border:1px solid ' + (isCur ? 'var(--accent-green,#00E785)' : 'var(--btn-surface-border,#46596d)') + ';background:' + (isCur ? 'var(--accent-green,#00E785)' : 'var(--btn-surface,#34485d)') + ';color:' + (isCur ? '#06121d' : 'var(--text-primary)') + ';">' + _durLbl(mm) + '</button>';
+        b += '<button data-dur-set="' + mm + '" data-dur-job="' + jid + '"' + (isCur ? ' disabled' : '') + ' style="padding:6px 10px;font-size:12px;font-weight:700;border-radius:6px;cursor:' + (isCur ? 'default' : 'pointer') + ';border:1px solid ' + (isCur ? 'var(--accent-green,#00E785)' : 'var(--btn-surface-border,#46596d)') + ';background:' + (isCur ? 'var(--accent-green,#00E785)' : 'var(--btn-surface,#34485d)') + ';color:' + (isCur ? '#06121d' : 'var(--text-primary)') + ';">' + _durLbl(mm) + '</button>';
       }
-      return '<div style="color:var(--text-muted);font-size:11px;margin-bottom:5px;">Set duration</div><div style="display:flex;flex-wrap:wrap;gap:5px;">' + b + '</div>';
+      return '<div style="color:var(--text-muted);font-size:11px;margin-bottom:5px;">Set duration</div><div style="display:flex;flex-wrap:wrap;gap:6px;">' + b + '</div>';
     }
+    // Capture-phase delegation: fires BEFORE the popup's bubble-phase outside-click-close, so a duration
+    // tap reliably reaches dashSetDuration on mobile regardless of hit-area/inline-handler weirdness.
+    document.addEventListener('click', function (e) {
+      const t = e.target, btn = t && t.closest && t.closest('[data-dur-set]');
+      if (btn && !btn.disabled) { e.stopPropagation(); e.preventDefault(); dashSetDuration(btn.getAttribute('data-dur-job'), parseInt(btn.getAttribute('data-dur-set'), 10)); }
+    }, true);
     function dashSetDuration(jobID, newMin) {
-      const j = _mjBoardByID[String(jobID)];
-      try { alert('DBG dashSetDuration FIRED\ntap ' + (newMin / 60) + 'h\njob ' + (j ? 'ok' : 'MISSING') + '\nwo ' + ((j && j.woID) || '-') + '\ndur ' + (j && j.durationMin) + '\nwrap ' + (document.getElementById('mjDurWrap') ? 'ok' : 'MISSING') + '\ntip ' + (document.getElementById('mjTip') ? (document.getElementById('mjTip').style.display || 'empty') : 'no-el')); } catch (e) {}
-      if (!j || !j.woID) return;
+      const j = _mjBoardByID[String(jobID)]; if (!j || !j.woID) return;
       const cur = Number(j.durationMin) || 0; if (newMin === cur) return;
       const spec = { woID: j.woID, jobID: String(jobID), client: (String(j.client || '').split(',')[0]) || j.client || 'Job', dayID: j._day, startTime: j.timeMin, startLabel: j.timeLabel, routeCode: j.routeCode, zip: j.zip, fromMin: cur, toMin: newMin };
-      _durChange = spec;
-      const w = document.getElementById('mjDurWrap'), tip = document.getElementById('mjTip');
-      if (w && tip && tip.style.display !== 'none') {
-        // INLINE confirm inside the open popup (no second overlay → no mobile modal collision)
-        w.innerHTML = '<div style="font-size:12px;margin-bottom:6px;">Set <b>' + mjEsc(spec.client) + '</b> to <b style="color:var(--accent-green,#00E785);">' + _durLbl(newMin) + '</b>?</div>'
-          + (newMin > cur ? '<div style="color:#ffb454;font-size:11px;margin-bottom:6px;">⚠ Extending — only if nothing’s booked right after.</div>' : '')
-          + '<div id="mjDurErr" style="color:#ff6b6b;font-size:11px;min-height:1px;"></div>'
-          + '<div style="display:flex;gap:8px;margin-top:4px;"><button id="mjDurConfirm" onclick="event.stopPropagation();dashDurationExecute()" style="flex:1;padding:9px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:6px;font-weight:800;cursor:pointer;">Confirm</button><button onclick="event.stopPropagation();dashDurCancel()" style="flex:1;padding:9px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:6px;font-weight:600;cursor:pointer;">Cancel</button></div>';
-      } else {
-        dashDurationModal(spec); // desktop drag (no popup open) → standalone modal
-      }
+      mjTipForceHide();        // dismiss the job detail popup (owner's design: dismiss → new popup)
+      dashDurationModal(spec); // fresh standalone confirmation popup
     }
     function dashDurCancel() { const w = document.getElementById('mjDurWrap'), j = _durChange && _mjBoardByID[String(_durChange.jobID)]; if (w && j) w.innerHTML = _mjDurButtonsHTML(mjEsc(String(j.jobID || '')), Number(j.durationMin) || 0); _durChange = null; }
     let _durChange = null;
