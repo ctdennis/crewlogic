@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.39 | 2026-06-26">
+  <meta name="crewlogic-version" content="v5.47.40 | 2026-06-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8000,7 +8000,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const hdr = (data.dayLabel || '') + ' — ' + jobs.length + ' job' + (jobs.length !== 1 ? 's' : '') + ' · ' + routesData.length + ' route' + (routesData.length !== 1 ? 's' : '');
       if (!routesData.length) { r.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-size:13px;color:var(--text-muted);">No routes for ' + mjEsc(data.dayLabel || 'this day') + '.</div>'; return; }
       if (!container) _mjBoardByID = {}; // single-board screen resets; dashboard boards accumulate (job IDs unique)
-      jobs.forEach(j => { if (j.jobID) _mjBoardByID[String(j.jobID)] = j; });
+      jobs.forEach(j => { if (j.jobID) { j._day = data.dayID; _mjBoardByID[String(j.jobID)] = j; } }); // stamp board day for duration/move
       const PXH = 66, LW = 52, ROW = 38;
       // Axis (originH/endH) precedence: (1) explicit axis param (two boards sharing ONE scale for cross-day
       // drag), (2) the franchise's route hours from the API (data.boardStartMin/EndMin — the bookable
@@ -8073,6 +8073,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           h += '<div' + dragAttrs + ' onmouseenter="mjTip(event,\'' + jidA + '\')" onmouseleave="mjTipHide()" onclick="mjTip(event,\'' + jidA + '\',true)" data-jid="' + jidA + '" title="' + (canDrag ? 'Drag to move' : (done ? 'Completed — adjust in Vonigo' : '')) + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:3px;bottom:3px;background:' + bg + ';opacity:' + (done ? '0.72' : '1') + ';border-radius:5px;padding:2px 5px 2px 9px;overflow:hidden;cursor:' + (canDrag ? 'grab' : 'pointer') + ';box-shadow:inset 5px 0 0 0 ' + zoneStripe + ',0 1px 2px rgba(0,0,0,.3);">';
           h += '<div style="font-size:10px;font-weight:700;color:#fff;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (n + 1) + '. ' + (done ? '✓ ' : '') + name + (city ? ' <span style="font-weight:500;color:rgba(255,255,255,.82);">' + mjEsc(city) + '</span>' : '') + '</div>';
           h += '<div style="font-size:9px;color:rgba(255,255,255,.82);line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (j.zip ? mjEsc(j.zip) : '') + (j.zip && j.jobID ? ' · ' : '') + '#' + jidA + '</div>';
+          if (canDrag) h += '<div onmousedown="dashResizeStart(event,\'' + jidA + '\')" title="Drag to resize duration" style="position:absolute;right:0;top:0;bottom:0;width:9px;cursor:ew-resize;background:linear-gradient(to right,transparent,rgba(255,255,255,0.28));"></div>'; // right-edge resize handle
           h += '</div>';
         });
         h += '</div></div>';
@@ -8354,6 +8355,82 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       clearTimeout(_dashToastT); _dashToastT = setTimeout(() => { if (t) t.style.display = 'none'; }, 4000);
     }
     let _dashToastT = null;
+
+    // ===== Duration change: tap-select buttons (mobile+desktop) AND desktop right-edge drag — one engine =====
+    function _durLbl(mm) { return (mm / 60) + 'h'; }
+    function dashSetDuration(jobID, newMin) {
+      const j = _mjBoardByID[String(jobID)]; if (!j || !j.woID) return;
+      const cur = Number(j.durationMin) || 0; if (newMin === cur) return;
+      mjTipForceHide();
+      dashDurationModal({ woID: j.woID, jobID: String(jobID), client: (String(j.client || '').split(',')[0]) || j.client || 'Job', dayID: j._day, startTime: j.timeMin, startLabel: j.timeLabel, routeCode: j.routeCode, zip: j.zip, fromMin: cur, toMin: newMin });
+    }
+    let _durChange = null;
+    function dashDurationModal(spec) {
+      _durChange = spec;
+      let ov = document.getElementById('dashDurOverlay');
+      if (!ov) { ov = document.createElement('div'); ov.id = 'dashDurOverlay'; document.body.appendChild(ov); }
+      ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(3,8,14,0.62);display:flex;align-items:center;justify-content:center;';
+      const longer = spec.toMin > spec.fromMin;
+      ov.innerHTML = '<div style="background:var(--bg-card,#1e2f40);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.5);padding:18px 20px;max-width:360px;width:92%;font-size:13px;color:var(--text-primary);">'
+        + '<div style="font-size:15px;font-weight:800;margin-bottom:10px;">Change duration</div>'
+        + '<div style="margin-bottom:8px;font-weight:700;">' + mjEsc(spec.client || 'Job') + '</div>'
+        + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin-bottom:10px;">'
+        +   '<span style="color:var(--text-muted);">When</span><span>' + mjEsc(spec.routeCode || '') + ' · ' + mjEsc(_dashDayLabel(spec.dayID)) + (spec.startLabel ? ' · ' + mjEsc(spec.startLabel) : '') + '</span>'
+        +   '<span style="color:var(--text-muted);">Duration</span><span style="font-weight:700;">' + _durLbl(spec.fromMin) + ' → <span style="color:var(--accent-green,#00E785);">' + _durLbl(spec.toMin) + '</span></span>'
+        + '</div>'
+        + (longer ? '<div style="color:#ffb454;font-size:12px;">⚠ Extending — works only if nothing is booked right after.</div>' : '')
+        + '<div id="dashDurErr" style="color:#ff6b6b;font-size:12px;margin-top:6px;min-height:1px;"></div>'
+        + '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px;">'
+        +   '<button onclick="dashDurClose()" style="padding:9px 16px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;font-weight:600;cursor:pointer;">Cancel</button>'
+        +   '<button id="dashDurConfirmBtn" onclick="dashDurationExecute()" style="padding:9px 18px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;font-weight:800;cursor:pointer;">Confirm</button>'
+        + '</div></div>';
+      ov.style.display = 'flex';
+      ov.onclick = (e) => { if (e.target === ov) dashDurClose(); };
+    }
+    function dashDurClose() { const ov = document.getElementById('dashDurOverlay'); if (ov) ov.style.display = 'none'; _durChange = null; }
+    async function dashDurationExecute() {
+      const spec = _durChange; if (!spec) return;
+      const btn = document.getElementById('dashDurConfirmBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
+      const plan = { kind: 'duration', woID: spec.woID, dayID: spec.dayID, startTime: spec.startTime, durationMin: spec.toMin, routeCode: spec.routeCode, zip: spec.zip || '', startLabel: spec.startLabel };
+      let res = null;
+      try { res = await edgeFunctionCall('crewlogic-dispatch', { action: 'execute', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, plan, commandText: 'duration change', actorEmail: currentUser.email }); } catch (e) { res = { success: false, error: 'Network error — try again.' }; }
+      if (res && res.success) {
+        const day = spec.dayID, client = spec.client, toMin = spec.toMin;
+        dashDurClose();
+        _dashToast('Set ' + client + ' to ' + _durLbl(toMin));
+        if (currentScreen === 'dashboard') { if (_dashSrcDay === day) dashReloadOne('src', true); if (_dashDestDay === day) dashReloadOne('dest', true); }
+        else if (_mjBoardDayID) mjSelectDate(_mjBoardDayID, null);
+      } else {
+        const e = document.getElementById('dashDurErr'); if (e) e.textContent = (res && res.error) || 'Could not change the duration.';
+        if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; }
+      }
+    }
+    // Desktop: drag a pill's right edge to resize (snaps to 30 min), then confirm via the same engine.
+    let _resize = null;
+    function dashResizeStart(ev, jid) {
+      ev.preventDefault(); ev.stopPropagation();
+      const pill = ev.currentTarget.parentElement, lane = pill && pill.closest('.mj-lane'), j = _mjBoardByID[String(jid)];
+      if (!pill || !lane || !j) return;
+      pill.draggable = false; pill.style.zIndex = '10';
+      _resize = { jid: String(jid), pill, lane, pxh: +lane.dataset.pxh || 66, startMin: +lane.dataset.start || 0, tmin: Number(j.timeMin) || 0, curMin: Number(j.durationMin) || 90 };
+      document.addEventListener('mousemove', dashResizeMove);
+      document.addEventListener('mouseup', dashResizeEnd);
+    }
+    function dashResizeMove(ev) {
+      const r = _resize; if (!r) return;
+      const laneLeft = r.lane.getBoundingClientRect().left, pillLeftPx = (r.tmin - r.startMin) / 60 * r.pxh;
+      let newMin = Math.round((((ev.clientX - laneLeft) - pillLeftPx) / r.pxh * 60) / 30) * 30;
+      newMin = Math.max(30, Math.min(300, newMin));
+      r.newMin = newMin;
+      r.pill.style.width = Math.max(newMin / 60 * r.pxh, 50) + 'px';
+    }
+    function dashResizeEnd() {
+      document.removeEventListener('mousemove', dashResizeMove);
+      document.removeEventListener('mouseup', dashResizeEnd);
+      const r = _resize; _resize = null; if (!r) return;
+      if (r.pill) { r.pill.draggable = true; r.pill.style.zIndex = ''; r.pill.style.width = Math.max(r.curMin / 60 * r.pxh, 50) + 'px'; } // snap back; the confirm+reload shows the real new length
+      if (r.newMin && r.newMin !== r.curMin) dashSetDuration(r.jid, r.newMin);
+    }
     // Parse a Vonigo service address ("123 Main St, Easton, MA 02375" / multi-line) → {street, city, zip}.
     function mjAddrParts(addr) {
       const s = String(addr || '').replace(/\s*\n\s*/g, ', ').replace(/\s+/g, ' ').trim();
@@ -8380,6 +8457,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (j.zoneName) h += _mjRow('Zone', '<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:' + mjZoneColor(j.zoneID) + ';margin-right:5px;vertical-align:middle;"></span>' + mjEsc(j.zoneName));
       h += _mjRow('Phone', '<span id="mjjobph-' + jid + '">…</span>');
       if (Number(j.price) > 0) h += _mjRow('Total', '<span style="font-weight:800;color:var(--accent-green,#00E785);">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>');
+      // Quick duration (0.5h–5h, 30-min steps) — instant change, no AI latency. Hidden on completed jobs (can't resize).
+      const _jdone = !!(j.completed || j.labelDone), _curMin = Number(j.durationMin) || 0;
+      if (!_jdone && j.woID) {
+        let durBtns = '';
+        for (let mm = 30; mm <= 300; mm += 30) {
+          const isCur = mm === _curMin;
+          durBtns += '<button onclick="dashSetDuration(\'' + jid + '\',' + mm + ')"' + (isCur ? ' disabled' : '') + ' style="padding:4px 8px;font-size:11px;font-weight:700;border-radius:6px;cursor:' + (isCur ? 'default' : 'pointer') + ';border:1px solid ' + (isCur ? 'var(--accent-green,#00E785)' : 'var(--btn-surface-border,#46596d)') + ';background:' + (isCur ? 'var(--accent-green,#00E785)' : 'var(--btn-surface,#34485d)') + ';color:' + (isCur ? '#06121d' : 'var(--text-primary)') + ';">' + _durLbl(mm) + '</button>';
+        }
+        h += '<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px;"><div style="color:var(--text-muted);font-size:11px;margin-bottom:5px;">Set duration</div><div style="display:flex;flex-wrap:wrap;gap:5px;">' + durBtns + '</div></div>';
+      }
       if (j.summary && String(j.summary).trim()) h += _mjBlock('Summary', mjEsc(String(j.summary).trim()));
       if (j.items && String(j.items).trim()) h += _mjBlock('Item(s) List', mjEsc(String(j.items).trim()));
       return h;
