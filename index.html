@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.55 | 2026-06-27">
+  <meta name="crewlogic-version" content="v5.47.56 | 2026-06-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8039,7 +8039,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:rgba(255,255,255,0.92);border:1px solid var(--border);"></span>Open to book</span>'
         + '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:rgba(255,255,255,0.14);"></span>Blocked / closed</span>'
         + '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:#45b6e6;"></span>Job</span></div>';
-      h += '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);-webkit-overflow-scrolling:touch;">';
+      h += '<div class="mj-scroll" style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);-webkit-overflow-scrolling:touch;">';
       h += '<div style="position:relative;min-width:' + (LW + trackW) + 'px;">';
       // time header
       h += '<div style="display:flex;height:20px;border-bottom:1px solid var(--border);">';
@@ -8088,10 +8088,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       });
       // current-time marker (only when viewing the franchise's TODAY and the clock is within visible hours)
       const _np = mjNowParts();
+      let nowX = null;
       if (data.dayID && String(data.dayID) === _np.dayID) {
         const nowMin = _np.minutesOfDay;
         if (nowMin >= startMin && nowMin <= endH * 60) {
           const nx = LW + ((nowMin - startMin) / 60) * PXH, laneH = ROW * routesData.length;
+          nowX = nx;
           h += '<div title="Now" style="position:absolute;left:' + (nx - 3) + 'px;top:12px;width:8px;height:8px;border-radius:50%;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
           h += '<div title="Now" style="position:absolute;left:' + nx + 'px;top:20px;width:2px;height:' + laneH + 'px;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
         }
@@ -8099,6 +8101,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       h += '</div></div>';
       h += '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);">Hover (desktop) or tap (mobile) a job for details.</div>';
       r.innerHTML = h;
+      // Auto-center the timeline on "now" (today only) so the current time sits mid-screen on arrival.
+      if (nowX != null) requestAnimationFrame(() => { const sc = r.querySelector('.mj-scroll'); if (sc && sc.clientWidth) sc.scrollLeft = Math.max(0, nowX - sc.clientWidth / 2); });
     }
     // ===== Dispatch Dashboard (desktop) — source + destination boards side by side (re-entrant board) =====
     let _dashSrcDay = '', _dashDestDay = '';
