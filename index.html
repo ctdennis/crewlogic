@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.57 | 2026-06-27">
+  <meta name="crewlogic-version" content="v5.47.58 | 2026-06-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7273,7 +7273,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const costLine = (t.costSuffix && s.cost != null && s.cost !== '') ? '<br><span style="color:#6e8194;">$' + _truckEsc(String(s.cost)) + t.costSuffix + '</span>' : '';
           const label = t.emoji + ' ' + (s.name || t.label);
           const m = L.marker([c.lat, c.lon], { icon: mkIcon(t.emoji, t.color, 26) })
-            .bindPopup('<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + _truckEsc(label) + '</b><br>' + _truckEsc(s.address) + costLine + '</div>');
+            .bindPopup('<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + _truckEsc(label) + '</b><br>' + _addrLink(_truckProperAddr(s.address), s.address, _truckEsc) + costLine + '</div>');
           attachMeasure(m, c.lat, c.lon, label);
           m.addTo(t.layer);
         });
@@ -7282,7 +7282,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _homeLayer.clearLayers();
         const c = coordsByAddr[home];
         const m = L.marker([c.lat, c.lon], { icon: mkIcon('🏠', '#f59e0b', 38), zIndexOffset: 900 })
-          .bindPopup('<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>🏠 Truck home</b><br>' + _truckEsc(home) + '</div>');
+          .bindPopup('<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>🏠 Truck home</b><br>' + _addrLink(_truckProperAddr(home), home, _truckEsc) + '</div>');
         attachMeasure(m, c.lat, c.lon, '🏠 Truck home');
         m.addTo(_homeLayer);
       }
@@ -7459,7 +7459,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '<b>' + dayLabel + '</b>' + (j.timeLabel ? ' · ' + _truckEsc(j.timeLabel) : '') + (route ? ' · ' + _truckEsc(route) : '')
             + '<br>' + _truckEsc(j.clientName || 'Job')
             + (Number(j.price) > 0 ? '<br><span style="font-weight:800;color:#0a7d33;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>' : '')
-            + (addr ? '<br><span style="color:#9aa7b4;">' + _truckEsc(addr) + '</span>' : '')
+            + (addr ? '<br>' + _addrLink(addr, addr, _truckEsc) : '')
             + _nearestTruckHtml(j.lat, j.lon)
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
             + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
@@ -7640,7 +7640,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const pop = '<div style="font-size:13px;line-height:1.5;min-width:150px;">'
           + '<b>' + (i + 1) + '. ' + _truckEsc(t.name) + '</b>'
           + (veh ? '<br>' + _truckEsc(veh) : '')
-          + (t.desc ? '<br>' + _truckEsc(t.desc) : '')
+          + (t.desc ? '<br>' + _addrLink(t.desc, t.desc, _truckEsc) : '')
           + '<br>' + _truckEsc([_truckStatusLabel(t), move].filter(Boolean).join(' · '))
           + (t.lastUpdate ? '<br><span style="color:#6e8194;">' + _truckEsc(_truckTimeAgo(t.lastUpdate)) + '</span>' : '')
           + (t.vin ? '<br><span style="color:#6e8194;font-size:11px;">VIN ' + _truckEsc(t.vin) + '</span>' : '')
@@ -7669,6 +7669,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       let t = String(s || '').toLowerCase().replace(/\b([a-z])/g, c => c.toUpperCase());
       t = t.replace(/,?\s*\b([A-Za-z]{2})\b\s+(\d{5})/, (_m, st, z) => ', ' + st.toUpperCase() + ' ' + z);
       return t;
+    }
+    // Google Maps driving-directions URL for ANY address (carried across CrewLogic, matching estimates).
+    function _mapsDirUrl(addr) {
+      const a = String(addr || '').replace(/\n/g, ', ').replace(/\s+/g, ' ').replace(/\s+,/g, ',').trim();
+      return a ? 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(a) + '&travelmode=driving' : '';
+    }
+    // Render an address as a clickable maps link (📍, opens directions in a new tab). `disp` = pretty text,
+    // `raw` = the address to route to, `esc` = the escaper to use for this context, `color` optional.
+    function _addrLink(disp, raw, esc, color) {
+      const url = _mapsDirUrl(raw); if (!url || !disp) return esc(disp || '');
+      return '<a href="' + url + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:' + (color || '#2563eb') + ';text-decoration:none;font-weight:600;">📍 ' + esc(disp) + '</a>';
     }
     // Customer phones are PREFETCHED in the background when the truck map loads its jobs, so the
     // number is already in hand by the time a user opens a job popup (transparent — no click-wait).
@@ -7748,7 +7759,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + (done ? '<div style="color:#6e8194;font-weight:700;font-size:11px;margin-top:2px;">✓ Completed</div>' : '')
             + (Number(j.price) > 0 ? '<div style="font-weight:800;color:#0a7d33;font-size:13px;margin-top:2px;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</div>' : '')
             + '<div style="margin-top:3px;">🏠 ' + _truckEsc(j.clientName || 'Job') + '</div>'
-            + (addr ? '<div>' + _truckEsc(addr) + '</div>' : '')
+            + (addr ? '<div>' + _addrLink(addr, addr, _truckEsc) + '</div>' : '')
             + _nearestTruckHtml(j.lat, j.lon)
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
             + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
@@ -8483,7 +8494,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (sticky) h += '<div style="text-align:right;margin:-4px -4px 2px 0;"><span onclick="mjTipForceHide()" style="cursor:pointer;color:var(--text-muted);font-size:16px;line-height:1;">×</span></div>';
       if (full) h += _mjRow('Name', mjEsc(full));
       h += _mjRow('Job', idLink);
-      h += _mjRow('Street', mjEsc(p.street || '—'));
+      h += _mjRow('Street', p.street ? _addrLink(p.street, j.address || (p.street + ', ' + (p.city || '') + ' ' + (p.zip || j.zip || '')), mjEsc, '#6db3ff') : '—');
       h += _mjRow('City', mjEsc(p.city || '—'));
       h += _mjRow('Zip', mjEsc(j.zip || p.zip || '—'));
       if (j.zoneName) h += _mjRow('Zone', '<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:' + mjZoneColor(j.zoneID) + ';margin-right:5px;vertical-align:middle;"></span>' + mjEsc(j.zoneName));
