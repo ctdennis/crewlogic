@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.50 | 2026-06-27">
+  <meta name="crewlogic-version" content="v5.47.51 | 2026-06-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8515,6 +8515,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _mjTipSticky = false;
     function mjTip(ev, jobID, sticky) {
       const j = _mjBoardByID[String(jobID)], tip = document.getElementById('mjTip'); if (!j || !tip) return;
+      // Touch devices have no real hover — a non-sticky (hover-preview) popup would hide the instant the
+      // finger moves, so taps land behind it. Force sticky on touch so the popup stays open + tappable.
+      if (!sticky && (('ontouchstart' in window) || navigator.maxTouchPoints > 0)) sticky = true;
       if (sticky && ev) ev.stopPropagation();
       _mjTipSticky = !!sticky;
       tip.innerHTML = mjJobInfoHTML(j, sticky);
