@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.69 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.70 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8311,7 +8311,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<button onclick="dashConvoSend()" style="padding:9px 14px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;font-weight:600;cursor:pointer;">Send</button>'
         + '</div>'
         + '<div style="display:flex;gap:10px;justify-content:flex-end;padding:0 16px 14px;">'
-        +   '<button onclick="dashConvoClose()" style="padding:9px 16px;background:transparent;border:1px solid var(--border);color:var(--text-muted);border-radius:8px;font-weight:600;cursor:pointer;">Close</button>'
+        +   '<button onclick="dashConvoClose()" style="padding:9px 16px;background:transparent;border:1px solid var(--border);color:var(--text-muted);border-radius:8px;font-weight:600;cursor:pointer;">Cancel</button>'
         +   '<button id="dashConvoConfirm" disabled onclick="dashConvoConfirm()" style="padding:9px 18px;background:var(--btn-surface,#34485d);color:var(--text-muted);border:none;border-radius:8px;font-weight:800;cursor:not-allowed;opacity:.6;">Confirm</button>'
         + '</div></div>';
       ov.style.display = 'flex';
@@ -8360,6 +8360,27 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const mm = String(p.dayID) !== String(_dashDestDay) ? '<br><span style="color:#ffb454;">⚠ Lands on ' + mjEsc(_dashDayLabel(p.dayID)) + ', not the destination board.</span>' : '';
       return 'Move <b>' + mjEsc(p.jobLabel || 'job') + '</b> → ' + mjEsc((p.toRouteCode || '') + ' · ' + (p.startLabel || '')) + ' (' + mjEsc(_dashDayLabel(p.dayID)) + ')' + mm;
     }
+    // Cancel resolves to reason DROPDOWNS (same UI as the tooltip Cancel button), not the AI reciting reasons.
+    function _dashConvoCancelHTML(plan) {
+      const sel = 'width:100%;padding:9px 10px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:8px;font-size:13px;margin-top:4px;box-sizing:border-box;';
+      const presetCat = String(plan.category || '').toLowerCase();
+      const catOpts = Object.keys(MJ_CANCEL_REASONS).map(c => '<option value="' + c + '"' + (c === presetCat ? ' selected' : '') + '>' + mjEsc(_mjTitle(c)) + '</option>').join('');
+      return '<div style="border-top:1px solid var(--border);padding:10px 0;">'
+        + '<div style="font-weight:700;margin-bottom:6px;">Cancel ' + mjEsc(plan.jobLabel || 'job') + '</div>'
+        + '<label style="color:var(--text-muted);font-size:12px;">Category</label>'
+        + '<select id="dashConvoCancelCat" onchange="_dashConvoFillReasons()" style="' + sel + '">' + catOpts + '</select>'
+        + '<label style="color:var(--text-muted);font-size:12px;display:block;margin-top:8px;">Reason</label>'
+        + '<select id="dashConvoCancelReason" style="' + sel + '"></select>'
+        + '<label style="color:var(--text-muted);font-size:12px;display:block;margin-top:8px;">Notes (optional)</label>'
+        + '<textarea id="dashConvoCancelNotes" rows="2" style="' + sel + 'resize:vertical;">' + mjEsc(plan.comments || '') + '</textarea>'
+        + '</div>';
+    }
+    function _dashConvoFillReasons(presetReason) {
+      const cat = document.getElementById('dashConvoCancelCat'), rsel = document.getElementById('dashConvoCancelReason');
+      if (!cat || !rsel) return;
+      const pr = String(presetReason || '').toLowerCase();
+      rsel.innerHTML = (MJ_CANCEL_REASONS[cat.value] || []).map(r => '<option value="' + r + '"' + (r === pr ? ' selected' : '') + '>' + mjEsc(_mjTitle(r)) + '</option>').join('');
+    }
     // Send a transcript to the AI dispatcher (working day = the SOURCE board's day); render the whole
     // exchange in the conversation modal. A resolved plan enables Confirm; clarifications keep it disabled.
     async function dashCommand(transcript) {
@@ -8374,6 +8395,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!data || !data.success) { _dashHistory.push({ role: 'assistant', text: (data && data.error) || 'Something went wrong.' }); _dashConvoRender(); return; }
       const msg = data.message || (data.intent === 'jobs' ? ('Found ' + ((data.jobs || []).length) + ' job(s) — see the boards.') : '');
       const resolved = (data.intent === 'move' || data.intent === 'cancel' || data.intent === 'duration') && data.plan;
+      if (resolved && data.plan.kind === 'cancel') {
+        _dashConvoPlan = data.plan;
+        _dashHistory.push({ role: 'assistant', text: 'Pick the cancellation reason for ' + (data.plan.jobLabel || 'this job') + ':' });
+        _dashConvoRender();
+        _dashConvoSetAction(_dashConvoCancelHTML(data.plan), true);
+        _dashConvoFillReasons(data.plan.reason);
+        return;
+      }
       if (msg) _dashHistory.push({ role: 'assistant', text: msg });
       else if (resolved) _dashHistory.push({ role: 'assistant', text: 'Ready to ' + data.intent + ' — review and confirm below.' });
       if (resolved) {
@@ -8383,8 +8412,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _dashConvoRender();
     }
     async function dashConvoConfirm() {
-      const plan = _dashConvoPlan; if (!plan) return;
-      const b = document.getElementById('dashConvoConfirm'); if (b) { b.disabled = true; b.textContent = 'Working…'; }
+      let plan = _dashConvoPlan; if (!plan) return;
+      const b = document.getElementById('dashConvoConfirm');
+      if (plan.kind === 'cancel') { // build the cancel plan from the reason dropdowns
+        const cat = document.getElementById('dashConvoCancelCat'), rsel = document.getElementById('dashConvoCancelReason'), notes = document.getElementById('dashConvoCancelNotes');
+        if (!cat || !rsel || !rsel.value) { _dashHistory.push({ role: 'assistant', text: 'Pick a reason first.' }); _dashConvoRender(); return; }
+        plan = { kind: 'cancel', jobID: plan.jobID, category: cat.value, reason: rsel.value, comments: ((notes && notes.value) || '').trim() };
+      }
+      if (b) { b.disabled = true; b.textContent = 'Working…'; }
       let res = null;
       try { res = await edgeFunctionCall('crewlogic-dispatch', { action: 'execute', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, plan, commandText: 'dashboard ' + (plan.kind || 'command'), actorEmail: currentUser.email }); } catch (e) { res = { success: false, error: 'Network error — try again.' }; }
       if (res && res.success) {
