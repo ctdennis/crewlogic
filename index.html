@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.86 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.87 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8307,8 +8307,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!_dashSrcDay) _dashSrcDay = today;
       if (!_dashDestDay) _dashDestDay = mjAddDays(today, 1);
       scr.innerHTML =
+        '<div id="dashWeatherBanner" style="display:none;"></div>' // active weather-alert callout (filled by dashLoadWeather)
         // toolbar: title + voice mic + text command (wired in Phase 2) + result
-        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">'
+        + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">'
         +   '<div style="font-size:16px;font-weight:800;color:var(--text-primary);white-space:nowrap;">🗺️ Dispatch</div>'
         +   '<button id="dashMicBtn" onclick="dashMic()" title="Voice command" style="width:38px;height:38px;flex:0 0 auto;border-radius:50%;background:var(--accent-green);color:var(--accent-text);border:none;cursor:pointer;font-size:17px;">🎤</button>'
         +   '<input id="dashCmdInput" type="text" placeholder="…or type a command — e.g. “move the 2nd job on MA1REG to tomorrow at 10”" onkeydown="if(event.key===\'Enter\')dashSendCmd()" style="flex:1;min-width:240px;padding:9px 12px;font-size:13px;background:var(--bg-input,#253545);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);">'
@@ -8352,6 +8353,33 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + '</div>';
       dashLoadBoards();
       dashMountMap();
+      dashLoadWeather();
+    }
+    // Active weather-alert callout for the ops manager (NWS via crewlogic-weather; per-franchise state).
+    let _dashWeatherDismissed = false;
+    function _dashWeatherDismiss() { _dashWeatherDismissed = true; const el = document.getElementById('dashWeatherBanner'); if (el) el.style.display = 'none'; }
+    function _wxTime(iso) { try { return new Date(iso).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; } }
+    async function dashLoadWeather() {
+      const el = document.getElementById('dashWeatherBanner'); if (!el) return;
+      if (_dashWeatherDismissed) { el.style.display = 'none'; return; }
+      let data = null;
+      try { data = await edgeFunctionCall('crewlogic-weather', { franchiseID: currentUser.franchiseID }); } catch (e) { return; }
+      const alerts = (data && data.success && data.alerts) || [];
+      if (!alerts.length) { el.style.display = 'none'; return; }
+      const a = alerts[0], more = alerts.length - 1, sev = String(a.severity || '');
+      const col = (sev === 'Extreme' || sev === 'Severe') ? '#e5484d' : (sev === 'Moderate') ? '#f59e0b' : '#eab308';
+      const bg = (sev === 'Extreme' || sev === 'Severe') ? 'rgba(229,72,77,0.14)' : 'rgba(245,158,11,0.13)';
+      const exp = a.expires ? _wxTime(a.expires) : '';
+      el.innerHTML = '<div style="display:flex;align-items:flex-start;gap:10px;padding:9px 14px;background:' + bg + ';border:1px solid ' + col + ';border-radius:var(--radius-sm,8px);margin-bottom:10px;font-size:13px;">'
+        + '<span style="font-size:18px;line-height:1.2;">⚠️</span>'
+        + '<div style="flex:1;min-width:0;"><span style="font-weight:800;color:' + col + ';">' + mjEsc(a.event) + '</span>'
+        +   (exp ? ' <span style="color:var(--text-muted);">until ' + mjEsc(exp) + '</span>' : '')
+        +   (more > 0 ? ' <span style="color:var(--text-muted);">· +' + more + ' more alert' + (more > 1 ? 's' : '') + '</span>' : '')
+        +   (a.headline ? '<div style="color:var(--text-primary);font-size:12px;margin-top:2px;">' + mjEsc(a.headline) + '</div>' : '')
+        + '</div>'
+        + '<span onclick="_dashWeatherDismiss()" title="Dismiss" style="cursor:pointer;color:var(--text-muted);font-size:18px;line-height:1;flex:0 0 auto;">×</span>'
+        + '</div>';
+      el.style.display = 'block';
     }
     // Mount the live trucks map (same machinery as the Where-Are-My-Trucks screen) into the dashboard pane.
     function dashMountMap() {
