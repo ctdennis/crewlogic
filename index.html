@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.66 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.67 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7425,6 +7425,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const d = new Date(); d.setDate(d.getDate() + offset);
       return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
     }
+    // Fit the map trucks-centered while keeping ALL on-map points visible (job markers + look-ahead dots):
+    // symmetric bounds around the trucks' centroid reaching the farthest point. NaN-safe.
+    function _fitTrucksCentered() {
+      if (typeof L === 'undefined' || !_trucksMap) return;
+      const _xy = (p) => p && (Array.isArray(p) ? { lat: +p[0], lng: +p[1] } : { lat: +p.lat, lng: +(p.lng != null ? p.lng : p.lon) });
+      const _ok = (p) => p && isFinite(p.lat) && isFinite(p.lng);
+      const truckPts = (_truckMarkers || []).map(m => _xy(m.getLatLng())).filter(_ok);
+      const otherPts = (_jobMarkers || []).concat(_lookaheadMarkers || []).map(m => _xy(m.getLatLng())).filter(_ok);
+      const allPts = truckPts.concat(otherPts);
+      if (truckPts.length && allPts.length) {
+        const cLat = truckPts.reduce((s, p) => s + p.lat, 0) / truckPts.length;
+        const cLng = truckPts.reduce((s, p) => s + p.lng, 0) / truckPts.length;
+        let dLat = 0.015, dLng = 0.015;
+        allPts.forEach(p => { dLat = Math.max(dLat, Math.abs(p.lat - cLat)); dLng = Math.max(dLng, Math.abs(p.lng - cLng)); });
+        _trucksMap.fitBounds([[cLat - dLat, cLng - dLng], [cLat + dLat, cLng + dLng]], { padding: [40, 40], maxZoom: 14 });
+      } else if (truckPts.length === 1) {
+        _trucksMap.setView([truckPts[0].lat, truckPts[0].lng], 13);
+      }
+    }
     function toggleTrucksLookahead() {
       _trucksLookahead = !_trucksLookahead;
       ['trucksLookaheadBtn', 'dashTrucksLookaheadBtn'].forEach(id => { // style both the trucks screen + dashboard buttons
@@ -7442,7 +7461,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _lookaheadMarkers.forEach(m => _trucksMap.removeLayer(m));
       _lookaheadMarkers = [];
       const legEl = document.getElementById('lookaheadLegend');
-      if (!_trucksLookahead) { if (legEl) legEl.style.display = 'none'; return; }
+      if (!_trucksLookahead) { if (legEl) legEl.style.display = 'none'; _fitTrucksCentered(); return; } // toggled off → refit to trucks + today's jobs
       const base = _trucksJobDay;
       // Fetch the next 3 days in parallel (cached geocodes make repeats instant).
       const results = await Promise.all([1, 2, 3].map(k =>
@@ -7486,6 +7505,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const c = document.getElementById('lookaheadLegendCount');
         if (c) c.textContent = total;
       }
+      _fitTrucksCentered(); // zoom out to include the new +3-day dots so the user sees they appeared
     }
     async function showTrucks(isRefresh) {
       const listEl = document.getElementById('trucksList');
@@ -7789,22 +7809,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _trucksJobsData = jobs;
         if (_trucksData && _trucksData.length) renderTrucks(_trucksData, false);
         renderSiteMarkers(); // retry site/home geocode now that cost settings are surely loaded (guarded)
-        // Keep the trucks centered (owner) BUT zoom out enough to keep all jobs visible: bounds symmetric
-        // around the trucks' centroid, reaching the farthest job → trucks stay mid-map, jobs on-screen.
-        // Normalize points ([lat,lng] arrays OR {lat,lng}/{lat,lon}) + drop any non-finite coords.
-        const _xy = (p) => p && (Array.isArray(p) ? { lat: +p[0], lng: +p[1] } : { lat: +p.lat, lng: +(p.lng != null ? p.lng : p.lon) });
-        const _ok = (p) => p && isFinite(p.lat) && isFinite(p.lng);
-        const truckPts = _truckMarkers.map(m => _xy(m.getLatLng())).filter(_ok);
-        const allPts = truckPts.concat((jobPts || []).map(_xy).filter(_ok));
-        if (truckPts.length && allPts.length) {
-          const cLat = truckPts.reduce((s, p) => s + p.lat, 0) / truckPts.length;
-          const cLng = truckPts.reduce((s, p) => s + p.lng, 0) / truckPts.length;
-          let dLat = 0.015, dLng = 0.015;
-          allPts.forEach(p => { dLat = Math.max(dLat, Math.abs(p.lat - cLat)); dLng = Math.max(dLng, Math.abs(p.lng - cLng)); });
-          _trucksMap.fitBounds([[cLat - dLat, cLng - dLng], [cLat + dLat, cLng + dLng]], { padding: [40, 40], maxZoom: 14 });
-        } else if (truckPts.length === 1) {
-          _trucksMap.setView([truckPts[0].lat, truckPts[0].lng], 13);
-        }
+        // Trucks centered, all jobs (+ any look-ahead dots) visible — shared helper.
+        _fitTrucksCentered();
         // Legend: one colored chip per route, with its open-stop count.
         const legend = document.getElementById('trucksLegend');
         if (legend) legend.style.display = 'flex';
