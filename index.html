@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.83 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.84 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8330,6 +8330,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<button id="dashTrucksLookaheadBtn" onclick="toggleTrucksLookahead()" title="Show jobs for the next 3 days from the selected day, as gray dots" style="font-size:12px;padding:6px 12px;background:var(--bg-input,#1e2f40);color:var(--text-muted);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;white-space:nowrap;">◌ +3 days</button>'
         +   '<button onclick="showTrucks()" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🔄 Refresh</button>'
         +   '<button id="dashDispBtn" onclick="dashFindDisposal()" title="Plan a dump: tap a truck, then the destination job" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🗑️ Find disposal</button>'
+        +   '<button onclick="dashGeneratePlan()" title="Generate the AI Job Plan for the selected day" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">📋 Generate plan</button>'
         + '</div>'
         // disposal control bar (hidden until "Find disposal") — % full + tap-status + done
         + '<div id="dashDispBar" style="display:none;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;padding:8px 12px;background:var(--bg-card);border:1px solid var(--accent-green,#00E785);border-radius:var(--radius-sm);">'
@@ -9465,6 +9466,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       loadSavedJobPlan();
     }
 
+    // Dashboard "Generate plan" → open the Job Plan screen for the trucks-map's SELECTED day and auto-generate.
+    let _pendingJobPlanGen = null;
+    function dashGeneratePlan() { _pendingJobPlanGen = (typeof _trucksJobDay === 'number' ? _trucksJobDay : 0); openModule('jobPlan'); }
     async function initJobPlan() {
       // Default Tomorrow selected
       jobPlanState.dayOffset = 1;
@@ -9487,6 +9491,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         return;
       }
       await loadSavedJobPlan();
+      // Dashboard "Generate plan" came in for a specific day → set that day + auto-generate now.
+      if (_pendingJobPlanGen != null) {
+        const off = _pendingJobPlanGen; _pendingJobPlanGen = null;
+        jobPlanState.dayOffset = off; jobPlanState.editedRoutes = {}; jobPlanState.isDirty = false;
+        document.querySelectorAll('.jp-day-tab').forEach(b => b.classList.toggle('active', String(b.dataset.offset) === String(off)));
+        generateJobPlan();
+      }
     }
 
     // Make sure currentUser.franchiseInternalID and tenantID are populated.
