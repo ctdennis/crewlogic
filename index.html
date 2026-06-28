@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.84 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.85 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9466,9 +9466,62 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       loadSavedJobPlan();
     }
 
-    // Dashboard "Generate plan" → open the Job Plan screen for the trucks-map's SELECTED day and auto-generate.
-    let _pendingJobPlanGen = null;
-    function dashGeneratePlan() { _pendingJobPlanGen = (typeof _trucksJobDay === 'number' ? _trucksJobDay : 0); openModule('jobPlan'); }
+    // Dashboard "Generate plan" → generate the Job Plan for the trucks-map's SELECTED day and show it in a
+    // scrollable popup (Copy all / Cancel), without leaving the dashboard.
+    let _dashPlanText = '';
+    function dashGeneratePlan() {
+      const off = (typeof _trucksJobDay === 'number' ? _trucksJobDay : 0);
+      const dayLabel = off === 0 ? 'Today' : off === 1 ? 'Tomorrow' : off === 2 ? 'Day After Tomorrow' : _dateStrFromOffset(off);
+      _dashPlanModalOpen(dayLabel);
+      _dashPlanGenerate(off, dayLabel);
+    }
+    function _dashPlanModalOpen(dayLabel) {
+      let ov = document.getElementById('dashPlanModalOv');
+      if (!ov) { ov = document.createElement('div'); ov.id = 'dashPlanModalOv'; document.body.appendChild(ov); }
+      ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(3,8,14,0.62);display:flex;align-items:center;justify-content:center;padding:5vh 12px;';
+      ov.innerHTML = '<div style="background:var(--bg-card,#1e2f40);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.5);width:96%;max-width:560px;max-height:86vh;display:flex;flex-direction:column;font-size:13px;color:var(--text-primary);">'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px 8px;"><span style="font-size:16px;font-weight:800;">📋 Job Plan — ' + mjEsc(dayLabel) + '</span><span onclick="_dashPlanModalClose()" style="cursor:pointer;color:var(--text-muted);font-size:20px;line-height:1;">×</span></div>'
+        + '<div id="dashPlanBody" style="overflow-y:auto;padding:4px 18px;flex:1;min-height:120px;"><div style="text-align:center;padding:32px;color:var(--text-muted);"><span class="spinner-inline"></span> Generating plan for ' + mjEsc(dayLabel) + '… (~10s)</div></div>'
+        + '<div style="display:flex;gap:10px;justify-content:flex-end;padding:12px 18px 16px;border-top:1px solid var(--border);">'
+        +   '<button onclick="_dashPlanModalClose()" style="padding:9px 16px;background:transparent;border:1px solid var(--border);color:var(--text-muted);border-radius:8px;font-weight:600;cursor:pointer;">Cancel</button>'
+        +   '<button id="dashPlanCopyBtn" disabled onclick="_dashPlanCopyAll()" style="padding:9px 18px;background:var(--btn-surface,#34485d);color:var(--text-muted);border:none;border-radius:8px;font-weight:800;cursor:not-allowed;opacity:.6;">📋 Copy all</button>'
+        + '</div></div>';
+      ov.style.display = 'flex';
+    }
+    function _dashPlanModalClose() { const ov = document.getElementById('dashPlanModalOv'); if (ov) ov.style.display = 'none'; _dashPlanText = ''; }
+    async function _dashPlanGenerate(off, dayLabel) {
+      let data = null;
+      try {
+        const res = await fetch(EDGE_BASE + '/crewlogic-job-plan', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + EDGE_ANON_KEY, 'apikey': EDGE_ANON_KEY }, body: JSON.stringify({ franchiseID: currentUser.franchiseID, dayOffset: off }) });
+        data = await res.json();
+      } catch (e) { data = { success: false, error: 'Network error — try again.' }; }
+      const body = document.getElementById('dashPlanBody'); const ov = document.getElementById('dashPlanModalOv');
+      if (!body || !ov || ov.style.display === 'none') return; // closed/cancelled mid-flight
+      if (!data || !data.success) { body.innerHTML = '<div style="padding:20px;color:#ff6b6b;">⚠ ' + mjEsc((data && data.error) || 'Plan generation failed.') + '</div>'; return; }
+      const routes = data.routes || [];
+      if (!routes.length) { body.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);">No jobs scheduled for ' + mjEsc(dayLabel) + '.</div>'; return; }
+      let html = '', copy = '';
+      routes.forEach(r => {
+        const nm = String(r.routeName || '').replace(/[<>&"']/g, ''), sc = r.stopCount || 0, txt = String(r.plan || '').trim();
+        html += '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px;background:var(--bg-input,#1e2f40);">'
+          + '<div style="font-weight:800;margin-bottom:6px;">' + mjEsc(nm) + ' <span style="color:var(--text-muted);font-weight:600;">— ' + sc + ' stop' + (sc === 1 ? '' : 's') + '</span></div>'
+          + '<div style="white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.5;color:#cdd6df;">' + mjEsc(txt) + '</div></div>';
+        copy += 'ROUTE ' + nm + ' — ' + sc + ' stop' + (sc === 1 ? '' : 's') + '\n' + txt + '\n\n';
+      });
+      body.innerHTML = html;
+      _dashPlanText = copy.trim();
+      const cb = document.getElementById('dashPlanCopyBtn'); if (cb) { cb.disabled = false; cb.style.cssText = 'padding:9px 18px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;font-weight:800;cursor:pointer;'; }
+      try { // persist (upsert) so it's also saved on the Job Plan screen — best-effort
+        await ensureJobPlanContext();
+        await supabaseFetch('/rest/v1/job_plans?on_conflict=tenant_id,franchise_id,plan_date', { method: 'POST', headers: { 'Prefer': 'resolution=merge-duplicates,return=representation' }, body: JSON.stringify({ tenant_id: currentUser.tenantID || '946a4535-aa61-45b6-a6fb-9190ff546d41', franchise_id: currentUser.franchiseInternalID, plan_date: data.date, routes: data.routes, total_jobs: data.totalJobs, ai_model: (data.meta && data.meta.model) || null, ai_metadata: data.meta || null, generated_at: new Date().toISOString(), last_edited_at: null }) });
+      } catch (e) {}
+    }
+    function _dashPlanCopyAll() {
+      const t = _dashPlanText || ''; if (!t) return;
+      const done = (ok) => { const b = document.getElementById('dashPlanCopyBtn'); if (b) { const o = b.textContent; b.textContent = ok ? '✓ Copied' : '✗ Copy failed'; setTimeout(() => { b.textContent = o; }, 1500); } };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(() => done(true), () => done(false));
+      else { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(true); } catch (e) { done(false); } document.body.removeChild(ta); }
+    }
     async function initJobPlan() {
       // Default Tomorrow selected
       jobPlanState.dayOffset = 1;
@@ -9491,13 +9544,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         return;
       }
       await loadSavedJobPlan();
-      // Dashboard "Generate plan" came in for a specific day → set that day + auto-generate now.
-      if (_pendingJobPlanGen != null) {
-        const off = _pendingJobPlanGen; _pendingJobPlanGen = null;
-        jobPlanState.dayOffset = off; jobPlanState.editedRoutes = {}; jobPlanState.isDirty = false;
-        document.querySelectorAll('.jp-day-tab').forEach(b => b.classList.toggle('active', String(b.dataset.offset) === String(off)));
-        generateJobPlan();
-      }
     }
 
     // Make sure currentUser.franchiseInternalID and tenantID are populated.
