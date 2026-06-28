@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.75 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.76 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7395,7 +7395,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _dispStatus('<span style="color:var(--accent-orange,#f59e0b);font-weight:700;">All sites closed at arrival</span> — details at right →');
         let h = '<div style="padding:10px 12px;border:1px solid var(--accent-orange,#f59e0b);border-radius:var(--radius-sm);color:var(--accent-orange,#f59e0b);font-size:13px;margin-bottom:8px;">⚠ No disposal sites are open at the estimated arrival' + (js ? ' (job at ' + dispEsc(js) + ')' : '') + ' — here are the closest options with the full breakdown (all currently closed):</div>';
         h += closed.length
-          ? '<div style="display:grid;grid-template-columns:1fr;gap:10px;align-items:start;">' + closed.slice(0, 4).map(s => dispRecCard('🔒 ' + dispEsc(s.closedReason || 'closed'), '#6e8194', s, js)).join('') + '</div>'
+          ? '<div style="display:grid;grid-template-columns:1fr;gap:10px;align-items:start;">' + closed.slice(0, 4).map(s => dispRecCard('🔒 ' + dispEsc(s.closedReason || 'closed'), '#6e8194', s, js, '', true)).join('') + '</div>'
           : '<div style="color:var(--text-muted);font-size:13px;">No disposal sites configured.</div>';
         res.innerHTML = h; _dispScrollResults(); return;
       }
@@ -7403,10 +7403,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const cheaper = (lc && lt) ? (Number(lt.totalCost) || 0) - (Number(lc.totalCost) || 0) : 0; // cheapest saves $ vs fastest
       const tSaved = (lc && lt) ? (Number(lc.totalTimeWithWait) || 0) - (Number(lt.totalTimeWithWait) || 0) : 0; // fastest saves time vs cheapest
       let html = '<div style="display:grid;grid-template-columns:1fr;gap:10px;align-items:start;">';
-      if (same) html += dispRecCard('⭐ Cheapest &amp; Fastest', '#fbbf24', lc, js);
+      if (same) html += dispRecCard('⭐ Cheapest &amp; Fastest', '#fbbf24', lc, js, '', true);
       else {
-        html += dispRecCard('Cheapest', '#00E785', lc, js, cheaper > 0 ? '💰 ' + dispMoney(cheaper) + ' cheaper' : '');
-        html += dispRecCard('Fastest', '#6db3ff', lt, js, tSaved > 0 ? '⚡ Saves ' + dispMins(tSaved) : '');
+        html += dispRecCard('Cheapest', '#00E785', lc, js, cheaper > 0 ? '💰 ' + dispMoney(cheaper) + ' cheaper' : '', true);
+        html += dispRecCard('Fastest', '#6db3ff', lt, js, tSaved > 0 ? '⚡ Saves ' + dispMins(tSaved) : '', true);
       }
       html += '</div>';
       res.innerHTML = html; _dispScrollResults();
@@ -10502,8 +10502,28 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return '<div style="margin-top:8px;padding:8px 10px;background:rgba(245,158,11,0.15);border:1.5px solid var(--accent-orange,#f59e0b);border-radius:var(--radius-sm);color:var(--accent-orange,#f59e0b);font-size:12.5px;font-weight:700;text-align:center;">⚠️ Cutting it close — closes ' + m + ' min after you arrive</div>';
     }
 
-    function dispRecCard(title, accent, site, jobStartTime, extra) {
+    function dispRecCard(title, accent, site, jobStartTime, extra, compact) {
       if (!site) return '';
+      const dirUrl = dispDirectionsUrl(site.address, dispState.endpointAddress);
+      if (compact) {
+        const arrive = dispEsc(site.arrivalTime || site.arrivalLocal || '—');
+        return '<div class="disp-rec" style="border-color:' + accent + ';padding:12px 14px;">'
+          + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">'
+          +   '<span class="disp-rec-title" style="color:' + accent + ';">' + title + '</span>'
+          +   '<span style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;">' + dispWarnChip(site)
+          +     '<a href="' + dirUrl + '" target="_blank" rel="noopener" style="font-size:12px;font-weight:700;color:' + accent + ';text-decoration:none;white-space:nowrap;">🧭 Directions</a>'
+          +   '</span></div>'
+          + (extra ? '<div style="font-size:13px;font-weight:800;color:' + accent + ';margin:2px 0 4px;">' + extra + '</div>' : '')
+          + '<div style="font-weight:700;font-size:14px;margin-top:2px;">' + dispEsc(site.name) + '</div>'
+          + '<div style="color:var(--text-muted);font-size:12px;margin-bottom:6px;">' + dispEsc(site.address) + '</div>'
+          + '<div style="display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline;">'
+          +   '<span style="font-weight:800;font-size:15px;">' + dispMoney(site.totalCost) + '</span>'
+          +   '<span style="font-weight:800;font-size:15px;">' + dispMins(site.totalTimeWithWait) + '</span>'
+          +   '<span style="color:var(--text-muted);font-size:12.5px;">arrive <b style="color:var(--text-primary);">' + arrive + '</b>' + (jobStartTime ? ' · job ' + dispEsc(jobStartTime) : '') + '</span>'
+          + '</div>'
+          + '<div class="disp-breakdown" style="margin-top:6px;">Disposal ' + dispMoney(site.disposalFee) + ' · Labor ' + dispMoney(site.laborCost) + ' · Fuel ' + dispMoney(site.fuelCost) + ' · ' + (Number(site.routeMiles) || 0) + ' mi · ' + dispMins(site.driveMinutes) + ' drive + ' + dispMins(site.waitMinutes) + ' wait</div>'
+          + '</div>';
+      }
       const timesBlock = '<div class="disp-times">' +
         (jobStartTime ? '<div class="disp-time-row"><span class="disp-time-lbl">Job Start</span><span class="disp-time-val">' + dispEsc(jobStartTime) + '</span></div>' : '') +
         '<div class="disp-time-row"><span class="disp-time-lbl">Expected Arrival</span><span class="disp-time-val">' + dispEsc(site.arrivalTime || site.arrivalLocal || '—') + '</span></div>' +
