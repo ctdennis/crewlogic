@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.74 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.75 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7337,7 +7337,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _dispMode = false; _dispPick = { truck: null, job: null }; _dispClearRoutes();
       const bar = document.getElementById('dashDispBar'); if (bar) bar.style.display = 'none';
       const res = document.getElementById('dashDispResults'); if (res) res.innerHTML = '';
+      _dispShowPanel(false); // results column away → map back to full width
       const btn = document.getElementById('dashDispBtn'); if (btn) { btn.style.background = 'var(--bg-input,#1e2f40)'; btn.style.color = 'var(--text-primary)'; }
+    }
+    // Toggle the right-hand results column beside the map; the map shrinks/grows so re-fit Leaflet's size.
+    function _dispShowPanel(show) {
+      const res = document.getElementById('dashDispResults'); if (!res) return;
+      res.style.display = show ? 'block' : 'none';
+      if (_trucksMap) setTimeout(() => { try { _trucksMap.invalidateSize(); } catch (e) {} }, 60);
     }
     function _dispClearRoutes() { if (_trucksMap) _dispRouteLayers.forEach(l => { try { _trucksMap.removeLayer(l); } catch (e) {} }); _dispRouteLayers = []; }
     function _dispTapTruck(i, t) {
@@ -7360,6 +7367,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const pctEl = document.getElementById('dashDispPct'); const pct = Number(pctEl && pctEl.value);
       const loadPercent = Number.isFinite(pct) ? pct : 100;
       res.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:10px;">Finding the best dump…</div>';
+      _dispShowPanel(true); // reveal the results column beside the map (map shrinks now, before plotting)
       let data = null;
       try {
         data = await edgeFunctionCall('crewlogic-route-disposal', {
@@ -7384,17 +7392,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const lc = data.leastCost, lt = data.leastTime, js = data.jobStartTime;
       if (!lc && !lt) {
         const closed = (data.sites || []).filter(s => s.open === false).sort((a, b) => (Number(a.totalCost) || 0) - (Number(b.totalCost) || 0));
-        _dispStatus('<span style="color:var(--accent-orange,#f59e0b);font-weight:700;">All sites closed at arrival</span> — full breakdown below ↓');
+        _dispStatus('<span style="color:var(--accent-orange,#f59e0b);font-weight:700;">All sites closed at arrival</span> — details at right →');
         let h = '<div style="padding:10px 12px;border:1px solid var(--accent-orange,#f59e0b);border-radius:var(--radius-sm);color:var(--accent-orange,#f59e0b);font-size:13px;margin-bottom:8px;">⚠ No disposal sites are open at the estimated arrival' + (js ? ' (job at ' + dispEsc(js) + ')' : '') + ' — here are the closest options with the full breakdown (all currently closed):</div>';
         h += closed.length
-          ? '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start;">' + closed.slice(0, 4).map(s => dispRecCard('🔒 ' + dispEsc(s.closedReason || 'closed'), '#6e8194', s, js)).join('') + '</div>'
+          ? '<div style="display:grid;grid-template-columns:1fr;gap:10px;align-items:start;">' + closed.slice(0, 4).map(s => dispRecCard('🔒 ' + dispEsc(s.closedReason || 'closed'), '#6e8194', s, js)).join('') + '</div>'
           : '<div style="color:var(--text-muted);font-size:13px;">No disposal sites configured.</div>';
         res.innerHTML = h; _dispScrollResults(); return;
       }
       const same = lc && lt && lc.facilityId === lt.facilityId;
       const cheaper = (lc && lt) ? (Number(lt.totalCost) || 0) - (Number(lc.totalCost) || 0) : 0; // cheapest saves $ vs fastest
       const tSaved = (lc && lt) ? (Number(lc.totalTimeWithWait) || 0) - (Number(lt.totalTimeWithWait) || 0) : 0; // fastest saves time vs cheapest
-      let html = '<div style="display:grid;grid-template-columns:' + (same ? '1fr' : '1fr 1fr') + ';gap:10px;align-items:start;">';
+      let html = '<div style="display:grid;grid-template-columns:1fr;gap:10px;align-items:start;">';
       if (same) html += dispRecCard('⭐ Cheapest &amp; Fastest', '#fbbf24', lc, js);
       else {
         html += dispRecCard('Cheapest', '#00E785', lc, js, cheaper > 0 ? '💰 ' + dispMoney(cheaper) + ' cheaper' : '');
@@ -7404,10 +7412,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       res.innerHTML = html; _dispScrollResults();
       // Compact summary in the bar ABOVE the map (visible with the routes); full breakdown is in the cards below.
       _dispStatus(same
-        ? '<span style="color:#fbbf24;font-weight:700;">Best: ' + dispMoney(lc.totalCost) + ' · ' + dispMins(lc.totalTimeWithWait) + '</span> — breakdown below ↓'
-        : '<span style="color:#00E785;font-weight:700;">Cheapest ' + dispMoney(lc.totalCost) + ' · ' + dispMins(lc.totalTimeWithWait) + '</span> &nbsp;<span style="color:#6db3ff;font-weight:700;">Fastest ' + dispMoney(lt.totalCost) + ' · ' + dispMins(lt.totalTimeWithWait) + '</span> — breakdown below ↓');
+        ? '<span style="color:#fbbf24;font-weight:700;">Best: ' + dispMoney(lc.totalCost) + ' · ' + dispMins(lc.totalTimeWithWait) + '</span>'
+        : '<span style="color:#00E785;font-weight:700;">Cheapest ' + dispMoney(lc.totalCost) + ' · ' + dispMins(lc.totalTimeWithWait) + '</span> &nbsp;<span style="color:#6db3ff;font-weight:700;">Fastest ' + dispMoney(lt.totalCost) + ' · ' + dispMins(lt.totalTimeWithWait) + '</span>');
     }
-    function _dispScrollResults() { const res = document.getElementById('dashDispResults'); if (res && res.scrollIntoView) { try { res.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {} } }
+    function _dispScrollResults() { const w = document.getElementById('dashMapWrap'); if (w && w.scrollIntoView) { try { w.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {} } }
     function _dispPlot(data) {
       if (!_trucksMap) return;
       _dispClearRoutes();
@@ -8319,8 +8327,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<span id="dashDispStatus" style="font-size:12px;color:var(--text-primary);flex:1;min-width:160px;">Tap a <b>truck</b> on the map…</span>'
         +   '<button onclick="_dispCancel()" style="font-size:12px;padding:6px 14px;background:transparent;border:1px solid var(--border);color:var(--text-muted);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">Done</button>'
         + '</div>'
-        + '<div id="dashMapPane" style="height:55vh;min-height:420px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);"></div>'
-        + '<div id="dashDispResults" style="margin-top:10px;"></div>';
+        + '<div id="dashMapWrap" style="display:flex;gap:10px;align-items:stretch;">'
+        +   '<div id="dashMapPane" style="flex:1;min-width:0;height:55vh;min-height:420px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);"></div>'
+        +   '<div id="dashDispResults" style="display:none;flex:0 0 430px;width:430px;height:55vh;min-height:420px;overflow-y:auto;"></div>'
+        + '</div>';
       dashLoadBoards();
       dashMountMap();
     }
