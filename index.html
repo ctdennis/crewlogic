@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.67 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.68 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8575,10 +8575,70 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (j.items && String(j.items).trim()) h += _mjBlock('Item(s) List', mjEsc(String(j.items).trim()));
       // Quick duration (0.5h–5h, 30-min steps) — tap a length → confirm. Hidden on completed jobs.
       const _jdone = !!(j.completed || j.labelDone);
+      _mjLastTipJob = j; // remember this job for the Cancel-job button (one tooltip shows at a time)
       if (!_jdone && j.woID) {
         h += '<div id="mjDurWrap" style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px;">' + _mjDurButtonsHTML(jid, Number(j.durationMin) || 0) + '</div>';
       }
+      if (!_jdone && j.jobID) {
+        h += '<button onclick="mjCancelJob()" style="margin-top:8px;width:100%;padding:9px;background:transparent;color:#ff6b6b;border:1px solid #e5484d;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">✕ Cancel job</button>';
+      }
       return h;
+    }
+    // ── Cancel-job button (tooltip) → reason picker → same execute kind:'cancel' path as voice ──
+    let _mjLastTipJob = null;
+    const MJ_CANCEL_REASONS = {
+      'customer initiated': ['customer decided to keep the items', 'customer removed items themselves', 'duplicate booking', 'no contact with customer', 'service no longer required'],
+      'pricing': ['customer thought we were free', 'price concerns', 'used alternative company'],
+      'scheduling': ['customer not ready', 'date no longer works for customer'],
+    };
+    function _mjTitle(s) { return String(s || '').replace(/\b\w/g, c => c.toUpperCase()); }
+    function mjCancelJob() {
+      const j = _mjLastTipJob; if (!j || !j.jobID) return;
+      mjTipForceHide();
+      const catOpts = Object.keys(MJ_CANCEL_REASONS).map(c => '<option value="' + c + '">' + mjEsc(_mjTitle(c)) + '</option>').join('');
+      let ov = document.getElementById('mjCancelOverlay');
+      if (!ov) { ov = document.createElement('div'); ov.id = 'mjCancelOverlay'; document.body.appendChild(ov); }
+      ov.style.cssText = 'position:fixed;inset:0;z-index:100001;background:rgba(3,8,14,0.62);display:flex;align-items:center;justify-content:center;';
+      const sel = 'width:100%;padding:9px 10px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:8px;font-size:13px;margin-top:4px;box-sizing:border-box;';
+      ov.innerHTML = '<div style="background:var(--bg-card,#1e2f40);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.5);padding:18px 20px;max-width:400px;width:92%;font-size:13px;color:var(--text-primary);">'
+        + '<div style="font-size:15px;font-weight:800;margin-bottom:4px;">Cancel job</div>'
+        + '<div style="color:var(--text-muted);margin-bottom:12px;">' + mjEsc(j.client || 'Job') + (j.jobID ? ' · #' + mjEsc(String(j.jobID)) : '') + '</div>'
+        + '<label style="color:var(--text-muted);font-size:12px;">Category</label>'
+        + '<select id="mjCancelCat" onchange="_mjFillCancelReasons()" style="' + sel + '">' + catOpts + '</select>'
+        + '<label style="color:var(--text-muted);font-size:12px;display:block;margin-top:10px;">Reason</label>'
+        + '<select id="mjCancelReason" style="' + sel + '"></select>'
+        + '<label style="color:var(--text-muted);font-size:12px;display:block;margin-top:10px;">Notes (optional)</label>'
+        + '<textarea id="mjCancelNotes" rows="2" style="' + sel + 'resize:vertical;"></textarea>'
+        + '<div id="mjCancelErr" style="color:#ff6b6b;font-size:12px;margin-top:8px;min-height:1px;"></div>'
+        + '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px;">'
+        +   '<button onclick="mjCancelClose()" style="padding:9px 16px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;font-weight:600;cursor:pointer;">Keep job</button>'
+        +   '<button id="mjCancelBtn" onclick="mjCancelExecute(\'' + mjEsc(String(j.jobID)) + '\')" style="padding:9px 18px;background:#e5484d;color:#fff;border:none;border-radius:8px;font-weight:800;cursor:pointer;">Cancel job</button>'
+        + '</div></div>';
+      ov.style.display = 'flex'; _mjFillCancelReasons();
+      ov.onclick = null; setTimeout(() => { ov.onclick = (e) => { if (e.target === ov) mjCancelClose(); }; }, 400);
+    }
+    function _mjFillCancelReasons() {
+      const cat = document.getElementById('mjCancelCat'), rsel = document.getElementById('mjCancelReason');
+      if (!cat || !rsel) return;
+      rsel.innerHTML = (MJ_CANCEL_REASONS[cat.value] || []).map(r => '<option value="' + r + '">' + mjEsc(_mjTitle(r)) + '</option>').join('');
+    }
+    function mjCancelClose() { const ov = document.getElementById('mjCancelOverlay'); if (ov) ov.style.display = 'none'; }
+    async function mjCancelExecute(jobID) {
+      const cat = document.getElementById('mjCancelCat'), rsel = document.getElementById('mjCancelReason'), notes = document.getElementById('mjCancelNotes');
+      const btn = document.getElementById('mjCancelBtn'), err = document.getElementById('mjCancelErr');
+      if (!cat || !rsel || !rsel.value) { if (err) err.textContent = 'Pick a reason.'; return; }
+      const plan = { kind: 'cancel', jobID: String(jobID), category: cat.value, reason: rsel.value, comments: ((notes && notes.value) || '').trim() };
+      if (btn) { btn.disabled = true; btn.textContent = 'Cancelling…'; }
+      let res = null;
+      try { res = await edgeFunctionCall('crewlogic-dispatch', { action: 'execute', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, plan, commandText: 'tooltip cancel button', actorEmail: currentUser.email }); } catch (e) { res = { success: false, error: 'Network error — try again.' }; }
+      if (res && res.success) { mjCancelClose(); if (typeof _dashToast === 'function') _dashToast('Job cancelled.'); _dispatchRefreshVisible(); }
+      else { if (err) err.textContent = (res && res.error) || 'Could not cancel that job.'; if (btn) { btn.disabled = false; btn.textContent = 'Cancel job'; } }
+    }
+    // Refresh whichever dispatch surface is visible (dashboard boards or the standalone Manage Jobs board).
+    function _dispatchRefreshVisible() {
+      const ds = document.getElementById('dashSrcBoard');
+      if (ds && ds.offsetParent !== null) { dashReloadOne('src', true); dashReloadOne('dest', true); }
+      else if (_mjBoardDayID) { try { mjSelectDate(_mjBoardDayID); } catch (e) {} }
     }
     // Job tooltip — desktop hover (quick peek) + mobile tap (sticky, dismiss via × or tap-outside).
     let _mjTipSticky = false;
@@ -8747,6 +8807,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _mjHistory = []; // task complete — start a fresh conversation
         const okTxt = plan.kind === 'cancel' ? 'Job cancelled.' : plan.kind === 'duration' ? ('Duration updated to ' + mjEsc(String(plan.durationMin || '')) + ' min.') : ('Moved to ' + mjEsc(plan.toRouteCode || '') + ' · ' + mjEsc(plan.startLabel || '') + '.');
         r.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--accent-green,#00E785);border-radius:var(--radius);padding:14px 16px;font-size:14px;color:var(--text-primary);">✅ ' + okTxt + '</div>';
+        _dispatchRefreshVisible(); // re-render the board so the change (move/cancel/duration) shows immediately
       } else {
         const msg = (data && (data.error || (data.move && data.move.errMsg) || (data.cancel && data.cancel.errMsg) || (data.edit && data.edit.errMsg))) || 'The change could not be completed.';
         r.innerHTML = '<div style="color:#ff6b6b;font-size:13px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;">⚠ ' + mjEsc(msg) + '</div>';
