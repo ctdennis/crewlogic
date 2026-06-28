@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.68 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.69 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8291,36 +8291,110 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       try { _dashRec.start(); _dashListening = true; if (btn) btn.style.background = 'var(--accent-yellow,#f59e0b)'; if (box) box.value = ''; _dashCmdMsg('Listening… tap the mic to send'); } catch (e) { _dashListening = false; }
     }
     function dashSendCmd() { const t = document.getElementById('dashCmdInput'); const v = (t.value || '').trim(); if (!v) return; t.value = ''; dashCommand(v); }
-    // Send a transcript to the AI dispatcher (working day = the SOURCE board's day). A move plan opens the
-    // shared confirm modal; if the resolved target day ≠ the destination board's day, the modal flags it.
+    // ── Unified dispatch conversation modal: the SAME popup holds the You/AI dialog AND the confirm.
+    // Opens on the first command, stays open through clarifying questions, has its own mic+input, and
+    // keeps Confirm DISABLED until the AI resolves an action — then it lights up with the summary.
+    let _dashConvoPlan = null, _dashConvoBusy = false;
+    function _dashConvoOpen() {
+      let ov = document.getElementById('dashConvoOverlay');
+      if (!ov) { ov = document.createElement('div'); ov.id = 'dashConvoOverlay'; document.body.appendChild(ov); }
+      if (ov.style.display === 'flex') return; // already open — don't rebuild (would wipe the transcript)
+      ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(3,8,14,0.62);display:flex;align-items:flex-start;justify-content:center;padding-top:6vh;';
+      const inp = 'flex:1;min-width:0;padding:9px 12px;font-size:13px;background:var(--bg-input,#1e2f40);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);';
+      ov.innerHTML = '<div style="background:var(--bg-card,#1e2f40);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.5);width:94%;max-width:460px;font-size:13px;color:var(--text-primary);display:flex;flex-direction:column;max-height:82vh;">'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px 8px;"><span style="font-size:15px;font-weight:800;">🎙️ Dispatch command</span><span onclick="dashConvoClose()" style="cursor:pointer;color:var(--text-muted);font-size:20px;line-height:1;">×</span></div>'
+        + '<div id="dashConvoLog" style="overflow-y:auto;padding:4px 16px;flex:1;min-height:90px;"></div>'
+        + '<div id="dashConvoAction" style="padding:0 16px;"></div>'
+        + '<div style="display:flex;gap:8px;align-items:center;padding:10px 16px;border-top:1px solid var(--border);">'
+        +   '<button id="dashConvoMicBtn" onclick="dashConvoMic()" title="Voice" style="width:36px;height:36px;flex:0 0 auto;border-radius:50%;background:var(--accent-green);color:var(--accent-text,#06121d);border:none;cursor:pointer;font-size:16px;">🎤</button>'
+        +   '<input id="dashConvoInput" type="text" placeholder="Answer or refine…" onkeydown="if(event.key===\'Enter\')dashConvoSend()" style="' + inp + '">'
+        +   '<button onclick="dashConvoSend()" style="padding:9px 14px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;font-weight:600;cursor:pointer;">Send</button>'
+        + '</div>'
+        + '<div style="display:flex;gap:10px;justify-content:flex-end;padding:0 16px 14px;">'
+        +   '<button onclick="dashConvoClose()" style="padding:9px 16px;background:transparent;border:1px solid var(--border);color:var(--text-muted);border-radius:8px;font-weight:600;cursor:pointer;">Close</button>'
+        +   '<button id="dashConvoConfirm" disabled onclick="dashConvoConfirm()" style="padding:9px 18px;background:var(--btn-surface,#34485d);color:var(--text-muted);border:none;border-radius:8px;font-weight:800;cursor:not-allowed;opacity:.6;">Confirm</button>'
+        + '</div></div>';
+      ov.style.display = 'flex';
+      setTimeout(() => { const i = document.getElementById('dashConvoInput'); if (i) i.focus(); }, 50);
+    }
+    function dashConvoClose() { const ov = document.getElementById('dashConvoOverlay'); if (ov) ov.style.display = 'none'; _dashConvoPlan = null; _dashConvoBusy = false; _dashHistory = []; }
+    function _dashConvoRender() {
+      const log = document.getElementById('dashConvoLog'); if (!log) return;
+      let h = '';
+      _dashHistory.forEach(t => {
+        const me = t.role === 'user';
+        h += '<div style="margin:6px 0;display:flex;' + (me ? 'justify-content:flex-end;' : '') + '">'
+          + '<div style="max-width:85%;padding:7px 11px;border-radius:12px;font-size:13px;line-height:1.4;'
+          + (me ? 'background:var(--accent-green,#00E785);color:#06121d;border-bottom-right-radius:3px;' : 'background:var(--bg-input,#1e2f40);color:var(--text-primary);border-bottom-left-radius:3px;') + '">'
+          + (me ? '' : '<span style="font-size:10px;font-weight:700;color:var(--text-muted);display:block;margin-bottom:1px;">AI</span>')
+          + mjEsc(t.text) + '</div></div>';
+      });
+      if (_dashConvoBusy) h += '<div style="margin:6px 0;"><span style="display:inline-block;padding:7px 11px;border-radius:12px;background:var(--bg-input,#1e2f40);color:var(--text-muted);font-size:13px;">…thinking</span></div>';
+      log.innerHTML = h; log.scrollTop = log.scrollHeight;
+    }
+    function _dashConvoSetAction(html, enable) {
+      const a = document.getElementById('dashConvoAction'); if (a) a.innerHTML = html || '';
+      const b = document.getElementById('dashConvoConfirm'); if (!b) return;
+      b.disabled = !enable;
+      b.style.cssText = enable
+        ? 'padding:9px 18px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;font-weight:800;cursor:pointer;'
+        : 'padding:9px 18px;background:var(--btn-surface,#34485d);color:var(--text-muted);border:none;border-radius:8px;font-weight:800;cursor:not-allowed;opacity:.6;';
+    }
+    function dashConvoSend() { const t = document.getElementById('dashConvoInput'); const v = (t && t.value || '').trim(); if (!v) return; t.value = ''; dashCommand(v); }
+    function dashConvoMic() {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) return;
+      const btn = document.getElementById('dashConvoMicBtn'), box = document.getElementById('dashConvoInput');
+      if (_dashListening) { if (_dashRec) { try { _dashRec.stop(); } catch (e) {} } return; }
+      _dashRec = new SR(); _dashRec.lang = 'en-US'; _dashRec.interimResults = true; try { _dashRec.continuous = true; } catch (e) {}
+      let got = false;
+      _dashRec.onresult = (e) => { let f = '', i2 = ''; for (let i = 0; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) f += t + ' '; else i2 += t; } if (box) box.value = (f + i2).trim(); };
+      _dashRec.onerror = () => { _dashListening = false; if (btn) btn.style.background = 'var(--accent-green,#00E785)'; };
+      _dashRec.onend = () => { _dashListening = false; if (btn) btn.style.background = 'var(--accent-green,#00E785)'; if (box) box.placeholder = 'Answer or refine…'; if (!got) { const cap = (box && box.value || '').trim(); if (cap) { got = true; box.value = ''; dashCommand(cap); } } };
+      try { _dashRec.start(); _dashListening = true; if (btn) btn.style.background = 'var(--accent-yellow,#f59e0b)'; if (box) { box.value = ''; box.placeholder = 'Listening…'; } } catch (e) { _dashListening = false; }
+    }
+    // Resolved-action summary for the confirm area (by plan kind).
+    function _dashPlanSummary(p) {
+      if (!p) return '';
+      if (p.kind === 'cancel') return 'Cancel <b>' + mjEsc(p.jobLabel || 'job') + '</b> — ' + mjEsc((p.category || '') + (p.reason ? ' · ' + p.reason : '')) + (p.comments ? '<br><span style="color:var(--text-muted);">' + mjEsc(p.comments) + '</span>' : '');
+      if (p.kind === 'duration') return '<b>' + mjEsc(p.jobLabel || 'job') + '</b> — ' + (p.fromDurationMin ? p.fromDurationMin + ' min' : '?') + ' → <b>' + (p.durationMin || '?') + ' min</b>';
+      const mm = String(p.dayID) !== String(_dashDestDay) ? '<br><span style="color:#ffb454;">⚠ Lands on ' + mjEsc(_dashDayLabel(p.dayID)) + ', not the destination board.</span>' : '';
+      return 'Move <b>' + mjEsc(p.jobLabel || 'job') + '</b> → ' + mjEsc((p.toRouteCode || '') + ' · ' + (p.startLabel || '')) + ' (' + mjEsc(_dashDayLabel(p.dayID)) + ')' + mm;
+    }
+    // Send a transcript to the AI dispatcher (working day = the SOURCE board's day); render the whole
+    // exchange in the conversation modal. A resolved plan enables Confirm; clarifications keep it disabled.
     async function dashCommand(transcript) {
-      _dashCmdMsg('Thinking…');
+      _dashConvoOpen();
+      _dashConvoPlan = null; _dashConvoSetAction('', false);
+      _dashHistory.push({ role: 'user', text: transcript });
+      if (_dashHistory.length > 12) _dashHistory = _dashHistory.slice(-12);
+      _dashConvoBusy = true; _dashConvoRender();
       let data = null;
-      try { data = await edgeFunctionCall('crewlogic-dispatch', { action: 'command', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, transcript, history: _dashHistory, dayID: _dashSrcDay || '' }); } catch (e) { data = { success: false, error: 'Network error — try again.' }; }
-      if (!data || !data.success) { _dashCmdMsg((data && data.error) || 'Something went wrong.'); return; }
-      _dashHistory.push({ role: 'user', text: transcript }); if (data.message) _dashHistory.push({ role: 'assistant', text: data.message }); if (_dashHistory.length > 8) _dashHistory = _dashHistory.slice(-8);
-      if (data.intent === 'move' && data.plan) {
-        const p = data.plan; _dashCmdMsg('');
-        dashMoveModal({
-          woID: p.woID, jobID: p.jobID, client: p.jobLabel || 'job', dur: p.durationMin, zip: p.zip,
-          fromText: p.fromLabel || '', fromDay: _dashSrcDay,
-          toDay: p.dayID, toRouteCode: p.toRouteCode, toMin: p.startTime, toLabel: p.startLabel,
-          open: true, conflict: false, dayMismatch: String(p.dayID) !== String(_dashDestDay), _plan: p,
-        });
-        return;
+      try { data = await edgeFunctionCall('crewlogic-dispatch', { action: 'command', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, transcript, history: _dashHistory.slice(0, -1), dayID: _dashSrcDay || '' }); } catch (e) { data = { success: false, error: 'Network error — try again.' }; }
+      _dashConvoBusy = false;
+      if (!data || !data.success) { _dashHistory.push({ role: 'assistant', text: (data && data.error) || 'Something went wrong.' }); _dashConvoRender(); return; }
+      const msg = data.message || (data.intent === 'jobs' ? ('Found ' + ((data.jobs || []).length) + ' job(s) — see the boards.') : '');
+      const resolved = (data.intent === 'move' || data.intent === 'cancel' || data.intent === 'duration') && data.plan;
+      if (msg) _dashHistory.push({ role: 'assistant', text: msg });
+      else if (resolved) _dashHistory.push({ role: 'assistant', text: 'Ready to ' + data.intent + ' — review and confirm below.' });
+      if (resolved) {
+        _dashConvoPlan = data.plan;
+        _dashConvoSetAction('<div style="border-top:1px solid var(--border);padding:10px 0;font-size:13px;">' + _dashPlanSummary(data.plan) + '</div>', true);
       }
-      if (data.intent === 'cancel' && data.plan) {
-        const p = data.plan; _dashCmdMsg('');
-        dashPlanModal(p, 'Cancel job', [['Job', mjEsc(p.jobLabel || '')], ['Reason', mjEsc((p.category || '') + (p.reason ? ' · ' + p.reason : ''))], ['Notes', mjEsc(p.comments || '—')]], '⚠ This cancels the job in Vonigo.');
-        return;
+      _dashConvoRender();
+    }
+    async function dashConvoConfirm() {
+      const plan = _dashConvoPlan; if (!plan) return;
+      const b = document.getElementById('dashConvoConfirm'); if (b) { b.disabled = true; b.textContent = 'Working…'; }
+      let res = null;
+      try { res = await edgeFunctionCall('crewlogic-dispatch', { action: 'execute', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, plan, commandText: 'dashboard ' + (plan.kind || 'command'), actorEmail: currentUser.email }); } catch (e) { res = { success: false, error: 'Network error — try again.' }; }
+      if (res && res.success) {
+        dashConvoClose();
+        _dashToast(plan.kind === 'cancel' ? 'Job cancelled.' : plan.kind === 'duration' ? 'Duration updated.' : 'Moved.');
+        dashReloadOne('src', true); dashReloadOne('dest', true);
+      } else {
+        _dashHistory.push({ role: 'assistant', text: '⚠ ' + ((res && res.error) || 'Could not complete that.') }); _dashConvoRender();
+        if (b) { b.disabled = false; b.textContent = 'Confirm'; }
       }
-      if (data.intent === 'duration' && data.plan) {
-        const p = data.plan; _dashCmdMsg('');
-        dashPlanModal(p, 'Change duration', [['Job', mjEsc(p.jobLabel || '')], ['Duration', (p.fromDurationMin ? p.fromDurationMin + ' min' : '?') + ' → ' + (p.durationMin || '?') + ' min'], ['Slot', mjEsc((p.routeCode || '') + (p.startLabel ? ' · ' + p.startLabel : ''))]], (p.durationMin > p.fromDurationMin ? '⚠ Extending — only if nothing’s booked right after.' : ''));
-        return;
-      }
-      // clarify / jobs / availability answer → surface the AI's text (the dispatcher already day-aware)
-      _dashCmdMsg(data.message || (data.intent === 'jobs' ? ('Found ' + ((data.jobs || []).length) + ' job(s) — see the boards.') : 'Done.'));
     }
     // Generic dashboard confirm modal for voice-resolved cancel/duration plans → runs the same execute engine.
     let _dashPlan = null;
