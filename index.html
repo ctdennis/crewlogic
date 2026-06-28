@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.77 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.78 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7273,7 +7273,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const costLine = (t.costSuffix && s.cost != null && s.cost !== '') ? '<br><span style="color:#6e8194;">$' + _truckEsc(String(s.cost)) + t.costSuffix + '</span>' : '';
           const label = t.emoji + ' ' + (s.name || t.label);
           const m = L.marker([c.lat, c.lon], { icon: mkIcon(t.emoji, t.color, 26) })
-            .bindPopup('<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + _truckEsc(label) + '</b><br>' + _addrLink(_truckProperAddr(s.address), s.address, _truckEsc) + costLine + '</div>');
+            .bindPopup('<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + _truckEsc(label) + '</b><br>' + _addrLink(_truckProperAddr(s.address), s.address, _truckEsc) + costLine + '</div>', { autoPan: false });
           attachMeasure(m, c.lat, c.lon, label);
           m.addTo(t.layer);
         });
@@ -7282,7 +7282,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _homeLayer.clearLayers();
         const c = coordsByAddr[home];
         const m = L.marker([c.lat, c.lon], { icon: mkIcon('🏠', '#f59e0b', 38), zIndexOffset: 900 })
-          .bindPopup('<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>🏠 Truck home</b><br>' + _addrLink(_truckProperAddr(home), home, _truckEsc) + '</div>');
+          .bindPopup('<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>🏠 Truck home</b><br>' + _addrLink(_truckProperAddr(home), home, _truckEsc) + '</div>', { autoPan: false });
         attachMeasure(m, c.lat, c.lon, '🏠 Truck home');
         m.addTo(_homeLayer);
       }
@@ -7425,7 +7425,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const s = [Number(site.latitude), Number(site.longitude)];
         _dispRouteLayers.push(L.polyline([[tk.lat, tk.lon], s, [jb.lat, jb.lon]], { color, weight: 4, opacity: 0.9, dashArray: dash }).addTo(_trucksMap));
         _dispRouteLayers.push(L.circleMarker(s, { radius: 8, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1 }).addTo(_trucksMap)
-          .bindPopup('<b>' + _truckEsc(site.name) + '</b><br>' + dispMoney(site.totalCost) + ' · ' + dispMins(site.totalTimeWithWait)));
+          .bindPopup('<b>' + _truckEsc(site.name) + '</b><br>' + dispMoney(site.totalCost) + ' · ' + dispMins(site.totalTimeWithWait), { autoPan: false }));
       };
       const lc = data.leastCost, lt = data.leastTime, same = lc && lt && lc.facilityId === lt.facilityId;
       if (!lc && !lt) {
@@ -7452,7 +7452,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // site/job marker's default popup covers the result — e.g. a disposal site's $/ton).
       await new Promise(r => setTimeout(r, 70));
       _trucksMap.closePopup();
-      const popup = L.popup({ offset: [0, -10] }).setLatLng([j.lat, j.lon]).setContent('<div style="font-size:13px;">Measuring…</div>').openOn(_trucksMap);
+      const popup = L.popup({ offset: [0, -10], autoPan: false }).setLatLng([j.lat, j.lon]).setContent('<div style="font-size:13px;">Measuring…</div>').openOn(_trucksMap);
       try {
         const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: from.lat + ',' + from.lon, dest: j.lat + ',' + j.lon });
         const dest = _truckEsc(j.clientName || 'Job');
@@ -7612,7 +7612,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap)
-            .bindPopup(tip);
+            .bindPopup(tip, { autoPan: false, maxHeight: 280 });
           // Lazy-load the clickable client phone on popup open (avoids a burst of Vonigo
           // lookups across 3 days the moment look-ahead is toggled on).
           m.on('popupopen', () => _prefetchJobPhone(j.jobID).then(ph => _renderJobPhoneSlot(j.jobID, ph)));
@@ -7795,7 +7795,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + (nearJobs.length ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;color:#F59E0B;font-weight:700;font-size:12px;">🏠 At ' + nearJobs.length + ' job' + (nearJobs.length > 1 ? 's' : '') + ' here</div>' + nearJobs.map(j => '<div style="font-size:12px;color:#cdd6df;">' + _truckEsc(j.clientName || 'Job') + (j._routeShort ? ' · ' + _truckEsc(j._routeShort) : '') + '</div>').join('') : '')
           + ((t.lat != null && t.lon != null) ? '<div style="margin-top:8px;"><button onclick="mtMeasureStart(' + i + ')" style="width:100%;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:#fff;font-weight:700;font-size:12px;padding:7px;border-radius:6px;cursor:pointer;">📏 Measure distance</button></div>' : '')
           + '</div>';
-        const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: 1000 }).addTo(_truckLayer || _trucksMap).bindPopup(pop); // trucks above job houses
+        const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: 1000 }).addTo(_truckLayer || _trucksMap).bindPopup(pop, { autoPan: false, maxHeight: 280 }); // trucks above job houses
         m.on('click', function () { if (_dispMode) { this.closePopup(); _dispTapTruck(i, t); } }); // disposal mode: tap truck = pick origin
         _truckMarkers.push(m);
         pts.push([t.lat, t.lon]);
@@ -7914,7 +7914,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
             + itemsHtml
             + '</div>';
-          const m = L.marker([j.lat, j.lon], { icon, opacity: done ? 0.6 : 1 }).addTo(_jobLayer || _trucksMap).bindPopup(pop);
+          const m = L.marker([j.lat, j.lon], { icon, opacity: done ? 0.6 : 1 }).addTo(_jobLayer || _trucksMap).bindPopup(pop, { autoPan: false, maxHeight: 280 });
           m.on('popupopen', () => _prefetchJobPhone(j.jobID).then(ph => _renderJobPhoneSlot(j.jobID, ph)));
           // When measuring, the FIRST interaction (mouseover on desktop, the synthesized hover on a mobile
           // first-tap) must do the measure — otherwise mobile's "first tap = hover" opens the popup and the
