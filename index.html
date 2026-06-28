@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.72 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.73 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7263,7 +7263,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const mkIcon = (emoji, color, size) => { const sz = size || 26; return L.divIcon({ className: 'site-marker', html: '<div style="background:' + color + ';width:' + sz + 'px;height:' + sz + 'px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-size:' + Math.round(sz * 0.55) + 'px;line-height:1;">' + emoji + '</div>', iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2], popupAnchor: [0, -(sz / 2) - 2] }); };
       // In measure mode (started from a truck), tapping a site measures truck→site (same as a job).
       // Bind both click and mouseover so a mobile first-tap (synthesized hover) triggers it too.
-      const attachMeasure = (m, lat, lon, label) => { const go = () => { if (_measureFrom) { try { m.closePopup(); } catch (e) {} _measureToJob({ lat: lat, lon: lon, clientName: label }); } }; m.on('click', go); m.on('mouseover', go); };
+      const attachMeasure = (m, lat, lon, label) => { const go = () => { if (_measureFrom) { try { m.closePopup(); } catch (e) {} _measureToJob({ lat: lat, lon: lon, clientName: label }); } }; m.on('click', go); m.on('mouseover', () => { if (_mtIsTouch()) go(); }); };
       types.forEach(t => {
         if (!t.layer) return;
         t.layer.clearLayers();
@@ -7298,6 +7298,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // ── "Measure to a job" (tap a truck's "Distance to a job", then tap a job) ──
     // Next job isn't the closest, so the owner picks the job; we draw a line + show driving distance + ETA.
     let _measureFrom = null, _measureLine = null;
+    function _mtIsTouch() { return ('ontouchstart' in window) || navigator.maxTouchPoints > 0; } // touch = measure on first tap; desktop = measure on click (not hover)
     function _mtBanner(text) {
       let b = document.getElementById('mtMeasureBanner');
       if (!b) {
@@ -7383,22 +7384,32 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const lc = data.leastCost, lt = data.leastTime, js = data.jobStartTime;
       if (!lc && !lt) {
         const closed = (data.sites || []).filter(s => s.open === false).sort((a, b) => (Number(a.totalCost) || 0) - (Number(b.totalCost) || 0));
-        let h = '<div style="padding:10px 12px;border:1px solid var(--accent-orange,#f59e0b);border-radius:var(--radius-sm);color:var(--accent-orange,#f59e0b);font-size:13px;margin-bottom:8px;">⚠ No disposal sites are open at the estimated arrival' + (js ? ' (job at ' + dispEsc(js) + ')' : '') + '. Options + why they’re closed:</div>';
-        h += (closed.length ? closed.map(dispClosedRow).join('') : '<div style="color:var(--text-muted);font-size:13px;">No disposal sites configured.</div>');
-        res.innerHTML = h; return;
+        _dispStatus('<span style="color:var(--accent-orange,#f59e0b);font-weight:700;">All sites closed at arrival</span> — full breakdown below ↓');
+        let h = '<div style="padding:10px 12px;border:1px solid var(--accent-orange,#f59e0b);border-radius:var(--radius-sm);color:var(--accent-orange,#f59e0b);font-size:13px;margin-bottom:8px;">⚠ No disposal sites are open at the estimated arrival' + (js ? ' (job at ' + dispEsc(js) + ')' : '') + ' — here are the closest options with the full breakdown (all currently closed):</div>';
+        h += closed.length
+          ? '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start;">' + closed.slice(0, 4).map(s => dispRecCard('🔒 ' + dispEsc(s.closedReason || 'closed'), '#6e8194', s, js)).join('') + '</div>'
+          : '<div style="color:var(--text-muted);font-size:13px;">No disposal sites configured.</div>';
+        res.innerHTML = h; _dispScrollResults(); return;
       }
       const same = lc && lt && lc.facilityId === lt.facilityId;
       let html = '<div style="display:grid;grid-template-columns:' + (same ? '1fr' : '1fr 1fr') + ';gap:10px;align-items:start;">';
       if (same) html += dispRecCard('⭐ Cheapest &amp; Fastest', '#fbbf24', lc, js);
       else { html += dispRecCard('Cheapest', '#00E785', lc, js); html += dispRecCard('Fastest', '#6db3ff', lt, js); }
       html += '</div>';
+      let delta = '';
       if (!same && lc && lt) {
         const tSaved = (Number(lc.totalTimeWithWait) || 0) - (Number(lt.totalTimeWithWait) || 0);
         const cMore = (Number(lt.totalCost) || 0) - (Number(lc.totalCost) || 0);
-        if (tSaved > 0) html += '<div style="margin-top:8px;text-align:center;font-size:13px;color:var(--text-primary);">⚡ <b>Fastest</b> saves <b>' + dispMins(tSaved) + '</b>' + (cMore > 0 ? ' for <b>+' + dispMoney(cMore) + '</b>' : cMore < 0 ? ' <b>and</b> ' + dispMoney(-cMore) + ' cheaper' : '') + '</div>';
+        if (tSaved > 0) delta = 'Fastest saves ' + dispMins(tSaved) + (cMore > 0 ? ' for +' + dispMoney(cMore) : cMore < 0 ? ' and ' + dispMoney(-cMore) + ' cheaper' : '');
+        if (delta) html += '<div style="margin-top:8px;text-align:center;font-size:13px;color:var(--text-primary);">⚡ ' + delta.replace('Fastest', '<b>Fastest</b>') + '</div>';
       }
-      res.innerHTML = html;
+      res.innerHTML = html; _dispScrollResults();
+      // Compact summary in the bar ABOVE the map (visible with the routes); full breakdown is in the cards below.
+      _dispStatus(same
+        ? '<span style="color:#fbbf24;font-weight:700;">Best: ' + dispMoney(lc.totalCost) + ' · ' + dispMins(lc.totalTimeWithWait) + '</span> — breakdown below ↓'
+        : '<span style="color:#00E785;font-weight:700;">Cheapest ' + dispMoney(lc.totalCost) + ' · ' + dispMins(lc.totalTimeWithWait) + '</span> &nbsp;<span style="color:#6db3ff;font-weight:700;">Fastest ' + dispMoney(lt.totalCost) + ' · ' + dispMins(lt.totalTimeWithWait) + '</span>' + (delta ? ' &nbsp;<span style="color:var(--text-muted);">⚡ ' + dispEsc(delta) + '</span>' : ''));
     }
+    function _dispScrollResults() { const res = document.getElementById('dashDispResults'); if (res && res.scrollIntoView) { try { res.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {} } }
     function _dispPlot(data) {
       if (!_trucksMap) return;
       _dispClearRoutes();
@@ -7599,7 +7610,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           // Lazy-load the clickable client phone on popup open (avoids a burst of Vonigo
           // lookups across 3 days the moment look-ahead is toggled on).
           m.on('popupopen', () => _prefetchJobPhone(j.jobID).then(ph => _renderJobPhoneSlot(j.jobID, ph)));
-          m.on('mouseover', function () { if (_measureFrom) { this.closePopup(); _measureToJob(j); } else this.openPopup(); }); // first-tap measures when measuring
+          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { this.closePopup(); _measureToJob(j); } else this.openPopup(); }); // first-tap measures when measuring
           m.on('click', function () { if (_dispMode) { this.closePopup(); _dispTapJob(j); } else if (_measureFrom) { this.closePopup(); _measureToJob(j); } });
           _lookaheadMarkers.push(m);
         });
@@ -7902,7 +7913,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           // When measuring, the FIRST interaction (mouseover on desktop, the synthesized hover on a mobile
           // first-tap) must do the measure — otherwise mobile's "first tap = hover" opens the popup and the
           // measure click never fires. Otherwise mouseover just opens the details popup.
-          m.on('mouseover', function () { if (_measureFrom) { this.closePopup(); _measureToJob(j); } else this.openPopup(); });
+          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { this.closePopup(); _measureToJob(j); } else this.openPopup(); });
           m.on('click', function () { if (_dispMode) { this.closePopup(); _dispTapJob(j); } else if (_measureFrom) { this.closePopup(); _measureToJob(j); } });
           _jobMarkers.push(m);
           jobPts.push([j.lat, j.lon]);
@@ -8301,6 +8312,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<span style="font-size:12px;color:var(--text-muted);font-weight:700;">Truck % full</span>'
         +   '<input type="range" id="dashDispPct" min="0" max="100" step="5" value="100" oninput="_dispPctLbl()" onchange="_dispMaybeRun()" style="width:130px;accent-color:var(--accent-green,#00E785);">'
         +   '<span id="dashDispPctLbl" style="font-size:13px;font-weight:800;color:var(--accent-green,#00E785);min-width:42px;">100%</span>'
+        +   '<span style="font-size:11px;color:var(--text-muted);display:inline-flex;align-items:center;gap:9px;white-space:nowrap;">'
+        +     '<span><span style="display:inline-block;width:12px;height:3px;background:#00E785;vertical-align:middle;margin-right:3px;border-radius:2px;"></span>Cheapest</span>'
+        +     '<span><span style="display:inline-block;width:12px;height:3px;background:#6db3ff;vertical-align:middle;margin-right:3px;border-radius:2px;"></span>Fastest</span>'
+        +     '<span><span style="display:inline-block;width:12px;height:3px;background:#fbbf24;vertical-align:middle;margin-right:3px;border-radius:2px;"></span>Both</span>'
+        +     '<span><span style="display:inline-block;width:12px;height:3px;background:#6e8194;vertical-align:middle;margin-right:3px;border-radius:2px;"></span>Closed</span>'
+        +   '</span>'
         +   '<span id="dashDispStatus" style="font-size:12px;color:var(--text-primary);flex:1;min-width:160px;">Tap a <b>truck</b> on the map…</span>'
         +   '<button onclick="_dispCancel()" style="font-size:12px;padding:6px 14px;background:transparent;border:1px solid var(--border);color:var(--text-muted);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">Done</button>'
         + '</div>'
