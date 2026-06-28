@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.88 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.89 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8360,6 +8360,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _dashWxAlerts = [];
     function _wxTime(iso) { try { return new Date(iso).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; } }
     function _wxColor(sev) { return (sev === 'Extreme' || sev === 'Severe') ? '#e5484d' : (sev === 'Moderate') ? '#f59e0b' : '#eab308'; }
+    // Short weather line for the top of a Job Plan (brief — event + expiry + count). '' when no alerts.
+    function _wxPlanNote(alerts) {
+      if (!alerts || !alerts.length) return '';
+      const a = alerts[0], more = alerts.length - 1;
+      return '⚠️ WEATHER: ' + a.event + (a.expires ? ' (until ' + _wxTime(a.expires) + ')' : '') + (more > 0 ? ' · +' + more + ' more alert' + (more > 1 ? 's' : '') : '');
+    }
+    function _wxPlanBanner(alerts) { // styled top line for the plan view
+      const note = _wxPlanNote(alerts); if (!note) return '';
+      const col = _wxColor(String(alerts[0].severity || ''));
+      return '<div style="border:1px solid ' + col + ';background:rgba(229,72,77,0.12);color:' + col + ';border-radius:8px;padding:8px 12px;margin-bottom:10px;font-weight:700;font-size:13px;">' + mjEsc(note) + '</div>';
+    }
     async function dashLoadWeather() {
       const chip = document.getElementById('dashWxChip'); if (!chip) return;
       let data = null;
@@ -9493,6 +9504,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       editedRoutes: {},    // routeName -> edited text
       isDirty: false,      // has user made edits since last save
     };
+    let _jpWeather = [];   // live weather alerts, fetched on Job Plan open — flagged at the top of the plan
 
     function selectJobPlanDay(offset) {
       if (jobPlanState.isDirty) {
@@ -9549,8 +9561,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + '<div style="white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.5;color:#cdd6df;">' + mjEsc(txt) + '</div></div>';
         copy += 'ROUTE ' + nm + ' — ' + sc + ' stop' + (sc === 1 ? '' : 's') + '\n' + txt + '\n\n';
       });
-      body.innerHTML = html;
-      _dashPlanText = copy.trim();
+      const wxNote = _wxPlanNote(_dashWxAlerts); // flag active weather at the top of the plan (live alerts)
+      body.innerHTML = _wxPlanBanner(_dashWxAlerts) + html;
+      _dashPlanText = (wxNote ? wxNote + '\n\n' : '') + copy.trim();
       const cb = document.getElementById('dashPlanCopyBtn'); if (cb) { cb.disabled = false; cb.style.cssText = 'padding:9px 18px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;font-weight:800;cursor:pointer;'; }
       try { // persist (upsert) so it's also saved on the Job Plan screen — best-effort
         await ensureJobPlanContext();
@@ -9584,6 +9597,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('jobPlanResults').innerHTML = '';
         return;
       }
+      try { const wx = await edgeFunctionCall('crewlogic-weather', { franchiseID: currentUser.franchiseID }); _jpWeather = (wx && wx.success && wx.alerts) || []; } catch (e) { _jpWeather = []; } // live weather for the plan header
       await loadSavedJobPlan();
     }
 
@@ -9734,7 +9748,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       html += '<button class="jp-action-btn" id="jobPlanSaveBtn" onclick="saveJobPlanEdits()" disabled>💾 Save Edits</button>';
       html += '<button class="jp-action-btn" onclick="generateJobPlan()">🔄 Regenerate</button>';
       html += '</div>';
-      resultsEl.innerHTML = html;
+      resultsEl.innerHTML = _wxPlanBanner(_jpWeather) + html; // flag active weather at the top of the plan
       updateJobPlanSaveBtn();
     }
 
@@ -9815,7 +9829,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const plan = jobPlanState.currentPlan;
       if (!plan) return;
       const dayLabel = ['Today', 'Tomorrow', 'Day After Tomorrow'][jobPlanState.dayOffset] || plan.plan_date;
-      let text = 'PLAN — ' + dayLabel + ' (' + plan.plan_date + ')\n\n';
+      const _wxn = _wxPlanNote(_jpWeather);
+      let text = 'PLAN — ' + dayLabel + ' (' + plan.plan_date + ')\n' + (_wxn ? _wxn + '\n' : '') + '\n';
       (plan.routes || []).forEach((r) => {
         const txt = (jobPlanState.editedRoutes[r.routeName] !== undefined ? jobPlanState.editedRoutes[r.routeName] : r.plan) || '';
         text += txt.trim() + '\n\n';
