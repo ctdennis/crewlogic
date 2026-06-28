@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.78 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.79 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7299,6 +7299,27 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Next job isn't the closest, so the owner picks the job; we draw a line + show driving distance + ETA.
     let _measureFrom = null, _measureLine = null;
     function _mtIsTouch() { return ('ontouchstart' in window) || navigator.maxTouchPoints > 0; } // touch = measure on first tap; desktop = measure on click (not hover)
+    // In-map hover panel: job details show in a FIXED box inside the map (top-left, below the zoom) instead of
+    // a marker popup — so the map never pans and the box never clips off an edge (owner request).
+    function _mapHoverBox() {
+      const mapEl = (_trucksMap && _trucksMap.getContainer) ? _trucksMap.getContainer() : document.getElementById(_trucksMapEl);
+      if (!mapEl) return null;
+      let box = mapEl.querySelector(':scope > .map-hover-box');
+      if (!box) {
+        box = document.createElement('div'); box.className = 'map-hover-box';
+        box.style.cssText = 'position:absolute;top:74px;left:10px;z-index:1100;width:290px;max-width:48%;max-height:calc(100% - 90px);overflow-y:auto;background:rgba(13,21,30,0.97);border:1px solid var(--border,#22354a);border-radius:8px;box-shadow:0 4px 18px rgba(0,0,0,.55);padding:8px 12px 12px;font-size:13px;color:#eef4fa;line-height:1.5;display:none;';
+        mapEl.appendChild(box);
+        if (window.L && L.DomEvent) { L.DomEvent.disableClickPropagation(box); L.DomEvent.disableScrollPropagation(box); }
+      }
+      return box;
+    }
+    function _mapHoverShow(html, jobID) {
+      const box = _mapHoverBox(); if (!box) return;
+      box.innerHTML = '<div style="text-align:right;margin:-2px -6px 2px 0;"><span onclick="_mapHoverHide()" style="cursor:pointer;color:#6e8194;font-size:18px;line-height:1;">×</span></div>' + (html || '');
+      box.style.display = 'block'; box.scrollTop = 0;
+      if (jobID) _prefetchJobPhone(jobID).then(ph => _renderJobPhoneSlot(jobID, ph)); // fill the phone slot like popupopen did
+    }
+    function _mapHoverHide() { const b = document.querySelector('.map-hover-box'); if (b) b.style.display = 'none'; }
     function _mtBanner(text) {
       let b = document.getElementById('mtMeasureBanner');
       if (!b) {
@@ -7314,6 +7335,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!t || t.lat == null || t.lon == null) { alert('That truck has no current location.'); return; }
       _measureFrom = { lat: t.lat, lon: t.lon, label: (i + 1) + '. ' + (t.name || 'Truck') };
       if (_trucksMap) _trucksMap.closePopup();
+      _mapHoverHide(); // clear the truck info box while measuring
       _mtBanner('📏 Tap a job or facility to measure from ' + _measureFrom.label + '  ·  tap here to cancel');
     }
     function mtMeasureCancel() {
@@ -7611,13 +7633,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
             + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
             + '</div>';
-          const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap)
-            .bindPopup(tip, { autoPan: false, maxHeight: 280 });
-          // Lazy-load the clickable client phone on popup open (avoids a burst of Vonigo
-          // lookups across 3 days the moment look-ahead is toggled on).
-          m.on('popupopen', () => _prefetchJobPhone(j.jobID).then(ph => _renderJobPhoneSlot(j.jobID, ph)));
-          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { this.closePopup(); _measureToJob(j); } else this.openPopup(); }); // first-tap measures when measuring
-          m.on('click', function () { if (_dispMode) { this.closePopup(); _dispTapJob(j); } else if (_measureFrom) { this.closePopup(); _measureToJob(j); } });
+          const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap);
+          // Details in the fixed in-map hover box (no popup → no clip/pan); measure + disposal-pick first.
+          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } else _mapHoverShow(tip, j.jobID); });
+          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _mapHoverShow(tip, j.jobID); });
           _lookaheadMarkers.push(m);
         });
       });
@@ -7795,8 +7814,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + (nearJobs.length ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;color:#F59E0B;font-weight:700;font-size:12px;">🏠 At ' + nearJobs.length + ' job' + (nearJobs.length > 1 ? 's' : '') + ' here</div>' + nearJobs.map(j => '<div style="font-size:12px;color:#cdd6df;">' + _truckEsc(j.clientName || 'Job') + (j._routeShort ? ' · ' + _truckEsc(j._routeShort) : '') + '</div>').join('') : '')
           + ((t.lat != null && t.lon != null) ? '<div style="margin-top:8px;"><button onclick="mtMeasureStart(' + i + ')" style="width:100%;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:#fff;font-weight:700;font-size:12px;padding:7px;border-radius:6px;cursor:pointer;">📏 Measure distance</button></div>' : '')
           + '</div>';
-        const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: 1000 }).addTo(_truckLayer || _trucksMap).bindPopup(pop, { autoPan: false, maxHeight: 280 }); // trucks above job houses
-        m.on('click', function () { if (_dispMode) { this.closePopup(); _dispTapTruck(i, t); } }); // disposal mode: tap truck = pick origin
+        const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: 1000 }).addTo(_truckLayer || _trucksMap); // trucks above job houses
+        // Truck details show in the fixed in-map hover box (no popup → no clip/pan); disposal mode picks the truck.
+        m.on('click', function () { if (_dispMode) { _dispTapTruck(i, t); } else _mapHoverShow(pop, null); });
         _truckMarkers.push(m);
         pts.push([t.lat, t.lon]);
       });
@@ -7914,13 +7934,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
             + itemsHtml
             + '</div>';
-          const m = L.marker([j.lat, j.lon], { icon, opacity: done ? 0.6 : 1 }).addTo(_jobLayer || _trucksMap).bindPopup(pop, { autoPan: false, maxHeight: 280 });
-          m.on('popupopen', () => _prefetchJobPhone(j.jobID).then(ph => _renderJobPhoneSlot(j.jobID, ph)));
-          // When measuring, the FIRST interaction (mouseover on desktop, the synthesized hover on a mobile
-          // first-tap) must do the measure — otherwise mobile's "first tap = hover" opens the popup and the
-          // measure click never fires. Otherwise mouseover just opens the details popup.
-          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { this.closePopup(); _measureToJob(j); } else this.openPopup(); });
-          m.on('click', function () { if (_dispMode) { this.closePopup(); _dispTapJob(j); } else if (_measureFrom) { this.closePopup(); _measureToJob(j); } });
+          const m = L.marker([j.lat, j.lon], { icon, opacity: done ? 0.6 : 1 }).addTo(_jobLayer || _trucksMap);
+          // Job details show in the fixed in-map hover box (no marker popup → never clips/pans). Measuring +
+          // disposal-pick still take priority on the first interaction.
+          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } else _mapHoverShow(pop, j.jobID); });
+          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _mapHoverShow(pop, j.jobID); });
           _jobMarkers.push(m);
           jobPts.push([j.lat, j.lon]);
         });
