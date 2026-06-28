@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.71 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.72 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7381,7 +7381,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const res = document.getElementById('dashDispResults'); if (!res) return;
       dispState.endpointAddress = data.endpointAddressUsed || (_dispPick.job && _dispPick.job.address) || '';
       const lc = data.leastCost, lt = data.leastTime, js = data.jobStartTime;
-      if (!lc && !lt) { res.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:13px;">No disposal sites are open at the estimated arrival time.</div>'; return; }
+      if (!lc && !lt) {
+        const closed = (data.sites || []).filter(s => s.open === false).sort((a, b) => (Number(a.totalCost) || 0) - (Number(b.totalCost) || 0));
+        let h = '<div style="padding:10px 12px;border:1px solid var(--accent-orange,#f59e0b);border-radius:var(--radius-sm);color:var(--accent-orange,#f59e0b);font-size:13px;margin-bottom:8px;">⚠ No disposal sites are open at the estimated arrival' + (js ? ' (job at ' + dispEsc(js) + ')' : '') + '. Options + why they’re closed:</div>';
+        h += (closed.length ? closed.map(dispClosedRow).join('') : '<div style="color:var(--text-muted);font-size:13px;">No disposal sites configured.</div>');
+        res.innerHTML = h; return;
+      }
       const same = lc && lt && lc.facilityId === lt.facilityId;
       let html = '<div style="display:grid;grid-template-columns:' + (same ? '1fr' : '1fr 1fr') + ';gap:10px;align-items:start;">';
       if (same) html += dispRecCard('⭐ Cheapest &amp; Fastest', '#fbbf24', lc, js);
@@ -7406,7 +7411,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           .bindPopup('<b>' + _truckEsc(site.name) + '</b><br>' + dispMoney(site.totalCost) + ' · ' + dispMins(site.totalTimeWithWait)));
       };
       const lc = data.leastCost, lt = data.leastTime, same = lc && lt && lc.facilityId === lt.facilityId;
-      if (same) leg(lc, '#fbbf24');
+      if (!lc && !lt) {
+        // all closed → still illustrate the run with the cheapest closed site in gray
+        const closed = (data.sites || []).filter(s => s.open === false && s.latitude != null).sort((a, b) => (Number(a.totalCost) || 0) - (Number(b.totalCost) || 0));
+        if (closed[0]) leg(closed[0], '#6e8194', '4,6');
+      } else if (same) leg(lc, '#fbbf24');
       else { if (lt) leg(lt, '#6db3ff', '8,6'); if (lc) leg(lc, '#00E785'); } // cheapest drawn last = on top
       try {
         const b = L.latLngBounds([[tk.lat, tk.lon], [jb.lat, jb.lon]]);

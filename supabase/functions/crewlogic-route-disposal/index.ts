@@ -278,6 +278,20 @@ async function distanceMatrix(
     }));
 }
 
+// Geocode a single address → {lat,lng} (null on failure). Used to fill coords for facilities that
+// don't have them stored, so the chosen route can be plotted on the client map.
+async function geocodeAddress(apiKey: string, address: string): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const url = "https://maps.googleapis.com/maps/api/geocode/json?address=" +
+      encodeURIComponent(address) + "&key=" + apiKey;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json() as { results?: Array<{ geometry?: { location?: { lat: number; lng: number } } }> };
+    const loc = data?.results?.[0]?.geometry?.location;
+    return (loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lng)) ? { lat: loc.lat, lng: loc.lng } : null;
+  } catch (_e) { return null; }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN
 // ─────────────────────────────────────────────────────────────────────────────
@@ -390,6 +404,15 @@ Deno.serve(async (req: Request) => {
       .select("federal_key, custom_label, custom_date, is_observed")
       .eq("franchise_id", franchiseUUID);
     const holidays = (holidayRows || []) as unknown as HolidayRow[];
+
+    // 3b) Fill coords for any facility lacking them (geocode the address, in parallel) — so the chosen
+    // route can be plotted on the client map. Also tightens the distance tokens to lat/lng.
+    await Promise.all((facilities as Record<string, unknown>[]).map(async (f) => {
+      if ((f.latitude == null || f.longitude == null) && f.address) {
+        const g = await geocodeAddress(apiKey, String(f.address));
+        if (g) { f.latitude = g.lat; f.longitude = g.lng; }
+      }
+    }));
 
     // 4) Distance Matrix — origins = [truck, ...sites]; destinations = [...sites, endpoint].
     const siteToken = (f: Record<string, unknown>) =>
