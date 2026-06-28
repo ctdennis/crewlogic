@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.65 | 2026-06-27">
+  <meta name="crewlogic-version" content="v5.47.66 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8303,8 +8303,53 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         });
         return;
       }
+      if (data.intent === 'cancel' && data.plan) {
+        const p = data.plan; _dashCmdMsg('');
+        dashPlanModal(p, 'Cancel job', [['Job', mjEsc(p.jobLabel || '')], ['Reason', mjEsc((p.category || '') + (p.reason ? ' · ' + p.reason : ''))], ['Notes', mjEsc(p.comments || '—')]], '⚠ This cancels the job in Vonigo.');
+        return;
+      }
+      if (data.intent === 'duration' && data.plan) {
+        const p = data.plan; _dashCmdMsg('');
+        dashPlanModal(p, 'Change duration', [['Job', mjEsc(p.jobLabel || '')], ['Duration', (p.fromDurationMin ? p.fromDurationMin + ' min' : '?') + ' → ' + (p.durationMin || '?') + ' min'], ['Slot', mjEsc((p.routeCode || '') + (p.startLabel ? ' · ' + p.startLabel : ''))]], (p.durationMin > p.fromDurationMin ? '⚠ Extending — only if nothing’s booked right after.' : ''));
+        return;
+      }
       // clarify / jobs / availability answer → surface the AI's text (the dispatcher already day-aware)
       _dashCmdMsg(data.message || (data.intent === 'jobs' ? ('Found ' + ((data.jobs || []).length) + ' job(s) — see the boards.') : 'Done.'));
+    }
+    // Generic dashboard confirm modal for voice-resolved cancel/duration plans → runs the same execute engine.
+    let _dashPlan = null;
+    function dashPlanModal(plan, title, rows, warn) {
+      _dashPlan = plan;
+      let ov = document.getElementById('dashPlanOverlay');
+      if (!ov) { ov = document.createElement('div'); ov.id = 'dashPlanOverlay'; document.body.appendChild(ov); }
+      ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(3,8,14,0.62);display:flex;align-items:center;justify-content:center;';
+      const rowsHtml = (rows || []).map(r => '<span style="color:var(--text-muted);">' + r[0] + '</span><span style="font-weight:600;">' + r[1] + '</span>').join('');
+      ov.innerHTML = '<div style="background:var(--bg-card,#1e2f40);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.5);padding:18px 20px;max-width:380px;width:92%;font-size:13px;color:var(--text-primary);">'
+        + '<div style="font-size:15px;font-weight:800;margin-bottom:10px;">' + mjEsc(title) + '</div>'
+        + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin-bottom:10px;">' + rowsHtml + '</div>'
+        + (warn ? '<div style="color:#ffb454;font-size:12px;">' + warn + '</div>' : '')
+        + '<div id="dashPlanErr" style="color:#ff6b6b;font-size:12px;margin-top:6px;min-height:1px;"></div>'
+        + '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px;">'
+        +   '<button onclick="dashPlanClose()" style="padding:9px 16px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;font-weight:600;cursor:pointer;">Cancel</button>'
+        +   '<button id="dashPlanBtn" onclick="dashPlanExecute()" style="padding:9px 18px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;font-weight:800;cursor:pointer;">Confirm</button>'
+        + '</div></div>';
+      ov.style.display = 'flex';
+      ov.onclick = null; setTimeout(() => { ov.onclick = (e) => { if (e.target === ov) dashPlanClose(); }; }, 400);
+    }
+    function dashPlanClose() { const ov = document.getElementById('dashPlanOverlay'); if (ov) ov.style.display = 'none'; _dashPlan = null; }
+    async function dashPlanExecute() {
+      const plan = _dashPlan; if (!plan) return;
+      const btn = document.getElementById('dashPlanBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Working…'; }
+      let res = null;
+      try { res = await edgeFunctionCall('crewlogic-dispatch', { action: 'execute', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, plan, commandText: 'dashboard ' + (plan.kind || 'command'), actorEmail: currentUser.email }); } catch (e) { res = { success: false, error: 'Network error — try again.' }; }
+      if (res && res.success) {
+        dashPlanClose();
+        _dashToast(plan.kind === 'cancel' ? 'Job cancelled.' : 'Done.');
+        dashReloadOne('src', true); dashReloadOne('dest', true); // refresh both (cancel/duration can affect either)
+      } else {
+        const e = document.getElementById('dashPlanErr'); if (e) e.textContent = (res && res.error) || 'Could not complete that.';
+        if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; }
+      }
     }
 
     // ===== Phase 2: cross-day move via drag-to-slot (shared confirm modal + execute) =====
