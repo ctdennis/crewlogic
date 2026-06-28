@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.73 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.74 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7392,22 +7392,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         res.innerHTML = h; _dispScrollResults(); return;
       }
       const same = lc && lt && lc.facilityId === lt.facilityId;
+      const cheaper = (lc && lt) ? (Number(lt.totalCost) || 0) - (Number(lc.totalCost) || 0) : 0; // cheapest saves $ vs fastest
+      const tSaved = (lc && lt) ? (Number(lc.totalTimeWithWait) || 0) - (Number(lt.totalTimeWithWait) || 0) : 0; // fastest saves time vs cheapest
       let html = '<div style="display:grid;grid-template-columns:' + (same ? '1fr' : '1fr 1fr') + ';gap:10px;align-items:start;">';
       if (same) html += dispRecCard('⭐ Cheapest &amp; Fastest', '#fbbf24', lc, js);
-      else { html += dispRecCard('Cheapest', '#00E785', lc, js); html += dispRecCard('Fastest', '#6db3ff', lt, js); }
-      html += '</div>';
-      let delta = '';
-      if (!same && lc && lt) {
-        const tSaved = (Number(lc.totalTimeWithWait) || 0) - (Number(lt.totalTimeWithWait) || 0);
-        const cMore = (Number(lt.totalCost) || 0) - (Number(lc.totalCost) || 0);
-        if (tSaved > 0) delta = 'Fastest saves ' + dispMins(tSaved) + (cMore > 0 ? ' for +' + dispMoney(cMore) : cMore < 0 ? ' and ' + dispMoney(-cMore) + ' cheaper' : '');
-        if (delta) html += '<div style="margin-top:8px;text-align:center;font-size:13px;color:var(--text-primary);">⚡ ' + delta.replace('Fastest', '<b>Fastest</b>') + '</div>';
+      else {
+        html += dispRecCard('Cheapest', '#00E785', lc, js, cheaper > 0 ? '💰 ' + dispMoney(cheaper) + ' cheaper' : '');
+        html += dispRecCard('Fastest', '#6db3ff', lt, js, tSaved > 0 ? '⚡ Saves ' + dispMins(tSaved) : '');
       }
+      html += '</div>';
       res.innerHTML = html; _dispScrollResults();
       // Compact summary in the bar ABOVE the map (visible with the routes); full breakdown is in the cards below.
       _dispStatus(same
         ? '<span style="color:#fbbf24;font-weight:700;">Best: ' + dispMoney(lc.totalCost) + ' · ' + dispMins(lc.totalTimeWithWait) + '</span> — breakdown below ↓'
-        : '<span style="color:#00E785;font-weight:700;">Cheapest ' + dispMoney(lc.totalCost) + ' · ' + dispMins(lc.totalTimeWithWait) + '</span> &nbsp;<span style="color:#6db3ff;font-weight:700;">Fastest ' + dispMoney(lt.totalCost) + ' · ' + dispMins(lt.totalTimeWithWait) + '</span>' + (delta ? ' &nbsp;<span style="color:var(--text-muted);">⚡ ' + dispEsc(delta) + '</span>' : ''));
+        : '<span style="color:#00E785;font-weight:700;">Cheapest ' + dispMoney(lc.totalCost) + ' · ' + dispMins(lc.totalTimeWithWait) + '</span> &nbsp;<span style="color:#6db3ff;font-weight:700;">Fastest ' + dispMoney(lt.totalCost) + ' · ' + dispMins(lt.totalTimeWithWait) + '</span> — breakdown below ↓');
     }
     function _dispScrollResults() { const res = document.getElementById('dashDispResults'); if (res && res.scrollIntoView) { try { res.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {} } }
     function _dispPlot(data) {
@@ -10484,7 +10482,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       else if (w === 'green') { color = 'var(--accent-green)'; label = 'On time (+' + ml + ' min)'; }
       else if (w === 'yellow') { color = 'var(--accent-orange)'; label = 'Tight (+' + ml + ' min)'; }
       else { color = 'var(--accent-red)'; label = 'Late risk (+' + ml + ' min)'; }
-      return '<span class="disp-chip" style="color:' + color + ';border-color:' + color + ';">' + label + '</span>';
+      return '<span class="disp-chip" style="color:' + color + ';border-color:' + color + ';font-size:12.5px;padding:4px 11px;font-weight:700;">' + label + '</span>';
     }
 
     // Highlighted "cutting it close" banner — site is open, but the truck arrives within ~15 min of close.
@@ -10494,7 +10492,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return '<div style="margin-top:8px;padding:8px 10px;background:rgba(245,158,11,0.15);border:1.5px solid var(--accent-orange,#f59e0b);border-radius:var(--radius-sm);color:var(--accent-orange,#f59e0b);font-size:12.5px;font-weight:700;text-align:center;">⚠️ Cutting it close — closes ' + m + ' min after you arrive</div>';
     }
 
-    function dispRecCard(title, accent, site, jobStartTime) {
+    function dispRecCard(title, accent, site, jobStartTime, extra) {
       if (!site) return '';
       const timesBlock = '<div class="disp-times">' +
         (jobStartTime ? '<div class="disp-time-row"><span class="disp-time-lbl">Job Start</span><span class="disp-time-val">' + dispEsc(jobStartTime) + '</span></div>' : '') +
@@ -10503,6 +10501,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return '' +
         '<div class="disp-rec" style="border-color:' + accent + ';">' +
           '<div class="disp-rec-head"><span class="disp-rec-title" style="color:' + accent + ';">' + title + '</span>' + dispWarnChip(site) + '</div>' +
+          (extra ? '<div style="font-size:13px;font-weight:800;color:' + accent + ';margin:1px 0 6px;">' + extra + '</div>' : '') +
           '<div class="disp-rec-name">' + dispEsc(site.name) + '</div>' +
           '<div class="disp-rec-addr">' + dispEsc(site.address) + '</div>' +
           '<div class="disp-rec-stats">' +
@@ -10510,7 +10509,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             '<div class="disp-stat"><div class="disp-stat-val">' + dispMins(site.totalTimeWithWait) + '</div><div class="disp-stat-lbl">total time</div></div>' +
           '</div>' +
           timesBlock +
-          dispCloseSoonBanner(site) +
           '<div class="disp-breakdown">Disposal ' + dispMoney(site.disposalFee) + ' · Labor ' + dispMoney(site.laborCost) + ' · Fuel ' + dispMoney(site.fuelCost) +
             ' · ' + (Number(site.routeMiles) || 0) + ' mi · ' + dispMins(site.driveMinutes) + ' drive + ' + dispMins(site.waitMinutes) + ' wait</div>' +
           '<a href="' + dispDirectionsUrl(site.address, dispState.endpointAddress) + '" target="_blank" rel="noopener" ' +
