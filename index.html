@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.85 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.86 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8822,7 +8822,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return { street: parts[0] || s, city: parts.length >= 2 ? parts[parts.length - 2] : '', zip: (s.match(/\b(\d{5})\b/) || [])[1] || '' };
     }
     function _mjRow(k, v) { return '<div style="display:flex;gap:8px;margin-bottom:4px;"><span style="color:var(--text-muted);flex:0 0 54px;">' + mjEsc(k) + '</span><span style="color:var(--text-primary);word-break:break-word;">' + v + '</span></div>'; }
-    function _mjBlock(k, v) { return '<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--border);"><div style="color:var(--text-muted);margin-bottom:2px;">' + mjEsc(k) + '</div><div style="color:var(--text-primary);white-space:pre-wrap;word-break:break-word;">' + v + '</div></div>'; }
+    function _mjBlock(k, v) { return '<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--border);"><div style="color:var(--text-muted);margin-bottom:2px;">' + mjEsc(k) + '</div><div style="color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:140px;overflow-y:auto;">' + v + '</div></div>'; }
     function mjJobInfoHTML(j, sticky) {
       const p = mjAddrParts(j.address), jid = mjEsc(String(j.jobID || ''));
       const idLink = j.jobID ? '<a href="https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(j.jobID)) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#6db3ff;font-weight:600;text-decoration:none;">' + jid + ' 🔗</a>' : '—';
@@ -8920,8 +8920,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _mjTipSticky = !!sticky;
       tip.innerHTML = mjJobInfoHTML(j, sticky);
       tip.style.display = 'block';
+      const vh = window.innerHeight;
+      tip.style.maxHeight = (vh - 16) + 'px'; tip.style.overflowY = 'auto'; // never taller than the viewport; scroll if it is
       const rect = (ev && ev.currentTarget && ev.currentTarget.getBoundingClientRect) ? ev.currentTarget.getBoundingClientRect() : { left: 60, top: 120, bottom: 140 };
-      const tw = tip.offsetWidth, th = tip.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+      const tw = tip.offsetWidth, th = tip.offsetHeight, vw = window.innerWidth;
       let left = rect.left; if (left + tw > vw - 8) left = vw - tw - 8; if (left < 8) left = 8;
       let top = rect.bottom + 6; if (top + th > vh - 8) top = rect.top - th - 6; if (top < 8) top = 8;
       tip.style.left = left + 'px'; tip.style.top = top + 'px';
