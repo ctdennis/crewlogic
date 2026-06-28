@@ -411,6 +411,8 @@ Deno.serve(async (req: Request) => {
         facilityId: f.id,
         name: f.name || "",
         address: f.address || "",
+        latitude: f.latitude != null ? Number(f.latitude) : null,   // for plotting the dump on the map
+        longitude: f.longitude != null ? Number(f.longitude) : null,
         tons,
       };
 

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.70 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.71 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7320,6 +7320,101 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const b = document.getElementById('mtMeasureBanner'); if (b) b.style.display = 'none';
       if (_measureLine && _trucksMap) { _trucksMap.removeLayer(_measureLine); _measureLine = null; }
     }
+    // ── Dashboard "Find disposal": tap a TRUCK + tap a JOB on the map → cheapest/fastest dump, plotted
+    //    (green/blue/gold) with detail cards below. Reuses crewlogic-route-disposal + dispRecCard renderers.
+    let _dispMode = false, _dispPick = { truck: null, job: null }, _dispRouteLayers = [];
+    function _dispPctLbl() { const s = document.getElementById('dashDispPct'), l = document.getElementById('dashDispPctLbl'); if (s && l) l.textContent = s.value + '%'; }
+    function _dispStatus(msg) { const el = document.getElementById('dashDispStatus'); if (el) el.innerHTML = msg; }
+    function dashFindDisposal() {
+      _dispMode = true; _dispPick = { truck: null, job: null }; _dispClearRoutes();
+      const bar = document.getElementById('dashDispBar'); if (bar) bar.style.display = 'flex';
+      const res = document.getElementById('dashDispResults'); if (res) res.innerHTML = '';
+      _dispStatus('Tap a <b>truck</b> on the map…');
+      const btn = document.getElementById('dashDispBtn'); if (btn) { btn.style.background = 'var(--accent-green,#00E785)'; btn.style.color = '#06121d'; }
+    }
+    function _dispCancel() {
+      _dispMode = false; _dispPick = { truck: null, job: null }; _dispClearRoutes();
+      const bar = document.getElementById('dashDispBar'); if (bar) bar.style.display = 'none';
+      const res = document.getElementById('dashDispResults'); if (res) res.innerHTML = '';
+      const btn = document.getElementById('dashDispBtn'); if (btn) { btn.style.background = 'var(--bg-input,#1e2f40)'; btn.style.color = 'var(--text-primary)'; }
+    }
+    function _dispClearRoutes() { if (_trucksMap) _dispRouteLayers.forEach(l => { try { _trucksMap.removeLayer(l); } catch (e) {} }); _dispRouteLayers = []; }
+    function _dispTapTruck(i, t) {
+      if (t.lat == null || t.lon == null) { _dispStatus('That truck has no current location — pick another.'); return; }
+      _dispPick.truck = { lat: t.lat, lon: t.lon, label: (i + 1) + '. ' + (t.name || 'Truck') };
+      _dispStatus('Truck <b>' + _truckEsc(_dispPick.truck.label) + '</b> ✓ — now tap the <b>destination job</b>.');
+      _dispMaybeRun();
+    }
+    function _dispClockToMin(s) { const m = String(s || '').match(/(\d{1,2}):(\d{2})\s*([ap])/i); if (!m) return null; let h = (+m[1]) % 12; if (/p/i.test(m[3])) h += 12; return h * 60 + (+m[2]); }
+    function _dispTapJob(j) {
+      if (j.lat == null || j.lon == null) { _dispStatus('That job has no location — pick another.'); return; }
+      const sched = (j.time != null && j.time !== '') ? Number(j.time) : _dispClockToMin(j.timeLabel);
+      _dispPick.job = { lat: j.lat, lon: j.lon, address: j.address || '', scheduledMinutes: (Number.isFinite(sched) ? sched : null), label: j.clientName || 'Job' };
+      _dispStatus('Job <b>' + _truckEsc(_dispPick.job.label) + '</b> ✓');
+      _dispMaybeRun();
+    }
+    function _dispMaybeRun() { if (_dispMode && _dispPick.truck && _dispPick.job) _dispRun(); }
+    async function _dispRun() {
+      const res = document.getElementById('dashDispResults'); if (!res) return;
+      const pctEl = document.getElementById('dashDispPct'); const pct = Number(pctEl && pctEl.value);
+      const loadPercent = Number.isFinite(pct) ? pct : 100;
+      res.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:10px;">Finding the best dump…</div>';
+      let data = null;
+      try {
+        data = await edgeFunctionCall('crewlogic-route-disposal', {
+          franchiseID: currentUser.franchiseID,
+          truckLat: _dispPick.truck.lat, truckLng: _dispPick.truck.lon,
+          endpointAddress: _dispPick.job.address, endpointIsHome: false,
+          endpointScheduledMinutes: _dispPick.job.scheduledMinutes, loadPercent
+        });
+      } catch (e) { data = { success: false, error: 'Network error — try again.' }; }
+      if (!data || !data.success) {
+        const msg = String((data && data.error) || 'Could not compute disposal routes.');
+        res.innerHTML = /no .*disposal sites|not configured|set your truck home|cost analysis/i.test(msg)
+          ? '<div style="padding:12px;border:1px solid var(--accent-orange,#f59e0b);border-radius:var(--radius-sm);color:var(--accent-orange,#f59e0b);font-size:13px;">⚠ ' + dispEsc(msg) + ' — set this up in <b>Settings → Cost Analysis</b>.</div>'
+          : '<div style="padding:12px;color:#ff6b6b;font-size:13px;">⚠ ' + dispEsc(msg) + '</div>';
+        return;
+      }
+      _dispRenderPanel(data); _dispPlot(data);
+    }
+    function _dispRenderPanel(data) {
+      const res = document.getElementById('dashDispResults'); if (!res) return;
+      dispState.endpointAddress = data.endpointAddressUsed || (_dispPick.job && _dispPick.job.address) || '';
+      const lc = data.leastCost, lt = data.leastTime, js = data.jobStartTime;
+      if (!lc && !lt) { res.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:13px;">No disposal sites are open at the estimated arrival time.</div>'; return; }
+      const same = lc && lt && lc.facilityId === lt.facilityId;
+      let html = '<div style="display:grid;grid-template-columns:' + (same ? '1fr' : '1fr 1fr') + ';gap:10px;align-items:start;">';
+      if (same) html += dispRecCard('⭐ Cheapest &amp; Fastest', '#fbbf24', lc, js);
+      else { html += dispRecCard('Cheapest', '#00E785', lc, js); html += dispRecCard('Fastest', '#6db3ff', lt, js); }
+      html += '</div>';
+      if (!same && lc && lt) {
+        const tSaved = (Number(lc.totalTimeWithWait) || 0) - (Number(lt.totalTimeWithWait) || 0);
+        const cMore = (Number(lt.totalCost) || 0) - (Number(lc.totalCost) || 0);
+        if (tSaved > 0) html += '<div style="margin-top:8px;text-align:center;font-size:13px;color:var(--text-primary);">⚡ <b>Fastest</b> saves <b>' + dispMins(tSaved) + '</b>' + (cMore > 0 ? ' for <b>+' + dispMoney(cMore) + '</b>' : cMore < 0 ? ' <b>and</b> ' + dispMoney(-cMore) + ' cheaper' : '') + '</div>';
+      }
+      res.innerHTML = html;
+    }
+    function _dispPlot(data) {
+      if (!_trucksMap) return;
+      _dispClearRoutes();
+      const tk = _dispPick.truck, jb = _dispPick.job; if (!tk || !jb) return;
+      const leg = (site, color, dash) => {
+        if (!site || site.latitude == null || site.longitude == null) return;
+        const s = [Number(site.latitude), Number(site.longitude)];
+        _dispRouteLayers.push(L.polyline([[tk.lat, tk.lon], s, [jb.lat, jb.lon]], { color, weight: 4, opacity: 0.9, dashArray: dash }).addTo(_trucksMap));
+        _dispRouteLayers.push(L.circleMarker(s, { radius: 8, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1 }).addTo(_trucksMap)
+          .bindPopup('<b>' + _truckEsc(site.name) + '</b><br>' + dispMoney(site.totalCost) + ' · ' + dispMins(site.totalTimeWithWait)));
+      };
+      const lc = data.leastCost, lt = data.leastTime, same = lc && lt && lc.facilityId === lt.facilityId;
+      if (same) leg(lc, '#fbbf24');
+      else { if (lt) leg(lt, '#6db3ff', '8,6'); if (lc) leg(lc, '#00E785'); } // cheapest drawn last = on top
+      try {
+        const b = L.latLngBounds([[tk.lat, tk.lon], [jb.lat, jb.lon]]);
+        if (lc && lc.latitude != null) b.extend([Number(lc.latitude), Number(lc.longitude)]);
+        if (lt && lt.latitude != null) b.extend([Number(lt.latitude), Number(lt.longitude)]);
+        _trucksMap.fitBounds(b, { padding: [50, 50], maxZoom: 14 });
+      } catch (e) {}
+    }
     async function _measureToJob(j) {
       if (!_measureFrom || j.lat == null || j.lon == null || !_trucksMap) return;
       const from = _measureFrom;
@@ -7496,7 +7591,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           // lookups across 3 days the moment look-ahead is toggled on).
           m.on('popupopen', () => _prefetchJobPhone(j.jobID).then(ph => _renderJobPhoneSlot(j.jobID, ph)));
           m.on('mouseover', function () { if (_measureFrom) { this.closePopup(); _measureToJob(j); } else this.openPopup(); }); // first-tap measures when measuring
-          m.on('click', function () { if (_measureFrom) { this.closePopup(); _measureToJob(j); } });
+          m.on('click', function () { if (_dispMode) { this.closePopup(); _dispTapJob(j); } else if (_measureFrom) { this.closePopup(); _measureToJob(j); } });
           _lookaheadMarkers.push(m);
         });
       });
@@ -7675,6 +7770,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + ((t.lat != null && t.lon != null) ? '<div style="margin-top:8px;"><button onclick="mtMeasureStart(' + i + ')" style="width:100%;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:#fff;font-weight:700;font-size:12px;padding:7px;border-radius:6px;cursor:pointer;">📏 Measure distance</button></div>' : '')
           + '</div>';
         const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: 1000 }).addTo(_truckLayer || _trucksMap).bindPopup(pop); // trucks above job houses
+        m.on('click', function () { if (_dispMode) { this.closePopup(); _dispTapTruck(i, t); } }); // disposal mode: tap truck = pick origin
         _truckMarkers.push(m);
         pts.push([t.lat, t.lon]);
       });
@@ -7798,7 +7894,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           // first-tap) must do the measure — otherwise mobile's "first tap = hover" opens the popup and the
           // measure click never fires. Otherwise mouseover just opens the details popup.
           m.on('mouseover', function () { if (_measureFrom) { this.closePopup(); _measureToJob(j); } else this.openPopup(); });
-          m.on('click', function () { if (_measureFrom) { this.closePopup(); _measureToJob(j); } });
+          m.on('click', function () { if (_dispMode) { this.closePopup(); _dispTapJob(j); } else if (_measureFrom) { this.closePopup(); _measureToJob(j); } });
           _jobMarkers.push(m);
           jobPts.push([j.lat, j.lon]);
         });
@@ -8189,8 +8285,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<span id="dashTrucksDayRel" style="font-size:12px;color:var(--text-muted);font-weight:600;"></span>'
         +   '<button id="dashTrucksLookaheadBtn" onclick="toggleTrucksLookahead()" title="Show jobs for the next 3 days from the selected day, as gray dots" style="font-size:12px;padding:6px 12px;background:var(--bg-input,#1e2f40);color:var(--text-muted);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;white-space:nowrap;">◌ +3 days</button>'
         +   '<button onclick="showTrucks()" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🔄 Refresh</button>'
+        +   '<button id="dashDispBtn" onclick="dashFindDisposal()" title="Plan a dump: tap a truck, then the destination job" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🗑️ Find disposal</button>'
         + '</div>'
-        + '<div id="dashMapPane" style="height:55vh;min-height:420px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);"></div>';
+        // disposal control bar (hidden until "Find disposal") — % full + tap-status + done
+        + '<div id="dashDispBar" style="display:none;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;padding:8px 12px;background:var(--bg-card);border:1px solid var(--accent-green,#00E785);border-radius:var(--radius-sm);">'
+        +   '<span style="font-size:12px;color:var(--text-muted);font-weight:700;">Truck % full</span>'
+        +   '<input type="range" id="dashDispPct" min="0" max="100" step="5" value="100" oninput="_dispPctLbl()" onchange="_dispMaybeRun()" style="width:130px;accent-color:var(--accent-green,#00E785);">'
+        +   '<span id="dashDispPctLbl" style="font-size:13px;font-weight:800;color:var(--accent-green,#00E785);min-width:42px;">100%</span>'
+        +   '<span id="dashDispStatus" style="font-size:12px;color:var(--text-primary);flex:1;min-width:160px;">Tap a <b>truck</b> on the map…</span>'
+        +   '<button onclick="_dispCancel()" style="font-size:12px;padding:6px 14px;background:transparent;border:1px solid var(--border);color:var(--text-muted);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">Done</button>'
+        + '</div>'
+        + '<div id="dashMapPane" style="height:55vh;min-height:420px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);"></div>'
+        + '<div id="dashDispResults" style="margin-top:10px;"></div>';
       dashLoadBoards();
       dashMountMap();
     }
@@ -8198,6 +8304,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function dashMountMap() {
       const pane = document.getElementById('dashMapPane'); if (!pane) return;
       _ensureTrucksMapFresh('dashMapPane'); // rebuild the map into the (freshly re-rendered) dashboard pane
+      _dispMode = false; _dispPick = { truck: null, job: null }; _dispRouteLayers = []; // reset disposal-finder state
       _trucksJobDay = 0;                     // dashboard map = today's trucks + jobs (matches the rendered toggle)
       _trucksLookahead = false;              // +3-day look-ahead off by default (matches the rendered button)
       _updateTrucksDayToggle();              // initialize the date picker to today
