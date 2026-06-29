@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.97 | 2026-06-29">
+  <meta name="crewlogic-version" content="v5.47.98 | 2026-06-29">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8256,7 +8256,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const blockedRow = !laneJobs.length && !open.length; // closed/blocked for the day → all gray
         // drop-target wiring (dashboard only): open slot [min,label] pairs (snap targets) + occupied [start,end] ranges (conflict)
         const dropAttrs = dnd
-          ? ' class="mj-lane" data-day="' + mjEsc(String(data.dayID || '')) + '" data-routeid="' + mjEsc(String(rt.id || '')) + '" data-routecode="' + mjEsc(rc) + '" data-start="' + startMin + '" data-pxh="' + PXH + '" data-open="' + mjEsc(JSON.stringify(open.map(s => [s.startTime, s.label || '']))) + '" data-jobs="' + mjEsc(JSON.stringify(laneJobs.map(j => [j.timeMin, j.timeMin + (j.durationMin || 60)]))) + '" ondragover="dashDragOver(event)" ondrop="dashDrop(event)"'
+          ? ' class="mj-lane" data-day="' + mjEsc(String(data.dayID || '')) + '" data-routeid="' + mjEsc(String(rt.id || '')) + '" data-routecode="' + mjEsc(rc) + '" data-start="' + startMin + '" data-pxh="' + PXH + '" data-open="' + mjEsc(JSON.stringify(open.map(s => [s.startTime, s.label || '']))) + '" data-jobs="' + mjEsc(JSON.stringify(laneJobs.map(j => [j.timeMin, j.timeMin + (j.durationMin || 60)]))) + '" ondragover="dashDragOver(event)" ondrop="dashDrop(event)" ondblclick="estDashSlotDblClick(event)"'
           : '';
         h += '<div style="display:flex;height:' + ROW + 'px;border-bottom:1px solid var(--border);">';
         h += '<div style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:var(--text-secondary);border-right:1px solid var(--border);padding:0 2px;text-align:center;word-break:break-all;">' + mjEsc(rc) + '</div>';
@@ -8631,6 +8631,73 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const data = await dashFetchDay(_estDashDay);
       const axis = (Number.isFinite(data.boardStartMin) && Number.isFinite(data.boardEndMin)) ? { originH: Math.floor(data.boardStartMin / 60), endH: Math.ceil(data.boardEndMin / 60) } : null;
       dashRenderBoard(_estDashDay, data.routes || [], c, axis);
+    }
+    // ===== Estimates Desk: double-click an open slot → create a Vonigo appointment for the open estimate =====
+    // Scoped to the Estimates Desk (currentScreen check) so the same board lane on the dispatch dashboard /
+    // Manage Jobs is unaffected. Snaps to the nearest OPEN slot (same logic as dashDrop).
+    let _estDashCreateSpec = null;
+    function estDashSlotDblClick(ev) {
+      if (currentScreen !== 'estimatesDashboard') return; // create is an Estimates Desk feature only
+      if (_dragMove) return; // not in the middle of a drag-move
+      if (ev.target && ev.target.closest && ev.target.closest('[data-jid]')) return; // double-clicked an existing job, not an open slot
+      if (!document.getElementById('estDashEditorPane')) { _dashToast('Open an estimate first to schedule it.'); return; }
+      if (!currentEstimate || !currentEstimate.jobID) { _dashToast('This estimate isn’t linked to a Vonigo job yet — look up the job # first.'); return; }
+      const lane = ev.currentTarget, d = lane.dataset, rect = lane.getBoundingClientRect();
+      const start = +d.start, pxh = +d.pxh;
+      const rawMin = Math.round((start + ((ev.clientX - rect.left) / pxh) * 60) / 30) * 30;
+      let open = []; try { open = JSON.parse(d.open || '[]'); } catch (e) {}
+      if (!open.length) { _dashToast('No open time on ' + (d.routecode || 'this route') + ' that day — pick a route with white (open) space.'); return; }
+      let best = open[0]; open.forEach(o => { if (Math.abs(o[0] - rawMin) < Math.abs(best[0] - rawMin)) best = o; });
+      estDashCreateModal({ day: d.day, routeID: d.routeid, routeCode: d.routecode, startMin: best[0], label: best[1] || _minLabel(best[0]), durationMin: 120, jobID: String(currentEstimate.jobID), client: currentEstimate.clientName || currentEstimate.label || 'Estimate' });
+    }
+    function estDashCreateModal(spec) {
+      _estDashCreateSpec = spec;
+      let ov = document.getElementById('estDashCreateOverlay');
+      if (!ov) { ov = document.createElement('div'); ov.id = 'estDashCreateOverlay'; document.body.appendChild(ov); }
+      ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(3,8,14,0.62);display:flex;align-items:center;justify-content:center;';
+      ov.innerHTML = '<div style="background:var(--bg-card,#1e2f40);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.5);padding:18px 20px;max-width:380px;width:92%;font-size:13px;color:var(--text-primary);">'
+        + '<div style="font-size:15px;font-weight:800;margin-bottom:10px;">Schedule this estimate</div>'
+        + '<div style="margin-bottom:8px;font-weight:700;">' + mjEsc(spec.client) + ' <span style="color:var(--text-muted);font-weight:500;">#' + mjEsc(String(spec.jobID)) + '</span></div>'
+        + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin-bottom:10px;">'
+        +   '<span style="color:var(--text-muted);">Route</span><span style="font-weight:700;">' + mjEsc(spec.routeCode || '—') + '</span>'
+        +   '<span style="color:var(--text-muted);">When</span><span style="font-weight:700;">' + mjEsc(_dashDayLabel(spec.day)) + ' · ' + mjEsc(spec.label) + '</span>'
+        +   '<span style="color:var(--text-muted);">Length</span><span>' + (spec.durationMin / 60) + ' hr (default)</span>'
+        + '</div>'
+        + '<div style="color:var(--accent-green,#00E785);font-weight:700;font-size:13px;">✓ Open slot</div>'
+        + '<div id="estDashCreateErr" style="color:#ff6b6b;font-size:12px;margin-top:6px;min-height:1px;"></div>'
+        + '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px;">'
+        +   '<button onclick="estDashCreateClose()" style="padding:9px 16px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;font-weight:600;cursor:pointer;">Cancel</button>'
+        +   '<button id="estDashCreateBtn" onclick="estDashCreateExecute()" style="padding:9px 18px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;font-weight:800;cursor:pointer;">Create job</button>'
+        + '</div></div>';
+      ov.style.display = 'flex';
+      ov.onclick = null; setTimeout(() => { ov.onclick = (e) => { if (e.target === ov) estDashCreateClose(); }; }, 400);
+    }
+    function estDashCreateClose() { const ov = document.getElementById('estDashCreateOverlay'); if (ov) ov.style.display = 'none'; _estDashCreateSpec = null; }
+    async function estDashCreateExecute() {
+      const spec = _estDashCreateSpec; if (!spec) return;
+      const btn = document.getElementById('estDashCreateBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+      const errEl = document.getElementById('estDashCreateErr'); if (errEl) errEl.textContent = '';
+      try {
+        // resolve Vonigo client/contact/location from the estimate's jobID (job-lookup returns all three)
+        const look = await edgeFunctionCall('crewlogic-job-lookup', { jobID: spec.jobID, franchiseID: currentUser.franchiseID });
+        if (!look || !look.success || !look.clientID || !look.locationID) {
+          if (errEl) errEl.textContent = (look && look.error) || 'Couldn’t read the Vonigo job details for this estimate.';
+          if (btn) { btn.disabled = false; btn.textContent = 'Create job'; }
+          return;
+        }
+        const res = await edgeFunctionCall('crewlogic-dispatch', { action: 'createJob', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, dayID: spec.day, routeID: spec.routeID, routeCode: spec.routeCode, startTime: spec.startMin, durationMin: spec.durationMin, clientID: look.clientID, contactID: look.contactID, locationID: look.locationID, jobID: spec.jobID, actorEmail: currentUser.email });
+        if (res && res.success) {
+          estDashCreateClose();
+          _dashToast('Scheduled ' + spec.client + ' → ' + spec.routeCode + ' · ' + _dashDayLabel(spec.day) + ' ' + spec.label);
+          _dispatchRefreshVisible();
+        } else {
+          if (errEl) errEl.textContent = (res && res.error) || 'Could not create the appointment.';
+          if (btn) { btn.disabled = false; btn.textContent = 'Create job'; }
+        }
+      } catch (e) {
+        if (errEl) errEl.textContent = 'Network error — try again.';
+        if (btn) { btn.disabled = false; btn.textContent = 'Create job'; }
+      }
     }
     // Voice / text command entry points — wired to the move pipeline + confirm modal in Phase 2.
     // ===== Phase 2: voice / text command on the dashboard → same confirm modal =====
@@ -9117,7 +9184,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _boardActionInProgress() {
       if (_dragMove || _resize) return true; // a drag or resize is underway — don't yank the board
       if (_mjTipSticky) { const t = document.getElementById('mjTip'); if (t && t.style.display !== 'none') return true; } // sticky tooltip open
-      return ['dashMoveOverlay', 'dashDurOverlay', 'mjCancelOverlay', 'dashConvoOverlay', 'dashPlanModalOv']
+      return ['dashMoveOverlay', 'dashDurOverlay', 'mjCancelOverlay', 'dashConvoOverlay', 'dashPlanModalOv', 'estDashCreateOverlay']
         .some(id => { const ov = document.getElementById(id); return ov && ov.style.display !== 'none' && ov.offsetParent !== null; }); // a confirm/convo modal is open
     }
     function _startBoardAutoRefresh() {
