@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.89 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.90 | 2026-06-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1370,6 +1370,12 @@
             <div class="module-desc">Two days side by side — move jobs between days (desktop)</div>
           </div>
 
+          <div class="module-card fade-in fade-in-delay-3" id="estimatesDashboardCard" data-card="estimatesDashboard" onclick="openModule('estimatesDashboard')" style="display:none;">
+            <div class="module-icon">📋</div>
+            <div class="module-name">Estimates Desk</div>
+            <div class="module-desc">Estimates + the schedule on one screen (desktop)</div>
+          </div>
+
           <div class="module-card fade-in fade-in-delay-3" id="priceLookupCard" data-card="priceLookup" onclick="openModule('priceLookup')">
             <div class="module-icon">💲</div>
             <div class="module-name">Price Lookup</div>
@@ -1460,6 +1466,7 @@
 
       <!-- DISPATCH DASHBOARD (desktop) — multi-pane layout injected by renderDashboard() -->
       <div id="dashboardScreen" style="display:none;box-sizing:border-box;padding:12px 24px 32px;"></div>
+      <div id="estimatesDashboardScreen" style="display:none;box-sizing:border-box;padding:12px 24px 32px;"></div>
 
       <!-- JOB PLAN -->
       <div class="job-plan-section" id="jobPlanScreen">
@@ -6934,12 +6941,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const _vonigoMJ = (currentUser.submissionTarget !== 'none' && currentUser.pricingSource !== 'native');
         manageJobsCard.style.display = _vonigoMJ ? '' : 'none';
       }
-      // Dispatch dashboard — Vonigo franchise + desktop width only (multi-pane needs the room).
+      // Dispatch dashboard + Estimates Desk — Vonigo franchise + desktop width only (multi-pane needs the room).
+      const _vonigoDash = (currentUser.submissionTarget !== 'none' && currentUser.pricingSource !== 'native');
+      const _deskOK = (_vonigoDash && window.innerWidth >= 1024) ? '' : 'none';
       const dashboardCard = document.getElementById('dashboardCard');
-      if (dashboardCard) {
-        const _vonigoDash = (currentUser.submissionTarget !== 'none' && currentUser.pricingSource !== 'native');
-        dashboardCard.style.display = (_vonigoDash && window.innerWidth >= 1024) ? '' : 'none';
-      }
+      if (dashboardCard) dashboardCard.style.display = _deskOK;
+      const estDeskCard = document.getElementById('estimatesDashboardCard');
+      if (estDeskCard) estDeskCard.style.display = _deskOK;
 
       // Job Plan pulls the day's schedule/work-orders from the CRM (Vonigo). Native tenants
       // have no scheduling source, so hide it. Cache-safe: hide only when submission_target is
@@ -7004,7 +7012,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       'disposalRouterScreen',
       'storageScreen', 'storageResultsScreen',
       'mattressScreen', 'mattressResultsScreen',
-      'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'dashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen'
+      'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen'
     ];
 
     function hideAll() {
@@ -8483,6 +8491,82 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       routesData.forEach(rt => (rt.jobs || []).forEach(j => jobs.push(Object.assign({}, j, { routeCode: rt.code, route: rt.name }))));
       mjRenderBoard({ dayID, dayLabel: _dashDayLabel(dayID), routes: routesData, jobs }, container, axis);
     }
+    // ── Estimates Desk (Chunk 1): estimates list (left) + schedule board (right), one desktop screen.
+    let _estDashDay = '';
+    function renderEstimatesDashboard() {
+      const scr = document.getElementById('estimatesDashboardScreen'); if (!scr) return;
+      const _tip = document.getElementById('mjTip'); if (_tip && _tip.parentElement !== document.body) document.body.appendChild(_tip); // hover tooltip works here too
+      if (!_estDashDay) _estDashDay = mjNowParts().dayID;
+      scr.innerHTML =
+        '<div style="display:flex;gap:12px;align-items:stretch;">'
+        // LEFT: estimates list
+        + '<div style="flex:0 0 360px;width:360px;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);max-height:82vh;">'
+        +   '<div style="padding:10px 12px;border-bottom:1px solid var(--border);">'
+        +     '<div style="font-size:15px;font-weight:800;margin-bottom:8px;">📋 Estimates</div>'
+        +     '<input id="estDashSearch" type="text" placeholder="Search name / address / status — blank = last 5" oninput="estDashLoadList()" style="width:100%;box-sizing:border-box;padding:8px 10px;font-size:13px;background:var(--bg-input,#1e2f40);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);">'
+        +   '</div>'
+        +   '<div id="estDashList" style="overflow-y:auto;flex:1;padding:6px;"></div>'
+        + '</div>'
+        // RIGHT: schedule board
+        + '<div style="flex:1;min-width:0;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);padding:8px;">'
+        +   '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">'
+        +     '<span style="font-size:13px;font-weight:700;color:var(--text-primary);">🗓️ Schedule</span>'
+        +     '<button onclick="estDashShiftDay(-1)" style="' + _dashNavBtnCss() + '">◀</button>'
+        +     '<span id="estDashDayLbl" style="font-size:13px;font-weight:700;min-width:104px;text-align:center;">' + mjEsc(_dashDayLabel(_estDashDay)) + '</span>'
+        +     '<button onclick="estDashShiftDay(1)" style="' + _dashNavBtnCss() + '">▶</button>'
+        +     '<button onclick="estDashLoadBoard()" style="font-size:12px;padding:6px 12px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;margin-left:auto;">🔄 Refresh</button>'
+        +   '</div>'
+        +   '<div id="estDashBoard"></div>'
+        + '</div>'
+        + '</div>';
+      estDashLoadList();
+      estDashLoadBoard();
+    }
+    async function estDashLoadList() {
+      const el = document.getElementById('estDashList'); if (!el) return;
+      const term = ((document.getElementById('estDashSearch') || {}).value || '').trim().toLowerCase();
+      if (!el._loaded) el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:10px;"><span class="spinner-inline"></span> Loading…</div>';
+      let rows = [];
+      try {
+        rows = await supabaseFetch('/rest/v1/estimates?owner_email=eq.' + encodeURIComponent(currentUser.email) + '&status=not.eq.deleted&order=updated_at.desc&select=estimate_id,label,status,client_name,address,zip,total_price,job_id,vonigo_quote_id,updated_at') || [];
+      } catch (e) { el.innerHTML = '<div style="color:#ff6b6b;font-size:13px;padding:10px;">Could not load estimates.</div>'; return; }
+      el._loaded = true;
+      const list = term
+        ? rows.filter(r => ((r.client_name || '') + ' ' + (r.label || '') + ' ' + (r.address || '') + ' ' + (r.status || '')).toLowerCase().includes(term))
+        : rows.slice(0, 5); // default: last 5
+      estDashRenderList(list, term, rows.length);
+    }
+    function estDashRenderList(list, term, total) {
+      const el = document.getElementById('estDashList'); if (!el) return;
+      if (!list.length) { el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:14px;text-align:center;">' + (term ? 'No matches.' : 'No estimates yet.') + '</div>'; return; }
+      const stColor = (s) => s === 'won' ? 'var(--accent-green,#00E785)' : s === 'lost' ? '#e5484d' : 'var(--text-muted)';
+      el.innerHTML = (term ? '' : '<div style="font-size:11px;color:var(--text-muted);padding:2px 6px 6px;">Last ' + list.length + ' of ' + total + ' — search to find any</div>')
+        + list.map(r => {
+          const name = mjEsc(r.client_name || r.label || 'Estimate');
+          const sub = mjEsc([r.address, r.zip].filter(Boolean).join(' · '));
+          const price = Number(r.total_price) > 0 ? '$' + Number(r.total_price).toLocaleString('en-US') : '';
+          const booked = r.job_id ? '<span style="color:var(--accent-green,#00E785);font-size:11px;font-weight:700;">● booked</span>' : (r.vonigo_quote_id ? '<span style="color:#6db3ff;font-size:11px;">quote</span>' : '');
+          return '<div onclick="estDashOpenEstimate(\'' + mjEsc(String(r.estimate_id)) + '\')" style="padding:9px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;background:var(--bg-input,#1e2f40);">'
+            + '<div style="display:flex;justify-content:space-between;gap:8px;"><span style="font-weight:700;font-size:13px;">' + name + '</span><span style="font-size:11px;font-weight:700;color:' + stColor(r.status) + ';white-space:nowrap;">' + mjEsc(String(r.status || '')) + '</span></div>'
+            + (sub ? '<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">' + sub + '</div>' : '')
+            + '<div style="display:flex;justify-content:space-between;gap:8px;margin-top:3px;font-size:12px;"><span style="font-weight:700;color:var(--accent-green,#00E785);">' + price + '</span>' + booked + '</div>'
+            + '</div>';
+        }).join('');
+    }
+    // CHUNK 2 hook: open the selected estimate into a wide in-pane editor on this screen.
+    function estDashOpenEstimate(id) { if (typeof _dashToast === 'function') _dashToast('Open estimate ' + id + ' — in-pane editor is the next chunk'); }
+    function estDashShiftDay(delta) {
+      _estDashDay = mjAddDays(_estDashDay, delta);
+      const lbl = document.getElementById('estDashDayLbl'); if (lbl) lbl.textContent = _dashDayLabel(_estDashDay);
+      estDashLoadBoard();
+    }
+    async function estDashLoadBoard() {
+      const c = document.getElementById('estDashBoard'); if (!c) return;
+      c.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">Loading…</div>';
+      const data = await dashFetchDay(_estDashDay);
+      const axis = (Number.isFinite(data.boardStartMin) && Number.isFinite(data.boardEndMin)) ? { originH: Math.floor(data.boardStartMin / 60), endH: Math.ceil(data.boardEndMin / 60) } : null;
+      dashRenderBoard(_estDashDay, data.routes || [], c, axis);
+    }
     // Voice / text command entry points — wired to the move pipeline + confirm modal in Phase 2.
     // ===== Phase 2: voice / text command on the dashboard → same confirm modal =====
     let _dashRec = null, _dashListening = false, _dashHistory = [];
@@ -9202,6 +9286,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('headerTitle').textContent = 'Dispatch';
         currentScreen = 'dashboard';
         renderDashboard();
+        return;
+      }
+      if (module === 'estimatesDashboard') {
+        ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) el.style.maxWidth = 'none'; }); // desktop: full width
+        document.getElementById('estimatesDashboardScreen').style.display = 'block';
+        document.getElementById('headerTitle').textContent = 'Estimates Desk';
+        currentScreen = 'estimatesDashboard';
+        renderEstimatesDashboard();
         return;
       }
 
