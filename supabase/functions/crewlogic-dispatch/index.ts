@@ -163,6 +163,25 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
   return jobs;
 }
 
+// Count a job's ACTIVE (non-cancelled) appointments/WorkOrders. SAFETY GUARD for cancel: a Vonigo job can
+// hold several appointments (the "copy to another day" pattern → 644660-1/-2/-3, one jobID, many WorkOrders).
+// Cancelling via /data/Jobs/ method 4 nukes the WHOLE job + every appointment — so before that, we check how
+// many active appointments exist and block the destructive cancel when > 1. Reads the Job's complete object;
+// appointments surface as a WorkOrders[] array and/or Relations. Cancelled status optionID = 162.
+// Returns { active, total, determinable }. determinable=false → caller fails OPEN (cancels as before).
+async function countActiveAppointments(token: string, jobID: string): Promise<{ active: number; determinable: boolean }> {
+  try {
+    const r = await vpost(token, '/data/Jobs/', { method: '-1', objectID: String(jobID), isCompleteObject: 'true' });
+    const job = (r.Job && (Array.isArray(r.Job) ? r.Job[0] : r.Job)) || (r.Jobs && r.Jobs[0]) || null;
+    if (!job) return { active: 0, determinable: false };
+    // countWorkOrders = the job's ACTIVE (non-cancelled) appointment count. Confirmed: a 5-appointment job
+    // reads "5"; a job whose appointments are all cancelled reads "0". This is the guard signal.
+    const n = parseInt(String(job.countWorkOrders ?? ''), 10);
+    if (Number.isFinite(n)) return { active: n, determinable: true };
+    return { active: 0, determinable: false };
+  } catch (e) { console.error('[dispatch] countActiveAppointments failed (fail-open):', (e as Error).message); return { active: 0, determinable: false }; }
+}
+
 // Standalone tool fns (shared by the action router AND the Claude executor).
 async function resolveJobFn(token: string, franchiseID: string, dayID: string, sel: { route?: string; position?: number; timeMin?: number; jobID?: string }) {
   const jobs = await listRouteJobs(token, franchiseID, dayID, sel.route, false);
@@ -457,7 +476,11 @@ Deno.serve(async (req: Request) => {
       const comments = String(body.comments || '');
       if (!jobID || !categoryOptionID || !reasonOptionID) return json({ success: false, error: 'cancelJob needs jobID, categoryOptionID, reasonOptionID' }, 400);
       const plan = { jobID: String(jobID), categoryOptionID: String(categoryOptionID), reasonOptionID: String(reasonOptionID), comments };
-      if (body.dryRun) return json({ success: true, dryRun: true, plan });
+      // SAFETY GUARD: /data/Jobs/ method 4 cancels the whole job + ALL appointments. Block when the job has
+      // >1 active appointment so the user doesn't wipe siblings (e.g. 644660-1/-2/-3). Fail-open if unknown.
+      const appt = await countActiveAppointments(token, String(jobID));
+      if (body.dryRun) return json({ success: true, dryRun: true, plan, appointments: appt });
+      if (appt.active > 1) return json({ success: false, multiAppointment: true, appointmentCount: appt.active, error: `This job has ${appt.active} appointments. To avoid cancelling all of them, cancel the specific appointment directly in Vonigo.` }, 409);
       const Fields = [{ fieldID: 974, optionID: String(categoryOptionID) }, { fieldID: 975, optionID: String(reasonOptionID) }];
       if (comments) Fields.push({ fieldID: 973, fieldValue: comments } as any);
       const c = await vpost(token, '/data/Jobs/', { method: '4', objectID: String(jobID), Fields });
@@ -503,6 +526,10 @@ Deno.serve(async (req: Request) => {
         const categoryOptionID = catEntry.categoryOptionID;
         const reasonOptionID = catEntry.reasons[reason];
         if (categoryOptionID == null || reasonOptionID == null) { console.error('[dispatch] cancel reason not configured:', JSON.stringify({ category: plan.category, reason: plan.reason, categoryOptionID, reasonOptionID })); return json({ success: false, error: 'That cancel reason isn’t set up yet — please pick another reason.' }, 422); }
+        // SAFETY GUARD (same as cancelJob): block cancelling a job that has >1 active appointment, since
+        // /data/Jobs/ method 4 would wipe every appointment. Fail-open if the count can't be determined.
+        const apptE = await countActiveAppointments(token, String(plan.jobID));
+        if (apptE.active > 1) return json({ success: false, multiAppointment: true, appointmentCount: apptE.active, error: `This job has ${apptE.active} appointments. To avoid cancelling all of them, cancel the specific appointment directly in Vonigo.` }, 409);
         const Fields: any[] = [{ fieldID: 974, optionID: String(categoryOptionID) }, { fieldID: 975, optionID: String(reasonOptionID) }];
         if (plan.comments) Fields.push({ fieldID: 973, fieldValue: String(plan.comments) });
         const c = await vpost(token, '/data/Jobs/', { method: '4', objectID: String(plan.jobID), Fields });
