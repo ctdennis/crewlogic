@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.90 | 2026-06-28">
+  <meta name="crewlogic-version" content="v5.47.91 | 2026-06-29">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8516,7 +8516,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +     '<button onclick="estDashShiftDay(1)" style="' + _dashNavBtnCss() + '">▶</button>'
         +     '<button onclick="estDashLoadBoard()" style="font-size:12px;padding:6px 12px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;margin-left:auto;">🔄 Refresh</button>'
         +   '</div>'
-        +   '<div id="estDashBoard"></div>'
+        +   '<div id="estDashBoard" style="min-height:55vh;"></div>'
         + '</div>'
         + '</div>';
       estDashLoadList();
@@ -8558,11 +8558,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function estDashShiftDay(delta) {
       _estDashDay = mjAddDays(_estDashDay, delta);
       const lbl = document.getElementById('estDashDayLbl'); if (lbl) lbl.textContent = _dashDayLabel(_estDashDay);
-      estDashLoadBoard();
+      estDashLoadBoard(true); // quiet — swap in place, no shrink/expand reflow
     }
-    async function estDashLoadBoard() {
+    async function estDashLoadBoard(quiet) {
       const c = document.getElementById('estDashBoard'); if (!c) return;
-      c.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">Loading…</div>';
+      // quiet (date switch / post-write refresh): keep the current board visible during the fetch and swap in
+      // place, so the screen doesn't collapse to "Loading…" and reflow. Only show Loading on first paint.
+      if (!quiet) c.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">Loading…</div>';
       const data = await dashFetchDay(_estDashDay);
       const axis = (Number.isFinite(data.boardStartMin) && Number.isFinite(data.boardEndMin)) ? { originH: Math.floor(data.boardStartMin / 60), endH: Math.ceil(data.boardEndMin / 60) } : null;
       dashRenderBoard(_estDashDay, data.routes || [], c, axis);
@@ -9039,6 +9041,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // Refresh whichever dispatch surface is visible (dashboard boards or the standalone Manage Jobs board).
     function _dispatchRefreshVisible() {
+      const eb = document.getElementById('estDashBoard');
+      if (eb && eb.offsetParent !== null) { estDashLoadBoard(true); return; } // Estimates Desk board (quiet reload)
       const ds = document.getElementById('dashSrcBoard');
       if (ds && ds.offsetParent !== null) { dashReloadOne('src', true); dashReloadOne('dest', true); }
       else if (_mjBoardDayID) { try { mjSelectDate(_mjBoardDayID); } catch (e) {} }
