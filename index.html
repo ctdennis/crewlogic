@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.94 | 2026-06-29">
+  <meta name="crewlogic-version" content="v5.47.95 | 2026-06-29">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7221,11 +7221,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     function goHome() {
-      // If in estimate editor, go back to estimates list
-      const editorScreen = document.getElementById('estimateEditorScreen');
-      if (editorScreen && editorScreen.classList.contains('active')) {
-        promptSaveBeforeLeaving();
-        return;
+      // Estimates Desk: the editor may be relocated into the desk pane. Restore it and exit cleanly to Home,
+      // bypassing the full-screen editor's save-prompt branch below (that branch is only for the normal editor).
+      const _eeNode = document.getElementById('estimateEditorScreen');
+      const _deskPane = document.getElementById('estDashEditorPane');
+      const _onDesk = currentScreen === 'estimatesDashboard' || (_eeNode && _deskPane && _eeNode.parentElement === _deskPane);
+      if (_onDesk) {
+        if (typeof _estDashRestoreEditor === 'function') _estDashRestoreEditor();
+        if (typeof hideSecondaryToolbar === 'function') hideSecondaryToolbar();
+      } else {
+        // If in estimate editor, go back to estimates list
+        const editorScreen = _eeNode;
+        if (editorScreen && editorScreen.classList.contains('active')) {
+          promptSaveBeforeLeaving();
+          return;
+        }
       }
       hideAll();
       document.getElementById('homeScreen').style.display = 'block';
@@ -8571,7 +8581,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function estDashBackToList() {
       _estDashRestoreEditor();
       if (typeof hideSecondaryToolbar === 'function') hideSecondaryToolbar();
-      const bb = document.getElementById('backBtn'); if (bb) bb.classList.remove('visible');
+      const bb = document.getElementById('backBtn'); if (bb) bb.classList.add('visible'); // keep the Home arrow on the list view
       const ht = document.getElementById('headerTitle'); if (ht) ht.textContent = 'Estimates Desk';
       renderEstimatesDashboard(); // back to list + board
     }
@@ -8602,7 +8612,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         await _loadEstimateInto(id);
         openEstimateEditor(); // populates fields + .active (shows in the pane) + the editor toolbar
         const loading = document.getElementById('estDashEditorLoading'); if (loading) loading.remove();
-        const bb = document.getElementById('backBtn'); if (bb) bb.classList.remove('visible'); // desk has its own Back-to-list
+        const bb = document.getElementById('backBtn'); if (bb) bb.classList.add('visible'); // top back-arrow exits the desk to Home (goHome is desk-aware); the in-pane "← Back to list" returns to the list
       } catch (e) {
         const loading = document.getElementById('estDashEditorLoading'); if (loading) loading.innerHTML = '<span style="color:#ff6b6b;">Could not load that estimate.</span>';
       }
