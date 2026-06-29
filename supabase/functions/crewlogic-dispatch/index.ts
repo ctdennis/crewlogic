@@ -429,34 +429,6 @@ Deno.serve(async (req: Request) => {
       return json({ success: ok, plan, lockID, move: { errNo: mv.errNo, errMsg: mv.errMsg || null, errors: mv.Errors || null } }, ok ? 200 : 502);
     }
 
-    // createJob: schedule a NEW appointment for an existing Vonigo job (the estimate's jobID) into an open
-    // slot. Proven spike recipe: lock the slot (method 2 → lockID, which carries route/date/time/duration),
-    // then add the WorkOrder (method 3) with client/contact/location + lockID + jobID. NO method-16 follow-up.
-    // (Used by the Estimates Desk double-click-to-schedule.)
-    if (action === 'createJob') {
-      const { dayID, startTime, clientID, contactID, locationID, jobID } = body;
-      const durationMin = String(body.durationMin || 120), zip = String(body.zip || ''), serviceTypeID = String(body.serviceTypeID || '11');
-      let routeID = body.routeID ? String(body.routeID) : undefined;
-      if (!routeID && body.routeCode) routeID = await resolveRouteID(token, String(dayID), String(body.routeCode));
-      if (!dayID || !routeID || startTime == null || !clientID || !contactID || !locationID || !jobID) {
-        return json({ success: false, error: 'createJob needs dayID, routeID/routeCode, startTime, clientID, contactID, locationID, jobID', routeID }, 400);
-      }
-      const plan = { dayID: String(dayID), routeID: String(routeID), routeCode: body.routeCode || null, startTime: Number(startTime), startLabel: timeLabel(Number(startTime)), durationMin, jobID: String(jobID), clientID: String(clientID) };
-      if (body.dryRun) return json({ success: true, dryRun: true, plan });
-      // 1) lock the open slot — supplies route/date/time/duration to the create
-      const lock = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID: String(routeID), zip, serviceTypeID, duration: durationMin, startTime: String(startTime) });
-      const lockID = lock.Ids && (lock.Ids.lockID || lock.Ids.LockID);
-      if (!lockID) { console.error('[dispatch] createJob lock failed:', JSON.stringify({ errNo: lock.errNo, errors: lock.Errors || null })); return json({ success: false, error: `That time isn’t open for the full ${durLabel(durationMin)} on ${body.routeCode || 'that route'} — pick another open slot.` }, 409); }
-      // 2) create the WorkOrder (method 3); jobID attaches it to the estimate's Vonigo job (the "copy to another day" pattern)
-      const cr = await vpost(token, '/data/WorkOrders/', { method: '3', clientID: String(clientID), contactID: String(contactID), locationID: String(locationID), serviceTypeID, lockID: String(lockID), jobID: String(jobID) });
-      const ok = cr.errNo === 0;
-      const woID = (cr.Ids && (cr.Ids.objectID || cr.Ids.workOrderID || cr.Ids.woID || cr.Ids.WorkOrderID)) || cr.objectID || null;
-      console.log(`[dispatch][AUDIT] createJob job=${jobID} route=${routeID} ${plan.startLabel} ${dayID} lock=${lockID} -> wo=${woID} errNo=${cr.errNo}`);
-      if (!ok) console.error('[dispatch] createJob create failed:', JSON.stringify({ errNo: cr.errNo, errMsg: cr.errMsg, errors: cr.Errors || null }));
-      await audit({ franchiseID, action: 'create', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan, lockID, woID }, fieldsWritten: { method: 3, clientID: String(clientID), contactID: String(contactID), locationID: String(locationID), lockID: String(lockID), jobID: String(jobID) }, vonigoErrno: cr.errNo, success: ok, result: { errMsg: cr.errMsg || null, errors: cr.Errors || null, woID, ids: cr.Ids || null } });
-      return json({ success: ok, woID, plan, create: { errNo: cr.errNo, errMsg: cr.errMsg || null, errors: cr.Errors || null, ids: cr.Ids || null }, ...(ok ? {} : { error: 'Couldn’t create the appointment — that slot may have just been taken. Try another open slot.' }) }, ok ? 200 : 502);
-    }
-
     if (action === 'cancelJob') {
       const { jobID, categoryOptionID, reasonOptionID } = body;
       const comments = String(body.comments || '');
