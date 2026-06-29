@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.92 | 2026-06-29">
+  <meta name="crewlogic-version" content="v5.47.93 | 2026-06-29">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7016,6 +7016,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     ];
 
     function hideAll() {
+      // The Estimates Desk relocates #estimateEditorScreen into its pane; on ANY nav, move it back to its
+      // home parent so a later re-render can't destroy it and the normal full-screen estimate flow still works.
+      const _eeNode = document.getElementById('estimateEditorScreen');
+      if (_eeNode && _estEditorHome && _eeNode.parentElement !== _estEditorHome) { _eeNode.classList.remove('active'); _estEditorHome.appendChild(_eeNode); }
       _stopTrucksAutoRefresh();
       // Restore the app shell + content to their default (480px) width; the desktop dashboard widens them.
       ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) el.style.maxWidth = ''; });
@@ -8553,8 +8557,52 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '</div>';
         }).join('');
     }
-    // CHUNK 2 hook: open the selected estimate into a wide in-pane editor on this screen.
-    function estDashOpenEstimate(id) { if (typeof _dashToast === 'function') _dashToast('Open estimate ' + id + ' — in-pane editor is the next chunk'); }
+    // Open an estimate into a WIDE pane on the Estimates Desk (board still visible), by relocating the
+    // existing #estimateEditorScreen node so all its features work as-is. Restored on Back / any nav.
+    let _estEditorHome = null; // original parent of #estimateEditorScreen
+    function _estDashRestoreEditor() {
+      const ee = document.getElementById('estimateEditorScreen');
+      if (ee && _estEditorHome && ee.parentElement !== _estEditorHome) { ee.classList.remove('active'); _estEditorHome.appendChild(ee); }
+    }
+    function estDashBackToList() {
+      _estDashRestoreEditor();
+      if (typeof hideSecondaryToolbar === 'function') hideSecondaryToolbar();
+      const bb = document.getElementById('backBtn'); if (bb) bb.classList.remove('visible');
+      const ht = document.getElementById('headerTitle'); if (ht) ht.textContent = 'Estimates Desk';
+      renderEstimatesDashboard(); // back to list + board
+    }
+    async function estDashOpenEstimate(id) {
+      const scr = document.getElementById('estimatesDashboardScreen'); if (!scr) return;
+      _estDashRestoreEditor(); // defensive: never let scr.innerHTML below destroy the editor node
+      isDirty = false; _lookupSessionID++;
+      scr.innerHTML =
+        '<div style="display:flex;gap:12px;align-items:stretch;">'
+        + '<div style="flex:1;min-width:0;display:flex;flex-direction:column;">'
+        +   '<div style="margin-bottom:8px;"><button onclick="estDashBackToList()" style="font-size:13px;padding:7px 14px;background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm);cursor:pointer;font-weight:700;">← Back to list</button></div>'
+        +   '<div id="estDashEditorPane" style="flex:1;min-width:0;overflow:auto;max-height:84vh;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);"><div id="estDashEditorLoading" style="padding:20px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline"></span> Loading estimate…</div></div>'
+        + '</div>'
+        + '<div style="flex:0 0 440px;width:440px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);padding:8px;max-height:84vh;overflow:auto;">'
+        +   '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">'
+        +     '<span style="font-size:13px;font-weight:700;color:var(--text-primary);">🗓️ Schedule</span>'
+        +     '<button onclick="estDashShiftDay(-1)" style="' + _dashNavBtnCss() + '">◀</button>'
+        +     '<span id="estDashDayLbl" style="font-size:13px;font-weight:700;min-width:104px;text-align:center;">' + mjEsc(_dashDayLabel(_estDashDay)) + '</span>'
+        +     '<button onclick="estDashShiftDay(1)" style="' + _dashNavBtnCss() + '">▶</button>'
+        +     '<button onclick="estDashLoadBoard()" style="font-size:12px;padding:6px 12px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;margin-left:auto;">🔄 Refresh</button>'
+        +   '</div>'
+        +   '<div id="estDashBoard" style="min-height:55vh;"></div>'
+        + '</div></div>';
+      estDashLoadBoard();
+      const ee = document.getElementById('estimateEditorScreen'), pane = document.getElementById('estDashEditorPane');
+      if (ee && pane) { if (!_estEditorHome) _estEditorHome = ee.parentElement; pane.appendChild(ee); } // relocate editor into the pane
+      try {
+        await _loadEstimateInto(id);
+        openEstimateEditor(); // populates fields + .active (shows in the pane) + the editor toolbar
+        const loading = document.getElementById('estDashEditorLoading'); if (loading) loading.remove();
+        const bb = document.getElementById('backBtn'); if (bb) bb.classList.remove('visible'); // desk has its own Back-to-list
+      } catch (e) {
+        const loading = document.getElementById('estDashEditorLoading'); if (loading) loading.innerHTML = '<span style="color:#ff6b6b;">Could not load that estimate.</span>';
+      }
+    }
     function estDashShiftDay(delta) {
       _estDashDay = mjAddDays(_estDashDay, delta);
       const lbl = document.getElementById('estDashDayLbl'); if (lbl) lbl.textContent = _dashDayLabel(_estDashDay);
@@ -12150,6 +12198,36 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       openEstimateEditor();
     }
 
+    // Load an estimate into currentEstimate (fetch + assemble + price blocks + collapse + photos) WITHOUT any
+    // screen nav — so it works full-screen (openEstimate) AND inside the Estimates Desk pane. Returns true;
+    // throws on not-found/error (caller shows the error). Mirrors openEstimate's load so that flow is untouched.
+    async function _loadEstimateInto(estimateID) {
+      const rows = await supabaseFetch('/rest/v1/estimates?estimate_id=eq.' + estimateID + '&select=*');
+      if (!rows || !rows.length) throw new Error('Estimate not found');
+      const row = rows[0];
+      const payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : (row.payload || {});
+      currentEstimate = Object.assign({}, payload, {
+        estimateID: row.estimate_id, ownerEmail: row.owner_email, franchiseID: row.franchise_id,
+        label: row.label, status: row.status, clientName: row.client_name, address: row.address, zip: row.zip,
+        totalPrice: row.total_price, totalTrucks: row.total_trucks, splitPricing: row.split_pricing,
+        vonigoQuoteID: row.vonigo_quote_id, jobID: row.job_id, clientID: row.client_id, contactID: row.contact_id,
+        locationID: row.location_id, coverPhoto: row.cover_photo, costAnalysis: row.cost_analysis,
+        priceBook: row.price_book, clonedFrom: row.cloned_from, createdAt: row.created_at,
+        updatedAt: row.updated_at, clientPhone: row.client_phone || null
+      });
+      currentEstimate._isNewDraft = false;
+      if (currentEstimate.clonedFrom) currentEstimate._pendingVolumeLines = null;
+      restorePriceBlocks();
+      chargeCollapsed.clear();
+      try {
+        let saved = null;
+        if (currentEstimate.collapseState && Array.isArray(currentEstimate.collapseState)) saved = JSON.stringify(currentEstimate.collapseState);
+        else { const key = 'cl_collapse_' + currentEstimate.estimateID; saved = (() => { try { return localStorage.getItem(key); } catch (e) { return null; } })() || storage.get(key); }
+        if (saved) JSON.parse(saved).forEach(idx => chargeCollapsed.add(idx));
+      } catch (e) {}
+      await mergeQueuedPhotosIntoEstimate(currentEstimate);
+      return true;
+    }
     async function openEstimate(estimateID) {
       isDirty = false; // reset before loading new estimate
       _lookupSessionID++; // invalidate any in-flight lookups from previous estimate
