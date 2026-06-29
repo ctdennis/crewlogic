@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.47.91 | 2026-06-29">
+  <meta name="crewlogic-version" content="v5.47.92 | 2026-06-29">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8838,9 +8838,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const fromDay = spec.fromDay, toDay = spec.toDay; // capture before close nulls _dragMove
         dashMoveClose();
         _dashToast('Moved ' + (spec.client || 'job') + ' → ' + spec.toRouteCode + ' · ' + _dashDayLabel(toDay) + ' ' + spec.toLabel);
-        // reload ONLY the board(s) whose day changed — in place, no blank, no map remount
-        if (_dashSrcDay === fromDay || _dashSrcDay === toDay) dashReloadOne('src', true);
-        if (_dashDestDay === fromDay || _dashDestDay === toDay) dashReloadOne('dest', true);
+        // refresh in place (no blank/remount). Estimates Desk → its board; dashboard → the affected day's board(s).
+        const eb = document.getElementById('estDashBoard');
+        if (eb && eb.offsetParent !== null) { estDashLoadBoard(true); }
+        else { if (_dashSrcDay === fromDay || _dashSrcDay === toDay) dashReloadOne('src', true); if (_dashDestDay === fromDay || _dashDestDay === toDay) dashReloadOne('dest', true); }
       } else {
         const e = document.getElementById('dashMoveErr'); if (e) e.textContent = (res && res.error) || 'Move failed — try again.';
         if (btn) { btn.disabled = false; btn.textContent = 'Confirm move'; }
@@ -8916,8 +8917,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const day = spec.dayID, client = spec.client, toMin = spec.toMin;
         dashDurClose();
         _dashToast('Set ' + client + ' to ' + _durLbl(toMin));
-        if (currentScreen === 'dashboard') { if (_dashSrcDay === day) dashReloadOne('src', true); if (_dashDestDay === day) dashReloadOne('dest', true); }
-        else if (_mjBoardDayID) { const _chip = document.querySelector('#mjDateStrip .mj-date-chip[data-dayid="' + _mjBoardDayID + '"]'); mjSelectDate(_mjBoardDayID, _chip || null); }
+        _dispatchRefreshVisible(); // refresh whichever board is visible (dashboard, Manage Jobs, OR the Estimates Desk)
       } else {
         const e = document.getElementById('dashDurErr'); if (e) e.textContent = (res && res.error) || 'Could not change the duration.';
         if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; }
