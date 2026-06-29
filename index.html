@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.0 | 2026-06-29">
+  <meta name="crewlogic-version" content="v5.48.1 | 2026-06-29">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8651,11 +8651,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       let open = []; try { open = JSON.parse(d.open || '[]'); } catch (e) {}
       if (!open.length) { _dashToast('No open time on ' + (d.routecode || 'this route') + ' that day — pick a route with white (open) space.'); return; }
       open = open.slice().sort((a, b) => a[0] - b[0]);
-      let best = open[0]; open.forEach(o => { if (Math.abs(o[0] - rawMin) < Math.abs(best[0] - rawMin)) best = o; });
+      const openSet = new Set(open.map(o => o[0]));
+      const dur = 120, need = dur / 30; // a job needs `need` consecutive 30-min openings
+      // The board shows RAW 30-min open slots (like Vonigo), but a late one (e.g. 7:30pm) can't hold a full
+      // 120-min job — Vonigo locks it anyway, then the intake page says "expired". So only let the user land
+      // on a slot where the whole job FITS (matches Vonigo's real 120-min availability).
+      const bookable = open.filter(o => { for (let i = 0; i < need; i++) if (!openSet.has(o[0] + i * 30)) return false; return true; });
+      if (!bookable.length) { _dashToast('No 2-hour opening on ' + (d.routecode || 'this route') + ' that day — pick a route/day with a longer open (white) block.'); return; }
+      let best = bookable[0]; bookable.forEach(o => { if (Math.abs(o[0] - rawMin) < Math.abs(best[0] - rawMin)) best = o; });
       // contiguous-open end from the picked slot (30-min granularity) → endTimeAvail
-      const starts = open.map(o => o[0]); let end = best[0] + 30;
-      while (starts.indexOf(end) !== -1) end += 30;
-      const dur = 120;
+      let end = best[0] + 30; while (openSet.has(end)) end += 30;
       // Open the tab NOW (synchronously, inside the user-gesture) so the browser doesn't block the popup;
       // we fill its URL after the async reserve returns.
       const w = window.open('', '_blank');

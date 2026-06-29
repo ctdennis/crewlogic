@@ -433,8 +433,16 @@ Deno.serve(async (req: Request) => {
     // intake page needs (scheduleID + requestID) so a double-click can deep-link into a NON-expired slot.
     if (action === 'reserveSlot') {
       const { dayID, routeID, startTime } = body;
-      const duration = String(body.durationMin || 120), zip = String(body.zip || ''), serviceTypeID = String(body.serviceTypeID || '11');
+      const durMin = Number(body.durationMin || 120);
+      const duration = String(durMin), zip = String(body.zip || ''), serviceTypeID = String(body.serviceTypeID || '11');
       if (!dayID || !routeID || startTime == null) return json({ success: false, error: 'reserveSlot needs dayID, routeID, startTime' }, 400);
+      // GUARD: the availability lock (method 2) returns a lockID even for slots that can't hold a full job
+      // (e.g. a 30-min display slot late in the day) — Vonigo's intake page then rejects it as "expired".
+      // So first confirm this startTime is in the route's REAL availability for the job duration.
+      const fit = await suggestSlotsFn(token, franchiseID, String(dayID), durMin, undefined, String(routeID)).catch(() => null);
+      if (fit && Array.isArray(fit) && !fit.some((s: any) => Number(s.startTime) === Number(startTime))) {
+        return json({ success: false, error: `That slot isn’t open long enough for a ${durMin}-minute job — pick an earlier open slot.` }, 409);
+      }
       const lock = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID: String(routeID), zip, serviceTypeID, duration, startTime: String(startTime) });
       const lockID = (lock.Ids && (lock.Ids.lockID || lock.Ids.LockID)) || null;
       if (!lockID) return json({ success: false, error: 'That slot isn’t open for the full duration — pick another.', errNo: lock.errNo }, 409);
