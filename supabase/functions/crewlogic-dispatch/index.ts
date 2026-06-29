@@ -429,6 +429,21 @@ Deno.serve(async (req: Request) => {
       return json({ success: ok, plan, lockID, move: { errNo: mv.errNo, errMsg: mv.errMsg || null, errors: mv.Errors || null } }, ok ? 200 : 502);
     }
 
+    // reserveSlot: lock an open slot (availability method 2) and return the reservation IDs the Vonigo
+    // intake page needs (scheduleID + requestID) so a double-click can deep-link into a NON-expired slot.
+    if (action === 'reserveSlot') {
+      const { dayID, routeID, startTime } = body;
+      const duration = String(body.durationMin || 120), zip = String(body.zip || ''), serviceTypeID = String(body.serviceTypeID || '11');
+      if (!dayID || !routeID || startTime == null) return json({ success: false, error: 'reserveSlot needs dayID, routeID, startTime' }, 400);
+      const lock = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID: String(routeID), zip, serviceTypeID, duration, startTime: String(startTime) });
+      const lockID = (lock.Ids && (lock.Ids.lockID || lock.Ids.LockID)) || null;
+      if (!lockID) return json({ success: false, error: 'That slot isn’t open for the full duration — pick another.', errNo: lock.errNo }, 409);
+      // The Vonigo intake page's requestID = the reservation we just made (lockID). scheduleID is internal
+      // Vonigo state (not exposed by availability/routes) — omitted; routeID+dayID+timeStart+requestID pin the slot.
+      console.log(`[dispatch][reserveSlot] route=${routeID} ${dayID} start=${startTime} dur=${duration} lockID=${lockID} errNo=${lock.errNo}`);
+      return json({ success: true, lockID, requestID: lockID, dayID: String(dayID), routeID: String(routeID), startTime: Number(startTime), durationMin: Number(duration) });
+    }
+
     if (action === 'cancelJob') {
       const { jobID, categoryOptionID, reasonOptionID } = body;
       const comments = String(body.comments || '');
