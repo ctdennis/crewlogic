@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.4 | 2026-06-30">
+  <meta name="crewlogic-version" content="v5.48.5 | 2026-06-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -17390,6 +17390,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.getElementById('pdfOptionsModal').style.display = 'flex';
     }
 
+    // Stamp the estimate + franchise ID in tiny faint type at the bottom of the CURRENT (last) PDF page,
+    // so a saved PDF can be traced back to its storage folder (estimate-photos/<franchiseID>/<estimateID>/).
+    function _pdfStampId(doc) {
+      try {
+        const eid = (typeof currentEstimate !== 'undefined' && currentEstimate) ? currentEstimate.estimateID : null;
+        if (!eid) return; // unsaved draft — nothing to trace
+        const fid = (currentUser && currentUser.franchiseID) || '';
+        const h = doc.internal.pageSize.getHeight();
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(6);
+        doc.setTextColor(150, 150, 150);
+        doc.text('Estimate ID: ' + eid + (fid ? '  |  Franchise: ' + fid : ''), 24, h - 8);
+      } catch (e) { /* never block the PDF on the trace stamp */ }
+    }
+
     async function generateEstimatePDF(mode, opts = {}) {
       document.getElementById('pdfOptionsModal').style.display = 'none';
       // Open tab immediately while still in user gesture context — browsers block window.open after await
@@ -18561,6 +18576,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       // Merge with boilerplate pages
       if (opts.skipBoilerplate) {
+        _pdfStampId(doc); // trace stamp on the estimate-only PDF's last page
         // Return estimate-only PDF (no boilerplate, no photos) — used for Vonigo upload
         if (mode === 'base64') {
           const bytes = new Uint8Array(doc.output('arraybuffer'));
@@ -18935,6 +18951,7 @@ RECYCLING & DONATION
           }
         }
 
+        _pdfStampId(doc); // trace stamp on the full proposal's last page
         // Output merged doc
         if (mode === 'base64') {
           const bytes = new Uint8Array(doc.output('arraybuffer'));
