@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.2 | 2026-06-29">
+  <meta name="crewlogic-version" content="v5.48.3 | 2026-06-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8632,56 +8632,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const axis = (Number.isFinite(data.boardStartMin) && Number.isFinite(data.boardEndMin)) ? { originH: Math.floor(data.boardStartMin / 60), endH: Math.ceil(data.boardEndMin / 60) } : null;
       dashRenderBoard(_estDashDay, data.routes || [], c, axis);
     }
-    // ===== Estimates Desk: double-click an open slot → create a Vonigo appointment for the open estimate =====
-    // Scoped to the Estimates Desk (currentScreen check) so the same board lane on the dispatch dashboard /
-    // Manage Jobs is unaffected. Snaps to the nearest OPEN slot (same logic as dashDrop).
-    // Double-click an OPEN slot on a desktop schedule board → RESERVE the slot in Vonigo (a lock, so the slot
-    // doesn't show "expired"), then open Vonigo's new-job INTAKE page in a new tab pre-filled with that slot
-    // (route / day / time) + the reservation's requestID. We do NOT create jobs ourselves — Vonigo owns intake
-    // (pick/create customer, residential vs commercial, service locations, etc.). Estimate-independent.
-    // requestID = the lockID returned by reserveSlot (that reservation is what keeps the slot from expiring).
-    // scheduleID is internal Vonigo state (not exposed by availability/routes) — omitted; routeID+dayID+timeStart
-    // +requestID pin the slot. NOTE: host + franchiseID are #90's Vonigo (the only Vonigo tenant); tenant-derive later.
-    async function boardSlotDblClick(ev) {
+    // ===== Schedule board: double-click an open slot → open Vonigo's day GRID in a new tab =====
+    // We open Vonigo's schedule grid for the board's current day (viewType=1); the user clicks the actual
+    // slot in Vonigo, which mints its own scheduleID + opens the intake (pick/create customer, residential
+    // vs commercial, service locations, etc.). We pass ONLY the day — no reservation, no slot/time, so the
+    // slot can never show "expired". Synchronous window.open (inside the user gesture) → no popup-blocker.
+    // dayID comes from the lane's data-day, set per board → correct on BOTH the Estimates Desk and the
+    // Dispatch dashboard boards. NOTE: host is #90's Vonigo (the only Vonigo tenant); tenant-derive later.
+    // (The backend `reserveSlot` action in crewlogic-dispatch is now unused by the frontend — dormant.)
+    function boardSlotDblClick(ev) {
       if (_dragMove) return; // not mid drag-move
       if (ev.target && ev.target.closest && ev.target.closest('[data-jid]')) return; // a job block, not an open slot
-      const lane = ev.currentTarget, d = lane.dataset, rect = lane.getBoundingClientRect();
-      const start = +d.start, pxh = +d.pxh;
-      const rawMin = Math.round((start + ((ev.clientX - rect.left) / pxh) * 60) / 30) * 30;
-      let open = []; try { open = JSON.parse(d.open || '[]'); } catch (e) {}
-      if (!open.length) { _dashToast('No open time on ' + (d.routecode || 'this route') + ' that day — pick a route with white (open) space.'); return; }
-      open = open.slice().sort((a, b) => a[0] - b[0]);
-      const openSet = new Set(open.map(o => o[0]));
-      const dur = 120, need = dur / 30; // a job needs `need` consecutive 30-min openings
-      // The board shows RAW 30-min open slots (like Vonigo), but a late one (e.g. 7:30pm) can't hold a full
-      // 120-min job — Vonigo locks it anyway, then the intake page says "expired". So only let the user land
-      // on a slot where the whole job FITS (matches Vonigo's real 120-min availability).
-      const bookable = open.filter(o => { for (let i = 0; i < need; i++) if (!openSet.has(o[0] + i * 30)) return false; return true; });
-      if (!bookable.length) { _dashToast('No 2-hour opening on ' + (d.routecode || 'this route') + ' that day — pick a route/day with a longer open (white) block.'); return; }
-      let best = bookable[0]; bookable.forEach(o => { if (Math.abs(o[0] - rawMin) < Math.abs(best[0] - rawMin)) best = o; });
-      // contiguous-open end from the picked slot (30-min granularity) → endTimeAvail
-      let end = best[0] + 30; while (openSet.has(end)) end += 30;
-      // Open the tab NOW (synchronously, inside the user-gesture) so the browser doesn't block the popup;
-      // we fill its URL after the async reserve returns.
-      const w = window.open('', '_blank');
-      _dashToast('Reserving ' + (d.routecode || 'slot') + ' ' + (best[1] || '') + '…');
-      let r = null;
-      try {
-        r = await edgeFunctionCall('crewlogic-dispatch', { action: 'reserveSlot', franchiseID: currentUser.franchiseID, dayID: String(d.day), routeID: String(d.routeid), startTime: best[0], durationMin: dur });
-      } catch (e) { r = { success: false }; }
-      if (!r || !r.success || !r.requestID) {
-        if (w) { try { w.close(); } catch (e) {} }
-        _dashToast((r && r.error) || 'Could not reserve that slot — pick another open time.');
-        return;
-      }
-      const p = new URLSearchParams({
-        requestCategoryID: '1', requestID: String(r.requestID), dayID: String(d.day), routeID: String(d.routeid),
-        timeStart: String(best[0]), duration: String(dur), franchiseID: String(currentUser.franchiseID || ''),
-        endTimeAvail: String(Math.max(end, best[0] + dur)), landingMode: '2', isCall: 'false', blank: '',
-      });
-      p.set('_', String(Date.now())); // cache-buster
-      const url = 'https://junkluggers.vonigo.com/Schedule/Intake/Intake_Main.aspx?' + p.toString();
-      if (w) { w.location.href = url; } else { window.open(url, '_blank'); }
+      const day = ev.currentTarget.dataset.day;
+      if (!day) return;
+      window.open('https://junkluggers.vonigo.com/Schedule/Grid/Grid_Main.aspx?dayID=' + encodeURIComponent(day) + '&viewType=1', '_blank');
     }
     // Voice / text command entry points — wired to the move pipeline + confirm modal in Phase 2.
     // ===== Phase 2: voice / text command on the dashboard → same confirm modal =====
