@@ -150,7 +150,7 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
     // gates the AI write-decline (status-Open label-done jobs are still movable).
     const labelDone = GRAY_LABELS.has(gf(f, F.label).optionID || 0);
     const zoneRel = rel.find((x: any) => x.relationType === 'zone');
-    return { jobID: jobRel ? String(jobRel.objectID) : null, woID: String(w.objectID), route: rname, routeCode: shortRoute(rname), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), labelDone, labelOpt: gf(f, F.label).optionID || 0, zoneID: zoneRel ? String(zoneRel.objectID) : '', zoneName: zoneRel ? zoneRel.name : '', lat: null as number | null, lon: null as number | null };
+    return { jobID: jobRel ? String(jobRel.objectID) : null, woID: String(w.objectID), route: rname, routeCode: shortRoute(rname), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), labelDone, labelOpt: gf(f, F.label).optionID || 0, apptCount: parseInt(String(w.countWorkOrders ?? '0'), 10) || 0, zoneID: zoneRel ? String(zoneRel.objectID) : '', zoneName: zoneRel ? zoneRel.name : '', lat: null as number | null, lon: null as number | null };
   }).filter((j: any) => j.jobID
     // hide CANCELLED only — plain "Cancelled" (optionID 162) AND same-day "Cancelled - Today" (different
     // optionID, caught by the text test). COMPLETED/ARCHIVED jobs are KEPT (flagged completed → grayed on
@@ -391,7 +391,7 @@ Deno.serve(async (req: Request) => {
       for (const j of jobs) {
         const k = j.routeID; if (!k) continue;
         if (!byId[k]) byId[k] = { id: k, code: j.routeCode, name: j.route, isActive: true, jobs: [], open: [] };
-        byId[k].jobs.push({ woID: j.woID, jobID: j.jobID, client: j.client, timeMin: j.timeMin, durationMin: j.durationMin, timeLabel: j.timeLabel, status: j.status, completed: j.completed, labelDone: j.labelDone, labelOpt: j.labelOpt, zoneID: j.zoneID, zoneName: j.zoneName, zip: j.zip, address: j.address, routeCode: j.routeCode, price: j.price, summary: j.summary, items: j.items });
+        byId[k].jobs.push({ woID: j.woID, jobID: j.jobID, client: j.client, timeMin: j.timeMin, durationMin: j.durationMin, timeLabel: j.timeLabel, status: j.status, completed: j.completed, labelDone: j.labelDone, labelOpt: j.labelOpt, apptCount: j.apptCount, zoneID: j.zoneID, zoneName: j.zoneName, zip: j.zip, address: j.address, routeCode: j.routeCode, price: j.price, summary: j.summary, items: j.items });
       }
       for (const s of openSlots) { const k = String(s.routeID); if (byId[k]) byId[k].open.push({ startTime: s.startTime, label: s.label }); }
       // Emit in getRoutesFull's sequence order — NOT Object.values(byId), which JS reorders by the

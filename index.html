@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.3 | 2026-06-30">
+  <meta name="crewlogic-version" content="v5.48.4 | 2026-06-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9075,9 +9075,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       'scheduling': ['customer not ready', 'date no longer works for customer'],
     };
     function _mjTitle(s) { return String(s || '').replace(/\b\w/g, c => c.toUpperCase()); }
+    function _mjOpenVonigoGrid(day) { window.open('https://junkluggers.vonigo.com/Schedule/Grid/Grid_Main.aspx?dayID=' + encodeURIComponent(String(day || '')) + '&viewType=1', '_blank'); }
+    // Multi-appointment job: Vonigo's API can't cancel ONE appointment (only the whole job). Skip the reason
+    // picker and send the user to that day's Vonigo grid to cancel the specific appointment there.
+    function _mjCancelMultiAppt(j) {
+      let ov = document.getElementById('mjCancelOverlay');
+      if (!ov) { ov = document.createElement('div'); ov.id = 'mjCancelOverlay'; document.body.appendChild(ov); }
+      ov.style.cssText = 'position:fixed;inset:0;z-index:100001;background:rgba(3,8,14,0.62);display:flex;align-items:center;justify-content:center;';
+      const n = j.apptCount || 0, day = mjEsc(String(j._day || ''));
+      ov.innerHTML = '<div style="background:var(--bg-card,#1e2f40);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.5);padding:18px 20px;max-width:420px;width:92%;font-size:13px;color:var(--text-primary);">'
+        + '<div style="font-size:15px;font-weight:800;margin-bottom:6px;">This job has ' + n + ' appointments</div>'
+        + '<div style="color:var(--text-muted);margin-bottom:10px;">' + mjEsc(j.client || 'Job') + (j.jobID ? ' · #' + mjEsc(String(j.jobID)) : '') + '</div>'
+        + '<div style="margin-bottom:14px;line-height:1.5;">Cancelling here would cancel the whole job and <b>all ' + n + ' appointments</b>. To cancel just one, do it in Vonigo.</div>'
+        + '<div style="display:flex;gap:10px;justify-content:flex-end;">'
+        +   '<button onclick="mjCancelClose()" style="padding:9px 16px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;font-weight:600;cursor:pointer;">Close</button>'
+        +   '<button onclick="_mjOpenVonigoGrid(\'' + day + '\');mjCancelClose();" style="padding:9px 18px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;font-weight:800;cursor:pointer;">Open Vonigo schedule</button>'
+        + '</div></div>';
+      ov.style.display = 'flex';
+      ov.onclick = null; setTimeout(() => { ov.onclick = (e) => { if (e.target === ov) mjCancelClose(); }; }, 400);
+    }
     function mjCancelJob() {
       const j = _mjLastTipJob; if (!j || !j.jobID) return;
       mjTipForceHide();
+      if ((j.apptCount || 0) > 1) { _mjCancelMultiAppt(j); return; } // multi-appointment → send to Vonigo (API can't cancel one)
       const catOpts = Object.keys(MJ_CANCEL_REASONS).map(c => '<option value="' + c + '">' + mjEsc(_mjTitle(c)) + '</option>').join('');
       let ov = document.getElementById('mjCancelOverlay');
       if (!ov) { ov = document.createElement('div'); ov.id = 'mjCancelOverlay'; document.body.appendChild(ov); }
