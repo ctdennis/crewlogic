@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.8 | 2026-07-01">
+  <meta name="crewlogic-version" content="v5.48.9 | 2026-07-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1356,6 +1356,12 @@
             <div class="module-desc">Live truck locations on the map</div>
           </div>
 
+          <div class="module-card fade-in fade-in-delay-3" id="truckAlertsCard" data-card="truckAlerts" onclick="openModule('truckAlerts')" style="display:none;">
+            <div class="module-icon">📡</div>
+            <div class="module-name">Truck Alerts</div>
+            <div class="module-desc">Live geofence &amp; ignition alerts (mobile-friendly)</div>
+          </div>
+
           <div class="module-card fade-in fade-in-delay-3" id="disposalRouterCard" data-card="disposalRouter" onclick="openModule('disposalRouter')" style="display:none;">
             <div class="module-icon">♻️</div>
             <div class="module-name">Job Router</div>
@@ -1419,8 +1425,8 @@
         <div style="display:flex;gap:12px;align-items:stretch;">
           <div id="trucksMap" style="flex:1;min-width:0;height:60vh;min-height:400px;max-height:680px;border-radius:var(--radius,16px);overflow:hidden;border:1px solid var(--border,#22354a);background:var(--tile,#1e2f40);"></div>
           <div id="trucksAlertsPanel" style="display:none;flex:0 0 320px;width:320px;height:60vh;min-height:400px;max-height:680px;border-radius:var(--radius,16px);border:1px solid var(--border,#22354a);background:var(--bg-card,#1e2f40);overflow:hidden;flex-direction:column;">
-            <div style="padding:10px 12px;border-bottom:1px solid var(--border,#22354a);font-size:13px;font-weight:700;color:var(--text-primary,#eef4fa);display:flex;align-items:center;gap:6px;">📡 Live Alerts<span id="trucksAlertsCount" style="font-size:11px;font-weight:600;color:var(--text-muted,#6e8194);margin-left:auto;"></span></div>
-            <div id="trucksAlertsList" style="flex:1;overflow-y:auto;padding:6px 6px 10px;"></div>
+            <div style="padding:10px 12px;border-bottom:1px solid var(--border,#22354a);font-size:13px;font-weight:700;color:var(--text-primary,#eef4fa);display:flex;align-items:center;gap:6px;">📡 Live Alerts<span id="trucksAlertsCount" class="gf-alerts-count" style="font-size:11px;font-weight:600;color:var(--text-muted,#6e8194);margin-left:auto;"></span></div>
+            <div id="trucksAlertsList" class="gf-alerts-list" style="flex:1;overflow-y:auto;padding:6px 6px 10px;"></div>
           </div>
         </div>
         <div id="trucksLegend" style="display:none;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--text-muted,#6e8194);">
@@ -1430,6 +1436,15 @@
           <span id="lookaheadLegend" style="display:none;align-items:center;gap:6px;"><span style="width:12px;height:12px;border-radius:50%;flex:0 0 auto;background:#d7dee5;border:2.5px solid #00E785;"></span> Next 3 days (<span id="lookaheadLegendCount">0</span>)</span>
         </div>
         <div id="trucksList" style="margin-top:14px;display:flex;flex-direction:column;gap:8px;"></div>
+      </div>
+
+      <!-- TRUCK ALERTS (mobile-friendly geofence/ignition list; reuses the trucks right-rail alerts engine) -->
+      <div id="truckAlertsScreen" style="display:none;">
+        <div class="section-title fade-in" style="display:flex;align-items:center;gap:8px;">📡 Truck Alerts
+          <button onclick="_fetchAndRenderAlerts()" style="margin-left:auto;font-size:13px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;">🔄 Refresh</button>
+        </div>
+        <div class="section-desc fade-in fade-in-delay-1">Live geofence &amp; ignition events from your trucks — newest at the top, updating in real time.</div>
+        <div id="truckAlertsList" class="gf-alerts-list" style="margin-top:12px;display:flex;flex-direction:column;border:1px solid var(--border,#22354a);border-radius:var(--radius,16px);background:var(--bg-card,#1e2f40);overflow:hidden;"></div>
       </div>
 
       <!-- PRICE LOOKUP -->
@@ -6952,6 +6967,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // per-franchise (stored in Vault, resolved by crewlogic-trucks via franchiseID) — not #90-only.
       const trucksCard = document.getElementById('trucksCard');
       if (trucksCard) trucksCard.style.display = (currentUser.role === 'owner') ? '' : 'none';
+      const truckAlertsCard = document.getElementById('truckAlertsCard'); // mobile-friendly alerts (owner-gated, no desktop-width restriction)
+      if (truckAlertsCard) truckAlertsCard.style.display = (currentUser.role === 'owner') ? '' : 'none';
 
       // Job Router (R1) — recommends the best transfer station between the truck's LIVE position and the
       // next job, so it requires telematics ACTUALLY connected (not just "is an owner") AND a Vonigo
@@ -7042,7 +7059,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       'disposalRouterScreen',
       'storageScreen', 'storageResultsScreen',
       'mattressScreen', 'mattressResultsScreen',
-      'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen'
+      'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'truckAlertsScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen'
     ];
 
     function hideAll() {
@@ -8020,27 +8037,32 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Populated by the crewlogic-motive-webhook receiver into geofence_alerts (franchise-scoped RLS).
     // Loads the last 50 on open, then streams new inserts via Supabase realtime.
     let _geofenceAlertsChannel = null;
-    async function loadGeofenceAlerts() {
-      const panel = document.getElementById('trucksAlertsPanel');
-      const list = document.getElementById('trucksAlertsList');
-      if (!panel || !list) return;
-      panel.style.display = 'flex';
-      setTimeout(() => { try { if (_trucksMap) _trucksMap.invalidateSize(); } catch (e) {} }, 60); // map now shares the row
+    // Shared core: fetch recent alerts + render into EVERY visible alerts list (the trucks right-rail
+    // AND the mobile Truck Alerts screen both use `.gf-alerts-list`), then subscribe for live inserts.
+    async function _fetchAndRenderAlerts() {
+      const lists = document.querySelectorAll('.gf-alerts-list');
+      if (!lists.length) return;
       try {
         const rows = await supabaseFetch('/rest/v1/geofence_alerts?select=id,franchise_id,action,event_type,vehicle_number,geofence_id,geofence_name,start_time,created_at&order=created_at.desc&limit=50');
         _renderGeofenceAlerts(Array.isArray(rows) ? rows : []);
       } catch (e) {
-        list.innerHTML = '<div style="padding:12px;color:var(--text-muted,#6e8194);font-size:12px;">Could not load alerts.</div>';
+        lists.forEach(l => { l.innerHTML = '<div style="padding:12px;color:var(--text-muted,#6e8194);font-size:12px;">Could not load alerts.</div>'; });
       }
       _subscribeGeofenceAlerts();
     }
+    // Trucks screen: reveal the right-rail panel (shares the map row), then load into it.
+    async function loadGeofenceAlerts() {
+      const panel = document.getElementById('trucksAlertsPanel');
+      if (panel) { panel.style.display = 'flex'; setTimeout(() => { try { if (_trucksMap) _trucksMap.invalidateSize(); } catch (e) {} }, 60); }
+      await _fetchAndRenderAlerts();
+    }
     function _renderGeofenceAlerts(rows) {
-      const list = document.getElementById('trucksAlertsList');
-      const count = document.getElementById('trucksAlertsCount');
-      if (!list) return;
-      if (count) count.textContent = rows.length ? (rows.length + (rows.length >= 50 ? '+' : '')) : '';
-      if (!rows.length) { list.innerHTML = '<div style="padding:14px 10px;color:var(--text-muted,#6e8194);font-size:12px;text-align:center;">No recent alerts.</div>'; return; }
-      list.innerHTML = rows.map(_geofenceAlertRow).join('');
+      const lists = document.querySelectorAll('.gf-alerts-list');
+      if (!lists.length) return;
+      const html = rows.length ? rows.map(_geofenceAlertRow).join('') : '<div style="padding:14px 10px;color:var(--text-muted,#6e8194);font-size:12px;text-align:center;">No recent alerts.</div>';
+      lists.forEach(l => { l.innerHTML = html; });
+      const cnt = rows.length ? (rows.length + (rows.length >= 50 ? '+' : '')) : '';
+      document.querySelectorAll('.gf-alerts-count').forEach(c => { c.textContent = cnt; });
     }
     function _geofenceAlertRow(a) {
       const et = String(a.event_type || '');
@@ -8070,12 +8092,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return Math.floor(h / 24) + 'd ago';
     }
     function _prependGeofenceAlert(row) {
-      const list = document.getElementById('trucksAlertsList');
-      if (!list) return;
-      if (list.children.length <= 1 && /No recent alerts|Could not load/.test(list.textContent || '')) list.innerHTML = '';
-      list.insertAdjacentHTML('afterbegin', _geofenceAlertRow(row));
-      const count = document.getElementById('trucksAlertsCount');
-      if (count) { const n = list.children.length; count.textContent = n + (n >= 50 ? '+' : ''); }
+      const lists = document.querySelectorAll('.gf-alerts-list');
+      if (!lists.length) return;
+      lists.forEach(list => {
+        if (/No recent alerts|Could not load/.test(list.textContent || '')) list.innerHTML = '';
+        list.insertAdjacentHTML('afterbegin', _geofenceAlertRow(row));
+      });
+      const n = lists[0].children.length;
+      document.querySelectorAll('.gf-alerts-count').forEach(c => { c.textContent = n + (n >= 50 ? '+' : ''); });
     }
     function _subscribeGeofenceAlerts() {
       try {
@@ -9539,6 +9563,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _ensureTrucksMapFresh('trucksMap'); // map lives in the trucks screen here (rebuild if it was on the dashboard)
         showTrucks();
         _startTrucksAutoRefresh();
+        return;
+      }
+      if (module === 'truckAlerts') {
+        document.getElementById('truckAlertsScreen').style.display = 'block';
+        document.getElementById('headerTitle').textContent = 'Truck Alerts';
+        currentScreen = 'truckAlerts';
+        _fetchAndRenderAlerts(); // mobile-friendly list; reuses the trucks right-rail alerts engine (fetch + realtime)
         return;
       }
       if (module === 'disposalRouter') {
