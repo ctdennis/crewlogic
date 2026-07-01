@@ -1,0 +1,40 @@
+-- 0031_job_geofence_cron.sql
+-- Scheduling for the job-arrive/leave geofence lifecycle (crewlogic-job-geofence-sync).
+--
+-- Enables the scheduling extensions (safe/idempotent on any environment). The actual cron SCHEDULES
+-- are environment-specific (they call the edge function by its per-project URL), so they are created
+-- per-environment via the commands documented below — NOT hardcoded into a migration that would run
+-- one project's URL on both. (Crons are runtime config, like the existing photo-sweep / signs-lifecycle
+-- jobs which were also set up per-environment rather than in a shared migration.)
+--
+-- LIFECYCLE (multi-truck safe): a truck LEAVING is never a delete signal — trucks arrive/leave/return
+-- (dump-and-come-back) in any order, so a job's geofence persists all day. The sync CREATES geofences
+-- for today's active jobs and DELETES them when the Vonigo WO is marked done (Completed/Archived or a
+-- "done" label). The EOD sweep is the backstop that clears anything still active (cancelled, no-shows).
+--
+-- DEV (bagkimfwmpwjfhfhmsrb): created 2026-07-01 via dev tooling. Jobs:
+--   'crewlogic-job-geofence-sync'      '*/30 * * * *'  -> POST .../crewlogic-job-geofence-sync {}
+--   'crewlogic-job-geofence-eod-sweep' '30 2 * * *'    -> POST .../crewlogic-job-geofence-sync {"action":"sweep"}
+--
+-- To (re)create on an environment, run (swap <PROJECT_REF> for the target project):
+--   -- SYNC every 30 min (create for today's jobs + delete-on-done, all franchises with a Motive credential):
+--   select cron.schedule('crewlogic-job-geofence-sync', '*/30 * * * *', $$
+--     select net.http_post(
+--       url := 'https://<PROJECT_REF>.supabase.co/functions/v1/crewlogic-job-geofence-sync',
+--       headers := jsonb_build_object('Content-Type','application/json'),
+--       body := jsonb_build_object())
+--   $$);
+--   -- EOD SWEEP at 02:30 UTC (~10:30 PM EDT / 9:30 PM EST; #90 is Eastern — per-franchise EOD timing is
+--   -- the multi-tenant follow-up, same caveat as the other TZ-hardcoded crons):
+--   select cron.schedule('crewlogic-job-geofence-eod-sweep', '30 2 * * *', $$
+--     select net.http_post(
+--       url := 'https://<PROJECT_REF>.supabase.co/functions/v1/crewlogic-job-geofence-sync',
+--       headers := jsonb_build_object('Content-Type','application/json'),
+--       body := jsonb_build_object('action','sweep'))
+--   $$);
+--
+-- To DISABLE:  select cron.unschedule('crewlogic-job-geofence-sync');
+--              select cron.unschedule('crewlogic-job-geofence-eod-sweep');
+
+create extension if not exists pg_net;
+create extension if not exists pg_cron;

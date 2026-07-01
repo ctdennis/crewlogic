@@ -36,17 +36,6 @@ function timingSafeEqualHex(a: string, b: string): boolean {
   return r === 0;
 }
 
-// Call a sibling edge function with the service key (internal service-to-service).
-async function callFn(name: string, body: unknown): Promise<{ ok: boolean; status: number; data: any }> {
-  const res = await fetch(SUPABASE_URL + "/functions/v1/" + name, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json().catch(() => ({}));
-  return { ok: res.ok, status: res.status, data };
-}
-
 type Cand = { uuid: string; tenant_id: string | null; external_id: string | null; secret: string };
 
 // Candidate franchise(s) + their secrets: exact when ?f= given, else every configured franchise.
@@ -167,8 +156,9 @@ Deno.serve(async (req: Request) => {
   const ev = parseEvent(parsed || {});
 
   // Is this a JOB geofence (auto-created by crewlogic-job-geofence-sync for today's jobs)?
-  // If so we already know the name; relabel as job_arrive / job_leave, and on EXIT delete the
-  // Motive geofence + mark the mapping row done (delete-on-exit). EOD sweep is the backstop.
+  // If so we already know the name; relabel as job_arrive / job_leave. We do NOT delete on exit —
+  // the geofence persists for the whole job (multi-truck arrive/leave/return). Deletion is handled
+  // by the sync (Vonigo WO done/cancelled) and the EOD sweep.
   let jobGeo: { id: any; name: string | null } | null = null;
   if (ev.action === "vehicle_geofence_event" && ev.geofence_id != null) {
     const { data: jg } = await sb.from("job_geofences")
@@ -181,18 +171,12 @@ Deno.serve(async (req: Request) => {
   let eventType = ev.event_type;
   let geofenceName: string | null = null;
   if (jobGeo) {
-    const isExit = ev.event_type === "geofence_exit";
-    eventType = isExit ? "job_leave" : "job_arrive";
+    // A truck LEAVING is never a delete signal: multi-truck jobs have trucks arrive/leave/return
+    // (dump-and-come-back) in any order, so the geofence must persist through the whole job.
+    // Deletion happens only when the Vonigo WO is marked done/cancelled (crewlogic-job-geofence-sync)
+    // or via the end-of-day sweep — NOT here.
+    eventType = ev.event_type === "geofence_exit" ? "job_leave" : "job_arrive";
     geofenceName = jobGeo.name; // no Motive name lookup needed — we created it
-    if (isExit) {
-      try {
-        const del = await callFn("crewlogic-geofence-create", { action: "delete", franchiseID: matched.external_id, geofence_id: ev.geofence_id });
-        if (!del.ok || !del.data?.success) console.error("[motive-webhook] job geofence delete failed:", JSON.stringify(del.data).slice(0, 200));
-      } catch (e) {
-        console.error("[motive-webhook] job geofence delete error:", (e as Error).message);
-      }
-      await sb.from("job_geofences").update({ status: "deleted", deleted_at: new Date().toISOString() }).eq("id", jobGeo.id);
-    }
   } else if (ev.geofence_id != null) {
     geofenceName = await resolveGeofenceName(sb, matched.uuid, ev.geofence_id);
   }
