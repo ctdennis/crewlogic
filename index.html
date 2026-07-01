@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.9 | 2026-07-01">
+  <meta name="crewlogic-version" content="v5.48.10 | 2026-07-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1422,13 +1422,7 @@
           </div>
           <button id="trucksRefreshBtn" onclick="showTrucks()" style="font-size:13px;padding:7px 16px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;">🔄 Refresh</button>
         </div>
-        <div style="display:flex;gap:12px;align-items:stretch;">
-          <div id="trucksMap" style="flex:1;min-width:0;height:60vh;min-height:400px;max-height:680px;border-radius:var(--radius,16px);overflow:hidden;border:1px solid var(--border,#22354a);background:var(--tile,#1e2f40);"></div>
-          <div id="trucksAlertsPanel" style="display:none;flex:0 0 320px;width:320px;height:60vh;min-height:400px;max-height:680px;border-radius:var(--radius,16px);border:1px solid var(--border,#22354a);background:var(--bg-card,#1e2f40);overflow:hidden;flex-direction:column;">
-            <div style="padding:10px 12px;border-bottom:1px solid var(--border,#22354a);font-size:13px;font-weight:700;color:var(--text-primary,#eef4fa);display:flex;align-items:center;gap:6px;">📡 Live Alerts<span id="trucksAlertsCount" class="gf-alerts-count" style="font-size:11px;font-weight:600;color:var(--text-muted,#6e8194);margin-left:auto;"></span></div>
-            <div id="trucksAlertsList" class="gf-alerts-list" style="flex:1;overflow-y:auto;padding:6px 6px 10px;"></div>
-          </div>
-        </div>
+        <div id="trucksMap" style="height:60vh;min-height:400px;max-height:680px;border-radius:var(--radius,16px);overflow:hidden;border:1px solid var(--border,#22354a);background:var(--tile,#1e2f40);"></div>
         <div id="trucksLegend" style="display:none;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--text-muted,#6e8194);">
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:14px;border-radius:50%;flex:0 0 auto;background:#00E785;"></span> Truck · live</span>
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:14px;border-radius:50%;flex:0 0 auto;background:#6e8194;"></span> Truck · last report &gt;1h ago</span>
@@ -7736,7 +7730,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (sub) sub.textContent = trucks.length + ' truck' + (trucks.length === 1 ? '' : 's') + ' · live from ' + provLabel + ' · auto-updating';
         renderTrucks(trucks, !isRefresh);  // fit the map only on first load, not on auto-refresh
         if (!isRefresh) loadJobMarkers();  // jobs are static this session — load once, don't re-pull every cycle
-        if (!isRefresh && _trucksMapEl === 'trucksMap') loadGeofenceAlerts();  // right-rail live geofence/ignition alerts (trucks screen only)
+        if (!isRefresh && _trucksMapEl === 'dashMapPane') loadGeofenceAlerts();  // right-rail live geofence/ignition alerts (dispatch dashboard only)
       } catch (e) {
         if (isRefresh) { console.warn('trucks auto-refresh failed (non-fatal):', e); return; }
         console.error('showTrucks error:', e);
@@ -8050,10 +8044,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
       _subscribeGeofenceAlerts();
     }
-    // Trucks screen: reveal the right-rail panel (shares the map row), then load into it.
+    // Dispatch dashboard only: the alerts rail (#dashAlertsPanel) sits beside the dashboard trucks map.
+    // Refresh the map size (the rail shares its flex row), then load into the shared list.
     async function loadGeofenceAlerts() {
-      const panel = document.getElementById('trucksAlertsPanel');
-      if (panel) { panel.style.display = 'flex'; setTimeout(() => { try { if (_trucksMap) _trucksMap.invalidateSize(); } catch (e) {} }, 60); }
+      setTimeout(() => { try { if (_trucksMap) _trucksMap.invalidateSize(); } catch (e) {} }, 60);
       await _fetchAndRenderAlerts();
     }
     function _renderGeofenceAlerts(rows) {
@@ -8559,6 +8553,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + '<div id="dashMapWrap" style="display:flex;gap:10px;align-items:stretch;">'
         +   '<div id="dashMapPane" style="flex:1;min-width:0;height:42vh;min-height:320px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);"></div>'
         +   '<div id="dashDispResults" style="display:none;flex:0 0 430px;width:430px;height:42vh;min-height:320px;overflow-y:auto;"></div>'
+        +   '<div id="dashAlertsPanel" style="flex:0 0 300px;width:300px;height:42vh;min-height:320px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);overflow:hidden;display:flex;flex-direction:column;">'
+        +     '<div style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;">📡 Live Alerts<span class="gf-alerts-count" style="font-size:11px;font-weight:600;color:var(--text-muted);margin-left:auto;"></span></div>'
+        +     '<div id="dashAlertsList" class="gf-alerts-list" style="flex:1;overflow-y:auto;padding:6px 6px 10px;"></div>'
+        +   '</div>'
         + '</div>';
       dashLoadBoards();
       dashMountMap();
