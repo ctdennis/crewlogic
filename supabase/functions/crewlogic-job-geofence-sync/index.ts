@@ -80,10 +80,15 @@ Deno.serve(async (req: Request) => {
       const lat = Number(job.lat), lon = Number(job.lon);
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) { skipped.push({ woId, reason: "no geocode" }); continue; }
 
-      // Idempotent: skip if an active geofence already maps this work order.
+      // Idempotent: skip if this work order already has a job_geofences row from today's cycle —
+      // ANY status (active OR deleted). A geofence deleted-on-exit must NOT be re-created by a later
+      // cron run the same day. (20h window covers a full workday of re-runs; resets overnight, and a
+      // wo_id is a specific appointment that only appears on its own day anyway.)
+      const cutoffISO = new Date(Date.now() - 20 * 3600 * 1000).toISOString();
       const { data: existing } = await sb.from("job_geofences")
-        .select("id, geofence_id").eq("franchise_id", franchiseUuid).eq("wo_id", woId).eq("status", "active").maybeSingle();
-      if (existing) { skipped.push({ woId, reason: "already mapped", geofence_id: existing.geofence_id }); continue; }
+        .select("id, geofence_id, status").eq("franchise_id", franchiseUuid).eq("wo_id", woId)
+        .gte("created_at", cutoffISO).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (existing) { skipped.push({ woId, reason: "already handled today (" + existing.status + ")", geofence_id: existing.geofence_id }); continue; }
 
       const name = (job.clientName || "Job") + " · #" + woId; // "<client> · #<woID>"
 

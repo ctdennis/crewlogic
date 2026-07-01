@@ -36,6 +36,17 @@ function timingSafeEqualHex(a: string, b: string): boolean {
   return r === 0;
 }
 
+// Call a sibling edge function with the service key (internal service-to-service).
+async function callFn(name: string, body: unknown): Promise<{ ok: boolean; status: number; data: any }> {
+  const res = await fetch(SUPABASE_URL + "/functions/v1/" + name, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
 type Cand = { uuid: string; tenant_id: string | null; external_id: string | null; secret: string };
 
 // Candidate franchise(s) + their secrets: exact when ?f= given, else every configured franchise.
@@ -154,14 +165,41 @@ Deno.serve(async (req: Request) => {
   }
 
   const ev = parseEvent(parsed || {});
+
+  // Is this a JOB geofence (auto-created by crewlogic-job-geofence-sync for today's jobs)?
+  // If so we already know the name; relabel as job_arrive / job_leave, and on EXIT delete the
+  // Motive geofence + mark the mapping row done (delete-on-exit). EOD sweep is the backstop.
+  let jobGeo: { id: any; name: string | null } | null = null;
+  if (ev.action === "vehicle_geofence_event" && ev.geofence_id != null) {
+    const { data: jg } = await sb.from("job_geofences")
+      .select("id, name")
+      .eq("franchise_id", matched.uuid).eq("geofence_id", ev.geofence_id).eq("status", "active")
+      .maybeSingle();
+    if (jg) jobGeo = { id: jg.id, name: jg.name ?? null };
+  }
+
+  let eventType = ev.event_type;
   let geofenceName: string | null = null;
-  if (ev.geofence_id != null) {
+  if (jobGeo) {
+    const isExit = ev.event_type === "geofence_exit";
+    eventType = isExit ? "job_leave" : "job_arrive";
+    geofenceName = jobGeo.name; // no Motive name lookup needed — we created it
+    if (isExit) {
+      try {
+        const del = await callFn("crewlogic-geofence-create", { action: "delete", franchiseID: matched.external_id, geofence_id: ev.geofence_id });
+        if (!del.ok || !del.data?.success) console.error("[motive-webhook] job geofence delete failed:", JSON.stringify(del.data).slice(0, 200));
+      } catch (e) {
+        console.error("[motive-webhook] job geofence delete error:", (e as Error).message);
+      }
+      await sb.from("job_geofences").update({ status: "deleted", deleted_at: new Date().toISOString() }).eq("id", jobGeo.id);
+    }
+  } else if (ev.geofence_id != null) {
     geofenceName = await resolveGeofenceName(sb, matched.uuid, ev.geofence_id);
   }
 
   const { error } = await sb.from("geofence_alerts").insert({
     franchise_id: matched.uuid, tenant_id: matched.tenant_id,
-    action: ev.action, event_type: ev.event_type,
+    action: ev.action, event_type: eventType,
     vehicle_id: ev.vehicle_id, vehicle_number: ev.vehicle_number,
     geofence_id: ev.geofence_id, geofence_name: geofenceName, event_id: ev.event_id,
     start_time: ev.start_time, end_time: ev.end_time, duration: ev.duration,
@@ -172,6 +210,6 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ ok: false, error: "store failed" }), { status: 500 });
   }
 
-  console.log(`[motive-webhook] stored ${ev.action}/${ev.event_type} veh=${ev.vehicle_number} f=${matched.external_id}`);
+  console.log(`[motive-webhook] stored ${ev.action}/${eventType} veh=${ev.vehicle_number} f=${matched.external_id}${jobGeo ? " (job)" : ""}`);
   return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
 });
