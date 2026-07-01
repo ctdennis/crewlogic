@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.6 | 2026-06-30">
+  <meta name="crewlogic-version" content="v5.48.11 | 2026-07-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -17540,14 +17540,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Left-column content width (the cover photo now lives in the right column).
       const photoW = rCol - lx - 20;
 
-      // Total box + optional payment schedule (from structured Special Terms)
+      // Total box + optional Subtotal/Discount summary + optional payment schedule (structured Special Terms).
+      // Layout stacks UP from the green box (bottom anchor): [Payment Schedule] → [Subtotal/Discount] → green box.
+      // Positions are computed dynamically so the pieces never overlap in any combo (±discount, ±deposit).
       const totalPrice = parseFloat(est.totalPrice) || 0;
       if (totalPrice > 0) {
         const bd = computeDepositBreakdown(est, totalPrice);
+        const lineRight = rCol - 20; // right edge of the left column (shared by all lines)
+        // Discount summary: non-discounted subtotal + the discount, shown above the green box when discounted.
+        const discountSum = (est.charges || []).filter(c => c.type === 'discount')
+          .reduce((s, c) => s + (parseFloat(c.qty) || 0) * (parseFloat(c.unitPrice) || 0), 0); // negative
+        const hasDisc = discountSum < 0;
         if (bd) {
-          // Payment schedule lines, rendered just above the green total box.
-          const schedTop = H - 152;
-          const lineRight = rCol - 20; // right edge of the left column
+          // Payment schedule lines — pushed higher when the discount summary occupies the space above the box.
+          const schedTop = hasDisc ? H - 168 : H - 152;
           doc.setTextColor(150, 180, 160);
           doc.setFont('helvetica', 'bold');
           doc.setFontSize(8);
@@ -17563,6 +17569,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           doc.text('Balance' + (bd.completion ? ' (due upon completion)' : (bd.days ? ' (due in ' + bd.days + ' days)' : '')), lx, schedTop + 34);
           doc.setFont('helvetica', 'bold');
           doc.text(fmtMoney(bd.balance), lineRight, schedTop + 34, { align: 'right' });
+        }
+        // Subtotal − Discount = Estimated Total (only when discounted), just above the green box.
+        if (hasDisc) {
+          const subtotal = totalPrice - discountSum;
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(10);
+          doc.setTextColor(...white);
+          doc.text('Subtotal', lx, H - 116);
+          doc.text(fmtMoney(subtotal), lineRight, H - 116, { align: 'right' });
+          doc.text('Discount', lx, H - 100);
+          doc.setTextColor(...green);
+          doc.text('-' + fmtMoney(Math.abs(discountSum)), lineRight, H - 100, { align: 'right' });
         }
         doc.setFillColor(...green);
         doc.roundedRect(lx, H - 90, photoW, 50, 4, 4, 'F');
