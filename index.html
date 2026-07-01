@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.7 | 2026-07-01">
+  <meta name="crewlogic-version" content="v5.48.8 | 2026-07-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1416,7 +1416,13 @@
           </div>
           <button id="trucksRefreshBtn" onclick="showTrucks()" style="font-size:13px;padding:7px 16px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;">🔄 Refresh</button>
         </div>
-        <div id="trucksMap" style="width:100%;height:60vh;min-height:400px;max-height:680px;border-radius:var(--radius,16px);overflow:hidden;border:1px solid var(--border,#22354a);background:var(--tile,#1e2f40);"></div>
+        <div style="display:flex;gap:12px;align-items:stretch;">
+          <div id="trucksMap" style="flex:1;min-width:0;height:60vh;min-height:400px;max-height:680px;border-radius:var(--radius,16px);overflow:hidden;border:1px solid var(--border,#22354a);background:var(--tile,#1e2f40);"></div>
+          <div id="trucksAlertsPanel" style="display:none;flex:0 0 320px;width:320px;height:60vh;min-height:400px;max-height:680px;border-radius:var(--radius,16px);border:1px solid var(--border,#22354a);background:var(--bg-card,#1e2f40);overflow:hidden;flex-direction:column;">
+            <div style="padding:10px 12px;border-bottom:1px solid var(--border,#22354a);font-size:13px;font-weight:700;color:var(--text-primary,#eef4fa);display:flex;align-items:center;gap:6px;">📡 Live Alerts<span id="trucksAlertsCount" style="font-size:11px;font-weight:600;color:var(--text-muted,#6e8194);margin-left:auto;"></span></div>
+            <div id="trucksAlertsList" style="flex:1;overflow-y:auto;padding:6px 6px 10px;"></div>
+          </div>
+        </div>
         <div id="trucksLegend" style="display:none;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--text-muted,#6e8194);">
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:14px;border-radius:50%;flex:0 0 auto;background:#00E785;"></span> Truck · live</span>
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:14px;border-radius:50%;flex:0 0 auto;background:#6e8194;"></span> Truck · last report &gt;1h ago</span>
@@ -7713,6 +7719,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (sub) sub.textContent = trucks.length + ' truck' + (trucks.length === 1 ? '' : 's') + ' · live from ' + provLabel + ' · auto-updating';
         renderTrucks(trucks, !isRefresh);  // fit the map only on first load, not on auto-refresh
         if (!isRefresh) loadJobMarkers();  // jobs are static this session — load once, don't re-pull every cycle
+        if (!isRefresh && _trucksMapEl === 'trucksMap') loadGeofenceAlerts();  // right-rail live geofence/ignition alerts (trucks screen only)
       } catch (e) {
         if (isRefresh) { console.warn('trucks auto-refresh failed (non-fatal):', e); return; }
         console.error('showTrucks error:', e);
@@ -8007,6 +8014,83 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       } catch (e) {
         console.warn('loadJobMarkers failed (non-fatal):', e);
       }
+    }
+
+    // ===== Trucks map right-rail: live Motive geofence/ignition alerts =====
+    // Populated by the crewlogic-motive-webhook receiver into geofence_alerts (franchise-scoped RLS).
+    // Loads the last 50 on open, then streams new inserts via Supabase realtime.
+    let _geofenceAlertsChannel = null;
+    async function loadGeofenceAlerts() {
+      const panel = document.getElementById('trucksAlertsPanel');
+      const list = document.getElementById('trucksAlertsList');
+      if (!panel || !list) return;
+      panel.style.display = 'flex';
+      setTimeout(() => { try { if (_trucksMap) _trucksMap.invalidateSize(); } catch (e) {} }, 60); // map now shares the row
+      try {
+        const rows = await supabaseFetch('/rest/v1/geofence_alerts?select=id,franchise_id,action,event_type,vehicle_number,geofence_id,geofence_name,start_time,created_at&order=created_at.desc&limit=50');
+        _renderGeofenceAlerts(Array.isArray(rows) ? rows : []);
+      } catch (e) {
+        list.innerHTML = '<div style="padding:12px;color:var(--text-muted,#6e8194);font-size:12px;">Could not load alerts.</div>';
+      }
+      _subscribeGeofenceAlerts();
+    }
+    function _renderGeofenceAlerts(rows) {
+      const list = document.getElementById('trucksAlertsList');
+      const count = document.getElementById('trucksAlertsCount');
+      if (!list) return;
+      if (count) count.textContent = rows.length ? (rows.length + (rows.length >= 50 ? '+' : '')) : '';
+      if (!rows.length) { list.innerHTML = '<div style="padding:14px 10px;color:var(--text-muted,#6e8194);font-size:12px;text-align:center;">No recent alerts.</div>'; return; }
+      list.innerHTML = rows.map(_geofenceAlertRow).join('');
+    }
+    function _geofenceAlertRow(a) {
+      const et = String(a.event_type || '');
+      const veh = _truckEsc(a.vehicle_number || 'Truck');
+      const place = _truckEsc(a.geofence_name || (a.geofence_id != null ? ('#' + a.geofence_id) : ''));
+      let icon = '📍', text;
+      if (et === 'geofence_entry') { icon = '🟢'; text = veh + ' entered ' + place; }
+      else if (et === 'geofence_exit') { icon = '🔴'; text = veh + ' exited ' + place; }
+      else if (et === 'engine_on') { icon = '🔑'; text = veh + ' — ignition on'; }
+      else if (et === 'engine_off') { icon = '⏹️'; text = veh + ' — ignition off'; }
+      else { text = veh + ' — ' + _truckEsc(et || a.action || 'event'); }
+      const when = a.created_at || a.start_time;
+      const abs = when ? new Date(when).toLocaleString() : '';
+      return '<div style="display:flex;gap:8px;padding:8px 6px;border-bottom:1px solid var(--border,#22354a);align-items:flex-start;">'
+        + '<span style="flex:0 0 auto;font-size:13px;line-height:1.3;">' + icon + '</span>'
+        + '<div style="flex:1;min-width:0;"><div style="font-size:12.5px;color:var(--text-primary,#eef4fa);line-height:1.35;">' + text + '</div>'
+        + '<div style="font-size:11px;color:var(--text-muted,#6e8194);" title="' + _truckEsc(abs) + '">' + _alertRelTime(when) + '</div></div></div>';
+    }
+    function _alertRelTime(iso) {
+      if (!iso) return '';
+      const t = new Date(iso).getTime();
+      if (isNaN(t)) return '';
+      const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+      if (s < 60) return 'just now';
+      const m = Math.floor(s / 60); if (m < 60) return m + 'm ago';
+      const h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
+      return Math.floor(h / 24) + 'd ago';
+    }
+    function _prependGeofenceAlert(row) {
+      const list = document.getElementById('trucksAlertsList');
+      if (!list) return;
+      if (list.children.length <= 1 && /No recent alerts|Could not load/.test(list.textContent || '')) list.innerHTML = '';
+      list.insertAdjacentHTML('afterbegin', _geofenceAlertRow(row));
+      const count = document.getElementById('trucksAlertsCount');
+      if (count) { const n = list.children.length; count.textContent = n + (n >= 50 ? '+' : ''); }
+    }
+    function _subscribeGeofenceAlerts() {
+      try {
+        if (_geofenceAlertsChannel) { supabaseClient.removeChannel(_geofenceAlertsChannel); _geofenceAlertsChannel = null; }
+        const fid = currentUser && currentUser.franchiseInternalID;
+        _geofenceAlertsChannel = supabaseClient
+          .channel('geofence_alerts_live')
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'geofence_alerts' }, (payload) => {
+            const row = payload && payload.new;
+            if (!row) return;
+            if (fid && row.franchise_id && row.franchise_id !== fid) return; // franchise safety net (realtime RLS should already scope)
+            _prependGeofenceAlert(row);
+          })
+          .subscribe();
+      } catch (e) { /* realtime optional — the initial load already populated the panel */ }
     }
 
     // ===== Settings → Trucks (telematics) tab =====
