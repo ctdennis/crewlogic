@@ -685,6 +685,43 @@ async function handleGetTelematics(body: Record<string, unknown>): Promise<Respo
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// HANDLER: saveMotiveWebhookSecret — store the franchise's Motive geofence-webhook
+// signing secret (→ Vault via upsert_motive_webhook_secret). Body: { franchiseInternalID, secret }.
+// WRITE-ONLY: the secret is never returned to the client or logged.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleSaveMotiveWebhookSecret(body: Record<string, unknown>): Promise<Response> {
+  const franchiseID = String(body.franchiseInternalID || "").trim();
+  const secret = String(body.secret || "").trim();
+  if (!franchiseID) return jsonResponse({ success: false, error: "franchiseInternalID required" }, 400);
+  if (!secret) return jsonResponse({ success: false, error: "secret required" }, 400);
+
+  const res = await supabaseRpc("upsert_motive_webhook_secret", {
+    p_franchise_id: franchiseID,
+    p_secret: secret,
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error("upsert_motive_webhook_secret failed:", res.status, errText.slice(0, 200));
+    return jsonResponse({ success: false, error: `Couldn't save secret (${res.status})` }, 500);
+  }
+  return jsonResponse({ success: true, saved: true });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HANDLER: getMotiveWebhookStatus — non-secret "configured?" for the Settings UI.
+// Body: { franchiseInternalID }.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleGetMotiveWebhookStatus(body: Record<string, unknown>): Promise<Response> {
+  const franchiseID = String(body.franchiseInternalID || "").trim();
+  if (!franchiseID) return jsonResponse({ success: false, error: "franchiseInternalID required" }, 400);
+  const res = await supabaseRpc("get_motive_webhook_status", { p_franchise_id: franchiseID });
+  if (!res.ok) return jsonResponse({ success: false, error: `DB error ${res.status}` }, 500);
+  const rows = await res.json().catch(() => []);
+  const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+  return jsonResponse({ success: true, configured: !!row, updatedAt: row?.updated_at || null });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // HANDLER: saveHomeCardOrder (per-user home-screen drag-to-reorder preference)
 // Body: { order: string[] }  — the card keys in the user's chosen order.
 // Auth: the caller is identified from the Authorization Bearer token (their own
@@ -1001,6 +1038,8 @@ const ACTION_HANDLERS: Record<string, (body: Record<string, unknown>) => Promise
   saveVonigoCredentials: handleSaveVonigoCredentials,
   saveTelematics:        handleSaveTelematics,
   getTelematics:         handleGetTelematics,
+  saveMotiveWebhookSecret: handleSaveMotiveWebhookSecret,
+  getMotiveWebhookStatus:  handleGetMotiveWebhookStatus,
   // The 4 other settings save flows all just write to cost_settings JSONB and/or
   // top-level columns — handled by one generic handler.
   saveFranchiseInfo:     handleSaveSettings,

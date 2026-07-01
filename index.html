@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.6 | 2026-06-30">
+  <meta name="crewlogic-version" content="v5.48.7 | 2026-07-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1970,6 +1970,26 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
             <button id="telematicsSaveBtn" onclick="saveTelematicsCredential()" style="padding:10px 18px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;">Save &amp; Test Connection</button>
             <div class="settings-feedback" id="telematicsFeedback" style="margin-top:10px;font-size:13px;"></div>
+          </div>
+
+          <div class="settings-card fade-in fade-in-delay-3">
+            <div class="settings-card-title">Motive Geofence Alerts</div>
+            <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">
+              Show live geofence + ignition alerts (trucks entering/exiting transfer stations, recycling centers, regions; ignition on/off) in a scrolling list on the <strong>Where Are My Trucks?</strong> map. In Motive, create a webhook to the URL below and paste Motive's <strong>signing secret</strong> here.
+            </div>
+            <div id="motiveWebhookStatus" style="font-size:13px;margin-bottom:16px;"></div>
+
+            <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">Your webhook URL (paste into Motive)</div>
+            <div style="display:flex;gap:8px;margin-bottom:14px;">
+              <input id="motiveWebhookUrl" type="text" readonly style="flex:1;min-width:0;box-sizing:border-box;font-size:12px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:monospace;">
+              <button onclick="copyMotiveWebhookUrl()" style="padding:10px 14px;background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">Copy</button>
+            </div>
+
+            <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">Motive signing secret</div>
+            <input id="motiveWebhookSecret" type="password" autocomplete="off" placeholder="Paste Motive's webhook signing secret here" style="width:100%;box-sizing:border-box;font-size:13px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);margin-bottom:6px;font-family:monospace;">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px;">Stored encrypted in our vault. Never shown again after saving.</div>
+            <button id="motiveWebhookSaveBtn" onclick="saveMotiveWebhookSecret()" style="padding:10px 18px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;">Save Secret</button>
+            <div class="settings-feedback" id="motiveWebhookFeedback" style="margin-top:10px;font-size:13px;"></div>
           </div>
         </div><!-- end trucks tab -->
 
@@ -8025,6 +8045,60 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         }
       } catch (e) {
         if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);">Could not load current status.</span>';
+      }
+      loadMotiveWebhookStatus();
+    }
+
+    // ── Motive geofence-webhook signing secret (Settings → Trucks) ──────────────
+    async function loadMotiveWebhookStatus() {
+      const statusEl = document.getElementById('motiveWebhookStatus');
+      const urlEl = document.getElementById('motiveWebhookUrl');
+      const fb = document.getElementById('motiveWebhookFeedback');
+      if (fb) fb.textContent = '';
+      if (urlEl) urlEl.value = 'https://bagkimfwmpwjfhfhmsrb.supabase.co/functions/v1/crewlogic-motive-webhook?f=' + encodeURIComponent(currentUser.franchiseID || '');
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);">Checking…</span>';
+      try {
+        const data = await edgeFunctionCall('crewlogic-settings', { action: 'getMotiveWebhookStatus', franchiseInternalID: currentUser.franchiseInternalID });
+        if (data && data.configured) {
+          if (statusEl) statusEl.innerHTML = '<span style="display:inline-flex;align-items:center;gap:7px;"><span style="width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:#00E785;"></span>Signing secret configured ✓</span>';
+        } else {
+          if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);">No signing secret saved yet.</span>';
+        }
+      } catch (e) {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);">Could not load status.</span>';
+      }
+    }
+
+    function copyMotiveWebhookUrl() {
+      const urlEl = document.getElementById('motiveWebhookUrl');
+      if (!urlEl) return;
+      urlEl.select();
+      try { navigator.clipboard.writeText(urlEl.value); } catch (e) { try { document.execCommand('copy'); } catch (e2) {} }
+      const fb = document.getElementById('motiveWebhookFeedback');
+      if (fb) { fb.style.color = 'var(--text-muted)'; fb.textContent = 'URL copied.'; }
+    }
+
+    async function saveMotiveWebhookSecret() {
+      const secEl = document.getElementById('motiveWebhookSecret');
+      const btn = document.getElementById('motiveWebhookSaveBtn');
+      const fb = document.getElementById('motiveWebhookFeedback');
+      const secret = secEl ? secEl.value.trim() : '';
+      if (!secret) { if (fb) { fb.style.color = '#ef4444'; fb.textContent = 'Paste Motive’s signing secret.'; } return; }
+      if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+      if (fb) { fb.style.color = 'var(--text-muted)'; fb.textContent = 'Saving…'; }
+      try {
+        const data = await edgeFunctionCall('crewlogic-settings', { action: 'saveMotiveWebhookSecret', franchiseInternalID: currentUser.franchiseInternalID, secret: secret });
+        if (data && data.success) {
+          if (fb) { fb.style.color = '#00E785'; fb.textContent = 'Saved ✓'; }
+          if (secEl) secEl.value = '';
+          loadMotiveWebhookStatus();
+        } else {
+          if (fb) { fb.style.color = '#ef4444'; fb.textContent = (data && data.error) || 'Save failed.'; }
+        }
+      } catch (e) {
+        if (fb) { fb.style.color = '#ef4444'; fb.textContent = 'Save failed: ' + (e.message || e); }
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Save Secret'; }
       }
     }
 
