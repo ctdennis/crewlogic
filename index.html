@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.19 | 2026-07-02">
+  <meta name="crewlogic-version" content="v5.48.20 | 2026-07-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1929,6 +1929,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               <span class="btn-text">Save proposal settings</span>
             </button>
             <div class="settings-feedback" id="proposalSettingsFeedback"></div>
+
+            <div class="form-section-label" style="margin-top:20px;border-top:1px solid var(--border,#22354a);padding-top:16px;">Text Message Template <span style="font-weight:normal;color:var(--text-muted);font-size:11px;">— per-user (each user sets their own)</span></div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Pre-filled when you tap a 💬 Text link</label>
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Tags: <code>{{customer name}}</code> <code>{{user name}}</code> <code>{{company name}}</code></div>
+              <textarea class="form-input" id="settingsSmsTemplate" rows="3" placeholder="Hello {{customer name}}, {{user name}} from {{company name}} here." style="resize:vertical;font-size:13px;line-height:1.5;font-family:inherit;"></textarea>
+            </div>
+            <button class="settings-save-btn" id="smsTemplateSaveBtn" onclick="saveSmsTemplate()">
+              <div class="spinner"></div>
+              <span class="btn-text">Save text template</span>
+            </button>
+            <div class="settings-feedback" id="smsTemplateFeedback"></div>
           </div>
 
         </div><!-- end proposal tab -->
@@ -4738,9 +4750,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             // The OAuth hash session doesn't carry the saved home-card order — load it now so a
             // fresh Google login keeps the user's card arrangement (showApp→goHome applies it).
             try {
-              const _hco = await supabaseFetch('/rest/v1/profiles?select=home_card_order&email=eq.' + encodeURIComponent(currentUser.email));
-              if (_hco && _hco[0] && Array.isArray(_hco[0].home_card_order)) {
-                currentUser.homeCardOrder = _hco[0].home_card_order;
+              const _hco = await supabaseFetch('/rest/v1/profiles?select=home_card_order,sms_template&email=eq.' + encodeURIComponent(currentUser.email));
+              if (_hco && _hco[0]) {
+                if (Array.isArray(_hco[0].home_card_order)) currentUser.homeCardOrder = _hco[0].home_card_order;
+                if (_hco[0].sms_template !== undefined) currentUser.smsTemplate = _hco[0].sms_template || null;
                 storage.set(SESSION_KEY, JSON.stringify(currentUser));
               }
             } catch (e) {}
@@ -4775,7 +4788,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           if (session && session.email) {
             currentUser = session;
             // Refresh costSettings + role + tier from Supabase in background (may have changed since cache)
-            supabaseFetch('/rest/v1/profiles?select=role,home_card_order,franchises(id,external_id,franchise_name,subscription_tier,subscription_status,cost_settings,tenant_id,tenants(subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(session.email))
+            supabaseFetch('/rest/v1/profiles?select=role,home_card_order,sms_template,franchises(id,external_id,franchise_name,subscription_tier,subscription_status,cost_settings,tenant_id,tenants(subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(session.email))
               .then(rows => {
                 if (rows && rows[0]) {
                   if (rows[0].role) currentUser.role = rows[0].role;
@@ -4783,6 +4796,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
                     currentUser.homeCardOrder = Array.isArray(rows[0].home_card_order) ? rows[0].home_card_order : null;
                     applyHomeCardOrder();
                   }
+                  if (rows[0].sms_template !== undefined) currentUser.smsTemplate = rows[0].sms_template || null;
                   if (rows[0].franchises) {
                     if (rows[0].franchises.id) currentUser.franchiseInternalID = rows[0].franchises.id;
                     if (rows[0].franchises.external_id) currentUser.franchiseID = rows[0].franchises.external_id;
@@ -5187,7 +5201,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // a Supabase-Auth-authenticated email, by reading profile→franchise→tenant (incl. the
     // per-capability provider flags). Returns null if no profile exists for that email.
     async function buildSessionFromSupabaseAuth(email, _retried) {
-      const rows = await supabaseFetch('/rest/v1/profiles?select=role,franchise_id,name,auth_user_id,pending_trial_ends_at,home_card_order,franchises(external_id,franchise_name,cost_settings,subscription_tier,subscription_status,trial_ends_at,vonigo_configured,tenants(id,subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(email));
+      const rows = await supabaseFetch('/rest/v1/profiles?select=role,franchise_id,name,auth_user_id,pending_trial_ends_at,home_card_order,sms_template,franchises(external_id,franchise_name,cost_settings,subscription_tier,subscription_status,trial_ends_at,vonigo_configured,tenants(id,subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(email));
       const p = rows && rows[0];
       if (!p) return null;
       const f = p.franchises || {};
@@ -5219,6 +5233,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         franchiseInternalID: p.franchise_id || null,
         authUserId: p.auth_user_id || null,
         homeCardOrder: Array.isArray(p.home_card_order) ? p.home_card_order : null,
+        smsTemplate: p.sms_template || null,
         tenantID: t.id || null,
         franchiseName: f.franchise_name || null,
         pricingSource: t.pricing_source || 'vonigo',
@@ -7926,7 +7941,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const digits = String(phone || '').replace(/[^0-9+]/g, '');
       e.innerHTML = phone
         ? '📞 <a href="tel:' + digits + '" style="color:#6db3ff;font-weight:600;text-decoration:none;">' + _truckEsc(_fmtPhone(phone)) + '</a>'
-          + ' &nbsp;·&nbsp; <a href="sms:' + digits + '" style="color:#6db3ff;font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>'
+          + ' &nbsp;·&nbsp; <a href="' + _smsHref(digits, buildSmsBody({})) + '" style="color:#6db3ff;font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>'
         : '<span style="color:#9aa7b4;">No phone on file</span>';
     }
     function _prefetchJobPhone(jobID) {
@@ -9558,7 +9573,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const digits = String(ph || '').replace(/[^0-9+]/g, '');
         slot.innerHTML = ph
           ? '📞 <a href="tel:' + digits + '" onclick="event.stopPropagation()" style="color:var(--accent-green,#00E785);font-weight:600;text-decoration:none;">' + mjEsc(_fmtPhone(ph)) + '</a>'
-            + ' &nbsp;·&nbsp; <a href="sms:' + digits + '" onclick="event.stopPropagation()" style="color:var(--accent-green,#00E785);font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>'
+            + ' &nbsp;·&nbsp; <a href="' + _smsHref(digits, buildSmsBody({})) + '" onclick="event.stopPropagation()" style="color:var(--accent-green,#00E785);font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>'
           : '<span style="color:var(--text-muted);">No phone on file</span>';
       }).catch(() => { slot.innerHTML = '<span style="color:var(--text-muted);">No phone on file</span>'; });
     }
@@ -19423,7 +19438,7 @@ RECYCLING & DONATION
         const smsEl = document.getElementById('estSmsDisplay');
         if (smsEl) {
           smsEl.textContent = phone ? '💬 Text' : '';
-          smsEl.href = phone ? 'sms:' + digits : '';
+          smsEl.href = phone ? _smsHref(digits, buildSmsBody({ clientName: (currentEstimate && currentEstimate.clientName) || '' })) : '';
           smsEl.style.display = phone ? 'inline-block' : 'none';
         }
       }
@@ -21646,7 +21661,52 @@ Please review the estimate below. If you have any questions or would like to adj
         .replace(/{{phone}}/g, currentUser.phone || cs.phone || '');
     }
 
+    // ── Per-user SMS pre-fill: fill the user's text template + build an sms: href ──
+    const SMS_DEFAULT_TEMPLATE = 'Hello {{customer name}}, {{user name}} from {{company name}} here.';
+    function _smsFirstName(full) { const s = String(full == null ? '' : full).trim(); return s ? s.split(/[\s,]+/)[0] : ''; }
+    function buildSmsBody(ctx) {
+      ctx = ctx || {};
+      const tmpl = (currentUser && currentUser.smsTemplate) || SMS_DEFAULT_TEMPLATE;
+      const cust = ctx.clientName ? _smsFirstName(ctx.clientName) : 'there';
+      const uname = (currentUser && currentUser.name) || '';
+      const company = (currentUser && currentUser.franchiseName) || '';
+      return tmpl
+        .replace(/\{\{\s*customer name\s*\}\}/gi, cust)
+        .replace(/\{\{\s*user name\s*\}\}/gi, uname)
+        .replace(/\{\{\s*company name\s*\}\}/gi, company);
+    }
+    // iOS wants sms:NUMBER&body=… ; others accept sms:NUMBER?body=…
+    function _smsHref(digits, body) {
+      const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+      return 'sms:' + digits + (iOS ? '&' : '?') + 'body=' + encodeURIComponent(body);
+    }
+    async function saveSmsTemplate() {
+      const ta = document.getElementById('settingsSmsTemplate');
+      const btn = document.getElementById('smsTemplateSaveBtn');
+      const fb = document.getElementById('smsTemplateFeedback');
+      const val = ta ? ta.value : '';
+      if (btn) btn.classList.add('loading');
+      if (fb) fb.textContent = '';
+      try {
+        const token = (await _supabaseUserToken()) || EDGE_ANON_KEY;
+        const res = await fetch(EDGE_BASE + '/crewlogic-settings', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + token, 'apikey': EDGE_ANON_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'saveSmsTemplate', template: val })
+        });
+        let data = null; try { data = await res.json(); } catch (e) {}
+        if (res.ok && data && data.success) {
+          if (currentUser) currentUser.smsTemplate = val;
+          try { storage.set(SESSION_KEY, JSON.stringify(currentUser)); } catch (e) {}
+          if (fb) { fb.textContent = '✓ Text template saved'; fb.className = 'settings-feedback ok'; }
+        } else if (fb) { fb.textContent = (data && data.error) || 'Failed to save.'; fb.className = 'settings-feedback error'; }
+      } catch (e) { if (fb) { fb.textContent = 'Connection error.'; fb.className = 'settings-feedback error'; } }
+      if (btn) btn.classList.remove('loading');
+    }
+
     function populateProposalSettingsFields() {
+      const _smsTa = document.getElementById('settingsSmsTemplate');
+      if (_smsTa && currentUser) _smsTa.value = currentUser.smsTemplate || '';
       if (!currentUser || !currentUser.costSettings) return;
       const cs = currentUser.costSettings;
       PROPOSAL_FIELDS.forEach(f => {
