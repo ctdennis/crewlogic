@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.18 | 2026-07-02">
+  <meta name="crewlogic-version" content="v5.48.19 | 2026-07-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7382,7 +7382,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       box.style.display = 'block'; box.scrollTop = 0;
       if (jobID) _prefetchJobPhone(jobID).then(ph => _renderJobPhoneSlot(jobID, ph)); // fill the phone slot like popupopen did
     }
-    function _mapHoverHide() { const b = document.querySelector('.map-hover-box'); if (b) b.style.display = 'none'; }
+    function _mapHoverHide() {
+      const b = document.querySelector('.map-hover-box'); if (b) b.style.display = 'none';
+      // Dismissing the box also clears the measure line — otherwise the green dotted line lingers with no way off.
+      if (_measureLine && _trucksMap) { try { _trucksMap.removeLayer(_measureLine); } catch (e) {} _measureLine = null; }
+    }
     function _mtBanner(text) {
       let b = document.getElementById('mtMeasureBanner');
       if (!b) {
