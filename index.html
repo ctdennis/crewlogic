@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.16 | 2026-07-02">
+  <meta name="crewlogic-version" content="v5.48.17 | 2026-07-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8534,6 +8534,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + '<button onclick="dashShiftDay(\'' + side + '\',-1)" style="' + _dashNavBtnCss() + '">◀</button>'
         + '<span id="dashDayLbl-' + side + '" style="font-size:13px;font-weight:700;color:var(--text-primary);min-width:104px;text-align:center;">' + mjEsc(_dashDayLabel(dayID)) + '</span>'
         + '<button onclick="dashShiftDay(\'' + side + '\',1)" style="' + _dashNavBtnCss() + '">▶</button>'
+        + '<input type="date" id="dashDayDate-' + side + '" value="' + (String(dayID).slice(0,4)+'-'+String(dayID).slice(4,6)+'-'+String(dayID).slice(6,8)) + '" onchange="dashSetDay(\'' + side + '\',this.value)" title="Jump to a date" style="font-size:12px;padding:5px 7px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);color-scheme:dark;">'
         + '<button onclick="dashReloadOne(\'' + side + '\',true)" title="Refresh this board" style="' + _dashNavBtnCss() + ';margin-left:auto;">🔄</button>'
         + '</div>';
     }
@@ -8666,11 +8667,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _dashMapRO = new ResizeObserver(fix); _dashMapRO.observe(pane);
       }
     }
-    function dashShiftDay(side, delta) {
-      if (side === 'src') _dashSrcDay = mjAddDays(_dashSrcDay, delta); else _dashDestDay = mjAddDays(_dashDestDay, delta);
+    // Apply a specific dayID to a board: state + label + calendar-input value + in-place reload. Shared by the
+    // ◀/▶ steppers and the calendar drop-down so all three stay in sync.
+    function dashApplyDay(side, dayID) {
+      if (side === 'src') _dashSrcDay = dayID; else _dashDestDay = dayID;
       const lbl = document.getElementById('dashDayLbl-' + side);
-      if (lbl) lbl.textContent = _dashDayLabel(side === 'src' ? _dashSrcDay : _dashDestDay);
+      if (lbl) lbl.textContent = _dashDayLabel(dayID);
+      const inp = document.getElementById('dashDayDate-' + side);
+      if (inp) inp.value = String(dayID).slice(0, 4) + '-' + String(dayID).slice(4, 6) + '-' + String(dayID).slice(6, 8);
       dashReloadOne(side, true); // reload ONLY this board — no full dashboard rebuild, no map remount, no blank flash
+    }
+    function dashShiftDay(side, delta) {
+      dashApplyDay(side, mjAddDays(side === 'src' ? _dashSrcDay : _dashDestDay, delta));
+    }
+    // Calendar drop-down: jump straight to any date (input 'YYYY-MM-DD' → dayID 'YYYYMMDD'; no epoch/TZ math).
+    function dashSetDay(side, dateStr) {
+      if (dateStr) dashApplyDay(side, String(dateStr).replace(/-/g, ''));
     }
     // Reload a single board in place (routes are day-independent, so its route-hours axis matches the other
     // board → they stay aligned). quiet=true keeps the old content until the new render swaps in (no blank).
