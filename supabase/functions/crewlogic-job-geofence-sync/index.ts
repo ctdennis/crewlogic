@@ -76,17 +76,45 @@ async function resolveFranchise(sb: SupabaseClient, external: string): Promise<F
   return (data as Fr) || null;
 }
 
-async function deleteGeofence(sb: SupabaseClient, fr: Fr, rowId: string, geofenceId: any): Promise<string | null> {
+// Lifecycle notification into the same alerts list the truck crossings use (📍 created / 🏁 deleted).
+// These are NOT Motive webhook events — WE generate them so the list reads as a full per-job lifecycle.
+// Best-effort: a failed insert must never break the create/delete it accompanies.
+async function insertLifecycleAlert(
+  sb: SupabaseClient,
+  fr: Fr,
+  ev: { event_type: string; geofence_id: any; geofence_name: string | null; raw?: unknown },
+): Promise<void> {
+  try {
+    await sb.from("geofence_alerts").insert({
+      franchise_id: fr.id, tenant_id: fr.tenant_id,
+      action: "lifecycle", event_type: ev.event_type,
+      vehicle_id: null, vehicle_number: null,
+      geofence_id: ev.geofence_id, geofence_name: ev.geofence_name,
+      raw: ev.raw ?? null,
+    });
+  } catch (e) {
+    console.error("[job-geofence-sync] lifecycle alert insert failed:", (e as Error).message);
+  }
+}
+
+async function deleteGeofence(
+  sb: SupabaseClient,
+  fr: Fr,
+  row: { id: string; geofence_id: any; name?: string | null },
+  reason: string, // 'job_complete' | 'eod'
+): Promise<string | null> {
   // Returns null on success, or an error string. Best-effort: always marks the row deleted so the
   // mapping stops matching (EOD sweep re-attempts nothing; the Motive geofence delete is best-effort).
   let err: string | null = null;
   try {
-    const del = await callFn("crewlogic-geofence-create", { action: "delete", franchiseID: fr.id, geofence_id: geofenceId });
+    const del = await callFn("crewlogic-geofence-create", { action: "delete", franchiseID: fr.id, geofence_id: row.geofence_id });
     if (!del.ok || !del.data?.success) err = "motive delete failed: " + JSON.stringify(del.data).slice(0, 160);
   } catch (e) {
     err = "motive delete error: " + (e as Error).message;
   }
-  await sb.from("job_geofences").update({ status: "deleted", deleted_at: new Date().toISOString() }).eq("id", rowId);
+  await sb.from("job_geofences").update({ status: "deleted", deleted_at: new Date().toISOString() }).eq("id", row.id);
+  // 🏁/🌙 "Tracking ended" notification in the alerts list.
+  await insertLifecycleAlert(sb, fr, { event_type: "geofence_deleted", geofence_id: row.geofence_id, geofence_name: row.name ?? null, raw: { reason } });
   return err;
 }
 
@@ -143,6 +171,8 @@ async function syncFranchise(
     });
     if (insErr) { errors.push({ woId, error: "mapping insert failed", detail: insErr.message, geofence_id: gid }); continue; }
     created.push({ woId, geofence_id: gid, name });
+    // 📍 "Tracking started" notification — fires once per job/day (idempotent create above prevents dupes).
+    await insertLifecycleAlert(sb, fr, { event_type: "geofence_created", geofence_id: gid, geofence_name: name, raw: { reason: "created", woId } });
   }
 
   // ---- DELETE-ON-DONE pass (skip for a targeted create-only test) ----
@@ -156,11 +186,11 @@ async function syncFranchise(
       doneByWo.set(w, !!(job.isComplete || job.labelDone));
     }
     const { data: activeRows } = await sb.from("job_geofences")
-      .select("id, wo_id, geofence_id").eq("franchise_id", fr.id).eq("status", "active");
+      .select("id, wo_id, geofence_id, name").eq("franchise_id", fr.id).eq("status", "active");
     for (const row of activeRows || []) {
       const w = String(row.wo_id);
       if (doneByWo.get(w) !== true) continue; // only delete WOs seen as done in this fetch
-      const err = await deleteGeofence(sb, fr, row.id, row.geofence_id);
+      const err = await deleteGeofence(sb, fr, row, "job_complete");
       if (err) errors.push({ woId: w, error: "delete-on-done", detail: err });
       deleted.push({ woId: w, geofence_id: row.geofence_id, reason: "done" });
     }
@@ -179,9 +209,9 @@ async function sweepFranchise(sb: SupabaseClient, fr: Fr): Promise<any> {
   const errors: any[] = [];
   let deleted = 0;
   const { data: activeRows } = await sb.from("job_geofences")
-    .select("id, wo_id, geofence_id").eq("franchise_id", fr.id).eq("status", "active");
+    .select("id, wo_id, geofence_id, name").eq("franchise_id", fr.id).eq("status", "active");
   for (const row of activeRows || []) {
-    const err = await deleteGeofence(sb, fr, row.id, row.geofence_id);
+    const err = await deleteGeofence(sb, fr, row, "eod");
     if (err) errors.push({ woId: row.wo_id, detail: err });
     deleted++;
   }

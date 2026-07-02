@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.14 | 2026-07-01">
+  <meta name="crewlogic-version" content="v5.48.15 | 2026-07-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8062,19 +8062,27 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const et = String(a.event_type || '');
       const veh = _truckEsc(a.vehicle_number || 'Truck');
       const place = _truckEsc(a.geofence_name || (a.geofence_id != null ? ('#' + a.geofence_id) : ''));
-      let icon = '📍', text;
+      let reason = '';
+      try { const r = (typeof a.raw === 'string') ? JSON.parse(a.raw) : a.raw; if (r && r.reason) reason = String(r.reason); } catch (e) {}
+      let icon = '📍', text, lifecycle = false;
       if (et === 'geofence_entry') { icon = '🟢'; text = veh + ' entered ' + place; }
       else if (et === 'geofence_exit') { icon = '🔴'; text = veh + ' exited ' + place; }
       else if (et === 'job_arrive') { icon = '🚚'; text = veh + ' arrived at ' + place; }
       else if (et === 'job_leave') { icon = '🚚'; text = veh + ' left ' + place; }
       else if (et === 'engine_on') { icon = '🔑'; text = veh + ' — ignition on'; }
       else if (et === 'engine_off') { icon = '⏹️'; text = veh + ' — ignition off'; }
+      // Lifecycle rows (WE generate these, not Motive) — muted/smaller so truck crossings stand out.
+      else if (et === 'geofence_created') { icon = '📍'; text = 'Tracking started — ' + place; lifecycle = true; }
+      else if (et === 'geofence_deleted') { lifecycle = true; if (reason === 'eod') { icon = '🌙'; text = 'Tracking ended (end of day) — ' + place; } else { icon = '🏁'; text = 'Tracking ended — ' + place; } }
       else { text = veh + ' — ' + _truckEsc(et || a.action || 'event'); }
       const when = a.created_at || a.start_time;
       const abs = when ? new Date(when).toLocaleString() : '';
-      return '<div style="display:flex;gap:8px;padding:8px 6px;border-bottom:1px solid var(--border,#22354a);align-items:flex-start;">'
-        + '<span style="flex:0 0 auto;font-size:13px;line-height:1.3;">' + icon + '</span>'
-        + '<div style="flex:1;min-width:0;"><div style="font-size:12.5px;color:var(--text-primary,#eef4fa);line-height:1.35;">' + text + '</div>'
+      const txtColor = lifecycle ? 'var(--text-muted,#6e8194)' : 'var(--text-primary,#eef4fa)';
+      const txtSize = lifecycle ? '11.5px' : '12.5px';
+      const iconSize = lifecycle ? '11.5px' : '13px';
+      return '<div style="display:flex;gap:8px;padding:' + (lifecycle ? '6px' : '8px') + ' 6px;border-bottom:1px solid var(--border,#22354a);align-items:flex-start;">'
+        + '<span style="flex:0 0 auto;font-size:' + iconSize + ';line-height:1.3;">' + icon + '</span>'
+        + '<div style="flex:1;min-width:0;"><div style="font-size:' + txtSize + ';color:' + txtColor + ';line-height:1.35;">' + text + '</div>'
         + '<div style="font-size:11px;color:var(--text-muted,#6e8194);" title="' + _truckEsc(abs) + '">' + _alertRelTime(when) + '</div></div></div>';
     }
     function _alertRelTime(iso) {
