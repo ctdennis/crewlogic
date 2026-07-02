@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.15 | 2026-07-01">
+  <meta name="crewlogic-version" content="v5.48.16 | 2026-07-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8031,6 +8031,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Populated by the crewlogic-motive-webhook receiver into geofence_alerts (franchise-scoped RLS).
     // Loads the last 50 on open, then streams new inserts via Supabase realtime.
     let _geofenceAlertsChannel = null;
+    let _geofenceAlertsPollTimer = null;
+    let _shownAlertIds = new Set(); // ids currently shown — dedups realtime vs poll, backfills realtime misses
     // Shared core: fetch recent alerts + render into EVERY visible alerts list (the trucks right-rail
     // AND the mobile Truck Alerts screen both use `.gf-alerts-list`), then subscribe for live inserts.
     async function _fetchAndRenderAlerts() {
@@ -8043,6 +8045,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         lists.forEach(l => { l.innerHTML = '<div style="padding:12px;color:var(--text-muted,#6e8194);font-size:12px;">Could not load alerts.</div>'; });
       }
       _subscribeGeofenceAlerts();
+      // Poll fallback: realtime can silently drop inserts (reconnect/hiccup). Poll every 30s while a
+      // list is visible and backfill anything realtime missed. Idempotent — never stack timers.
+      if (!_geofenceAlertsPollTimer) _geofenceAlertsPollTimer = setInterval(_pollGeofenceAlerts, 30000);
     }
     // Dispatch dashboard only: the alerts rail (#dashAlertsPanel) sits beside the dashboard trucks map.
     // Refresh the map size (the rail shares its flex row), then load into the shared list.
@@ -8055,8 +8060,28 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!lists.length) return;
       const html = rows.length ? rows.map(_geofenceAlertRow).join('') : '<div style="padding:14px 10px;color:var(--text-muted,#6e8194);font-size:12px;text-align:center;">No recent alerts.</div>';
       lists.forEach(l => { l.innerHTML = html; });
+      _shownAlertIds = new Set(rows.map(r => r.id));
       const cnt = rows.length ? (rows.length + (rows.length >= 50 ? '+' : '')) : '';
       document.querySelectorAll('.gf-alerts-count').forEach(c => { c.textContent = cnt; });
+    }
+    // Poll fallback: re-fetch the authoritative newest-first list; if it contains any id we're not
+    // showing (realtime dropped it), re-render in place (scroll preserved). Self-stops when hidden.
+    async function _pollGeofenceAlerts() {
+      const lists = document.querySelectorAll('.gf-alerts-list');
+      const anyVisible = Array.prototype.some.call(lists, l => l.offsetParent !== null);
+      if (!lists.length || !anyVisible) {
+        if (_geofenceAlertsPollTimer) { clearInterval(_geofenceAlertsPollTimer); _geofenceAlertsPollTimer = null; }
+        return;
+      }
+      try {
+        const rows = await supabaseFetch('/rest/v1/geofence_alerts?select=id,franchise_id,action,event_type,vehicle_number,geofence_id,geofence_name,start_time,created_at&order=created_at.desc&limit=50');
+        if (!Array.isArray(rows)) return;
+        const missing = rows.some(r => !_shownAlertIds.has(r.id));
+        if (!missing) return; // nothing realtime dropped — don't disturb the list/scroll
+        const scrolls = Array.prototype.map.call(lists, l => l.scrollTop);
+        _renderGeofenceAlerts(rows); // authoritative order, dedups, resets _shownAlertIds
+        Array.prototype.forEach.call(document.querySelectorAll('.gf-alerts-list'), (l, i) => { if (scrolls[i] != null) l.scrollTop = scrolls[i]; });
+      } catch (e) { /* transient — retry next tick */ }
     }
     function _geofenceAlertRow(a) {
       const et = String(a.event_type || '');
@@ -8097,7 +8122,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function _prependGeofenceAlert(row) {
       const lists = document.querySelectorAll('.gf-alerts-list');
-      if (!lists.length) return;
+      if (!lists.length || !row || row.id == null || _shownAlertIds.has(row.id)) return; // dedup vs poll/self
+      _shownAlertIds.add(row.id);
       lists.forEach(list => {
         if (/No recent alerts|Could not load/.test(list.textContent || '')) list.innerHTML = '';
         list.insertAdjacentHTML('afterbegin', _geofenceAlertRow(row));
@@ -8117,8 +8143,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             if (fid && row.franchise_id && row.franchise_id !== fid) return; // franchise safety net (realtime RLS should already scope)
             _prependGeofenceAlert(row);
           })
-          .subscribe();
-      } catch (e) { /* realtime optional — the initial load already populated the panel */ }
+          .subscribe((status) => { if (status === 'SUBSCRIBED') { try { _pollGeofenceAlerts(); } catch (e) {} } }); // backfill on (re)connect
+      } catch (e) { /* realtime optional — the poll fallback still backfills the panel */ }
     }
 
     // ===== Settings → Trucks (telematics) tab =====
