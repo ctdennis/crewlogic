@@ -118,6 +118,15 @@ async function deleteGeofence(
   return err;
 }
 
+// Town/city from a Vonigo multi-line address ("street\ncity, ST zip"). Returns the city segment —
+// the comma-part just before "STATE ZIP" — best-effort for US addresses; "" when unparseable.
+function townFromAddress(addr: string): string {
+  if (!addr) return "";
+  const parts = String(addr).replace(/\n/g, ",").split(",").map((s) => s.trim()).filter(Boolean);
+  if (parts.length && /^(usa|united states)$/i.test(parts[parts.length - 1])) parts.pop();
+  return parts.length >= 2 ? parts[parts.length - 2] : "";
+}
+
 // CREATE + DELETE-ON-DONE for one franchise.
 async function syncFranchise(
   sb: SupabaseClient,
@@ -154,7 +163,8 @@ async function syncFranchise(
       .gte("created_at", cutoffISO).order("created_at", { ascending: false }).limit(1).maybeSingle();
     if (existing) { skipped.push({ woId, reason: "already handled today (" + existing.status + ")", geofence_id: existing.geofence_id }); continue; }
 
-    const name = (job.clientName || "Job") + " · #" + woId; // "<client> · #<woID>"
+    const town = townFromAddress(job.address || "");
+    const name = (job.clientName || "Job") + " · #" + woId + (town ? " · " + town : ""); // "<client> · #<woID> · <town>"
     const gc = await callFn("crewlogic-geofence-create", {
       franchiseID: fr.id, name, category: "Job Site",
       radius_in_meters: radius, centre_lat: lat, centre_lon: lon,
