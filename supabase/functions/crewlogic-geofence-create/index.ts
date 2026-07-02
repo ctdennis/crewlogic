@@ -75,6 +75,29 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json();
+
+    // DELETE branch (for delete-on-exit + end-of-day sweep): { action:'delete', franchiseID, geofence_id }
+    if (String(body.action || "") === "delete") {
+      const delFranchiseID = String(body.franchiseID || "").trim();
+      const geofenceId = body.geofence_id;
+      if (!delFranchiseID) return jsonResponse({ success: false, error: "franchiseID required" }, 400);
+      if (geofenceId === undefined || geofenceId === null || geofenceId === "") {
+        return jsonResponse({ success: false, error: "geofence_id required" }, 400);
+      }
+      const delCred = await getFranchiseCredential(delFranchiseID);
+      if (!delCred || delCred.provider.toLowerCase() !== "motive" || !delCred.token) {
+        return jsonResponse({ success: false, error: "No Motive credential for this franchise." }, 404);
+      }
+      const delRes = await fetch("https://api.gomotive.com/v1/geofences/" + encodeURIComponent(String(geofenceId)), {
+        method: "DELETE",
+        headers: { accept: "application/json", "x-api-key": delCred.token },
+      });
+      const delTxt = await delRes.text();
+      let delParsed: unknown; try { delParsed = JSON.parse(delTxt); } catch { delParsed = delTxt; }
+      if (!delRes.ok) console.error(`[geofence-create] Motive DELETE ${delRes.status}: ${delTxt.slice(0, 300)}`);
+      return jsonResponse({ success: delRes.ok, status: delRes.status, action: "delete", geofence_id: geofenceId, motive: delParsed });
+    }
+
     const franchiseID = String(body.franchiseID || "").trim();
     const name = String(body.name || "").trim();
     const category = String(body.category || "").trim();
