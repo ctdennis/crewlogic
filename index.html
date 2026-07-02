@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.20 | 2026-07-02">
+  <meta name="crewlogic-version" content="v5.48.21 | 2026-07-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1922,6 +1922,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 {{ownerName}}
 {{franchiseName}}
 {{phone}}" style="resize:vertical;font-size:13px;line-height:1.5;font-family:inherit;"></textarea>
+            </div>
+
+            <div class="form-section-label" style="margin-top:12px;">Company Nickname (DBA)</div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Casual name used in text messages — e.g. Junkluggers. Leave blank to use the full company name.</label>
+              <input type="text" class="form-input" id="settingsCompanyNickname" placeholder="Junkluggers" autocomplete="off">
             </div>
 
             <button class="settings-save-btn" id="proposalSettingsSaveBtn" onclick="saveProposalSettings()">
@@ -21669,7 +21675,9 @@ Please review the estimate below. If you have any questions or would like to adj
       const tmpl = (currentUser && currentUser.smsTemplate) || SMS_DEFAULT_TEMPLATE;
       const cust = ctx.clientName ? _smsFirstName(ctx.clientName) : 'there';
       const uname = (currentUser && currentUser.name) || '';
-      const company = (currentUser && currentUser.franchiseName) || '';
+      // SMS uses the casual DBA nickname if set; the email/proposal keep the formal franchiseName.
+      const _nick = ((currentUser && currentUser.costSettings && currentUser.costSettings.companyNickname) || '').trim();
+      const company = _nick || (currentUser && currentUser.franchiseName) || '';
       return tmpl
         .replace(/\{\{\s*customer name\s*\}\}/gi, cust)
         .replace(/\{\{\s*user name\s*\}\}/gi, uname)
@@ -21713,6 +21721,8 @@ Please review the estimate below. If you have any questions or would like to adj
         const el = document.getElementById('settingsProposal' + f);
         if (el && cs['proposal' + f] !== undefined) el.value = cs['proposal' + f];
       });
+      const _nickEl = document.getElementById('settingsCompanyNickname');
+      if (_nickEl) _nickEl.value = cs.companyNickname || '';
     }
 
     async function saveProposalSettings() {
@@ -21725,6 +21735,8 @@ Please review the estimate below. If you have any questions or would like to adj
         const el = document.getElementById('settingsProposal' + f);
         if (el) currentUser.costSettings['proposal' + f] = el.value.trim();
       });
+      const _nickEl = document.getElementById('settingsCompanyNickname');
+      if (_nickEl) currentUser.costSettings.companyNickname = _nickEl.value.trim();
       try {
         const data = await edgeFunctionCall('crewlogic-settings', {
           action: 'saveProposalSettings',
