@@ -768,6 +768,40 @@ async function handleSaveHomeCardOrder(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// HANDLER: saveSmsTemplate (per-user text-message pre-fill template)
+// Body: { template: string } — the user's SMS template (with {{customer name}} etc.).
+// Auth: caller identified from the Bearer token; updates ONLY that user's own profile
+// row (auth_user_id) and ONLY the sms_template column. Mirrors saveHomeCardOrder.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleSaveSmsTemplate(
+  body: Record<string, unknown>,
+  token: string | null,
+): Promise<Response> {
+  if (!token) {
+    return jsonResponse({ success: false, error: "Missing Authorization token" }, 401);
+  }
+  const anonClient = createClient(SUPABASE_URL, ANON_KEY);
+  const { data: { user }, error: authErr } = await anonClient.auth.getUser(token);
+  if (authErr || !user) {
+    return jsonResponse({ success: false, error: "Invalid or expired session" }, 401);
+  }
+  const template = body.template;
+  if (typeof template !== "string" || template.length > 1000) {
+    return jsonResponse({ success: false, error: "template must be a string <=1000 chars" }, 400);
+  }
+  const res = await supabasePatch(
+    `/rest/v1/profiles?auth_user_id=eq.${encodeURIComponent(user.id)}`,
+    { sms_template: template },
+  );
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error("saveSmsTemplate update failed:", res.status, errText);
+    return jsonResponse({ success: false, error: `DB error ${res.status}` }, 500);
+  }
+  return jsonResponse({ success: true });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // FACILITIES (disposal/recycling/donation sites + hours + holidays)
 //
 // These live in the relational tables `facilities`, `facility_hours`, and
@@ -1082,13 +1116,14 @@ serve(async (req) => {
 
   // Token-aware actions (caller-verified via the Authorization Bearer token) are
   // routed here rather than through the body-only ACTION_HANDLERS map.
-  if (action === "saveHomeCardOrder" || action === "getFacilities" || action === "saveFacilities") {
+  if (action === "saveHomeCardOrder" || action === "saveSmsTemplate" || action === "getFacilities" || action === "saveFacilities") {
     const authHeader = req.headers.get("Authorization") || "";
     const token = authHeader.toLowerCase().startsWith("bearer ")
       ? authHeader.slice(7).trim()
       : null;
     try {
       if (action === "saveHomeCardOrder") return await handleSaveHomeCardOrder(body, token);
+      if (action === "saveSmsTemplate") return await handleSaveSmsTemplate(body, token);
       if (action === "getFacilities") return await handleGetFacilities(body, token);
       return await handleSaveFacilities(body, token);
     } catch (e) {
