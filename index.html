@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.27 | 2026-07-03">
+  <meta name="crewlogic-version" content="v5.48.28 | 2026-07-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7559,20 +7559,52 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!_measureFrom || j.lat == null || j.lon == null || !_trucksMap) return;
       const from = _measureFrom;
       if (_measureLine) { _trucksMap.removeLayer(_measureLine); _measureLine = null; }
-      _measureLine = L.polyline([[from.lat, from.lon], [j.lat, j.lon]], { color: '#00E785', weight: 3, dashArray: '7,6', opacity: 0.9 }).addTo(_trucksMap);
       _measureFrom = null;
       const b = document.getElementById('mtMeasureBanner'); if (b) b.style.display = 'none';
       _trucksMap.closePopup(); // close any marker popup the tap opened
+      const dest = _truckEsc(j.clientName || 'Job');
       // Show the result in the FIXED in-map box (top-left) — never pans/clips off the edge (unlike a popup).
       _mapHoverShow('<div style="font-size:13px;">Measuring…</div>');
-      try {
-        const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: from.lat + ',' + from.lon, dest: j.lat + ',' + j.lon });
-        const dest = _truckEsc(j.clientName || 'Job');
-        const html = (data && data.success)
-          ? '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(data.distanceText) + ' · ~' + _truckEsc(data.durationText) + ' drive' + (data.inTraffic ? '<br><span style="color:#9fb0c0;font-size:11px;">in current traffic</span>' : '')
-          : 'Could not measure distance — try again.';
-        _mapHoverShow('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
-      } catch (_e) { _mapHoverShow('<div style="font-size:13px;">Could not measure distance.</div>'); }
+      // Fallback = the pre-routing behavior: straight dashed line + Google pointDistance. Used if TomTom routing fails.
+      const _straightFallback = async () => {
+        _measureLine = L.polyline([[from.lat, from.lon], [j.lat, j.lon]], { color: '#00E785', weight: 3, dashArray: '7,6', opacity: 0.9 }).addTo(_trucksMap);
+        try {
+          const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: from.lat + ',' + from.lon, dest: j.lat + ',' + j.lon });
+          const html = (data && data.success)
+            ? '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(data.distanceText) + ' · ~' + _truckEsc(data.durationText) + ' drive' + (data.inTraffic ? '<br><span style="color:#9fb0c0;font-size:11px;">in current traffic</span>' : '')
+            : 'Could not measure distance — try again.';
+          _mapHoverShow('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
+        } catch (_e) { _mapHoverShow('<div style="font-size:13px;">Could not measure distance.</div>'); }
+      };
+      // Primary: TomTom Calculate Route — real road-following geometry + traffic-aware ETA (same TomTom key as the traffic tiles).
+      if (TOMTOM_TRAFFIC_KEY && TOMTOM_TRAFFIC_KEY !== 'PASTE_TOMTOM_KEY_HERE') {
+        try {
+          const url = 'https://api.tomtom.com/routing/1/calculateRoute/' + from.lat + ',' + from.lon + ':' + j.lat + ',' + j.lon
+            + '/json?key=' + TOMTOM_TRAFFIC_KEY + '&traffic=true&travelMode=car&routeType=fastest';
+          const res = await fetch(url);
+          if (!res.ok) throw new Error('routing HTTP ' + res.status);
+          const rd = await res.json();
+          const route = rd && rd.routes && rd.routes[0];
+          const pts = (route && route.legs) ? route.legs.reduce((a, leg) => a.concat((leg.points || []).map(p => [p.latitude, p.longitude])), []) : [];
+          if (!pts.length) throw new Error('no route geometry');
+          _measureLine = L.polyline(pts, { color: '#00E785', weight: 4, opacity: 0.9 }).addTo(_trucksMap); // solid = the actual driving route
+          const sum = route.summary || {};
+          const miles = (sum.lengthInMeters != null) ? sum.lengthInMeters / 1609.344 : null;
+          const mins = (sum.travelTimeInSeconds != null) ? Math.round(sum.travelTimeInSeconds / 60) : null;
+          const distText = (miles != null) ? ((miles < 10 ? miles.toFixed(1) : String(Math.round(miles))) + ' mi') : '';
+          const durText = (mins != null) ? ('~' + mins + ' min drive') : '';
+          const traffic = !!(sum.trafficDelayInSeconds && sum.trafficDelayInSeconds > 0);
+          const html = '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(distText)
+            + ((distText && durText) ? ' · ' : '') + _truckEsc(durText)
+            + (traffic ? '<br><span style="color:#9fb0c0;font-size:11px;">in current traffic</span>' : '');
+          _mapHoverShow('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
+          return;
+        } catch (_e) {
+          if (_measureLine) { _trucksMap.removeLayer(_measureLine); _measureLine = null; }
+          await _straightFallback(); return;
+        }
+      }
+      await _straightFallback();
     }
     // Nearest live truck (by name) to a point — for job/look-ahead popups. Returns {name, mi} or null.
     function _nearestTruck(lat, lon) {
