@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.26 | 2026-07-03">
+  <meta name="crewlogic-version" content="v5.48.27 | 2026-07-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8000,19 +8000,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // number is already in hand by the time a user opens a job popup (transparent — no click-wait).
     // Cache: jobID -> Promise<phone string|''> (reuses crewlogic-job-lookup → clientPhone).
     let _jobPhones = {};
+    let _jobClients = {}; // jobID -> clientName (from the same crewlogic-job-lookup as the phone) — for the SMS greeting
     function _renderJobPhoneSlot(jobID, phone) {
       const e = document.getElementById('jobph-' + jobID);
       if (!e) return;
       const digits = String(phone || '').replace(/[^0-9+]/g, '');
       e.innerHTML = phone
         ? '📞 <a href="tel:' + digits + '" style="color:#6db3ff;font-weight:600;text-decoration:none;">' + _truckEsc(_fmtPhone(phone)) + '</a>'
-          + ' &nbsp;·&nbsp; <a href="' + _smsHref(digits, buildSmsBody({})) + '" style="color:#6db3ff;font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>'
+          + ' &nbsp;·&nbsp; <a href="' + _smsHref(digits, buildSmsBody({ clientName: _jobClients[jobID] || '' })) + '" style="color:#6db3ff;font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>'
         : '<span style="color:#9aa7b4;">No phone on file</span>';
     }
     function _prefetchJobPhone(jobID) {
       if (_jobPhones[jobID]) return _jobPhones[jobID];
       const p = edgeFunctionCall('crewlogic-job-lookup', { jobID: String(jobID), franchiseID: currentUser.franchiseID })
-        .then(r => (r && r.success && r.clientPhone) ? String(r.clientPhone).trim() : '')
+        .then(r => { if (r && r.success && r.clientName) _jobClients[jobID] = String(r.clientName).trim(); return (r && r.success && r.clientPhone) ? String(r.clientPhone).trim() : ''; })
         .catch(() => '');
       _jobPhones[jobID] = p;
       p.then(ph => _renderJobPhoneSlot(jobID, ph)); // fill in if the popup happens to be open already
@@ -8027,7 +8028,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const jobs = (data.workOrders || []).filter(j => j.lat != null && j.lon != null); // keep completed (shown grayed); cancelled is filtered server-side
         if (_jobLayer) _jobLayer.clearLayers(); else _jobMarkers.forEach(m => _trucksMap.removeLayer(m));
         _jobMarkers = [];
-        _jobPhones = {}; // reset phone cache for this fresh job set
+        _jobPhones = {}; _jobClients = {}; // reset phone + client-name cache for this fresh job set
         const routeColor = {}; let colorIdx = 0;
         const colorFor = (key) => {
           if (!(key in routeColor)) routeColor[key] = (key === 'Unrouted') ? '#6e8194' : _ROUTE_COLORS[colorIdx++ % _ROUTE_COLORS.length];
@@ -9638,7 +9639,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const digits = String(ph || '').replace(/[^0-9+]/g, '');
         slot.innerHTML = ph
           ? '📞 <a href="tel:' + digits + '" onclick="event.stopPropagation()" style="color:var(--accent-green,#00E785);font-weight:600;text-decoration:none;">' + mjEsc(_fmtPhone(ph)) + '</a>'
-            + ' &nbsp;·&nbsp; <a href="' + _smsHref(digits, buildSmsBody({})) + '" onclick="event.stopPropagation()" style="color:var(--accent-green,#00E785);font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>'
+            + ' &nbsp;·&nbsp; <a href="' + _smsHref(digits, buildSmsBody({ clientName: _jobClients[jobID] || '' })) + '" onclick="event.stopPropagation()" style="color:var(--accent-green,#00E785);font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>'
           : '<span style="color:var(--text-muted);">No phone on file</span>';
       }).catch(() => { slot.innerHTML = '<span style="color:var(--text-muted);">No phone on file</span>'; });
     }
@@ -21728,11 +21729,12 @@ Please review the estimate below. If you have any questions or would like to adj
 
     // ── Per-user SMS pre-fill: fill the user's text template + build an sms: href ──
     const SMS_DEFAULT_TEMPLATE = 'Hello {{customer name}}, {{user name}} from {{company name}} here.';
-    function _smsFirstName(full) { const s = String(full == null ? '' : full).trim(); return s ? s.split(/[\s,]+/)[0] : ''; }
+    // Vonigo stores names "Last, First" — so if there's a comma, the first name is the first word AFTER it; else the first token.
+    function _smsFirstName(full) { const s = String(full == null ? '' : full).trim(); if (!s) return ''; const ci = s.indexOf(','); const base = (ci >= 0 && s.slice(ci + 1).trim()) ? s.slice(ci + 1).trim() : s; return (base.split(/\s+/)[0] || '').replace(/,/g, ''); }
     function buildSmsBody(ctx) {
       ctx = ctx || {};
       const tmpl = (currentUser && currentUser.smsTemplate) || SMS_DEFAULT_TEMPLATE;
-      const cust = ctx.clientName ? _smsFirstName(ctx.clientName) : 'there';
+      const cust = (ctx.clientName && _smsFirstName(ctx.clientName)) || 'there';
       const uname = (currentUser && currentUser.name) || '';
       // SMS uses the casual DBA nickname if set; the email/proposal keep the formal franchiseName.
       const _nick = ((currentUser && currentUser.costSettings && currentUser.costSettings.companyNickname) || '').trim();
