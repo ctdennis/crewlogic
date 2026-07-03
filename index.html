@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.25 | 2026-07-03">
+  <meta name="crewlogic-version" content="v5.48.26 | 2026-07-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7864,11 +7864,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // (placeholder → toggle stays hidden so nothing 401s/breaks before the key is dropped in).
         // Traffic first so it sits directly under the base-map options (Street / Hybrid), then the marker overlays.
         const _overlays = {};
+        let _trafficLayer = null;
         if (TOMTOM_TRAFFIC_KEY && TOMTOM_TRAFFIC_KEY !== 'PASTE_TOMTOM_KEY_HERE') {
-          // TomTom Traffic Flow — style 'relative' = roads colored vs free-flow (green/amber/red). Default OFF
-          // (opt-in via the control); zIndex keeps it above the base tiles but below the truck/job markers.
-          // thickness=3 (TomTom default ~10 = very heavy lines) + lower opacity so it reads as a subtle overlay, not a wall of color.
-          const _trafficLayer = L.tileLayer('https://api.tomtom.com/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.png?key=' + TOMTOM_TRAFFIC_KEY + '&thickness=3', { opacity: 0.7, maxZoom: 22, zIndex: 250, attribution: 'Traffic © TomTom' });
+          // TomTom Traffic Flow — style 'relative' = roads colored vs free-flow (green/amber/red).
+          // thickness=3 (default ~10 = very heavy) + lower opacity so it reads as a subtle overlay, not a wall of color.
+          _trafficLayer = L.tileLayer('https://api.tomtom.com/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.png?key=' + TOMTOM_TRAFFIC_KEY + '&thickness=3', { opacity: 0.7, maxZoom: 22, zIndex: 250, attribution: 'Traffic © TomTom' });
+          _trafficLayer.addTo(_trucksMap); // default ON (persisted prefs below can turn it off)
           _overlays['🚦 Traffic'] = _trafficLayer;
         }
         _overlays['🚚 Trucks'] = _truckLayer;
@@ -7877,11 +7878,48 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _overlays['🗑️ Disposal'] = _disposalLayer;
         _overlays['♻️ Recycling'] = _recyclingLayer;
         _overlays['🎁 Donation'] = _donationLayer;
-        L.control.layers(
-          { 'Street': _streetLayer, 'Hybrid (streets)': _hybridLayer },
-          _overlays,
-          { position: 'topright', collapsed: false }
-        ).addTo(_trucksMap);
+        const _mapBases = { 'Street': _streetLayer, 'Hybrid (streets)': _hybridLayer };
+        // Restore saved layer choices (base + which overlays are on) from a prior session (localStorage).
+        // Runs BEFORE the control is built so its checkboxes reflect the restored state. First run = the defaults above.
+        let _mapBaseName = 'Street';
+        try {
+          const _savedLayers = JSON.parse(localStorage.getItem('crewlogic_map_layers') || 'null');
+          if (_savedLayers) {
+            if (_savedLayers.base && _mapBases[_savedLayers.base]) {
+              Object.keys(_mapBases).forEach(n => { if (_trucksMap.hasLayer(_mapBases[n])) _trucksMap.removeLayer(_mapBases[n]); });
+              _mapBases[_savedLayers.base].addTo(_trucksMap); _mapBaseName = _savedLayers.base;
+            }
+            const _ov = _savedLayers.overlays || {};
+            Object.keys(_overlays).forEach(n => {
+              if (!(n in _ov)) return; // a new overlay not in the saved prefs → keep its default
+              const layer = _overlays[n];
+              if (_ov[n] && !_trucksMap.hasLayer(layer)) _trucksMap.addLayer(layer);
+              else if (!_ov[n] && _trucksMap.hasLayer(layer)) _trucksMap.removeLayer(layer);
+            });
+          }
+        } catch (e) {}
+        const _mapLayersCtl = L.control.layers(_mapBases, _overlays, { position: 'topright', collapsed: false }).addTo(_trucksMap);
+        // Persist choices whenever the user toggles an overlay or switches base map.
+        const _saveMapLayers = () => {
+          try {
+            const overlays = {};
+            Object.keys(_overlays).forEach(n => { overlays[n] = _trucksMap.hasLayer(_overlays[n]); });
+            localStorage.setItem('crewlogic_map_layers', JSON.stringify({ base: _mapBaseName, overlays: overlays }));
+          } catch (e) {}
+        };
+        _trucksMap.on('overlayadd overlayremove', _saveMapLayers);
+        _trucksMap.on('baselayerchange', (e) => { _mapBaseName = e.name; _saveMapLayers(); });
+        // Group 🚦 Traffic with the base maps: drop the default base/overlay divider and instead draw the divider
+        // above the 2nd overlay (🚚 Trucks) — so Traffic sits directly under Hybrid. CSS (not a DOM move) so it
+        // survives Leaflet's control re-render on every toggle; scoped to THIS control + only when Traffic is present.
+        if (_trafficLayer && _mapLayersCtl.getContainer) {
+          _mapLayersCtl.getContainer().classList.add('tt-traffic-first');
+          if (!document.getElementById('tt-traffic-css')) {
+            const _st = document.createElement('style'); _st.id = 'tt-traffic-css';
+            _st.textContent = '.tt-traffic-first .leaflet-control-layers-separator{display:none}.tt-traffic-first .leaflet-control-layers-overlays>label:nth-of-type(2){border-top:1px solid rgba(0,0,0,.18);margin-top:5px;padding-top:6px}';
+            document.head.appendChild(_st);
+          }
+        }
         renderSiteMarkers(); // geocode + place the cost-section sites + truck home (async, once)
       }
       if (_truckLayer) _truckLayer.clearLayers(); else _truckMarkers.forEach(m => _trucksMap.removeLayer(m));
