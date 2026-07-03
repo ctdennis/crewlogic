@@ -116,21 +116,39 @@ async function audit(row: { franchiseID: string; action: string; commandText?: s
   } catch (e) { console.error('[dispatch][audit] failed (non-fatal):', (e as Error).message); }
 }
 
-// Geocode (cache-first, free US Census) — gives route-opt the lat/lon it needs.
+// Geocode (cache-first): free US Census FIRST, then Google as a fallback for addresses Census can't
+// match (e.g. "Street Ext" and other formats Census misses — Census is US-street-range based). Reuses
+// GOOGLE_GEOCODING_API_KEY (same key crewlogic-geofence-create uses). A prior census-only miss is
+// RE-TRIED so it gets the new Google fallback (auto-heals, no cache clearing); a google miss is final.
 async function geocode(addr: string): Promise<{ lat: number; lon: number } | null> {
   const oneLine = String(addr || '').replace(/\n/g, ', ').replace(/\s+/g, ' ').trim();
   if (!oneLine) return null;
   const key = oneLine.toLowerCase(); const sb = supa();
-  const { data: c } = await sb.from('geocode_cache').select('lat, lon, found').eq('address_key', key).maybeSingle();
-  if (c) return c.found ? { lat: c.lat, lon: c.lon } : null;
+  const { data: c } = await sb.from('geocode_cache').select('lat, lon, found, provider').eq('address_key', key).maybeSingle();
+  if (c && c.found) return { lat: c.lat, lon: c.lon };
+  if (c && !c.found && c.provider === 'google') return null; // already tried Google — genuinely not found
+  let g: { lat: number; lon: number } | null = null;
+  let provider = 'census';
   try {
     const url = 'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=' + encodeURIComponent(oneLine) + '&benchmark=Public_AR_Current&format=json';
     const d = await (await fetch(url)).json();
     const m = d?.result?.addressMatches?.[0];
-    const g = m?.coordinates ? { lat: Number(m.coordinates.y), lon: Number(m.coordinates.x) } : null;
-    await sb.from('geocode_cache').upsert({ address_key: key, lat: g?.lat ?? null, lon: g?.lon ?? null, found: !!g, provider: 'census', updated_at: new Date().toISOString() });
-    return g;
-  } catch { return null; }
+    if (m?.coordinates) g = { lat: Number(m.coordinates.y), lon: Number(m.coordinates.x) };
+  } catch { /* census failed — fall through to Google */ }
+  if (!g) {
+    const gkey = Deno.env.get('GOOGLE_GEOCODING_API_KEY') || Deno.env.get('GOOGLE_MAPS_API_KEY') || '';
+    if (gkey) {
+      provider = 'google';
+      try {
+        const gurl = 'https://maps.googleapis.com/maps/api/geocode/json?address=' + encodeURIComponent(oneLine) + '&key=' + gkey;
+        const gd = await (await fetch(gurl)).json();
+        const loc = gd?.results?.[0]?.geometry?.location;
+        if (loc && loc.lat != null && loc.lng != null) g = { lat: Number(loc.lat), lon: Number(loc.lng) };
+      } catch { /* google failed too */ }
+    }
+  }
+  await sb.from('geocode_cache').upsert({ address_key: key, lat: g?.lat ?? null, lon: g?.lon ?? null, found: !!g, provider, updated_at: new Date().toISOString() });
+  return g;
 }
 
 // listRouteJobs: WorkOrders for a day (+optional route filter), enriched + geocoded.
