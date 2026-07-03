@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.30 | 2026-07-03">
+  <meta name="crewlogic-version" content="v5.48.35 | 2026-07-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -20,6 +20,8 @@
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Leaflet.VectorGrid (bundled: incl. pbf + vector-tile) — SPIKE: renders TomTom vector traffic flow tiles for crisp, road-class/zoom-filtered traffic on the Leaflet map. -->
+  <script src="https://unpkg.com/leaflet.vectorgrid@1.3.0/dist/Leaflet.VectorGrid.bundled.js"></script>
   <script>
     // Initialize on DOM ready — no GIS library needed
     window.addEventListener('DOMContentLoaded', function() {
@@ -7575,7 +7577,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _mapHoverShow('<div style="font-size:13px;">Measuring…</div>');
       // Fallback = the pre-routing behavior: straight dashed line + Google pointDistance. Used if TomTom routing fails.
       const _straightFallback = async () => {
-        _measureLine = L.polyline([[from.lat, from.lon], [j.lat, j.lon]], { color: '#00E785', weight: 3, dashArray: '7,6', opacity: 0.9 }).addTo(_trucksMap);
+        _measureLine = L.polyline([[from.lat, from.lon], [j.lat, j.lon]], { color: '#1e6fff', weight: 4, dashArray: '7,6', opacity: 0.95 }).addTo(_trucksMap);
         try {
           const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: from.lat + ',' + from.lon, dest: j.lat + ',' + j.lon });
           const html = (data && data.success)
@@ -7595,7 +7597,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const route = rd && rd.routes && rd.routes[0];
           const pts = (route && route.legs) ? route.legs.reduce((a, leg) => a.concat((leg.points || []).map(p => [p.latitude, p.longitude])), []) : [];
           if (!pts.length) throw new Error('no route geometry');
-          _measureLine = L.polyline(pts, { color: '#00E785', weight: 4, opacity: 0.9 }).addTo(_trucksMap); // solid = the actual driving route
+          _measureLine = L.polyline(pts, { color: '#1e6fff', weight: 5, opacity: 0.95 }).addTo(_trucksMap); // solid blue = the actual driving route (distinct from green traffic; reads on light + satellite)
           const sum = route.summary || {};
           const miles = (sum.lengthInMeters != null) ? sum.lengthInMeters / 1609.344 : null;
           const mins = (sum.travelTimeInSeconds != null) ? Math.round(sum.travelTimeInSeconds / 60) : null;
@@ -7905,10 +7907,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Traffic first so it sits directly under the base-map options (Street / Hybrid), then the marker overlays.
         const _overlays = {};
         let _trafficLayer = null;
-        if (TOMTOM_TRAFFIC_KEY && TOMTOM_TRAFFIC_KEY !== 'PASTE_TOMTOM_KEY_HERE') {
-          // TomTom Traffic Flow — style 'relative' = roads colored vs free-flow (green/amber/red).
-          // thickness=3 (default ~10 = very heavy) + lower opacity so it reads as a subtle overlay, not a wall of color.
-          _trafficLayer = L.tileLayer('https://api.tomtom.com/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.png?key=' + TOMTOM_TRAFFIC_KEY + '&thickness=3', { opacity: 0.7, maxZoom: 22, zIndex: 250, attribution: 'Traffic © TomTom' });
+        if (TOMTOM_TRAFFIC_KEY && TOMTOM_TRAFFIC_KEY !== 'PASTE_TOMTOM_KEY_HERE' && window.L && L.vectorGrid) {
+          // TomTom VECTOR traffic flow (Leaflet.VectorGrid) — crisp at every zoom, with a road-class/zoom filter
+          // (major roads only when zoomed out, all roads zoomed in). Schema: layer "Traffic flow", props road_type
+          // (0 Motorway…8 Other) + traffic_level (0–1 speed ratio; 1=free-flow green). Default ON; first overlay so
+          // it sits directly under the base maps (tt-traffic-first CSS below).
+          const _flowColor = (lvl) => (lvl == null || isNaN(lvl) ? '#2ecc71' : lvl > 0.75 ? '#2ecc71' : lvl > 0.5 ? '#f1c40f' : lvl > 0.25 ? '#e67e22' : '#e74c3c');
+          _trafficLayer = L.vectorGrid.protobuf(
+            'https://api.tomtom.com/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.pbf?key=' + TOMTOM_TRAFFIC_KEY,
+            { rendererFactory: L.canvas.tile, interactive: false, maxZoom: 22, attribution: 'Traffic © TomTom',
+              vectorTileLayerStyles: { 'Traffic flow': (props, zoom) => {
+                const rt = Number(props.road_type);
+                const maxClass = zoom < 9 ? 1 : zoom < 11 ? 3 : zoom < 13 ? 5 : 8; // progressive detail by zoom
+                if (!isNaN(rt) && rt > maxClass) return []; // hide minor classes when zoomed out
+                const w = rt <= 1 ? 4 : rt <= 3 ? 3 : rt <= 5 ? 2 : 1.5;
+                return { color: _flowColor(Number(props.traffic_level)), weight: w, opacity: 0.85 };
+              } } }
+          );
           _trafficLayer.addTo(_trucksMap); // default ON (persisted prefs below can turn it off)
           _overlays['🚦 Traffic'] = _trafficLayer;
         }
