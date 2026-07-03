@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.49.0 | 2026-07-03">
+  <meta name="crewlogic-version" content="v5.49.1 | 2026-07-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -16646,6 +16646,32 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         };
       }).filter(Boolean);
 
+      // Resolve a Vonigo price-item ID for a non-volume charge. Charges built OUTSIDE the normal
+      // picker (PDF/manual recreation, imports, older data) can land with no priceItemID; sending
+      // String(undefined)/"null" makes Vonigo reject the WHOLE quote with an opaque "data validation"
+      // error (root cause of estimate 1782846616115: a recreated discount had no price item). Recover
+      // the ID from the live price book by charge type; anything still unresolved is collected and the
+      // submit is aborted below with an actionable message rather than sending "null" to Vonigo.
+      const missingPriceItems = [];
+      const resolveChargeItem = (c) => {
+        const raw = c.priceItemID;
+        const has = raw != null && String(raw) !== '' && String(raw) !== 'null' && String(raw) !== 'undefined';
+        if (has) return { priceItemID: String(raw), taxID: c.taxID };
+        const needle = c.type === 'discount' ? 'discount'
+          : c.type === 'singleitem' ? 'single item'
+          : c.type === 'surcharge' ? 'surcharge'
+          : c.type === 'labor' ? 'labor' : null;
+        let block = needle ? priceBlocks.find(b => b.name && b.name.toLowerCase().includes(needle)) : null;
+        if (c.type === 'labor' && !block) block = priceBlocks.find(b => b.name && ['additional labor', 'labor'].includes(b.name.toLowerCase()));
+        const items = block && Array.isArray(block.items) ? block.items : [];
+        const pick = items.find(i => (i.name || '').toLowerCase() === (c.name || '').toLowerCase())
+          || (c.type === 'discount' ? items.find(i => (i.name || '').toLowerCase() === 'discount') : null)
+          || items[0];
+        if (pick && pick.priceItemID != null) return { priceItemID: String(pick.priceItemID), taxID: c.taxID != null ? c.taxID : pick.taxID };
+        missingPriceItems.push(c.name || c.description || ('a ' + (c.type || 'charge') + ' charge'));
+        return { priceItemID: null, taxID: c.taxID };
+      };
+
       const otherLines = (currentEstimate.charges || [])
         .filter(c => c.type !== 'volume')
         .map(c => {
@@ -16666,9 +16692,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           if (c.isAllowDecimals === false && submitQty % 1 !== 0) {
             submitQty = Math.round(submitQty);
           }
+          const resolved = resolveChargeItem(c);
           return {
-            priceItemID: String(c.priceItemID),
-            taxID: String(c.taxID || 146),
+            priceItemID: resolved.priceItemID,
+            taxID: String(resolved.taxID || 146),
             Fields: [
               { fieldID: 9290, fieldValue: c.name },
               { fieldID: 9289, fieldValue: desc },
@@ -16677,6 +16704,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             ]
           };
         });
+
+      // Guard: never send a null/undefined price item to Vonigo. Abort with an actionable message.
+      if (missingPriceItems.length) {
+        feedbackEl.textContent = "Can't submit to Vonigo — " + missingPriceItems.length + ' charge' + (missingPriceItems.length !== 1 ? 's are' : ' is') +
+          ' missing a price item (' + missingPriceItems.join('; ') + '). Delete and re-add ' + (missingPriceItems.length !== 1 ? 'them' : 'it') +
+          ' via the ✏️ Manual menu (that sets the price item), then submit again.';
+        feedbackEl.className = 'settings-feedback error';
+        btn.classList.remove('loading');
+        return;
+      }
 
       const charges = [...volLines, ...otherLines];
 
