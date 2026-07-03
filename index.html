@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.48.30 | 2026-07-03">
+  <meta name="crewlogic-version" content="v5.48.31 | 2026-07-03">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7908,7 +7908,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (TOMTOM_TRAFFIC_KEY && TOMTOM_TRAFFIC_KEY !== 'PASTE_TOMTOM_KEY_HERE') {
           // TomTom Traffic Flow — style 'relative' = roads colored vs free-flow (green/amber/red).
           // thickness=3 (default ~10 = very heavy) + lower opacity so it reads as a subtle overlay, not a wall of color.
-          _trafficLayer = L.tileLayer('https://api.tomtom.com/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.png?key=' + TOMTOM_TRAFFIC_KEY + '&thickness=3', { opacity: 0.7, maxZoom: 22, zIndex: 250, attribution: 'Traffic © TomTom' });
+          // tileSize 512 + zoomOffset -1 = request the traffic tile one zoom level DOWN (upscaled) → fewer minor
+          // roads / less clutter when zoomed out (owner). thickness 2 (down from 3) since the 2× upscale widens lines.
+          _trafficLayer = L.tileLayer('https://api.tomtom.com/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.png?key=' + TOMTOM_TRAFFIC_KEY + '&thickness=2', { opacity: 0.7, maxZoom: 22, tileSize: 512, zoomOffset: -1, zIndex: 250, attribution: 'Traffic © TomTom' });
           _trafficLayer.addTo(_trucksMap); // default ON (persisted prefs below can turn it off)
           _overlays['🚦 Traffic'] = _trafficLayer;
         }
