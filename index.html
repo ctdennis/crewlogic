@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.49.1 | 2026-07-03">
+  <meta name="crewlogic-version" content="v5.50.0 | 2026-07-04">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1959,72 +1959,104 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           <div class="settings-card fade-in fade-in-delay-2">
             <div class="settings-card-title">Truck Tracking (Telematics)</div>
             <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">
-              Connect your GPS provider to see your trucks live on the <strong>Where Are My Trucks?</strong> screen. Pick your provider, paste your API token, and save — we'll test the connection right away.
+              Connect your GPS provider to see your trucks live on the <strong>Where Are My Trucks?</strong> screen. Each provider has an <strong>API (pull)</strong> connection for live truck positions and an optional <strong>Webhook (push)</strong> for geofence alerts. You can configure both providers, but only one feeds the trucks map at a time.
             </div>
 
-            <!-- Current connection status -->
-            <div id="telematicsStatus" style="font-size:13px;margin-bottom:16px;"></div>
+            <!-- Which provider currently feeds the trucks map -->
+            <div id="telematicsActiveHeader" style="font-size:13px;margin-bottom:16px;"></div>
 
-            <!-- Provider flag -->
-            <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">Provider</div>
-            <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
-              <label style="display:flex;align-items:center;gap:7px;padding:9px 14px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-primary);cursor:pointer;">
-                <input type="radio" name="telematicsProvider" value="motive" onchange="onTelematicsProviderChange()" style="margin:0;"> Motive
-              </label>
-              <label style="display:flex;align-items:center;gap:7px;padding:9px 14px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text-primary);cursor:pointer;">
-                <input type="radio" name="telematicsProvider" value="linxup" onchange="onTelematicsProviderChange()" style="margin:0;"> Linxup
-              </label>
-            </div>
+            <!-- ── Motive expander ─────────────────────────────────────────── -->
+            <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-bottom:14px;">
+              <button onclick="toggleTruckProvider('motive')" style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--bg-card);border:none;cursor:pointer;color:var(--text-primary);">
+                <span style="font-size:13px;font-weight:700;color:var(--text-primary);display:inline-flex;align-items:center;gap:8px;">🚛 Motive</span>
+                <span id="motiveProviderChevron" style="font-size:11px;color:var(--text-muted);">▾ Collapse</span>
+              </button>
+              <div id="motiveProviderBody" style="display:block;padding:14px;background:var(--bg-secondary);">
 
-            <!-- Flag-driven setup instructions -->
-            <div id="telematicsInstructions" style="display:none;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:14px;font-size:12.5px;line-height:1.6;color:var(--text-secondary);">
-              <div id="telematicsInstrMotive" style="display:none;">
-                <strong style="color:var(--text-primary);">Get your Motive API key</strong>
-                <ol style="margin:7px 0 0 18px;padding:0;">
-                  <li>In Motive, click the <strong>person icon</strong> at the very bottom-left.</li>
-                  <li>Open <strong>Developers</strong>.</li>
-                  <li>Click <strong>Request API Key</strong> (or copy an existing Active key).</li>
-                  <li>Copy the API key and paste it below.</li>
-                </ol>
+                <!-- API (pull) -->
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:10px;">API — live truck positions (pull)</div>
+                <div id="motivePullStatus" style="font-size:13px;margin-bottom:6px;"></div>
+                <div id="motiveActiveCtl" style="margin-bottom:12px;"></div>
+                <div id="telematicsInstrMotive" style="background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:14px;font-size:12.5px;line-height:1.6;color:var(--text-secondary);">
+                  <strong style="color:var(--text-primary);">Get your Motive API key</strong>
+                  <ol style="margin:7px 0 0 18px;padding:0;">
+                    <li>In Motive, click the <strong>person icon</strong> at the very bottom-left.</li>
+                    <li>Open <strong>Developers</strong>.</li>
+                    <li>Click <strong>Request API Key</strong> (or copy an existing Active key).</li>
+                    <li>Copy the API key and paste it below.</li>
+                  </ol>
+                </div>
+                <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">API key (x-api-key)</div>
+                <input id="motiveApiToken" type="password" autocomplete="off" placeholder="Paste your Motive API key here" style="width:100%;box-sizing:border-box;font-size:13px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);margin-bottom:6px;font-family:monospace;">
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px;">Stored encrypted in our vault. Never shown again after saving.</div>
+                <button id="motiveApiSaveBtn" onclick="saveTelematicsProvider('motive')" style="padding:10px 18px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;">Save &amp; Test</button>
+                <div class="settings-feedback" id="motivePullFeedback" style="margin-top:10px;font-size:13px;"></div>
+
+                <!-- Webhook (push) -->
+                <div style="height:1px;background:var(--border);margin:18px 0;"></div>
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:10px;">Webhook — geofence alerts (push)</div>
+                <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">Show live geofence + ignition alerts (trucks entering/exiting transfer stations, recycling centers, regions; ignition on/off) on the <strong>Where Are My Trucks?</strong> map. In Motive, create a webhook to the URL below and paste Motive's <strong>signing secret</strong> here.</div>
+                <div id="motiveWebhookStatus" style="font-size:13px;margin-bottom:16px;"></div>
+                <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">Your webhook URL (paste into Motive)</div>
+                <div style="display:flex;gap:8px;margin-bottom:14px;">
+                  <input id="motiveWebhookUrl" type="text" readonly style="flex:1;min-width:0;box-sizing:border-box;font-size:12px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:monospace;">
+                  <button onclick="copyMotiveWebhookUrl()" style="padding:10px 14px;background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">Copy</button>
+                </div>
+                <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">Motive signing secret</div>
+                <input id="motiveWebhookSecret" type="password" autocomplete="off" placeholder="Paste Motive's webhook signing secret here" style="width:100%;box-sizing:border-box;font-size:13px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);margin-bottom:6px;font-family:monospace;">
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px;">Stored encrypted in our vault. Never shown again after saving.</div>
+                <button id="motiveWebhookSaveBtn" onclick="saveMotiveWebhookSecret()" style="padding:10px 18px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;">Save Secret</button>
+                <div class="settings-feedback" id="motiveWebhookFeedback" style="margin-top:10px;font-size:13px;"></div>
               </div>
-              <div id="telematicsInstrLinxup" style="display:none;">
-                <strong style="color:var(--text-primary);">Get your Linxup API token</strong>
-                <ol style="margin:7px 0 0 18px;padding:0;">
-                  <li>In Linxup, click the <strong>Setup</strong> (gear) icon on the top bar.</li>
-                  <li>In the lower-left, open the <strong>API / Developers</strong> link.</li>
-                  <li>Click <strong>Create New API Token</strong> and create the token.</li>
-                  <li>Copy the token and paste it below.</li>
-                </ol>
+            </div>
+
+            <!-- ── Linxup expander ─────────────────────────────────────────── -->
+            <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-bottom:4px;">
+              <button onclick="toggleTruckProvider('linxup')" style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--bg-card);border:none;cursor:pointer;color:var(--text-primary);">
+                <span style="font-size:13px;font-weight:700;color:var(--text-primary);display:inline-flex;align-items:center;gap:8px;">🚛 Linxup</span>
+                <span id="linxupProviderChevron" style="font-size:11px;color:var(--text-muted);">▸ Expand</span>
+              </button>
+              <div id="linxupProviderBody" style="display:none;padding:14px;background:var(--bg-secondary);">
+
+                <!-- API (pull) -->
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:10px;">API — live truck positions (pull)</div>
+                <div id="linxupPullStatus" style="font-size:13px;margin-bottom:6px;"></div>
+                <div id="linxupActiveCtl" style="margin-bottom:12px;"></div>
+                <div id="telematicsInstrLinxup" style="background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:14px;font-size:12.5px;line-height:1.6;color:var(--text-secondary);">
+                  <strong style="color:var(--text-primary);">Get your Linxup API token</strong>
+                  <ol style="margin:7px 0 0 18px;padding:0;">
+                    <li>In Linxup, click the <strong>Setup</strong> (gear) icon on the top bar.</li>
+                    <li>In the lower-left, open the <strong>API / Developers</strong> link.</li>
+                    <li>Click <strong>Create New API Token</strong> and create the token.</li>
+                    <li>Copy the token and paste it below.</li>
+                  </ol>
+                </div>
+                <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">REST token (Bearer)</div>
+                <input id="linxupApiToken" type="password" autocomplete="off" placeholder="Paste your Linxup REST token here" style="width:100%;box-sizing:border-box;font-size:13px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);margin-bottom:6px;font-family:monospace;">
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px;">Stored encrypted in our vault. Never shown again after saving.</div>
+                <button id="linxupApiSaveBtn" onclick="saveTelematicsProvider('linxup')" style="padding:10px 18px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;">Save &amp; Test</button>
+                <div class="settings-feedback" id="linxupPullFeedback" style="margin-top:10px;font-size:13px;"></div>
+
+                <!-- Webhook (push) -->
+                <div style="height:1px;background:var(--border);margin:18px 0;"></div>
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:10px;">Webhook — geofence alerts (push)</div>
+                <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">Generate a token below, then paste the <strong>URL</strong> and <strong>token</strong> into Linxup's webhook settings to push geofence alerts to the <strong>Where Are My Trucks?</strong> map.</div>
+                <div id="linxupWebhookStatus" style="font-size:13px;margin-bottom:16px;"></div>
+                <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">Your webhook URL (paste into Linxup)</div>
+                <div style="display:flex;gap:8px;margin-bottom:14px;">
+                  <input id="linxupWebhookUrl" type="text" readonly style="flex:1;min-width:0;box-sizing:border-box;font-size:12px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:monospace;">
+                  <button onclick="copyLinxupWebhookUrl()" style="padding:10px 14px;background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">Copy</button>
+                </div>
+                <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">Webhook token (we generate)</div>
+                <div id="linxupWebhookTokenWrap" style="display:none;gap:8px;margin-bottom:8px;">
+                  <input id="linxupWebhookToken" type="text" readonly style="flex:1;min-width:0;box-sizing:border-box;font-size:12px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:monospace;">
+                  <button onclick="copyLinxupWebhookToken()" style="padding:10px 14px;background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">Copy</button>
+                </div>
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px;">Paste this token + the URL above into Linxup's webhook settings. Shown once — regenerate if lost.</div>
+                <button id="linxupWebhookGenBtn" onclick="generateLinxupWebhookToken()" style="padding:10px 18px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;">Generate token</button>
+                <div class="settings-feedback" id="linxupWebhookFeedback" style="margin-top:10px;font-size:13px;"></div>
               </div>
             </div>
-
-            <!-- Token input -->
-            <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">API token / key</div>
-            <input id="telematicsToken" type="password" autocomplete="off" placeholder="Paste your provider token here" style="width:100%;box-sizing:border-box;font-size:13px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);margin-bottom:6px;font-family:monospace;">
-            <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px;">Stored encrypted in our vault. Never shown again after saving.</div>
-
-            <button id="telematicsSaveBtn" onclick="saveTelematicsCredential()" style="padding:10px 18px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;">Save &amp; Test Connection</button>
-            <div class="settings-feedback" id="telematicsFeedback" style="margin-top:10px;font-size:13px;"></div>
-          </div>
-
-          <div class="settings-card fade-in fade-in-delay-3">
-            <div class="settings-card-title">Motive Geofence Alerts</div>
-            <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">
-              Show live geofence + ignition alerts (trucks entering/exiting transfer stations, recycling centers, regions; ignition on/off) in a scrolling list on the <strong>Where Are My Trucks?</strong> map. In Motive, create a webhook to the URL below and paste Motive's <strong>signing secret</strong> here.
-            </div>
-            <div id="motiveWebhookStatus" style="font-size:13px;margin-bottom:16px;"></div>
-
-            <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">Your webhook URL (paste into Motive)</div>
-            <div style="display:flex;gap:8px;margin-bottom:14px;">
-              <input id="motiveWebhookUrl" type="text" readonly style="flex:1;min-width:0;box-sizing:border-box;font-size:12px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:monospace;">
-              <button onclick="copyMotiveWebhookUrl()" style="padding:10px 14px;background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">Copy</button>
-            </div>
-
-            <div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">Motive signing secret</div>
-            <input id="motiveWebhookSecret" type="password" autocomplete="off" placeholder="Paste Motive's webhook signing secret here" style="width:100%;box-sizing:border-box;font-size:13px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);margin-bottom:6px;font-family:monospace;">
-            <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px;">Stored encrypted in our vault. Never shown again after saving.</div>
-            <button id="motiveWebhookSaveBtn" onclick="saveMotiveWebhookSecret()" style="padding:10px 18px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;">Save Secret</button>
-            <div class="settings-feedback" id="motiveWebhookFeedback" style="margin-top:10px;font-size:13px;"></div>
           </div>
         </div><!-- end trucks tab -->
 
@@ -8338,31 +8370,74 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (wrap) wrap.style.display = p ? 'block' : 'none';
     }
 
-    // Load + show the current connection status (no token is ever returned).
+    // Collapsible provider expander (matches the Special Terms / Cost Analysis pattern).
+    function toggleTruckProvider(prov) {
+      const body = document.getElementById(prov + 'ProviderBody');
+      const chev = document.getElementById(prov + 'ProviderChevron');
+      if (!body || !chev) return;
+      const isOpen = body.style.display !== 'none';
+      body.style.display = isOpen ? 'none' : 'block';
+      chev.textContent = isOpen ? '▸ Expand' : '▾ Collapse';
+    }
+
+    // Load + show per-provider pull status + which provider is active.
+    // Consumes the dual-provider getTelematics shape:
+    //   { active:'motive'|'linxup'|null, providers:{ motive:{configured,status,truckCount,lastError}, linxup:{…} } }
     async function renderTrucksTab() {
-      const statusEl = document.getElementById('telematicsStatus');
-      const fb = document.getElementById('telematicsFeedback');
-      if (fb) fb.textContent = '';
-      if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);">Checking current connection…</span>';
+      const hdr = document.getElementById('telematicsActiveHeader');
+      ['motive', 'linxup'].forEach(function (p) {
+        const fb = document.getElementById(p + 'PullFeedback'); if (fb) fb.textContent = '';
+      });
+      if (hdr) hdr.innerHTML = '<span style="color:var(--text-muted);">Checking current connection…</span>';
       try {
         const data = await edgeFunctionCall('crewlogic-settings', { action: 'getTelematics', franchiseInternalID: currentUser.franchiseInternalID });
-        if (data && data.configured) {
-          const prov = data.provider ? (data.provider.charAt(0).toUpperCase() + data.provider.slice(1)) : '';
-          const connected = data.status === 'connected';
-          const dot = connected ? '#00E785' : '#f59e0b';
-          const label = connected
-            ? ('Connected to ' + prov + ' · ' + (data.truckCount != null ? data.truckCount : '?') + ' truck' + (data.truckCount === 1 ? '' : 's'))
-            : ('Saved for ' + prov + ', but the last test did not connect');
-          if (statusEl) statusEl.innerHTML = '<span style="display:inline-flex;align-items:center;gap:7px;"><span style="width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:' + dot + ';"></span>' + _truckEsc(label) + '</span>';
-          const radio = document.querySelector('input[name="telematicsProvider"][value="' + (data.provider || '') + '"]');
-          if (radio) { radio.checked = true; onTelematicsProviderChange(); }
-        } else {
-          if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);">No provider connected yet.</span>';
+        const active = data && data.active ? data.active : null;
+        const providers = (data && data.providers) || {};
+        if (hdr) {
+          if (active) {
+            const nm = active.charAt(0).toUpperCase() + active.slice(1);
+            hdr.innerHTML = '<span style="display:inline-flex;align-items:center;gap:7px;"><span style="width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:#00E785;"></span>Active provider: <strong style="color:var(--text-primary);">' + _truckEsc(nm) + '</strong> <span style="color:var(--text-muted);">— feeds the trucks map</span></span>';
+          } else {
+            hdr.innerHTML = '<span style="color:var(--text-muted);">No provider connected yet.</span>';
+          }
         }
+        renderTelematicsProviderState('motive', providers.motive || {}, active);
+        renderTelematicsProviderState('linxup', providers.linxup || {}, active);
       } catch (e) {
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);">Could not load current status.</span>';
+        if (hdr) hdr.innerHTML = '<span style="color:var(--text-muted);">Could not load current status.</span>';
       }
       loadMotiveWebhookStatus();
+      loadLinxupWebhookStatus();
+    }
+
+    // Paint one provider's pull status line + active/make-active control.
+    function renderTelematicsProviderState(prov, info, active) {
+      const statusEl = document.getElementById(prov + 'PullStatus');
+      const ctlEl = document.getElementById(prov + 'ActiveCtl');
+      const configured = !!(info && info.configured);
+      const isActive = active === prov;
+      if (statusEl) {
+        if (!configured) {
+          statusEl.innerHTML = '<span style="color:var(--text-muted);">Not connected yet.</span>';
+        } else {
+          const connected = info.status === 'connected';
+          const dot = connected ? '#00E785' : '#f59e0b';
+          const tc = info.truckCount;
+          const label = connected
+            ? ('Connected · ' + (tc != null ? tc : '?') + ' truck' + (tc === 1 ? '' : 's'))
+            : ('Saved, but the last test did not connect' + (info.lastError ? ' (' + info.lastError + ')' : ''));
+          statusEl.innerHTML = '<span style="display:inline-flex;align-items:center;gap:7px;"><span style="width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:' + dot + ';"></span>' + _truckEsc(label) + '</span>';
+        }
+      }
+      if (ctlEl) {
+        if (!configured) {
+          ctlEl.innerHTML = '';
+        } else if (isActive) {
+          ctlEl.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:rgba(0,231,133,0.14);border:1px solid rgba(0,231,133,0.4);border-radius:999px;font-size:12px;font-weight:700;color:#00E785;">● Active</span>';
+        } else {
+          ctlEl.innerHTML = '<button onclick="setTelematicsActive(\'' + prov + '\')" style="padding:7px 14px;background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;">Make active</button>';
+        }
+      }
     }
 
     // ── Motive geofence-webhook signing secret (Settings → Trucks) ──────────────
@@ -8415,6 +8490,115 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (fb) { fb.style.color = '#ef4444'; fb.textContent = 'Save failed: ' + (e.message || e); }
       } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Save Secret'; }
+      }
+    }
+
+    // Per-provider: save the token (→ Vault, server-side), run a live test, and activate this provider.
+    // Does NOT wipe the other provider's stored credential (dual-provider storage).
+    async function saveTelematicsProvider(prov) {
+      const tokenEl = document.getElementById(prov + 'ApiToken');
+      const btn = document.getElementById(prov + 'ApiSaveBtn');
+      const fb = document.getElementById(prov + 'PullFeedback');
+      const token = tokenEl ? tokenEl.value.trim() : '';
+      if (!token) { if (fb) { fb.style.color = '#ef4444'; fb.textContent = 'Paste your API token.'; } return; }
+      if (btn) { btn.disabled = true; btn.textContent = 'Testing…'; }
+      if (fb) { fb.style.color = 'var(--text-muted)'; fb.textContent = 'Saving and testing connection…'; }
+      try {
+        const data = await edgeFunctionCall('crewlogic-settings', { action: 'saveTelematics', franchiseInternalID: currentUser.franchiseInternalID, provider: prov, token: token });
+        if (data && data.success && data.status === 'connected') {
+          if (fb) { fb.style.color = '#00E785'; fb.textContent = 'Connected ✓ — ' + (data.truckCount != null ? data.truckCount : 0) + ' truck' + (data.truckCount === 1 ? '' : 's') + ' found.'; }
+          if (tokenEl) tokenEl.value = '';
+          renderTrucksTab();
+        } else if (data && (data.saved || data.success)) {
+          if (fb) { fb.style.color = '#f59e0b'; fb.textContent = "Saved, but couldn't connect: " + (data.error || 'check the token and try again.'); }
+          if (tokenEl) tokenEl.value = '';
+          renderTrucksTab();
+        } else {
+          if (fb) { fb.style.color = '#ef4444'; fb.textContent = (data && data.error) || 'Save failed.'; }
+        }
+      } catch (e) {
+        if (fb) { fb.style.color = '#ef4444'; fb.textContent = 'Save failed: ' + (e.message || e); }
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Save & Test'; }
+      }
+    }
+
+    // Flip which stored provider feeds the trucks map.
+    async function setTelematicsActive(prov) {
+      const fb = document.getElementById(prov + 'PullFeedback');
+      if (fb) { fb.style.color = 'var(--text-muted)'; fb.textContent = 'Switching active provider…'; }
+      try {
+        const data = await edgeFunctionCall('crewlogic-settings', { action: 'setActiveProvider', franchiseInternalID: currentUser.franchiseInternalID, provider: prov });
+        if (data && data.success) { if (fb) fb.textContent = ''; renderTrucksTab(); }
+        else { if (fb) { fb.style.color = '#ef4444'; fb.textContent = (data && data.error) || 'Could not switch provider.'; } }
+      } catch (e) {
+        if (fb) { fb.style.color = '#ef4444'; fb.textContent = 'Could not switch: ' + (e.message || e); }
+      }
+    }
+
+    // ── Linxup geofence-webhook token (Settings → Trucks) — we GENERATE the token ──
+    async function loadLinxupWebhookStatus() {
+      const statusEl = document.getElementById('linxupWebhookStatus');
+      const urlEl = document.getElementById('linxupWebhookUrl');
+      const btn = document.getElementById('linxupWebhookGenBtn');
+      const fb = document.getElementById('linxupWebhookFeedback');
+      if (fb) fb.textContent = '';
+      if (urlEl) urlEl.value = SUPABASE_URL + '/functions/v1/crewlogic-linxup-webhook?f=' + encodeURIComponent(currentUser.franchiseID || '');
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);">Checking…</span>';
+      try {
+        const data = await edgeFunctionCall('crewlogic-settings', { action: 'getLinxupWebhookStatus', franchiseInternalID: currentUser.franchiseInternalID });
+        if (data && data.configured) {
+          if (statusEl) statusEl.innerHTML = '<span style="display:inline-flex;align-items:center;gap:7px;"><span style="width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:#00E785;"></span>Webhook token configured ✓</span>';
+          if (btn) btn.textContent = 'Regenerate token';
+        } else {
+          if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);">No webhook token generated yet.</span>';
+          if (btn) btn.textContent = 'Generate token';
+        }
+      } catch (e) {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted);">Could not load status.</span>';
+      }
+    }
+
+    function copyLinxupWebhookUrl() {
+      const urlEl = document.getElementById('linxupWebhookUrl');
+      if (!urlEl) return;
+      urlEl.select();
+      try { navigator.clipboard.writeText(urlEl.value); } catch (e) { try { document.execCommand('copy'); } catch (e2) {} }
+      const fb = document.getElementById('linxupWebhookFeedback');
+      if (fb) { fb.style.color = 'var(--text-muted)'; fb.textContent = 'URL copied.'; }
+    }
+
+    function copyLinxupWebhookToken() {
+      const el = document.getElementById('linxupWebhookToken');
+      if (!el) return;
+      el.select();
+      try { navigator.clipboard.writeText(el.value); } catch (e) { try { document.execCommand('copy'); } catch (e2) {} }
+      const fb = document.getElementById('linxupWebhookFeedback');
+      if (fb) { fb.style.color = 'var(--text-muted)'; fb.textContent = 'Token copied.'; }
+    }
+
+    // Server generates the token and returns it ONCE; re-calling rotates it.
+    async function generateLinxupWebhookToken() {
+      const btn = document.getElementById('linxupWebhookGenBtn');
+      const fb = document.getElementById('linxupWebhookFeedback');
+      const tokWrap = document.getElementById('linxupWebhookTokenWrap');
+      const tokEl = document.getElementById('linxupWebhookToken');
+      if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
+      if (fb) { fb.style.color = 'var(--text-muted)'; fb.textContent = 'Generating token…'; }
+      try {
+        const data = await edgeFunctionCall('crewlogic-settings', { action: 'saveLinxupWebhookSecret', franchiseInternalID: currentUser.franchiseInternalID });
+        if (data && data.success && data.token) {
+          if (tokEl) tokEl.value = data.token;
+          if (tokWrap) tokWrap.style.display = 'flex';
+          if (fb) { fb.style.color = '#00E785'; fb.textContent = "Token generated ✓ — copy it now, it won't be shown again."; }
+          loadLinxupWebhookStatus();
+        } else {
+          if (fb) { fb.style.color = '#ef4444'; fb.textContent = (data && data.error) || 'Could not generate token.'; }
+        }
+      } catch (e) {
+        if (fb) { fb.style.color = '#ef4444'; fb.textContent = 'Failed: ' + (e.message || e); }
+      } finally {
+        if (btn) { btn.disabled = false; }
       }
     }
 

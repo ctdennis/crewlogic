@@ -601,8 +601,9 @@ async function handleSaveSettings(body: Record<string, unknown>): Promise<Respon
 // ─────────────────────────────────────────────────────────────────────────────
 // HANDLER: saveTelematics (per-franchise "Where Are My Trucks?" credential)
 // Body: { franchiseInternalID, provider: 'motive'|'linxup', token }
-// Stores the token in Vault via upsert_telematics_credential, then does a live
-// test call to the provider and stamps the result. The token is NEVER returned.
+// Per-provider: stores THIS provider's token in Vault via upsert_telematics_credential
+// (does NOT wipe the other provider) and makes this provider the ACTIVE one, then
+// does a live test call and stamps the result. The token is NEVER returned.
 // ─────────────────────────────────────────────────────────────────────────────
 async function handleSaveTelematics(body: Record<string, unknown>): Promise<Response> {
   const franchiseID = String(body.franchiseInternalID || "").trim();
@@ -636,9 +637,11 @@ async function handleSaveTelematics(body: Record<string, unknown>): Promise<Resp
   const truckCount = result.success ? result.trucks.length : null;
   const errMsg = result.success ? null : (result.error || "Connection failed");
 
-  // 3) Stamp the validation result (non-fatal — the credential is already stored)
+  // 3) Stamp the validation result (non-fatal — the credential is already stored).
+  //    Keyed by (franchise_id, provider) so it stamps THIS provider's row only.
   const stampRes = await supabaseRpc("set_telematics_status", {
     p_franchise_id: franchiseID,
+    p_provider: provider,
     p_status: status,
     p_truck_count: truckCount,
     p_error: errMsg,
@@ -659,9 +662,18 @@ async function handleSaveTelematics(body: Record<string, unknown>): Promise<Resp
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HANDLER: getTelematics — non-secret status for the Settings tab (NO token)
+// HANDLER: getTelematics — per-provider non-secret status for the Settings tab.
 // Body: { franchiseInternalID }
+// Response (dual-provider):
+//   { success, active: 'motive'|'linxup'|null,
+//     providers: { motive: {configured, status, truckCount, lastError, lastValidatedAt},
+//                  linxup: {..same..} } }
+// A provider with no stored credential → { configured:false, ...nulls }.
 // ─────────────────────────────────────────────────────────────────────────────
+function emptyProviderStatus() {
+  return { configured: false, status: null, truckCount: null, lastError: null, lastValidatedAt: null };
+}
+
 async function handleGetTelematics(body: Record<string, unknown>): Promise<Response> {
   const franchiseID = String(body.franchiseInternalID || "").trim();
   if (!franchiseID) return jsonResponse({ success: false, error: "franchiseInternalID required" }, 400);
@@ -673,15 +685,54 @@ async function handleGetTelematics(body: Record<string, unknown>): Promise<Respo
     return jsonResponse({ success: false, error: `DB error ${res.status}` }, 500);
   }
   const rows = await res.json().catch(() => []);
-  const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
-  return jsonResponse({
-    success: true,
-    configured: !!row,
-    provider: row?.provider || null,
-    status: row?.status || null,
-    truckCount: row?.last_truck_count ?? null,
-    lastValidatedAt: row?.last_validated_at || null,
+  const providers: Record<string, ReturnType<typeof emptyProviderStatus>> = {
+    motive: emptyProviderStatus(),
+    linxup: emptyProviderStatus(),
+  };
+  let active: string | null = null;
+  if (Array.isArray(rows)) {
+    for (const r of rows) {
+      const p = String(r?.provider || "").toLowerCase();
+      if (p !== "motive" && p !== "linxup") continue;
+      providers[p] = {
+        configured: r?.configured ?? true,
+        status: r?.status ?? null,
+        truckCount: r?.last_truck_count ?? null,
+        lastError: r?.last_error ?? null,
+        lastValidatedAt: r?.last_validated_at ?? null,
+      };
+      if (r?.is_active) active = p;
+    }
+  }
+  return jsonResponse({ success: true, active, providers });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HANDLER: setActiveProvider — flip which stored provider feeds the trucks map,
+// WITHOUT re-entering a token. Body: { franchiseInternalID, provider }.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleSetActiveProvider(body: Record<string, unknown>): Promise<Response> {
+  const franchiseID = String(body.franchiseInternalID || "").trim();
+  const provider = String(body.provider || "").trim().toLowerCase();
+  if (!franchiseID) return jsonResponse({ success: false, error: "franchiseInternalID required" }, 400);
+  if (provider !== "motive" && provider !== "linxup") {
+    return jsonResponse({ success: false, error: "provider must be 'motive' or 'linxup'" }, 400);
+  }
+
+  const res = await supabaseRpc("set_active_telematics_provider", {
+    p_franchise_id: franchiseID,
+    p_provider: provider,
   });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error("set_active_telematics_provider failed:", res.status, errText);
+    return jsonResponse({ success: false, error: `DB error ${res.status}` }, 500);
+  }
+  const flipped = await res.json().catch(() => false); // RPC returns boolean
+  if (flipped !== true) {
+    return jsonResponse({ success: false, error: `${provider} is not configured for this franchise`, active: null }, 400);
+  }
+  return jsonResponse({ success: true, active: provider });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -715,6 +766,54 @@ async function handleGetMotiveWebhookStatus(body: Record<string, unknown>): Prom
   const franchiseID = String(body.franchiseInternalID || "").trim();
   if (!franchiseID) return jsonResponse({ success: false, error: "franchiseInternalID required" }, 400);
   const res = await supabaseRpc("get_motive_webhook_status", { p_franchise_id: franchiseID });
+  if (!res.ok) return jsonResponse({ success: false, error: `DB error ${res.status}` }, 500);
+  const rows = await res.json().catch(() => []);
+  const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+  return jsonResponse({ success: true, configured: !!row, updatedAt: row?.updated_at || null });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HANDLER: saveLinxupWebhookSecret — GENERATE a random receiver token server-side,
+// store it in Vault (upsert_linxup_webhook_secret), and return it ONCE for the
+// Owner to paste into Linxup's webhook config. Re-calling ROTATES the token.
+// Body: { franchiseInternalID }. The token is returned exactly once, never logged.
+// The crewlogic-linxup-webhook receiver checks the incoming Bearer against it.
+// ─────────────────────────────────────────────────────────────────────────────
+function generateWebhookToken(): string {
+  // ~32 bytes of CSPRNG entropy → URL-safe base64 (no +,/,= so it's paste-safe).
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function handleSaveLinxupWebhookSecret(body: Record<string, unknown>): Promise<Response> {
+  const franchiseID = String(body.franchiseInternalID || "").trim();
+  if (!franchiseID) return jsonResponse({ success: false, error: "franchiseInternalID required" }, 400);
+
+  const token = generateWebhookToken();
+  const res = await supabaseRpc("upsert_linxup_webhook_secret", {
+    p_franchise_id: franchiseID,
+    p_secret: token,
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error("upsert_linxup_webhook_secret failed:", res.status, errText.slice(0, 200));
+    return jsonResponse({ success: false, error: `Couldn't save token (${res.status})` }, 500);
+  }
+  // Return the generated token ONCE — this is the only time it leaves the server.
+  return jsonResponse({ success: true, token });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HANDLER: getLinxupWebhookStatus — non-secret "configured?" for the Settings UI.
+// Body: { franchiseInternalID }.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleGetLinxupWebhookStatus(body: Record<string, unknown>): Promise<Response> {
+  const franchiseID = String(body.franchiseInternalID || "").trim();
+  if (!franchiseID) return jsonResponse({ success: false, error: "franchiseInternalID required" }, 400);
+  const res = await supabaseRpc("get_linxup_webhook_status", { p_franchise_id: franchiseID });
   if (!res.ok) return jsonResponse({ success: false, error: `DB error ${res.status}` }, 500);
   const rows = await res.json().catch(() => []);
   const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
@@ -1072,8 +1171,11 @@ const ACTION_HANDLERS: Record<string, (body: Record<string, unknown>) => Promise
   saveVonigoCredentials: handleSaveVonigoCredentials,
   saveTelematics:        handleSaveTelematics,
   getTelematics:         handleGetTelematics,
+  setActiveProvider:     handleSetActiveProvider,
   saveMotiveWebhookSecret: handleSaveMotiveWebhookSecret,
   getMotiveWebhookStatus:  handleGetMotiveWebhookStatus,
+  saveLinxupWebhookSecret: handleSaveLinxupWebhookSecret,
+  getLinxupWebhookStatus:  handleGetLinxupWebhookStatus,
   // The 4 other settings save flows all just write to cost_settings JSONB and/or
   // top-level columns — handled by one generic handler.
   saveFranchiseInfo:     handleSaveSettings,
