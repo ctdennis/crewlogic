@@ -42,7 +42,7 @@ use by a prod tenant"; keep those distinct.
 | FW-14 | Dropped | Weather alerts narrow-scope — KILLED 2026-07-05 (state-level on dashboard + Job Plan is enough) |
 | FW-15 | Done | Voice command: move job between routes |
 | FW-16 | Done | Voice Dispatcher — prod write path (move/cancel/duration) verified working (owner 2026-07-05) |
-| FW-17 | In progress | Town title-case on job alerts — built on dev v5.50.1 (display-side `_titleCaseTown`), pending test + prod |
+| FW-17 | In progress | Town/city title-case — job alerts + schedule board (chip + popup) on dev v5.50.2 (display-side `_titleCaseTown`), pending test + prod |
 | FW-18 | Open | Vonigo date-range CRM pipeline |
 | FW-19 | Open | National Accounts auto-fill job Summary (nightly cron) |
 | FW-20 | Partial | Vonigo submit server-side null-price guard (frontend guard live; server guard deferred) |
