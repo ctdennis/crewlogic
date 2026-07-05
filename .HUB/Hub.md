@@ -20,6 +20,66 @@ use by a prod tenant"; keep those distinct.
 **Status legend:** `Done` · `In progress` · `Planned` · `Not started` · `Dropped`
 **Prod rollout:** `Live` (in prod & in use) · `Deployed` (code/fn in prod, not yet exercised by a prod tenant) · `Dev only` · `n/a`
 
+## Future-Work Register (CANONICAL — stable IDs, do NOT renumber)
+
+**Numbering rule (binding):** FW-IDs are **permanent**. A completed item **keeps its ID** marked `Done` (never reused, never renumbered); new work gets the **next free FW-NN** (currently FW-52+). Never re-sort or re-number existing rows. This register and **`docs/CrewLogic-Future-Work-Register.xlsx`** (full detail: what / next step / evidence / priority) share these exact IDs. Status here is the **canonical** item status — it supersedes any older prose callout below (those remain as shipped-history/audit trail per the Hub guardrail). Statuses verified against code 2026-07-05 (`Open`=not started, `Partial`=core shipped + named remainder, `Done`=fully shipped).
+
+| ID | Status | Item |
+|----|--------|------|
+| FW-01 | Open | Linxup live end-to-end validation (blocked on a Linxup device online) |
+| FW-02 | Open | Linxup job-level arrive/leave matching (needs Linxup geofence-create) |
+| FW-03 | Open | Re-enter #90 Motive token in prod Settings + validate |
+| FW-04 | Open | Refine dashcam/fault-code event labels |
+| FW-05 | Open | Optional "N trucks on site" count |
+| FW-06 | Open | Telematics partnership / referral links |
+| FW-07 | Open | Estimates Desk iCal calendar lane (Chunk 4) |
+| FW-08 | Open | Per-appointment Vonigo cancel (Vonigo ticket pending) |
+| FW-09 | Partial | Real route optimization — geocoded server tools exist; recombine engine remains |
+| FW-10 | Partial | In-app reschedule ("pull it forward") — drag-move works; no popup date picker |
+| FW-11 | Open | Route Optimizer Round-2 ideas |
+| FW-12 | Open | Route Optimizer multi-tenant re-architecture (off n8n + owner Sheet) |
+| FW-13 | Open | Per-facility wait times |
+| FW-14 | Open | Weather alerts: narrow to office point + trucks screen |
+| FW-15 | Done | Voice command: move job between routes |
+| FW-16 | Partial | Voice Dispatcher — write path wired (not prod-verified); popup not on Manage Jobs bar |
+| FW-17 | Open | Town title-case on job alerts |
+| FW-18 | Open | Vonigo date-range CRM pipeline |
+| FW-19 | Open | National Accounts auto-fill job Summary (nightly cron) |
+| FW-20 | Partial | Vonigo submit server-side null-price guard (frontend guard live; server guard deferred) |
+| FW-21 | Done | Deploy native CPL fix to prod |
+| FW-22 | Open | Shed/building estimator undercounts volume |
+| FW-23 | Open | Route-Optimizer/Storage 16 cy quick-buttons |
+| FW-24 | Partial | Onboarding serviceStates — states done; per-estimator default + signup capture remain |
+| FW-25 | Open | New-estimate onboarding prompt |
+| FW-26 | Partial | Native price-book onboarding — "no price book" notice done; home tile remains |
+| FW-27 | Open | Phase 2 onboarding wizard |
+| FW-28 | Open | Streamline the Settings environment |
+| FW-29 | Open | Hide unused home cards (reorder is live) |
+| FW-30 | Open | index.html size / architecture review |
+| FW-31 | Done | Payments + pricing model (BUILD shipped dormant; activation = FW-32) |
+| FW-32 | Open | Billing activation (flip BILLING_ENABLED + LIVE Stripe + apply 0025 to prod) |
+| FW-33 | Done | Subscription field-model finishers (superseded by gate-logic + null-tier fix) |
+| FW-34 | Partial | Trial-expiry UX — banner done; end-of-trial lockout/re-enable decisions remain |
+| FW-35 | Open | Truly-dead session "Reconnecting…" banner |
+| FW-36 | Open | Harden crewlogic-trucks caller verification |
+| FW-37 | Done | "Name your workspace" mis-route check (guarded) |
+| FW-38 | Done | Native toolbar-fix prod promote (on main v5.50.0) |
+| FW-39 | Open | Generalize Eastern-hardcoded date logic (todays-workorders + job-plan) |
+| FW-40 | Open | Onboarding: capture location + confirm timezone |
+| FW-41 | Open | Reconnect crewlogic-marketing Pages Git |
+| FW-42 | Open | Retire the last n8n dependency (route engine) |
+| FW-43 | Partial | Estimate-charges normalization — dual-write done; reads + prod-apply + retire-blob remain |
+| FW-44 | Open | Storage headroom / STORAGE_INCLUDED_GB (set to 100 on Pro) |
+| FW-45 | Open | estimate-photos per-franchise path scoping |
+| FW-46 | Partial | Rotate + strip committed API keys — file gitignored/uncommitted; keys still need ROTATING |
+| FW-47 | Open | Google Cloud credentials cleanup + Street View proxy |
+| FW-48 | Open | Track Photo-Analyzer volume-tier adjustments (analytics) |
+| FW-49 | Open | Deferred usage-metering events (Street View / price.lookup / estimate.created) |
+| FW-50 | Open | Live Vonigo-connect prod validation (2 @junkluggers.com cells) |
+| FW-51 | Partial | Confirm-email deliverability re-test — DMARC done; inbox re-test remains |
+
+_Register established 2026-07-05 from a full code audit of the Hub's identified future work (6 Done / 10 Partial / 35 Open). Next free ID: **FW-52**._
+
 > **SHIPPED (v5.50.0, prod 2026-07-05): Telematics consolidation — Motive + Linxup expanders (API + Webhook) + Linxup webhook receiver.** LIVE in prod: migration 0033 applied + verified (both prod franchises preserved/active: `209f31ef`/Linxup + #90/Motive; `linxup_webhook_config` + 4 RPCs created), `crewlogic-linxup-webhook` + `crewlogic-settings` deployed to prod (receiver 401s on no-auth), `dev`→`main` merged `d8439c3`, app.crewlogicai.com serving v5.50.0. Migration applied via `supabase db query --linked --file` (prod migration-tracking table is EMPTY → `db push` would re-run 0012–0032, unsafe). **Live Linxup end-to-end still PENDING** — prod Linxup franchise `209f31ef`'s cameras/devices are disconnected (no geofence activity); validate when back online by generating the Linxup token in their Settings→Trucks and pasting URL+token into their Linxup webhook. **Cloudflare incident (2026-07-04→05):** the `crewlogic` Pages project went **Git-disconnected** (owner account change) → dev+prod deploys silently stopped after v5.49.1; reconnecting Git restored both. `crewlogic-marketing` (crewlogicai.com) likely still needs the same reconnect. Owner-approved plan: **`docs/plan-telematics-consolidation.md`**. Reorganizes Settings→Trucks into two provider expanders (Motive, Linxup), each with API-pull + Webhook-push; builds the missing **Linxup webhook** side (new `crewlogic-linxup-webhook` — Bearer in `Authentication` header, 201 response, log-then-parse both flat `pushType` + V3 `eventType` formats → `geofence_alerts`) + storage (`linxup_webhook_config` mirroring `0027`). Owner decisions: **one ACTIVE pull provider at a time BUT store both providers' creds** (`telematics_credentials` → per-provider + `is_active`; #90 needs both Motive+Linxup for testing, so saving Linxup must NOT wipe Motive); **all-at-once** rollout (dev-first). Motive storage + live webhook receiver **untouched** (regression guard). Scope boundary: Linxup **fence-name** alerts only in Phase-1; Linxup **job-level** arrive/leave matching (needs Linxup geofence-create) = follow-on. Refs: `docs/PushAPIV3.pdf`, `docs/LinxupPushAPI.pdf`, Linxup pull swagger `api.linxup.com/pullapi`. Building backend (migration + 2 fns) on dev now; UI reorg next.
 
 > **SHIPPED (v5.49.1, prod 2026-07-03): Vonigo submit — never send a null price item.** Fix for estimate 1782846616115 failing to submit with an opaque Vonigo **"data validation error"**. Root cause: its discount line was built by an **external PDF-recreation** (not the in-app picker), so it had **no `priceItemID`**; the submit charge builder (`executeVonigoSubmit`, ~index.html:16649) sent `String(undefined)` → Vonigo rejected the **whole quote**. Volume charges were immune (they resolve their ID from the price book); only hand-built/recreated **non-volume** charges hit this. (Confirmed the in-app description edit is NOT involved — `updateChargeFromInput` writes only `charge.description`; `name` is a separate field.) Fix adds `resolveChargeItem(c)`: a non-volume charge missing a valid `priceItemID` resolves it from the live price book by type (**discount → the "Discount" item `61664`**, the same ID a picker-added discount gets — so a recreated discount now **auto-heals and submits**); anything still unresolvable is collected and the submit **aborts BEFORE calling Vonigo** with an actionable message naming the charge, instead of the opaque rejection. Amounts (qty/unitPrice → fields 9288/9287) untouched → **no pricing change**. FRONTEND-ONLY (dev→main no-ff merge `a6196ad`). **Validation caveat:** dev is `VONIGO_READONLY` so the real submit can only be proven on prod — logic verified by tracing the actual failing charge data (null discount → resolves to 61664, not flagged). Deferred: optional server-side guard in `crewlogic-estimate`.
