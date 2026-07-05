@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.0 | 2026-07-04">
+  <meta name="crewlogic-version" content="v5.50.2 | 2026-07-05">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -2760,6 +2760,34 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               <option value="Metal">Metal</option>
               <option value="T1-11">T1-11</option>
               <option value="Other">Other</option>
+            </select>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div class="form-group">
+              <div class="form-label">Floor Framing</div>
+              <select class="form-select" id="shedFloorJoist">
+                <option value="0">Slab / none</option>
+                <option value="5.5">2×6 joists</option>
+                <option value="7.25" selected>2×8 joists</option>
+                <option value="9.25">2×10 joists</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Roof Framing</div>
+              <select class="form-select" id="shedRoofRafter">
+                <option value="3.5">2×4 rafters</option>
+                <option value="5.5" selected>2×6 rafters</option>
+                <option value="7.25">2×8 rafters</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Roofing (shingle layers)</div>
+            <select class="form-select" id="shedShingleLayers">
+              <option value="0">Metal / none</option>
+              <option value="1" selected>1 layer</option>
+              <option value="2">2 layers</option>
+              <option value="3">3 layers</option>
             </select>
           </div>
           <div class="form-group">
@@ -8284,6 +8312,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         Array.prototype.forEach.call(document.querySelectorAll('.gf-alerts-list'), (l, i) => { if (scrolls[i] != null) l.scrollTop = scrolls[i]; });
       } catch (e) { /* transient — retry next tick */ }
     }
+    // Title-case a town from Vonigo (which returns e.g. "FALL RIVER") -> "Fall River".
+    // Per-word cap; handles multi-word, hyphen and apostrophe town names.
+    function _titleCaseTown(s) {
+      s = String(s == null ? '' : s).trim();
+      if (!s) return s;
+      return s.toLowerCase().replace(/\b([a-z])/g, function (m, c) { return c.toUpperCase(); });
+    }
+
     function _geofenceAlertRow(a) {
       const et = String(a.event_type || '');
       const veh = _truckEsc(a.vehicle_number || 'Truck');
@@ -8300,7 +8336,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const parts = nm.split(' · ');
         const woIdx = parts.findIndex(function (p) { return p.charAt(0) === '#'; });
         const client = woIdx > 0 ? parts.slice(0, woIdx).join(' · ') : nm;
-        if (woIdx >= 0) jobDetail = _truckEsc(parts.slice(woIdx).join(' · '));
+        if (woIdx >= 0) {
+          // Keep the "#woID" segment; title-case the town segment(s) that follow
+          // (Vonigo returns towns UPPERCASE, e.g. FALL RIVER -> Fall River).
+          const detail = parts.slice(woIdx).map(function (p, i) { return i === 0 ? p : _titleCaseTown(p); });
+          jobDetail = _truckEsc(detail.join(' · '));
+        }
         text = veh + (et === 'job_arrive' ? ' arrived at ' : ' left ') + _truckEsc(client);
       }
       else if (et === 'engine_on') { icon = '🔑'; text = veh + ' — ignition on'; }
@@ -8854,7 +8895,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const canDrag = dnd && !done;
           const dragAttrs = canDrag ? ' draggable="true" ondragstart="dashDragStart(event)" ondragend="dashClearDragGhost()" data-wo="' + mjEsc(String(j.woID || '')) + '" data-dur="' + (j.durationMin || 90) + '" data-zip="' + mjEsc(String(j.zip || '')) + '" data-client="' + mjEsc(String(j.client || '')) + '" data-day="' + mjEsc(String(data.dayID || '')) + '" data-route="' + mjEsc(rc) + '" data-tlabel="' + mjEsc(String(j.timeLabel || '')) + '" data-tmin="' + (j.timeMin != null ? j.timeMin : '') + '"' : '';
           h += '<div' + dragAttrs + ' onmouseenter="mjTip(event,\'' + wkey + '\')" onmouseleave="mjTipHide()" onclick="mjTip(event,\'' + wkey + '\',true)" data-jid="' + wkey + '" title="' + (canDrag ? 'Drag to move' : (done ? 'Completed — adjust in Vonigo' : '')) + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:3px;bottom:3px;background:' + bg + ';opacity:' + (done ? '0.72' : '1') + ';border-radius:5px;padding:2px 5px 2px 9px;overflow:hidden;cursor:' + (canDrag ? 'grab' : 'pointer') + ';box-shadow:inset 5px 0 0 0 ' + zoneStripe + ',0 1px 2px rgba(0,0,0,.3);">';
-          h += '<div style="font-size:10px;font-weight:700;color:#fff;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (n + 1) + '. ' + (done ? '✓ ' : '') + name + (city ? ' <span style="font-weight:500;color:rgba(255,255,255,.82);">' + mjEsc(city) + '</span>' : '') + '</div>';
+          h += '<div style="font-size:10px;font-weight:700;color:#fff;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (n + 1) + '. ' + (done ? '✓ ' : '') + name + (city ? ' <span style="font-weight:500;color:rgba(255,255,255,.82);">' + mjEsc(_titleCaseTown(city)) + '</span>' : '') + '</div>';
           h += '<div style="font-size:9px;color:rgba(255,255,255,.82);line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (j.zip ? mjEsc(j.zip) : '') + (j.zip && j.jobID ? ' · ' : '') + '#' + jidA + '</div>';
           if (canDrag) h += '<div onmousedown="dashResizeStart(event,\'' + wkey + '\')" title="Drag to resize duration" style="position:absolute;right:0;top:0;bottom:0;width:9px;cursor:ew-resize;background:linear-gradient(to right,transparent,rgba(255,255,255,0.28));"></div>'; // right-edge resize handle
           h += '</div>';
@@ -9638,7 +9679,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (full) h += _mjRow('Name', mjEsc(full));
       h += _mjRow('Job', idLink);
       h += _mjRow('Street', p.street ? _addrLink(p.street, j.address || (p.street + ', ' + (p.city || '') + ' ' + (p.zip || j.zip || '')), mjEsc, '#6db3ff') : '—');
-      h += _mjRow('City', mjEsc(p.city || '—'));
+      h += _mjRow('City', mjEsc(p.city ? _titleCaseTown(p.city) : '—'));
       h += _mjRow('Zip', mjEsc(j.zip || p.zip || '—'));
       if (j.zoneName) h += _mjRow('Zone', '<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:' + mjZoneColor(j.zoneID) + ';margin-right:5px;vertical-align:middle;"></span>' + mjEsc(j.zoneName));
       h += _mjRow('Phone', '<span id="mjjobph-' + jid + '">…</span>');
@@ -23526,8 +23567,22 @@ Please review the estimate below. If you have any questions or would like to adj
       const fillMap = { 'Empty': 0.05, '25% full': 0.25, '50% full': 0.50, '75% full': 0.75, 'Packed full': 1.0 };
       const fillPct = fillMap[fill] || 0.5;
 
-      // Structural debris: surface area × material thickness estimate
-      const structureCubicFt = (2 * L * wallH + 2 * W * wallH + L * W) * 0.5;
+      // Structural debris = walls + floor + PITCHED roof, each as loose-debris volume.
+      // Prior version counted wall area + ONE flat plane (roof missing, pitch ignored, no
+      // framing depth) and undercounted ~½. Framing depth + shingle layers now fold in.
+      // Thickness factors are loose-debris (a torn-down pile is mostly air) and calibratable.
+      const floorFt   = (parseFloat(document.getElementById('shedFloorJoist').value) || 0) / 12;    // 0 = slab
+      const rafterFt  = (parseFloat(document.getElementById('shedRoofRafter').value) || 5.5) / 12;
+      const shLayers  = parseFloat(document.getElementById('shedShingleLayers').value) || 0;
+      const shingleFt = shLayers * 0.045;                              // ~0.55" packed tear-off per layer
+      const rise = Math.max(0, peakH - wallH), run = W / 2;
+      const slope = run > 0 ? Math.sqrt(run * run + rise * rise) / run : 1;   // pitched-roof area factor
+      const roofArea = L * W * slope;
+      const wallArea = (2 * L + 2 * W) * wallH;
+      const wallsCF = wallArea * 0.6;                                  // studs + siding + sheathing
+      const floorCF = (L * W) * (floorFt + 0.08);                      // joists + subfloor decking
+      const roofCF  = roofArea * (rafterFt + 0.08 + shingleFt);        // rafters + roof deck + shingles
+      const structureCubicFt = wallsCF + floorCF + roofCF;
       const contentsCubicFt = cubicFt * fillPct;
       const totalCubicFt = structureCubicFt + contentsCubicFt;
 
@@ -23546,8 +23601,11 @@ Please review the estimate below. If you have any questions or would like to adj
         dims: L + 'x' + W + ' wall:' + wallH + (peakH ? ' peak:' + peakH : '')
       };
 
+      const breakdown = 'Structure ≈ ' + Math.round(structureCubicFt) + ' cu ft (walls ' + Math.round(wallsCF) +
+        ' / floor ' + Math.round(floorCF) + ' / roof ' + Math.round(roofCF) + ') + contents ≈ ' +
+        Math.round(contentsCubicFt) + ' cu ft, ×' + SHED_PACK_FACTOR + ' pack';
       document.getElementById('shedCalcVolume').textContent = formatTrucks(snapped);
-      document.getElementById('shedCalcDetail').textContent = detail;
+      document.getElementById('shedCalcDetail').textContent = detail + ' — ' + breakdown;
       document.getElementById('shedCalcResult').style.display = 'block';
       document.getElementById('shedAddBtn').disabled = false;
       document.getElementById('shedAddBtn').style.opacity = '1';
