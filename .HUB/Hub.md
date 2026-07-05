@@ -28,7 +28,7 @@ use by a prod tenant"; keep those distinct.
 |----|--------|------|
 | FW-01 | Open | Linxup live end-to-end validation (blocked on a Linxup device online) |
 | FW-02 | Open | Linxup job-level arrive/leave matching (needs Linxup geofence-create) |
-| FW-03 | Open | Re-enter #90 Motive token in prod Settings + validate |
+| FW-03 | Done | #90 Motive already live in prod — pull token connected (3 trucks) + webhook secret configured; migration 0033 preserved it, re-entry never needed (verified 2026-07-05) |
 | FW-04 | Open | Refine dashcam/fault-code event labels |
 | FW-05 | Open | Optional "N trucks on site" count |
 | FW-06 | Open | Telematics partnership / referral links |
@@ -78,7 +78,7 @@ use by a prod tenant"; keep those distinct.
 | FW-50 | Open | Live Vonigo-connect prod validation (2 @junkluggers.com cells) |
 | FW-51 | Done | Confirm-email deliverability — inbox delivery tested working (owner 2026-07-05; DMARC/SPF/DKIM) |
 
-_Register established 2026-07-05 from a full code audit of the Hub's identified future work. Current: 9 Done / 5 Partial / 2 Dropped / 35 Open. Next free ID: **FW-52**._
+_Register established 2026-07-05 from a full code audit of the Hub's identified future work. Current: 10 Done / 5 Partial / 2 Dropped / 34 Open. Next free ID: **FW-52**._
 
 > **SHIPPED (v5.50.0, prod 2026-07-05): Telematics consolidation — Motive + Linxup expanders (API + Webhook) + Linxup webhook receiver.** LIVE in prod: migration 0033 applied + verified (both prod franchises preserved/active: `209f31ef`/Linxup + #90/Motive; `linxup_webhook_config` + 4 RPCs created), `crewlogic-linxup-webhook` + `crewlogic-settings` deployed to prod (receiver 401s on no-auth), `dev`→`main` merged `d8439c3`, app.crewlogicai.com serving v5.50.0. Migration applied via `supabase db query --linked --file` (prod migration-tracking table is EMPTY → `db push` would re-run 0012–0032, unsafe). **Live Linxup end-to-end still PENDING** — prod Linxup franchise `209f31ef`'s cameras/devices are disconnected (no geofence activity); validate when back online by generating the Linxup token in their Settings→Trucks and pasting URL+token into their Linxup webhook. **Cloudflare incident (2026-07-04→05):** the `crewlogic` Pages project went **Git-disconnected** (owner account change) → dev+prod deploys silently stopped after v5.49.1; reconnecting Git restored both. `crewlogic-marketing` (crewlogicai.com) likely still needs the same reconnect. Owner-approved plan: **`docs/plan-telematics-consolidation.md`**. Reorganizes Settings→Trucks into two provider expanders (Motive, Linxup), each with API-pull + Webhook-push; builds the missing **Linxup webhook** side (new `crewlogic-linxup-webhook` — Bearer in `Authentication` header, 201 response, log-then-parse both flat `pushType` + V3 `eventType` formats → `geofence_alerts`) + storage (`linxup_webhook_config` mirroring `0027`). Owner decisions: **one ACTIVE pull provider at a time BUT store both providers' creds** (`telematics_credentials` → per-provider + `is_active`; #90 needs both Motive+Linxup for testing, so saving Linxup must NOT wipe Motive); **all-at-once** rollout (dev-first). Motive storage + live webhook receiver **untouched** (regression guard). Scope boundary: Linxup **fence-name** alerts only in Phase-1; Linxup **job-level** arrive/leave matching (needs Linxup geofence-create) = follow-on. Refs: `docs/PushAPIV3.pdf`, `docs/LinxupPushAPI.pdf`, Linxup pull swagger `api.linxup.com/pullapi`. Building backend (migration + 2 fns) on dev now; UI reorg next.
 
