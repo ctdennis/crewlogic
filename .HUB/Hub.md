@@ -71,7 +71,7 @@ use by a prod tenant"; keep those distinct.
 | FW-43 | Partial | Estimate-charges normalization — dual-write done; reads + prod-apply + retire-blob remain |
 | FW-44 | Open | Storage headroom / STORAGE_INCLUDED_GB (set to 100 on Pro) |
 | FW-45 | Open | estimate-photos per-franchise path scoping |
-| FW-46 | Partial | Rotate + strip committed API keys — file gitignored/uncommitted; keys still need ROTATING |
+| FW-46 | Partial | Keys export redacted to MY_* placeholders + backup deleted 2026-07-05; verified not in repo/index. Remaining: rotate ONLY if the file ever synced/shared |
 | FW-47 | Open | Google Cloud credentials cleanup + Street View proxy |
 | FW-48 | Open | Track Photo-Analyzer volume-tier adjustments (analytics) |
 | FW-49 | Open | Deferred usage-metering events (Street View / price.lookup / estimate.created) |
