@@ -1,6 +1,6 @@
 # Plan — Consolidated Telematics Setup (Motive + Linxup, API + Webhook)
 
-Status: DRAFT — awaiting Owner approval
+Status: SHIPPED to prod (v5.50.0) 2026-07-05 — dev→main `d8439c3`; migration 0033 + both fns live on prod; frontend live on app.crewlogicai.com. Live Linxup end-to-end pending a Linxup device online (prod franchise `209f31ef` cameras disconnected).
 Owner: charles.dennis@junkluggers.com
 Author: Claude (master session)
 Date: 2026-07-04
