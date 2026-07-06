@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.12 | 2026-07-06">
+  <meta name="crewlogic-version" content="v5.50.13 | 2026-07-06">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7496,7 +7496,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Next job isn't the closest, so the owner picks the job; we draw a line + show driving distance + ETA.
     let _measureFrom = null, _measureLine = null;
     // Remove the drawn measure line from the map (shared by the rail-info path and _mapHoverHide).
-    function _clearMeasureLine() { if (_measureLine && _trucksMap) { try { _trucksMap.removeLayer(_measureLine); } catch (e) {} _measureLine = null; } }
+    function _clearMeasureLine() {
+      if (_measureLine) { try { _measureLine.remove(); } catch (e) {} _measureLine = null; }
+      // Belt-and-suspenders: also sweep any ORPHANED measure polyline off the current map. The _measureLine
+      // reference can be lost across a re-render, leaving the blue line stuck — this catches it by its flag.
+      if (_trucksMap) { try { _trucksMap.eachLayer(function (ly) { if (ly && ly.options && ly.options._measure) { try { ly.remove(); } catch (e) {} } }); } catch (e) {} }
+    }
     function _mtIsTouch() { return ('ontouchstart' in window) || navigator.maxTouchPoints > 0; } // touch = measure on first tap; desktop = measure on click (not hover)
     // In-map hover panel: job details show in a FIXED box inside the map (top-left, below the zoom) instead of
     // a marker popup — so the map never pans and the box never clips off an edge (owner request).
@@ -7711,7 +7716,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _railShowInfo('<div style="font-size:13px;">Measuring…</div>');
       // Fallback = the pre-routing behavior: straight dashed line + Google pointDistance. Used if TomTom routing fails.
       const _straightFallback = async () => {
-        _measureLine = L.polyline([[from.lat, from.lon], [j.lat, j.lon]], { color: '#1e6fff', weight: 4, dashArray: '7,6', opacity: 0.95 }).addTo(_trucksMap);
+        _measureLine = L.polyline([[from.lat, from.lon], [j.lat, j.lon]], { color: '#1e6fff', weight: 4, dashArray: '7,6', opacity: 0.95, _measure: true }).addTo(_trucksMap);
         try {
           const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: from.lat + ',' + from.lon, dest: j.lat + ',' + j.lon });
           const html = (data && data.success)
@@ -7731,7 +7736,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const route = rd && rd.routes && rd.routes[0];
           const pts = (route && route.legs) ? route.legs.reduce((a, leg) => a.concat((leg.points || []).map(p => [p.latitude, p.longitude])), []) : [];
           if (!pts.length) throw new Error('no route geometry');
-          _measureLine = L.polyline(pts, { color: '#1e6fff', weight: 5, opacity: 0.95 }).addTo(_trucksMap); // solid blue = the actual driving route (distinct from green traffic; reads on light + satellite)
+          _measureLine = L.polyline(pts, { color: '#1e6fff', weight: 5, opacity: 0.95, _measure: true }).addTo(_trucksMap); // solid blue = the actual driving route (distinct from green traffic; reads on light + satellite)
           const sum = route.summary || {};
           const miles = (sum.lengthInMeters != null) ? sum.lengthInMeters / 1609.344 : null;
           const mins = (sum.travelTimeInSeconds != null) ? Math.round(sum.travelTimeInSeconds / 60) : null;
