@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.2 | 2026-07-05">
+  <meta name="crewlogic-version" content="v5.50.6 | 2026-07-06">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7419,6 +7419,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _trucksJobsData = []; // latest loaded job overlay (for the "job under truck" badge proximity check)
     // Toggleable overlay layer groups (trucks / jobs / cost-section sites / truck home) + the layers control.
     let _truckLayer = null, _jobLayer = null, _disposalLayer = null, _recyclingLayer = null, _donationLayer = null, _homeLayer = null, _sitesGeocoded = false;
+    // Site divIcon builder — hoisted to module scope so the disposal-route drawing can reuse it. Uses only its
+    // params (no closure state). bare = just the emoji graphic (no white circle / colored ring) with a subtle
+    // shadow for legibility; the home marker keeps its ring.
+    const mkIcon = (emoji, color, size, bare) => {
+      const sz = size || 28;
+      const inner = bare
+        ? '<div style="font-size:' + sz + 'px;line-height:1;text-shadow:0 1px 3px rgba(0,0,0,.55),0 0 3px rgba(255,255,255,.85);">' + emoji + '</div>'
+        : '<div style="background:#fff;width:' + sz + 'px;height:' + sz + 'px;border-radius:50%;border:3px solid ' + color + ';box-shadow:0 1px 3px rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-size:' + Math.round(sz * 0.5) + 'px;line-height:1;">' + emoji + '</div>';
+      return L.divIcon({ className: 'site-marker', html: inner, iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2], popupAnchor: [0, -(sz / 2) - 2] });
+    };
+    // Map a site type → its bare emoji icon (reuses the same emoji/colors as renderSiteMarkers); disposal is the default.
+    function _siteIconFor(type) {
+      if (type === 'recycling') return mkIcon('♻️', '#10b981', 20, true);
+      if (type === 'donation') return mkIcon('🎁', '#ec4899', 20, true);
+      return mkIcon('🗑️', '#8b5cf6', 20, true); // disposal (default)
+    }
     // Geocode the cost-section sites + truck home (once per session) and place them on their layer groups.
     async function renderSiteMarkers() {
       if (_sitesGeocoded || !_trucksMap) return;
@@ -7439,15 +7455,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'geocodeAddresses', addresses: addrList });
         (data.results || []).forEach(r => { if (r.lat != null) coordsByAddr[r.address] = r; });
       } catch (_e) { return; } // leave _sitesGeocoded false so a later open retries
-      const mkIcon = (emoji, color, size, bare) => {
-        const sz = size || 28;
-        // bare = just the emoji graphic (no white circle / colored ring), with a subtle shadow for legibility —
-        // used for disposal/recycling/donation per owner request; the home marker keeps its ring.
-        const inner = bare
-          ? '<div style="font-size:' + sz + 'px;line-height:1;text-shadow:0 1px 3px rgba(0,0,0,.55),0 0 3px rgba(255,255,255,.85);">' + emoji + '</div>'
-          : '<div style="background:#fff;width:' + sz + 'px;height:' + sz + 'px;border-radius:50%;border:3px solid ' + color + ';box-shadow:0 1px 3px rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-size:' + Math.round(sz * 0.5) + 'px;line-height:1;">' + emoji + '</div>';
-        return L.divIcon({ className: 'site-marker', html: inner, iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2], popupAnchor: [0, -(sz / 2) - 2] });
-      };
+      // mkIcon + _siteIconFor are now module-scope (hoisted for disposal-route reuse).
       // In measure mode (started from a truck), tapping a site measures truck→site (same as a job).
       // Bind both click and mouseover so a mobile first-tap (synthesized hover) triggers it too.
       const attachMeasure = (m, lat, lon, label) => { const go = () => { if (_measureFrom) { try { m.closePopup(); } catch (e) {} _measureToJob({ lat: lat, lon: lon, clientName: label }); } }; m.on('click', go); m.on('mouseover', () => { if (_mtIsTouch()) go(); }); };
@@ -7459,8 +7467,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           if (!c) return;
           const costLine = (t.costSuffix && s.cost != null && s.cost !== '') ? '<br><span style="color:#6e8194;">$' + _truckEsc(String(s.cost)) + t.costSuffix + '</span>' : '';
           const label = t.emoji + ' ' + (s.name || t.label);
-          const m = L.marker([c.lat, c.lon], { icon: mkIcon(t.emoji, t.color, 20, true) }) // ~75% of the old size — bare emoji reads too big at full 26
-            .bindPopup('<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + _truckEsc(label) + '</b><br>' + _addrLink(_truckProperAddr(s.address), s.address, _truckEsc) + costLine + '</div>', { autoPan: false });
+          const siteHtml = '<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + _truckEsc(label) + '</b><br>' + _addrLink(_truckProperAddr(s.address), s.address, _truckEsc) + costLine + '</div>';
+          const m = L.marker([c.lat, c.lon], { icon: mkIcon(t.emoji, t.color, 20, true) }); // ~75% of the old size — bare emoji reads too big at full 26
+          // Details show in the left rail on click; in measure mode attachMeasure's handler wins instead.
+          m.on('click', function () { if (!_measureFrom) _railShowInfo(siteHtml); });
           attachMeasure(m, c.lat, c.lon, label);
           m.addTo(t.layer);
         });
@@ -7485,6 +7495,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // ── "Measure to a job" (tap a truck's "Distance to a job", then tap a job) ──
     // Next job isn't the closest, so the owner picks the job; we draw a line + show driving distance + ETA.
     let _measureFrom = null, _measureLine = null;
+    // Remove the drawn measure line from the map (shared by the rail-info path and _mapHoverHide).
+    function _clearMeasureLine() { if (_measureLine && _trucksMap) { try { _trucksMap.removeLayer(_measureLine); } catch (e) {} _measureLine = null; } }
     function _mtIsTouch() { return ('ontouchstart' in window) || navigator.maxTouchPoints > 0; } // touch = measure on first tap; desktop = measure on click (not hover)
     // In-map hover panel: job details show in a FIXED box inside the map (top-left, below the zoom) instead of
     // a marker popup — so the map never pans and the box never clips off an edge (owner request).
@@ -7508,8 +7520,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function _mapHoverHide() {
       const b = document.querySelector('.map-hover-box'); if (b) b.style.display = 'none';
-      // Dismissing the box also clears the measure line — otherwise the green dotted line lingers with no way off.
-      if (_measureLine && _trucksMap) { try { _trucksMap.removeLayer(_measureLine); } catch (e) {} _measureLine = null; }
+      // Dismissing the box also clears the measure line — otherwise the dotted line lingers with no way off.
+      _clearMeasureLine();
     }
     function _mtBanner(text) {
       let b = document.getElementById('mtMeasureBanner');
@@ -7526,7 +7538,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!t || t.lat == null || t.lon == null) { alert('That truck has no current location.'); return; }
       _measureFrom = { lat: t.lat, lon: t.lon, label: (i + 1) + '. ' + (t.name || 'Truck') };
       if (_trucksMap) _trucksMap.closePopup();
-      _mapHoverHide(); // clear the truck info box while measuring
+      _clearMeasureLine(); // clear any lingering measure line
+      _railShowInfo('<div style="font-size:13px;padding:8px;">Measuring… tap a job on the map.</div>');
       _mtBanner('📏 Tap a job or facility to measure from ' + _measureFrom.label + '  ·  tap here to cancel');
     }
     function mtMeasureCancel() {
@@ -7539,25 +7552,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _dispMode = false, _dispPick = { truck: null, job: null }, _dispRouteLayers = [];
     function _dispPctLbl() { const s = document.getElementById('dashDispPct'), l = document.getElementById('dashDispPctLbl'); if (s && l) l.textContent = s.value + '%'; }
     function _dispStatus(msg) { const el = document.getElementById('dashDispStatus'); if (el) el.innerHTML = msg; }
+    // Reset the left-rail disposal body to its empty hint. The rail body is permanent (no column to hide).
+    function _dispClearBody() {
+      const b = document.getElementById('dashLeftDispBody');
+      if (b) b.innerHTML = '<div class="dash-rail-empty" style="color:var(--text-muted);font-size:13px;padding:10px;">Run 🗑️ Find disposal for routes.</div>';
+    }
     function dashFindDisposal() {
       _dispMode = true; _dispPick = { truck: null, job: null }; _dispClearRoutes();
       const bar = document.getElementById('dashDispBar'); if (bar) bar.style.display = 'flex';
-      const res = document.getElementById('dashDispResults'); if (res) res.innerHTML = '';
+      _dispClearBody();
       _dispStatus('Tap a <b>truck</b> on the map…');
       const btn = document.getElementById('dashDispBtn'); if (btn) { btn.style.background = 'var(--accent-green,#00E785)'; btn.style.color = '#06121d'; }
     }
     function _dispCancel() {
       _dispMode = false; _dispPick = { truck: null, job: null }; _dispClearRoutes();
       const bar = document.getElementById('dashDispBar'); if (bar) bar.style.display = 'none';
-      const res = document.getElementById('dashDispResults'); if (res) res.innerHTML = '';
-      _dispShowPanel(false); // results column away → map back to full width
+      _dispClearBody();
       const btn = document.getElementById('dashDispBtn'); if (btn) { btn.style.background = 'var(--bg-input,#1e2f40)'; btn.style.color = 'var(--text-primary)'; }
-    }
-    // Toggle the right-hand results column beside the map; the map shrinks/grows so re-fit Leaflet's size.
-    function _dispShowPanel(show) {
-      const res = document.getElementById('dashDispResults'); if (!res) return;
-      res.style.display = show ? 'block' : 'none';
-      if (_trucksMap) setTimeout(() => { try { _trucksMap.invalidateSize(); } catch (e) {} }, 60);
     }
     function _dispClearRoutes() { if (_trucksMap) _dispRouteLayers.forEach(l => { try { _trucksMap.removeLayer(l); } catch (e) {} }); _dispRouteLayers = []; }
     function _dispTapTruck(i, t) {
@@ -7576,11 +7587,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function _dispMaybeRun() { if (_dispMode && _dispPick.truck && _dispPick.job) _dispRun(); }
     async function _dispRun() {
-      const res = document.getElementById('dashDispResults'); if (!res) return;
+      const res = document.getElementById('dashLeftDispBody'); if (!res) return;
       const pctEl = document.getElementById('dashDispPct'); const pct = Number(pctEl && pctEl.value);
       const loadPercent = Number.isFinite(pct) ? pct : 100;
       res.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:10px;">Finding the best dump…</div>';
-      _dispShowPanel(true); // reveal the results column beside the map (map shrinks now, before plotting)
       let data = null;
       try {
         data = await edgeFunctionCall('crewlogic-route-disposal', {
@@ -7600,7 +7610,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _dispRenderPanel(data); _dispPlot(data);
     }
     function _dispRenderPanel(data) {
-      const res = document.getElementById('dashDispResults'); if (!res) return;
+      const res = document.getElementById('dashLeftDispBody'); if (!res) return;
       dispState.endpointAddress = data.endpointAddressUsed || (_dispPick.job && _dispPick.job.address) || '';
       const lc = data.leastCost, lt = data.leastTime, js = data.jobStartTime;
       if (!lc && !lt) {
@@ -7629,16 +7639,55 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         : '<span style="color:#00E785;font-weight:700;">Cheapest ' + dispMoney(lc.totalCost) + ' · ' + dispMins(lc.totalTimeWithWait) + '</span> &nbsp;<span style="color:#6db3ff;font-weight:700;">Fastest ' + dispMoney(lt.totalCost) + ' · ' + dispMins(lt.totalTimeWithWait) + '</span>');
     }
     function _dispScrollResults() { const w = document.getElementById('dashMapWrap'); if (w && w.scrollIntoView) { try { w.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {} } }
+    // Fetch a TomTom road-following route through the given [lat,lon] waypoints and return its
+    // flattened polyline points ([[lat,lon],…]), or null on failure. Mirrors the routing call in
+    // _measureToJob (which additionally needs the summary/ETA). One call handles multiple waypoints.
+    async function _tomtomRoutePoints(waypoints) {
+      if (!TOMTOM_TRAFFIC_KEY || TOMTOM_TRAFFIC_KEY === 'PASTE_TOMTOM_KEY_HERE') return null;
+      if (!Array.isArray(waypoints) || waypoints.length < 2) return null;
+      try {
+        const path = waypoints.map(w => w[0] + ',' + w[1]).join(':');
+        const url = 'https://api.tomtom.com/routing/1/calculateRoute/' + path
+          + '/json?key=' + TOMTOM_TRAFFIC_KEY + '&traffic=true&travelMode=car&routeType=fastest';
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const rd = await res.json();
+        const route = rd && rd.routes && rd.routes[0];
+        const pts = (route && route.legs) ? route.legs.reduce((a, lg) => a.concat((lg.points || []).map(p => [p.latitude, p.longitude])), []) : [];
+        return pts.length ? pts : null;
+      } catch (_e) { return null; }
+    }
     function _dispPlot(data) {
       if (!_trucksMap) return;
       _dispClearRoutes();
       const tk = _dispPick.truck, jb = _dispPick.job; if (!tk || !jb) return;
+      const DOT = { dashArray: '2,9', lineCap: 'round' }; // round dots for the site→job leg
       const leg = (site, color, dash) => {
         if (!site || site.latitude == null || site.longitude == null) return;
         const s = [Number(site.latitude), Number(site.longitude)];
-        _dispRouteLayers.push(L.polyline([[tk.lat, tk.lon], s, [jb.lat, jb.lon]], { color, weight: 4, opacity: 0.9, dashArray: dash }).addTo(_trucksMap));
-        _dispRouteLayers.push(L.circleMarker(s, { radius: 8, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1 }).addTo(_trucksMap)
+        // Two straight lines immediately (instant feedback + fallback): truck→site SOLID, site→job DOTTED.
+        let line1 = L.polyline([[tk.lat, tk.lon], s], { color, weight: 4, opacity: 0.9 }).addTo(_trucksMap);
+        let line2 = L.polyline([s, [jb.lat, jb.lon]], Object.assign({ color, weight: 4, opacity: 0.9 }, DOT)).addTo(_trucksMap);
+        _dispRouteLayers.push(line1); _dispRouteLayers.push(line2);
+        // Site marker: bare emoji icon by type (all engine sites are disposal → 🗑️), with its cost/time popup.
+        _dispRouteLayers.push(L.marker(s, { icon: _siteIconFor(site.type || 'disposal') }).addTo(_trucksMap)
           .bindPopup('<b>' + _truckEsc(site.name) + '</b><br>' + dispMoney(site.totalCost) + ' · ' + dispMins(site.totalTimeWithWait), { autoPan: false }));
+        // Upgrade each straight leg to the real TomTom road route, in its own call, replacing only its own line.
+        // Ranking is already road-based server-side; this just makes the drawn lines follow the road.
+        _tomtomRoutePoints([[tk.lat, tk.lon], s]).then(pts => {
+          if (!pts || !_trucksMap || !line1 || !_trucksMap.hasLayer(line1)) return; // failed, or run cleared/superseded
+          _dispRouteLayers.push(L.polyline(pts, { color, weight: 4, opacity: 0.9 }).addTo(_trucksMap));
+          _trucksMap.removeLayer(line1);
+          const i = _dispRouteLayers.indexOf(line1); if (i >= 0) _dispRouteLayers.splice(i, 1);
+          line1 = null;
+        });
+        _tomtomRoutePoints([s, [jb.lat, jb.lon]]).then(pts => {
+          if (!pts || !_trucksMap || !line2 || !_trucksMap.hasLayer(line2)) return; // failed, or run cleared/superseded
+          _dispRouteLayers.push(L.polyline(pts, Object.assign({ color, weight: 4, opacity: 0.9 }, DOT)).addTo(_trucksMap));
+          _trucksMap.removeLayer(line2);
+          const i = _dispRouteLayers.indexOf(line2); if (i >= 0) _dispRouteLayers.splice(i, 1);
+          line2 = null;
+        });
       };
       const lc = data.leastCost, lt = data.leastTime, same = lc && lt && lc.facilityId === lt.facilityId;
       if (!lc && !lt) {
@@ -7647,12 +7696,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (closed[0]) leg(closed[0], '#6e8194', '4,6');
       } else if (same) leg(lc, '#fbbf24');
       else { if (lt) leg(lt, '#6db3ff', '8,6'); if (lc) leg(lc, '#00E785'); } // cheapest drawn last = on top
-      try {
-        const b = L.latLngBounds([[tk.lat, tk.lon], [jb.lat, jb.lon]]);
-        if (lc && lc.latitude != null) b.extend([Number(lc.latitude), Number(lc.longitude)]);
-        if (lt && lt.latitude != null) b.extend([Number(lt.latitude), Number(lt.longitude)]);
-        _trucksMap.fitBounds(b, { padding: [50, 50], maxZoom: 14 });
-      } catch (e) {}
+      // No map recenter: a cheapest/fastest result updates the rail + draws routes WITHOUT panning/zooming
+      // the trucks map (owner request). Routes are drawn above; the map keeps its current view.
     }
     async function _measureToJob(j) {
       if (!_measureFrom || j.lat == null || j.lon == null || !_trucksMap) return;
@@ -7662,8 +7707,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const b = document.getElementById('mtMeasureBanner'); if (b) b.style.display = 'none';
       _trucksMap.closePopup(); // close any marker popup the tap opened
       const dest = _truckEsc(j.clientName || 'Job');
-      // Show the result in the FIXED in-map box (top-left) — never pans/clips off the edge (unlike a popup).
-      _mapHoverShow('<div style="font-size:13px;">Measuring…</div>');
+      // Show the result in the left rail (Details section); the measure line stays drawn on the map.
+      _railShowInfo('<div style="font-size:13px;">Measuring…</div>');
       // Fallback = the pre-routing behavior: straight dashed line + Google pointDistance. Used if TomTom routing fails.
       const _straightFallback = async () => {
         _measureLine = L.polyline([[from.lat, from.lon], [j.lat, j.lon]], { color: '#1e6fff', weight: 4, dashArray: '7,6', opacity: 0.95 }).addTo(_trucksMap);
@@ -7672,8 +7717,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const html = (data && data.success)
             ? '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(data.distanceText) + ' · ~' + _truckEsc(data.durationText) + ' drive' + (data.inTraffic ? '<br><span style="color:#9fb0c0;font-size:11px;">in current traffic</span>' : '')
             : 'Could not measure distance — try again.';
-          _mapHoverShow('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
-        } catch (_e) { _mapHoverShow('<div style="font-size:13px;">Could not measure distance.</div>'); }
+          _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
+        } catch (_e) { _railShowInfo('<div style="font-size:13px;">Could not measure distance.</div>'); }
       };
       // Primary: TomTom Calculate Route — real road-following geometry + traffic-aware ETA (same TomTom key as the traffic tiles).
       if (TOMTOM_TRAFFIC_KEY && TOMTOM_TRAFFIC_KEY !== 'PASTE_TOMTOM_KEY_HERE') {
@@ -7696,7 +7741,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const html = '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(distText)
             + ((distText && durText) ? ' · ' : '') + _truckEsc(durText)
             + (traffic ? '<br><span style="color:#9fb0c0;font-size:11px;">in current traffic</span>' : '');
-          _mapHoverShow('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
+          _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
           return;
         } catch (_e) {
           if (_measureLine) { _trucksMap.removeLayer(_measureLine); _measureLine = null; }
@@ -7856,8 +7901,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap);
           // Details in the fixed in-map hover box (no popup → no clip/pan); measure + disposal-pick first.
-          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } else _mapHoverShow(tip, j.jobID); });
-          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _mapHoverShow(tip, j.jobID); });
+          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } });
+          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _railShowJob(tip, j.jobID); });
           _lookaheadMarkers.push(m);
         });
       });
@@ -8106,7 +8151,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + '</div>';
         const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: 1000 }).addTo(_truckLayer || _trucksMap); // trucks above job houses
         // Truck details show in the fixed in-map hover box (no popup → no clip/pan); disposal mode picks the truck.
-        m.on('click', function () { if (_dispMode) { _dispTapTruck(i, t); } else _mapHoverShow(pop, null); });
+        m.on('click', function () { if (_dispMode) { _dispTapTruck(i, t); } else _railShowInfo(pop); });
         _truckMarkers.push(m);
         pts.push([t.lat, t.lon]);
       });
@@ -8228,8 +8273,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const m = L.marker([j.lat, j.lon], { icon, opacity: done ? 0.6 : 1 }).addTo(_jobLayer || _trucksMap);
           // Job details show in the fixed in-map hover box (no marker popup → never clips/pans). Measuring +
           // disposal-pick still take priority on the first interaction.
-          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } else _mapHoverShow(pop, j.jobID); });
-          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _mapHoverShow(pop, j.jobID); });
+          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } });
+          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _railShowJob(pop, j.jobID); });
           _jobMarkers.push(m);
           jobPts.push([j.lat, j.lon]);
         });
@@ -8991,13 +9036,26 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<button onclick="_dispCancel()" style="font-size:12px;padding:6px 14px;background:transparent;border:1px solid var(--border);color:var(--text-muted);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">Done</button>'
         + '</div>'
         + '<div id="dashMapWrap" style="display:flex;gap:10px;align-items:stretch;">'
+        +   '<div id="dashLeftRail" style="flex:0 0 400px;width:400px;height:42vh;min-height:320px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);padding:8px;">'
+        +     '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input,#1e2f40);overflow:hidden;flex-shrink:0;">'
+        +       '<div onclick="_railToggle(this)" style="padding:9px 12px;font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">📍 Details<span style="margin-left:auto;font-size:12px;color:var(--text-muted);">▾</span></div>'
+        +       '<div id="dashLeftJobBody" style="padding:2px 6px 8px;"><div class="dash-rail-empty" style="color:var(--text-muted);font-size:13px;padding:10px;">Tap a job or truck for details.</div></div>'
+        +     '</div>'
+        +     '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input,#1e2f40);overflow:hidden;flex-shrink:0;">'
+        +       '<div onclick="_railToggle(this)" style="padding:9px 12px;font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">🗑️ Cheapest &amp; Fastest<span style="margin-left:auto;font-size:12px;color:var(--text-muted);">▾</span></div>'
+        +       '<div id="dashLeftDispBody" style="padding:2px 6px 8px;"><div class="dash-rail-empty" style="color:var(--text-muted);font-size:13px;padding:10px;">Run 🗑️ Find disposal for routes.</div></div>'
+        +     '</div>'
+        +   '</div>'
+        +   '<div class="dash-divider" data-side="left" title="Drag to resize" style="flex:0 0 6px;align-self:stretch;cursor:col-resize;background:var(--btn-surface,#34485d);border-radius:3px;"></div>'
         +   '<div id="dashMapPane" style="flex:1;min-width:0;height:42vh;min-height:320px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);"></div>'
-        +   '<div id="dashDispResults" style="display:none;flex:0 0 430px;width:430px;height:42vh;min-height:320px;overflow-y:auto;"></div>'
+        +   '<div class="dash-divider" data-side="right" title="Drag to resize" style="flex:0 0 6px;align-self:stretch;cursor:col-resize;background:var(--btn-surface,#34485d);border-radius:3px;"></div>'
         +   '<div id="dashAlertsPanel" style="flex:0 0 300px;width:300px;height:42vh;min-height:320px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);overflow:hidden;display:flex;flex-direction:column;">'
         +     '<div style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;">📡 Live Alerts<span class="gf-alerts-count" style="font-size:11px;font-weight:600;color:var(--text-muted);margin-left:auto;"></span></div>'
         +     '<div id="dashAlertsList" class="gf-alerts-list" style="flex:1;overflow-y:auto;padding:6px 6px 10px;"></div>'
         +   '</div>'
         + '</div>';
+      _dashApplyRailWidths();   // restore saved column widths BEFORE the map mounts (so it sizes right)
+      _dashInitDividers();      // wire the drag-to-resize handles
       dashLoadBoards();
       dashMountMap();
       dashLoadWeather();
@@ -9051,6 +9109,82 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function dashWxClose() { const ov = document.getElementById('dashWxOv'); if (ov) ov.style.display = 'none'; }
     // Mount the live trucks map (same machinery as the Where-Are-My-Trucks screen) into the dashboard pane.
+    // ── Permanent LEFT info rail (mirrors the right-side Live Alerts rail). Two collapsible sections:
+    //    "📍 Job details" (fed by a job-marker click) and "🗑️ Cheapest & Fastest" (fed by Find disposal).
+    // ── Adjustable dividers: drag the handles to resize the left/right rails; widths persist per-browser
+    //    in localStorage so the dispatch view opens the way you left it. Map (center) absorbs the rest.
+    const _DASH_RAIL_DEFAULT = { left: 400, right: 300 };
+    const _DASH_RAIL_MIN = { left: 260, right: 220 };
+    const _DASH_RAIL_MAX = { left: 680, right: 560 };
+    function _dashRailClamp(side, px) { return Math.max(_DASH_RAIL_MIN[side], Math.min(_DASH_RAIL_MAX[side], Math.round(px))); }
+    function _dashRailWidth(side) {
+      const v = parseInt(localStorage.getItem('dashRailW_' + side) || '', 10);
+      return _dashRailClamp(side, Number.isFinite(v) ? v : _DASH_RAIL_DEFAULT[side]);
+    }
+    function _dashSetRailWidth(side, px) {
+      const el = document.getElementById(side === 'left' ? 'dashLeftRail' : 'dashAlertsPanel');
+      if (!el) return 0;
+      const w = _dashRailClamp(side, px);
+      el.style.flex = '0 0 ' + w + 'px'; el.style.width = w + 'px';
+      return w;
+    }
+    function _dashApplyRailWidths() { _dashSetRailWidth('left', _dashRailWidth('left')); _dashSetRailWidth('right', _dashRailWidth('right')); }
+    function _dashInitDividers() {
+      document.querySelectorAll('#dashMapWrap .dash-divider').forEach(function (d) {
+        d.onmousedown = function (e) {
+          e.preventDefault();
+          const side = d.getAttribute('data-side');
+          const el = document.getElementById(side === 'left' ? 'dashLeftRail' : 'dashAlertsPanel');
+          if (!el) return;
+          const startX = e.clientX, startW = el.getBoundingClientRect().width;
+          document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
+          const onMove = function (ev) {
+            // left rail widens as the divider moves right; right rail widens as it moves left.
+            const delta = ev.clientX - startX;
+            _dashSetRailWidth(side, side === 'left' ? startW + delta : startW - delta);
+          };
+          const onUp = function () {
+            document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+            document.body.style.cursor = ''; document.body.style.userSelect = '';
+            try { localStorage.setItem('dashRailW_' + side, String(Math.round(el.getBoundingClientRect().width))); } catch (_e) {}
+            if (_trucksMap && _trucksMap.invalidateSize) _trucksMap.invalidateSize();
+          };
+          document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+        };
+      });
+    }
+    // Toggle one rail section open/closed (its body is the header's next sibling); flip the chevron ▾/▸.
+    function _railToggle(hdrEl) {
+      const body = hdrEl && hdrEl.nextElementSibling; if (!body) return;
+      const chev = hdrEl.querySelector('span');
+      const hidden = body.style.display === 'none';
+      body.style.display = hidden ? '' : 'none';
+      if (chev) chev.textContent = hidden ? '▾' : '▸';
+    }
+    // Reset the Job-details body back to the empty hint (used by the card's × close).
+    function _railClearJob() {
+      const b = document.getElementById('dashLeftJobBody');
+      if (b) b.innerHTML = '<div class="dash-rail-empty" style="color:var(--text-muted);font-size:13px;padding:10px;">Tap a job or truck for details.</div>';
+    }
+    // Render a job-details card (the same `pop` HTML the map hover box used) into the left rail's Job-details
+    // section, ensure that section is expanded, and wire the phone slot exactly as _mapHoverShow did.
+    function _railShowJob(pop, jobID) {
+      const body = document.getElementById('dashLeftJobBody'); if (!body) return;
+      body.innerHTML = '<div style="text-align:right;margin:-2px -2px 2px 0;"><span onclick="_railClearJob()" style="cursor:pointer;color:#6e8194;font-size:18px;line-height:1;">×</span></div>' + (pop || '');
+      body.style.display = ''; // make sure the section is open
+      const hdr = body.previousElementSibling, chev = hdr && hdr.querySelector('span'); if (chev) chev.textContent = '▾';
+      body.scrollTop = 0;
+      if (jobID) _prefetchJobPhone(jobID).then(ph => _renderJobPhoneSlot(jobID, ph)); // fill the phone slot like the hover box did
+    }
+    // Render arbitrary (non-job) info — trucks, sites, measure result — into the left rail's Details section.
+    // Same visual wrapper as _railShowJob but NO phone-slot wiring (no jobID for non-job content).
+    function _railShowInfo(html) {
+      const body = document.getElementById('dashLeftJobBody'); if (!body) return;
+      body.innerHTML = '<div style="text-align:right;margin:-2px -2px 2px 0;"><span onclick="_railClearJob()" style="cursor:pointer;color:#6e8194;font-size:18px;line-height:1;">×</span></div>' + (html || '');
+      body.style.display = ''; // make sure the section is open
+      const hdr = body.previousElementSibling, chev = hdr && hdr.querySelector('span'); if (chev) chev.textContent = '▾';
+      body.scrollTop = 0;
+    }
     function dashMountMap() {
       const pane = document.getElementById('dashMapPane'); if (!pane) return;
       _ensureTrucksMapFresh('dashMapPane'); // rebuild the map into the (freshly re-rendered) dashboard pane
