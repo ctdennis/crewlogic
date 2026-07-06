@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.8 | 2026-07-06">
+  <meta name="crewlogic-version" content="v5.50.9 | 2026-07-06">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8880,6 +8880,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // eyeballed 2026-06-22; "done" labels (245/9996/9993) render gray anyway. None/unknown → New Appointment
     // blue (active default). Route is conveyed by the lane, not the body color.
     function mjLabelColor(opt) { const M = { 245: '#6cc070', 9996: '#7fae8a', 9993: '#e0492e', 9984: '#45b6e6', 9981: '#1f4e79', 9975: '#2f9e78', 9973: '#9b59b6', 9971: '#e85fa0', 9970: '#9a8fa6', 247: '#c79fd6', 249: '#aab3bd' }; return M[opt] || '#45b6e6'; }
+    // RESERVED status color — "Estimate taken" (Vonigo label 245: estimate created/priced but NOT yet paid).
+    // Deliberately OUTSIDE _ROUTE_COLORS, mjZoneColor, and mjLabelColor so it never collides with a route,
+    // zone, or other label. Do NOT add this hex to any of those palettes. Gray (#5b6b7a) stays reserved for
+    // truly-PAID (status 164/165) + Lost(9993)/Est-Only(9996).
+    const EST_TAKEN_COLOR = '#ffab00';
     // Left-stripe color by PRICING ZONE. Vonigo's per-franchise zone colors are NOT API-readable, so this is a
     // stable CrewLogic palette keyed deterministically to the zone id (consistent per franchise; flags a job
     // whose zone is unusual for its lane). Zone NAME is shown in the tooltip.
@@ -8968,7 +8973,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const name = mjEsc((String(j.client || '').split(',')[0]) || j.client || 'Job');
           const city = mjAddrParts(j.address).city, jidA = mjEsc(String(j.jobID || '')), wkey = mjEsc(String(j.woID || j.jobID || '')); // jidA = display JobID; wkey = UNIQUE per-appointment lookup key (woID)
           // Body = label color (Vonigo parity); gray when done. Left stripe = pricing zone (inset box-shadow).
-          const done = (!!j.completed || !!j.labelDone), bg = done ? '#5b6b7a' : mjLabelColor(j.labelOpt), zoneStripe = mjZoneColor(j.zoneID);
+          // 3 states: PAID/dead (status 164/165, or Lost 9993 / Est-Only 9996) → gray + faded + locked;
+          // ESTIMATE TAKEN (label 245 — priced but UNPAID) → reserved amber, still an ACTIVE job (draggable,
+          // no ✓); anything else → its label color. (Estimate 245 no longer grays — verified 2026-07-06 that
+          // 245 fires at estimate-create, before payment; gray is now reserved for truly-paid.)
+          const done = (!!j.completed || j.labelOpt === 9993 || j.labelOpt === 9996);
+          const estTaken = (!done && j.labelOpt === 245);
+          const bg = done ? '#5b6b7a' : (estTaken ? EST_TAKEN_COLOR : mjLabelColor(j.labelOpt)), zoneStripe = mjZoneColor(j.zoneID);
           const canDrag = dnd && !done;
           const dragAttrs = canDrag ? ' draggable="true" ondragstart="dashDragStart(event)" ondragend="dashClearDragGhost()" data-wo="' + mjEsc(String(j.woID || '')) + '" data-dur="' + (j.durationMin || 90) + '" data-zip="' + mjEsc(String(j.zip || '')) + '" data-client="' + mjEsc(String(j.client || '')) + '" data-day="' + mjEsc(String(data.dayID || '')) + '" data-route="' + mjEsc(rc) + '" data-tlabel="' + mjEsc(String(j.timeLabel || '')) + '" data-tmin="' + (j.timeMin != null ? j.timeMin : '') + '"' : '';
           h += '<div' + dragAttrs + ' onmouseenter="mjTip(event,\'' + wkey + '\')" onmouseleave="mjTipHide()" onclick="mjTip(event,\'' + wkey + '\',true)" data-jid="' + wkey + '" title="' + (canDrag ? 'Drag to move' : (done ? 'Completed — adjust in Vonigo' : '')) + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:3px;bottom:3px;background:' + bg + ';opacity:' + (done ? '0.72' : '1') + ';border-radius:5px;padding:2px 5px 2px 9px;overflow:hidden;cursor:' + (canDrag ? 'grab' : 'pointer') + ';box-shadow:inset 5px 0 0 0 ' + zoneStripe + ',0 1px 2px rgba(0,0,0,.3);">';
