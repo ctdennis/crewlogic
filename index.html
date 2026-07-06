@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.11 | 2026-07-06">
+  <meta name="crewlogic-version" content="v5.50.12 | 2026-07-06">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7778,9 +7778,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       el.textContent = ' · …';
       try {
         const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: tlat + ',' + tlon, dest: jlat + ',' + jlon });
-        el.textContent = (data && data.success && data.durationText)
-          ? ' · ~' + data.durationText + ' drive' + (data.inTraffic ? ' in traffic' : '')
-          : '';
+        if (data && data.success && data.durationText) {
+          let out = ' · ~' + data.durationText + ' drive' + (data.inTraffic ? ' in traffic' : '');
+          if (data.minutes != null) {
+            const arr = new Date(Date.now() + Number(data.minutes) * 60000); // now + drive time = expected arrival
+            out += ' · arrive ~' + arr.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+          }
+          el.textContent = out;
+        } else { el.textContent = ''; }
       } catch (_e) { el.textContent = ''; }
     }
     // Recompute the nearest-truck line from CURRENT truck positions each time a job card opens — trucks
@@ -8271,8 +8276,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           routeStop[rkey] = (routeStop[rkey] || 0) + 1;
           const n = routeStop[rkey];           // stop number within this route
           const baseColor = colorFor(rkey);    // memoize the route's color even for completed stops
-          const done = !!j.isComplete || !!j.labelDone; // completed/archived OR a "done" label (Estimate Completed / Lost) → gray marker
-          const color = done ? '#5b6b7a' : baseColor;
+          // Match the board's 3-state (owner 2026-07-06): PAID (status 164/165) or Lost (9993) → gray + faded;
+          // NOT STARTED (New Appt 9984 / no label) → route color; anything else UNPAID (estimate taken) → amber.
+          const done = !!j.isComplete || j.labelOpt === 9993; // paid or Lost → gray + faded marker
+          const notStarted = (!j.labelOpt || j.labelOpt === 9984);
+          const estTaken = (!done && !notStarted);
+          const color = done ? '#5b6b7a' : (estTaken ? EST_TAKEN_COLOR : baseColor);
           const icon = L.divIcon({
             className: 'job-stop-marker',
             html: '<svg width="22" height="22" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.5));">' +
