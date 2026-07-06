@@ -136,7 +136,7 @@ async function syncFranchise(
   const { onlyWoID, dayOffset, radius } = opts;
   const created: any[] = [], skipped: any[] = [], errors: any[] = [], deleted: any[] = [];
 
-  const wo = await callFn("crewlogic-todays-workorders", { franchiseID: fr.external_id, includeCoords: true, dayOffset });
+  const wo = await callFn("crewlogic-todays-workorders", { franchiseID: fr.external_id, includeCoords: true, includeCancelled: true, dayOffset });
   if (!wo.ok || !wo.data?.success) {
     // Do NOT run the delete pass on a failed/empty fetch — that could wrongly delete active geofences.
     return { franchise: fr.external_id, error: "todays-workorders failed", counts: { created: 0, skipped: 0, errors: 1, deleted: 0 }, detail: wo.data };
@@ -154,6 +154,9 @@ async function syncFranchise(
     // Don't geofence a job that's already done — no arrivals to track. (A job that becomes done AFTER
     // its geofence is created is handled by the delete-on-done pass below.)
     if (job.isComplete || job.labelDone) { skipped.push({ woId, reason: "already done" }); continue; }
+    // Cancelled jobs (surfaced via includeCancelled) get NO geofence — the delete pass below removes
+    // any that already exist from earlier in the day.
+    if (job.isCancelled) { skipped.push({ woId, reason: "cancelled" }); continue; }
 
     // Idempotent: skip if this WO already has a job_geofences row from today's cycle — ANY status
     // (active OR deleted). A geofence deleted-on-done must NOT be re-created by a later same-day run.
@@ -185,24 +188,27 @@ async function syncFranchise(
     await insertLifecycleAlert(sb, fr, { event_type: "geofence_created", geofence_id: gid, geofence_name: name, raw: { reason: "created", woId } });
   }
 
-  // ---- DELETE-ON-DONE pass (skip for a targeted create-only test) ----
-  // Delete a job's geofence when its WO is EXPLICITLY done (Completed/Archived, or a "done" label —
-  // the same gray rule the dispatch board uses, surfaced by todays-workorders as isComplete/labelDone).
-  // We do NOT delete on "missing from list" — the EOD sweep handles cancelled/dropped/no-shows safely.
+  // ---- DELETE-ON-TERMINAL pass (skip for a targeted create-only test) ----
+  // Delete a job's geofence when its WO is EXPLICITLY done (Completed/Archived or a "done" label — the
+  // same gray rule the dispatch board uses) OR EXPLICITLY cancelled (surfaced via includeCancelled).
+  // Both are explicit signals present in this fetch. We still do NOT delete on "missing from list" —
+  // the EOD sweep remains the backstop for no-shows / anything else the day leaves behind.
   if (!onlyWoID) {
-    const doneByWo = new Map<string, boolean>();
+    const terminalByWo = new Map<string, "done" | "cancelled">();
     for (const job of allJobs) {
       const w = String(job.workOrderID || ""); if (!w) continue;
-      doneByWo.set(w, !!(job.isComplete || job.labelDone));
+      if (job.isComplete || job.labelDone) terminalByWo.set(w, "done");
+      else if (job.isCancelled) terminalByWo.set(w, "cancelled");
     }
     const { data: activeRows } = await sb.from("job_geofences")
       .select("id, wo_id, geofence_id, name").eq("franchise_id", fr.id).eq("status", "active");
     for (const row of activeRows || []) {
       const w = String(row.wo_id);
-      if (doneByWo.get(w) !== true) continue; // only delete WOs seen as done in this fetch
-      const err = await deleteGeofence(sb, fr, row, "job_complete");
-      if (err) errors.push({ woId: w, error: "delete-on-done", detail: err });
-      deleted.push({ woId: w, geofence_id: row.geofence_id, reason: "done" });
+      const st = terminalByWo.get(w);
+      if (st !== "done" && st !== "cancelled") continue; // only delete WOs seen done/cancelled in this fetch
+      const err = await deleteGeofence(sb, fr, row, st === "cancelled" ? "job_cancelled" : "job_complete");
+      if (err) errors.push({ woId: w, error: "delete-on-" + st, detail: err });
+      deleted.push({ woId: w, geofence_id: row.geofence_id, reason: st });
     }
   }
 

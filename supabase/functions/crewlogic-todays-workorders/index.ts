@@ -184,6 +184,11 @@ Deno.serve(async (req: Request) => {
     const includePlanData = body.includePlanData === true;
     // When true, geocode OPEN jobs (cache-first) and attach lat/lon for the truck map.
     const includeCoords = body.includeCoords === true;
+    // When true, INCLUDE cancelled jobs (flagged `isCancelled`) instead of dropping them. Used by
+    // crewlogic-job-geofence-sync so a same-day cancel deactivates its geofence right away (an
+    // EXPLICIT cancel is a safe delete signal, unlike "missing from list"). Default off keeps the
+    // customer-facing picker clean.
+    const includeCancelled = body.includeCancelled === true;
 
     if (!franchiseID) {
       return new Response(JSON.stringify({ success: false, error: 'franchiseID required' }), {
@@ -346,6 +351,9 @@ Deno.serve(async (req: Request) => {
           dateService,
           price,
           isComplete: statusOptionID === STATUS_COMPLETED || statusOptionID === STATUS_ARCHIVED,
+          // isCancelled: cancel variants — plain "Cancelled" (162) + same-day "Cancelled - Today" (163);
+          // matched by id OR status text so all variants flag. Only surfaced when includeCancelled.
+          isCancelled: statusOptionID === STATUS_CANCELLED || /cancel/i.test(String(statusLabel || '')),
           // labelDone: field-201 label marks it "done" (Estimate Completed Job/Est.Only, or Lost) even with
           // status Open → render gray. (Converted/National-Account labels gray only on Archived = isComplete.)
           labelDone: GRAY_LABELS.has(getField(fields, F_LABEL)?.optionID || 0),
@@ -364,7 +372,9 @@ Deno.serve(async (req: Request) => {
       })
       // Filter out cancelled jobs — plain "Cancelled" (162) AND same-day "Cancelled - Today" (163, a
       // different optionID); match by status text so all cancelled variants drop (completed jobs are KEPT).
-      .filter((wo) => wo.statusOptionID !== STATUS_CANCELLED && !/cancel/i.test(String(wo.status || '')))
+      // Exception: includeCancelled keeps them (flagged isCancelled) so the geofence sync can deactivate
+      // a same-day cancel's geofence immediately.
+      .filter((wo) => includeCancelled || (wo.statusOptionID !== STATUS_CANCELLED && !/cancel/i.test(String(wo.status || ''))))
       // Filter out Urgent Call Back (UCB) route jobs
       .filter((wo) => !/URGENTCB/i.test(wo.route))
       // Require a jobID
