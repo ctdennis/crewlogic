@@ -381,6 +381,9 @@ Deno.serve(async (req: Request) => {
           // labelDone: field-201 label marks it "done" (Estimate Completed Job/Est.Only, or Lost) even with
           // status Open → render gray. (Converted/National-Account labels gray only on Archived = isComplete.)
           labelDone: GRAY_LABELS.has(getField(fields, F_LABEL)?.optionID || 0),
+          // Raw Vonigo label-201 optionID — lets the trucks-map markers do the board's 3-state coloring
+          // (amber for estimate-taken / gray for paid / route color for not-started).
+          labelOpt: getField(fields, F_LABEL)?.optionID || 0,
           lat: null as number | null,
           lon: null as number | null,
         };

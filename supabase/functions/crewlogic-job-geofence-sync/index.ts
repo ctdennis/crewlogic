@@ -151,9 +151,12 @@ async function syncFranchise(
     const lat = Number(job.lat), lon = Number(job.lon);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) { skipped.push({ woId, reason: "no geocode" }); continue; }
 
-    // Don't geofence a job that's already done — no arrivals to track. (A job that becomes done AFTER
-    // its geofence is created is handled by the delete-on-done pass below.)
-    if (job.isComplete || job.labelDone) { skipped.push({ woId, reason: "already done" }); continue; }
+    // Don't geofence a job that's already done — no arrivals to track. "Done" = status Completed/Archived
+    // (164/165), which in this franchise only happens when PAYMENT is taken (crew truly finished). We do
+    // NOT use the estimate label here: it flips "done" the instant the estimator creates the estimate —
+    // before work/payment — and even flaps back off at "do work now" (verified 2026-07-06, job 861720).
+    // A job that becomes complete AFTER its geofence is created is handled by the delete pass below.
+    if (job.isComplete) { skipped.push({ woId, reason: "already done" }); continue; }
     // Cancelled jobs (surfaced via includeCancelled) get NO geofence — the delete pass below removes
     // any that already exist from earlier in the day.
     if (job.isCancelled) { skipped.push({ woId, reason: "cancelled" }); continue; }
@@ -189,15 +192,16 @@ async function syncFranchise(
   }
 
   // ---- DELETE-ON-TERMINAL pass (skip for a targeted create-only test) ----
-  // Delete a job's geofence when its WO is EXPLICITLY done (Completed/Archived or a "done" label — the
-  // same gray rule the dispatch board uses) OR EXPLICITLY cancelled (surfaced via includeCancelled).
-  // Both are explicit signals present in this fetch. We still do NOT delete on "missing from list" —
-  // the EOD sweep remains the backstop for no-shows / anything else the day leaves behind.
+  // Delete a job's geofence when its WO is EXPLICITLY done — status Completed/Archived (164/165), i.e.
+  // PAYMENT taken / job truly finished — OR EXPLICITLY cancelled (surfaced via includeCancelled). We do
+  // NOT end tracking on the estimate "done" label: it fires at estimate-create (before work + payment)
+  // and flaps, so it would wrongly end tracking while the crew is still on-site (verified 2026-07-06).
+  // We still never delete on "missing from list" — the EOD sweep backstops no-shows / anything left.
   if (!onlyWoID) {
     const terminalByWo = new Map<string, "done" | "cancelled">();
     for (const job of allJobs) {
       const w = String(job.workOrderID || ""); if (!w) continue;
-      if (job.isComplete || job.labelDone) terminalByWo.set(w, "done");
+      if (job.isComplete) terminalByWo.set(w, "done");
       else if (job.isCancelled) terminalByWo.set(w, "cancelled");
     }
     const { data: activeRows } = await sb.from("job_geofences")

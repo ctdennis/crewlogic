@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.8 | 2026-07-06">
+  <meta name="crewlogic-version" content="v5.50.12 | 2026-07-06">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7470,7 +7470,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const siteHtml = '<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + _truckEsc(label) + '</b><br>' + _addrLink(_truckProperAddr(s.address), s.address, _truckEsc) + costLine + '</div>';
           const m = L.marker([c.lat, c.lon], { icon: mkIcon(t.emoji, t.color, 20, true) }); // ~75% of the old size — bare emoji reads too big at full 26
           // Details show in the left rail on click; in measure mode attachMeasure's handler wins instead.
-          m.on('click', function () { if (!_measureFrom) _railShowInfo(siteHtml); });
+          m.on('click', function () { if (!_measureFrom) { _clearMeasureLine(); _railShowInfo(siteHtml); } });
           attachMeasure(m, c.lat, c.lon, label);
           m.addTo(t.layer);
         });
@@ -7778,9 +7778,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       el.textContent = ' · …';
       try {
         const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: tlat + ',' + tlon, dest: jlat + ',' + jlon });
-        el.textContent = (data && data.success && data.durationText)
-          ? ' · ~' + data.durationText + ' drive' + (data.inTraffic ? ' in traffic' : '')
-          : '';
+        if (data && data.success && data.durationText) {
+          let out = ' · ~' + data.durationText + ' drive' + (data.inTraffic ? ' in traffic' : '');
+          if (data.minutes != null) {
+            const arr = new Date(Date.now() + Number(data.minutes) * 60000); // now + drive time = expected arrival
+            out += ' · arrive ~' + arr.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+          }
+          el.textContent = out;
+        } else { el.textContent = ''; }
       } catch (_e) { el.textContent = ''; }
     }
     // Recompute the nearest-truck line from CURRENT truck positions each time a job card opens — trucks
@@ -8183,7 +8188,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + '</div>';
         const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: 1000 }).addTo(_truckLayer || _trucksMap); // trucks above job houses
         // Truck details show in the fixed in-map hover box (no popup → no clip/pan); disposal mode picks the truck.
-        m.on('click', function () { if (_dispMode) { _dispTapTruck(i, t); } else _railShowInfo(pop); });
+        m.on('click', function () { if (_dispMode) { _dispTapTruck(i, t); } else { _clearMeasureLine(); _railShowInfo(pop); } });
         _truckMarkers.push(m);
         pts.push([t.lat, t.lon]);
       });
@@ -8271,8 +8276,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           routeStop[rkey] = (routeStop[rkey] || 0) + 1;
           const n = routeStop[rkey];           // stop number within this route
           const baseColor = colorFor(rkey);    // memoize the route's color even for completed stops
-          const done = !!j.isComplete || !!j.labelDone; // completed/archived OR a "done" label (Estimate Completed / Lost) → gray marker
-          const color = done ? '#5b6b7a' : baseColor;
+          // Match the board's 3-state (owner 2026-07-06): PAID (status 164/165) or Lost (9993) → gray + faded;
+          // NOT STARTED (New Appt 9984 / no label) → route color; anything else UNPAID (estimate taken) → amber.
+          const done = !!j.isComplete || j.labelOpt === 9993; // paid or Lost → gray + faded marker
+          const notStarted = (!j.labelOpt || j.labelOpt === 9984);
+          const estTaken = (!done && !notStarted);
+          const color = done ? '#5b6b7a' : (estTaken ? EST_TAKEN_COLOR : baseColor);
           const icon = L.divIcon({
             className: 'job-stop-marker',
             html: '<svg width="22" height="22" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.5));">' +
@@ -8306,7 +8315,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           // Job details show in the fixed in-map hover box (no marker popup → never clips/pans). Measuring +
           // disposal-pick still take priority on the first interaction.
           m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } });
-          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _railShowJob(pop, j.jobID); });
+          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else { _clearMeasureLine(); _railShowJob(pop, j.jobID); } });
           _jobMarkers.push(m);
           jobPts.push([j.lat, j.lon]);
         });
@@ -8880,6 +8889,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // eyeballed 2026-06-22; "done" labels (245/9996/9993) render gray anyway. None/unknown → New Appointment
     // blue (active default). Route is conveyed by the lane, not the body color.
     function mjLabelColor(opt) { const M = { 245: '#6cc070', 9996: '#7fae8a', 9993: '#e0492e', 9984: '#45b6e6', 9981: '#1f4e79', 9975: '#2f9e78', 9973: '#9b59b6', 9971: '#e85fa0', 9970: '#9a8fa6', 247: '#c79fd6', 249: '#aab3bd' }; return M[opt] || '#45b6e6'; }
+    // RESERVED status color — "Estimate taken" (Vonigo label 245: estimate created/priced but NOT yet paid).
+    // Deliberately OUTSIDE _ROUTE_COLORS, mjZoneColor, and mjLabelColor so it never collides with a route,
+    // zone, or other label. Do NOT add this hex to any of those palettes. Gray (#5b6b7a) stays reserved for
+    // truly-PAID (status 164/165) + Lost(9993)/Est-Only(9996).
+    const EST_TAKEN_COLOR = '#ffab00';
     // Left-stripe color by PRICING ZONE. Vonigo's per-franchise zone colors are NOT API-readable, so this is a
     // stable CrewLogic palette keyed deterministically to the zone id (consistent per franchise; flags a job
     // whose zone is unusual for its lane). Zone NAME is shown in the tooltip.
@@ -8968,7 +8982,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const name = mjEsc((String(j.client || '').split(',')[0]) || j.client || 'Job');
           const city = mjAddrParts(j.address).city, jidA = mjEsc(String(j.jobID || '')), wkey = mjEsc(String(j.woID || j.jobID || '')); // jidA = display JobID; wkey = UNIQUE per-appointment lookup key (woID)
           // Body = label color (Vonigo parity); gray when done. Left stripe = pricing zone (inset box-shadow).
-          const done = (!!j.completed || !!j.labelDone), bg = done ? '#5b6b7a' : mjLabelColor(j.labelOpt), zoneStripe = mjZoneColor(j.zoneID);
+          // 3 states (owner rule 2026-07-06):
+          //   PAID/dead — status Completed/Archived (164/165, = payment) OR Lost (9993) → gray + faded + locked.
+          //   NOT STARTED — New Appt (9984) or no label yet → normal color (nothing estimated).
+          //   ESTIMATE TAKEN — anything else while UNPAID (an estimate/price exists, e.g. Est Converted 9975,
+          //     Est Completed 245) → reserved amber, still an ACTIVE job (draggable, no ✓). Gray is reserved
+          //     for truly-paid; the estimate label no longer grays a job (245 fires pre-payment and flaps).
+          const done = (!!j.completed || j.labelOpt === 9993);
+          const notStarted = (!j.labelOpt || j.labelOpt === 9984);
+          const estTaken = (!done && !notStarted);
+          const bg = done ? '#5b6b7a' : (estTaken ? EST_TAKEN_COLOR : mjLabelColor(j.labelOpt)), zoneStripe = mjZoneColor(j.zoneID);
           const canDrag = dnd && !done;
           const dragAttrs = canDrag ? ' draggable="true" ondragstart="dashDragStart(event)" ondragend="dashClearDragGhost()" data-wo="' + mjEsc(String(j.woID || '')) + '" data-dur="' + (j.durationMin || 90) + '" data-zip="' + mjEsc(String(j.zip || '')) + '" data-client="' + mjEsc(String(j.client || '')) + '" data-day="' + mjEsc(String(data.dayID || '')) + '" data-route="' + mjEsc(rc) + '" data-tlabel="' + mjEsc(String(j.timeLabel || '')) + '" data-tmin="' + (j.timeMin != null ? j.timeMin : '') + '"' : '';
           h += '<div' + dragAttrs + ' onmouseenter="mjTip(event,\'' + wkey + '\')" onmouseleave="mjTipHide()" onclick="mjTip(event,\'' + wkey + '\',true)" data-jid="' + wkey + '" title="' + (canDrag ? 'Drag to move' : (done ? 'Completed — adjust in Vonigo' : '')) + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:3px;bottom:3px;background:' + bg + ';opacity:' + (done ? '0.72' : '1') + ';border-radius:5px;padding:2px 5px 2px 9px;overflow:hidden;cursor:' + (canDrag ? 'grab' : 'pointer') + ';box-shadow:inset 5px 0 0 0 ' + zoneStripe + ',0 1px 2px rgba(0,0,0,.3);">';
@@ -9197,6 +9220,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _railClearJob() {
       const b = document.getElementById('dashLeftJobBody');
       if (b) b.innerHTML = '<div class="dash-rail-empty" style="color:var(--text-muted);font-size:13px;padding:10px;">Tap a job or truck for details.</div>';
+      _clearMeasureLine(); // dismissing the Details card (×) also removes the blue measure route line
     }
     // Render a job-details card (the same `pop` HTML the map hover box used) into the left rail's Job-details
     // section, ensure that section is expanded, and wire the phone slot exactly as _mapHoverShow did.
