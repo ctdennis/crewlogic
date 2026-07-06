@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.3 | 2026-07-06">
+  <meta name="crewlogic-version" content="v5.50.4 | 2026-07-06">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7539,25 +7539,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _dispMode = false, _dispPick = { truck: null, job: null }, _dispRouteLayers = [];
     function _dispPctLbl() { const s = document.getElementById('dashDispPct'), l = document.getElementById('dashDispPctLbl'); if (s && l) l.textContent = s.value + '%'; }
     function _dispStatus(msg) { const el = document.getElementById('dashDispStatus'); if (el) el.innerHTML = msg; }
+    // Reset the left-rail disposal body to its empty hint. The rail body is permanent (no column to hide).
+    function _dispClearBody() {
+      const b = document.getElementById('dashLeftDispBody');
+      if (b) b.innerHTML = '<div class="dash-rail-empty" style="color:var(--text-muted);font-size:13px;padding:10px;">Run 🗑️ Find disposal for routes.</div>';
+    }
     function dashFindDisposal() {
       _dispMode = true; _dispPick = { truck: null, job: null }; _dispClearRoutes();
       const bar = document.getElementById('dashDispBar'); if (bar) bar.style.display = 'flex';
-      const res = document.getElementById('dashDispResults'); if (res) res.innerHTML = '';
+      _dispClearBody();
       _dispStatus('Tap a <b>truck</b> on the map…');
       const btn = document.getElementById('dashDispBtn'); if (btn) { btn.style.background = 'var(--accent-green,#00E785)'; btn.style.color = '#06121d'; }
     }
     function _dispCancel() {
       _dispMode = false; _dispPick = { truck: null, job: null }; _dispClearRoutes();
       const bar = document.getElementById('dashDispBar'); if (bar) bar.style.display = 'none';
-      const res = document.getElementById('dashDispResults'); if (res) res.innerHTML = '';
-      _dispShowPanel(false); // results column away → map back to full width
+      _dispClearBody();
       const btn = document.getElementById('dashDispBtn'); if (btn) { btn.style.background = 'var(--bg-input,#1e2f40)'; btn.style.color = 'var(--text-primary)'; }
-    }
-    // Toggle the right-hand results column beside the map; the map shrinks/grows so re-fit Leaflet's size.
-    function _dispShowPanel(show) {
-      const res = document.getElementById('dashDispResults'); if (!res) return;
-      res.style.display = show ? 'block' : 'none';
-      if (_trucksMap) setTimeout(() => { try { _trucksMap.invalidateSize(); } catch (e) {} }, 60);
     }
     function _dispClearRoutes() { if (_trucksMap) _dispRouteLayers.forEach(l => { try { _trucksMap.removeLayer(l); } catch (e) {} }); _dispRouteLayers = []; }
     function _dispTapTruck(i, t) {
@@ -7576,11 +7574,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function _dispMaybeRun() { if (_dispMode && _dispPick.truck && _dispPick.job) _dispRun(); }
     async function _dispRun() {
-      const res = document.getElementById('dashDispResults'); if (!res) return;
+      const res = document.getElementById('dashLeftDispBody'); if (!res) return;
       const pctEl = document.getElementById('dashDispPct'); const pct = Number(pctEl && pctEl.value);
       const loadPercent = Number.isFinite(pct) ? pct : 100;
       res.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:10px;">Finding the best dump…</div>';
-      _dispShowPanel(true); // reveal the results column beside the map (map shrinks now, before plotting)
       let data = null;
       try {
         data = await edgeFunctionCall('crewlogic-route-disposal', {
@@ -7600,7 +7597,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _dispRenderPanel(data); _dispPlot(data);
     }
     function _dispRenderPanel(data) {
-      const res = document.getElementById('dashDispResults'); if (!res) return;
+      const res = document.getElementById('dashLeftDispBody'); if (!res) return;
       dispState.endpointAddress = data.endpointAddressUsed || (_dispPick.job && _dispPick.job.address) || '';
       const lc = data.leastCost, lt = data.leastTime, js = data.jobStartTime;
       if (!lc && !lt) {
@@ -7676,12 +7673,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (closed[0]) leg(closed[0], '#6e8194', '4,6');
       } else if (same) leg(lc, '#fbbf24');
       else { if (lt) leg(lt, '#6db3ff', '8,6'); if (lc) leg(lc, '#00E785'); } // cheapest drawn last = on top
-      try {
-        const b = L.latLngBounds([[tk.lat, tk.lon], [jb.lat, jb.lon]]);
-        if (lc && lc.latitude != null) b.extend([Number(lc.latitude), Number(lc.longitude)]);
-        if (lt && lt.latitude != null) b.extend([Number(lt.latitude), Number(lt.longitude)]);
-        _trucksMap.fitBounds(b, { padding: [50, 50], maxZoom: 14 });
-      } catch (e) {}
+      // No map recenter: a cheapest/fastest result updates the rail + draws routes WITHOUT panning/zooming
+      // the trucks map (owner request). Routes are drawn above; the map keeps its current view.
     }
     async function _measureToJob(j) {
       if (!_measureFrom || j.lat == null || j.lon == null || !_trucksMap) return;
@@ -8257,8 +8250,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const m = L.marker([j.lat, j.lon], { icon, opacity: done ? 0.6 : 1 }).addTo(_jobLayer || _trucksMap);
           // Job details show in the fixed in-map hover box (no marker popup → never clips/pans). Measuring +
           // disposal-pick still take priority on the first interaction.
-          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } else _mapHoverShow(pop, j.jobID); });
-          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _mapHoverShow(pop, j.jobID); });
+          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } else _railShowJob(pop, j.jobID); });
+          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _railShowJob(pop, j.jobID); });
           _jobMarkers.push(m);
           jobPts.push([j.lat, j.lon]);
         });
@@ -9020,13 +9013,26 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<button onclick="_dispCancel()" style="font-size:12px;padding:6px 14px;background:transparent;border:1px solid var(--border);color:var(--text-muted);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">Done</button>'
         + '</div>'
         + '<div id="dashMapWrap" style="display:flex;gap:10px;align-items:stretch;">'
+        +   '<div id="dashLeftRail" style="flex:0 0 400px;width:400px;height:42vh;min-height:320px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);padding:8px;">'
+        +     '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input,#1e2f40);overflow:hidden;">'
+        +       '<div onclick="_railToggle(this)" style="padding:9px 12px;font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">📍 Job details<span style="margin-left:auto;font-size:12px;color:var(--text-muted);">▾</span></div>'
+        +       '<div id="dashLeftJobBody" style="padding:2px 6px 8px;"><div class="dash-rail-empty" style="color:var(--text-muted);font-size:13px;padding:10px;">Tap a job or truck for details.</div></div>'
+        +     '</div>'
+        +     '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input,#1e2f40);overflow:hidden;">'
+        +       '<div onclick="_railToggle(this)" style="padding:9px 12px;font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">🗑️ Cheapest &amp; Fastest<span style="margin-left:auto;font-size:12px;color:var(--text-muted);">▾</span></div>'
+        +       '<div id="dashLeftDispBody" style="padding:2px 6px 8px;"><div class="dash-rail-empty" style="color:var(--text-muted);font-size:13px;padding:10px;">Run 🗑️ Find disposal for routes.</div></div>'
+        +     '</div>'
+        +   '</div>'
+        +   '<div class="dash-divider" data-side="left" title="Drag to resize" style="flex:0 0 6px;align-self:stretch;cursor:col-resize;background:var(--btn-surface,#34485d);border-radius:3px;"></div>'
         +   '<div id="dashMapPane" style="flex:1;min-width:0;height:42vh;min-height:320px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);"></div>'
-        +   '<div id="dashDispResults" style="display:none;flex:0 0 430px;width:430px;height:42vh;min-height:320px;overflow-y:auto;"></div>'
+        +   '<div class="dash-divider" data-side="right" title="Drag to resize" style="flex:0 0 6px;align-self:stretch;cursor:col-resize;background:var(--btn-surface,#34485d);border-radius:3px;"></div>'
         +   '<div id="dashAlertsPanel" style="flex:0 0 300px;width:300px;height:42vh;min-height:320px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);overflow:hidden;display:flex;flex-direction:column;">'
         +     '<div style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;">📡 Live Alerts<span class="gf-alerts-count" style="font-size:11px;font-weight:600;color:var(--text-muted);margin-left:auto;"></span></div>'
         +     '<div id="dashAlertsList" class="gf-alerts-list" style="flex:1;overflow-y:auto;padding:6px 6px 10px;"></div>'
         +   '</div>'
         + '</div>';
+      _dashApplyRailWidths();   // restore saved column widths BEFORE the map mounts (so it sizes right)
+      _dashInitDividers();      // wire the drag-to-resize handles
       dashLoadBoards();
       dashMountMap();
       dashLoadWeather();
@@ -9080,6 +9086,73 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function dashWxClose() { const ov = document.getElementById('dashWxOv'); if (ov) ov.style.display = 'none'; }
     // Mount the live trucks map (same machinery as the Where-Are-My-Trucks screen) into the dashboard pane.
+    // ── Permanent LEFT info rail (mirrors the right-side Live Alerts rail). Two collapsible sections:
+    //    "📍 Job details" (fed by a job-marker click) and "🗑️ Cheapest & Fastest" (fed by Find disposal).
+    // ── Adjustable dividers: drag the handles to resize the left/right rails; widths persist per-browser
+    //    in localStorage so the dispatch view opens the way you left it. Map (center) absorbs the rest.
+    const _DASH_RAIL_DEFAULT = { left: 400, right: 300 };
+    const _DASH_RAIL_MIN = { left: 260, right: 220 };
+    const _DASH_RAIL_MAX = { left: 680, right: 560 };
+    function _dashRailClamp(side, px) { return Math.max(_DASH_RAIL_MIN[side], Math.min(_DASH_RAIL_MAX[side], Math.round(px))); }
+    function _dashRailWidth(side) {
+      const v = parseInt(localStorage.getItem('dashRailW_' + side) || '', 10);
+      return _dashRailClamp(side, Number.isFinite(v) ? v : _DASH_RAIL_DEFAULT[side]);
+    }
+    function _dashSetRailWidth(side, px) {
+      const el = document.getElementById(side === 'left' ? 'dashLeftRail' : 'dashAlertsPanel');
+      if (!el) return 0;
+      const w = _dashRailClamp(side, px);
+      el.style.flex = '0 0 ' + w + 'px'; el.style.width = w + 'px';
+      return w;
+    }
+    function _dashApplyRailWidths() { _dashSetRailWidth('left', _dashRailWidth('left')); _dashSetRailWidth('right', _dashRailWidth('right')); }
+    function _dashInitDividers() {
+      document.querySelectorAll('#dashMapWrap .dash-divider').forEach(function (d) {
+        d.onmousedown = function (e) {
+          e.preventDefault();
+          const side = d.getAttribute('data-side');
+          const el = document.getElementById(side === 'left' ? 'dashLeftRail' : 'dashAlertsPanel');
+          if (!el) return;
+          const startX = e.clientX, startW = el.getBoundingClientRect().width;
+          document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
+          const onMove = function (ev) {
+            // left rail widens as the divider moves right; right rail widens as it moves left.
+            const delta = ev.clientX - startX;
+            _dashSetRailWidth(side, side === 'left' ? startW + delta : startW - delta);
+          };
+          const onUp = function () {
+            document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+            document.body.style.cursor = ''; document.body.style.userSelect = '';
+            try { localStorage.setItem('dashRailW_' + side, String(Math.round(el.getBoundingClientRect().width))); } catch (_e) {}
+            if (_trucksMap && _trucksMap.invalidateSize) _trucksMap.invalidateSize();
+          };
+          document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+        };
+      });
+    }
+    // Toggle one rail section open/closed (its body is the header's next sibling); flip the chevron ▾/▸.
+    function _railToggle(hdrEl) {
+      const body = hdrEl && hdrEl.nextElementSibling; if (!body) return;
+      const chev = hdrEl.querySelector('span');
+      const hidden = body.style.display === 'none';
+      body.style.display = hidden ? '' : 'none';
+      if (chev) chev.textContent = hidden ? '▾' : '▸';
+    }
+    // Reset the Job-details body back to the empty hint (used by the card's × close).
+    function _railClearJob() {
+      const b = document.getElementById('dashLeftJobBody');
+      if (b) b.innerHTML = '<div class="dash-rail-empty" style="color:var(--text-muted);font-size:13px;padding:10px;">Tap a job or truck for details.</div>';
+    }
+    // Render a job-details card (the same `pop` HTML the map hover box used) into the left rail's Job-details
+    // section, ensure that section is expanded, and wire the phone slot exactly as _mapHoverShow did.
+    function _railShowJob(pop, jobID) {
+      const body = document.getElementById('dashLeftJobBody'); if (!body) return;
+      body.innerHTML = '<div style="text-align:right;margin:-2px -2px 2px 0;"><span onclick="_railClearJob()" style="cursor:pointer;color:#6e8194;font-size:18px;line-height:1;">×</span></div>' + (pop || '');
+      body.style.display = ''; // make sure the section is open
+      const hdr = body.previousElementSibling, chev = hdr && hdr.querySelector('span'); if (chev) chev.textContent = '▾';
+      body.scrollTop = 0;
+      if (jobID) _prefetchJobPhone(jobID).then(ph => _renderJobPhoneSlot(jobID, ph)); // fill the phone slot like the hover box did
+    }
     function dashMountMap() {
       const pane = document.getElementById('dashMapPane'); if (!pane) return;
       _ensureTrucksMapFresh('dashMapPane'); // rebuild the map into the (freshly re-rendered) dashboard pane
