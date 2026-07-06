@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.2 | 2026-07-05">
+  <meta name="crewlogic-version" content="v5.50.3 | 2026-07-06">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7629,6 +7629,24 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         : '<span style="color:#00E785;font-weight:700;">Cheapest ' + dispMoney(lc.totalCost) + ' · ' + dispMins(lc.totalTimeWithWait) + '</span> &nbsp;<span style="color:#6db3ff;font-weight:700;">Fastest ' + dispMoney(lt.totalCost) + ' · ' + dispMins(lt.totalTimeWithWait) + '</span>');
     }
     function _dispScrollResults() { const w = document.getElementById('dashMapWrap'); if (w && w.scrollIntoView) { try { w.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {} } }
+    // Fetch a TomTom road-following route through the given [lat,lon] waypoints and return its
+    // flattened polyline points ([[lat,lon],…]), or null on failure. Mirrors the routing call in
+    // _measureToJob (which additionally needs the summary/ETA). One call handles multiple waypoints.
+    async function _tomtomRoutePoints(waypoints) {
+      if (!TOMTOM_TRAFFIC_KEY || TOMTOM_TRAFFIC_KEY === 'PASTE_TOMTOM_KEY_HERE') return null;
+      if (!Array.isArray(waypoints) || waypoints.length < 2) return null;
+      try {
+        const path = waypoints.map(w => w[0] + ',' + w[1]).join(':');
+        const url = 'https://api.tomtom.com/routing/1/calculateRoute/' + path
+          + '/json?key=' + TOMTOM_TRAFFIC_KEY + '&traffic=true&travelMode=car&routeType=fastest';
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const rd = await res.json();
+        const route = rd && rd.routes && rd.routes[0];
+        const pts = (route && route.legs) ? route.legs.reduce((a, lg) => a.concat((lg.points || []).map(p => [p.latitude, p.longitude])), []) : [];
+        return pts.length ? pts : null;
+      } catch (_e) { return null; }
+    }
     function _dispPlot(data) {
       if (!_trucksMap) return;
       _dispClearRoutes();
@@ -7636,9 +7654,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const leg = (site, color, dash) => {
         if (!site || site.latitude == null || site.longitude == null) return;
         const s = [Number(site.latitude), Number(site.longitude)];
-        _dispRouteLayers.push(L.polyline([[tk.lat, tk.lon], s, [jb.lat, jb.lon]], { color, weight: 4, opacity: 0.9, dashArray: dash }).addTo(_trucksMap));
+        // Draw a straight line immediately (instant feedback + fallback), plus the site marker.
+        let line = L.polyline([[tk.lat, tk.lon], s, [jb.lat, jb.lon]], { color, weight: 4, opacity: 0.9, dashArray: dash }).addTo(_trucksMap);
+        _dispRouteLayers.push(line);
         _dispRouteLayers.push(L.circleMarker(s, { radius: 8, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1 }).addTo(_trucksMap)
           .bindPopup('<b>' + _truckEsc(site.name) + '</b><br>' + dispMoney(site.totalCost) + ' · ' + dispMins(site.totalTimeWithWait), { autoPan: false }));
+        // Upgrade the straight line to the real TomTom road route (truck → site → job in one call).
+        // Ranking is already road-based server-side; this just makes the drawn line follow the road.
+        _tomtomRoutePoints([[tk.lat, tk.lon], s, [jb.lat, jb.lon]]).then(pts => {
+          if (!pts || !_trucksMap || !line || !_trucksMap.hasLayer(line)) return; // failed, or run cleared/superseded
+          _dispRouteLayers.push(L.polyline(pts, { color, weight: 4, opacity: 0.9, dashArray: dash }).addTo(_trucksMap));
+          _trucksMap.removeLayer(line);
+          const i = _dispRouteLayers.indexOf(line); if (i >= 0) _dispRouteLayers.splice(i, 1);
+          line = null;
+        });
       };
       const lc = data.leastCost, lt = data.leastTime, same = lc && lt && lc.facilityId === lt.facilityId;
       if (!lc && !lt) {
