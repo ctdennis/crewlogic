@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.7 | 2026-07-06">
+  <meta name="crewlogic-version" content="v5.50.8 | 2026-07-06">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7866,6 +7866,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // symmetric bounds around the trucks' centroid reaching the farthest point. NaN-safe.
     function _fitTrucksCentered() {
       if (typeof L === 'undefined' || !_trucksMap) return;
+      // Re-measure the pane's CURRENT width before fitting. With the column layout the map is created
+      // before the flex row finishes laying out, so Leaflet can hold a stale/too-narrow size — fitting
+      // into that picks a too-low (zoomed-out) zoom. invalidateSize syncs the real width first.
+      try { _trucksMap.invalidateSize(false); } catch (e) {}
       const _xy = (p) => p && (Array.isArray(p) ? { lat: +p[0], lng: +p[1] } : { lat: +p.lat, lng: +(p.lng != null ? p.lng : p.lon) });
       const _ok = (p) => p && isFinite(p.lat) && isFinite(p.lng);
       const truckPts = (_truckMarkers || []).map(m => _xy(m.getLatLng())).filter(_ok);
