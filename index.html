@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.9 | 2026-07-06">
+  <meta name="crewlogic-version" content="v5.50.10 | 2026-07-06">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7470,7 +7470,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const siteHtml = '<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + _truckEsc(label) + '</b><br>' + _addrLink(_truckProperAddr(s.address), s.address, _truckEsc) + costLine + '</div>';
           const m = L.marker([c.lat, c.lon], { icon: mkIcon(t.emoji, t.color, 20, true) }); // ~75% of the old size — bare emoji reads too big at full 26
           // Details show in the left rail on click; in measure mode attachMeasure's handler wins instead.
-          m.on('click', function () { if (!_measureFrom) _railShowInfo(siteHtml); });
+          m.on('click', function () { if (!_measureFrom) { _clearMeasureLine(); _railShowInfo(siteHtml); } });
           attachMeasure(m, c.lat, c.lon, label);
           m.addTo(t.layer);
         });
@@ -8183,7 +8183,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + '</div>';
         const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: 1000 }).addTo(_truckLayer || _trucksMap); // trucks above job houses
         // Truck details show in the fixed in-map hover box (no popup → no clip/pan); disposal mode picks the truck.
-        m.on('click', function () { if (_dispMode) { _dispTapTruck(i, t); } else _railShowInfo(pop); });
+        m.on('click', function () { if (_dispMode) { _dispTapTruck(i, t); } else { _clearMeasureLine(); _railShowInfo(pop); } });
         _truckMarkers.push(m);
         pts.push([t.lat, t.lon]);
       });
@@ -8306,7 +8306,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           // Job details show in the fixed in-map hover box (no marker popup → never clips/pans). Measuring +
           // disposal-pick still take priority on the first interaction.
           m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } });
-          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _railShowJob(pop, j.jobID); });
+          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else { _clearMeasureLine(); _railShowJob(pop, j.jobID); } });
           _jobMarkers.push(m);
           jobPts.push([j.lat, j.lon]);
         });
@@ -9208,6 +9208,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _railClearJob() {
       const b = document.getElementById('dashLeftJobBody');
       if (b) b.innerHTML = '<div class="dash-rail-empty" style="color:var(--text-muted);font-size:13px;padding:10px;">Tap a job or truck for details.</div>';
+      _clearMeasureLine(); // dismissing the Details card (×) also removes the blue measure route line
     }
     // Render a job-details card (the same `pop` HTML the map hover box used) into the left rail's Job-details
     // section, ensure that section is expanded, and wire the phone slot exactly as _mapHoverShow did.
