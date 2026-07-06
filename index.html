@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.6 | 2026-07-06">
+  <meta name="crewlogic-version" content="v5.50.8 | 2026-07-06">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7756,13 +7756,41 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       (_trucksData || []).forEach(t => {
         if (t.lat == null || t.lon == null) return;
         const mi = haversine(lat, lon, t.lat, t.lon) * 0.621371;
-        if (!best || mi < best.mi) best = { name: t.name || t.number || 'Truck', mi };
+        if (!best || mi < best.mi) best = { name: t.name || t.number || 'Truck', mi, lat: t.lat, lon: t.lon };
       });
       return best;
     }
     function _nearestTruckHtml(lat, lon) {
       const nt = _nearestTruck(lat, lon);
-      return nt ? '<div style="color:#cdd6df;">🚚 ' + _truckEsc(nt.name) + ' — ' + nt.mi.toFixed(1) + ' mi away</div>' : '';
+      if (!nt) return '';
+      // Straight-line "mi away" renders instantly; the drive-time ETA (Google, traffic-aware) fills the
+      // .job-eta slot async once the card is in the rail (see _fillJobEta), using the embedded coords.
+      return '<div style="color:#cdd6df;">🚚 ' + _truckEsc(nt.name) + ' — ' + nt.mi.toFixed(1) + ' mi away'
+        + '<span class="job-eta" data-tlat="' + nt.lat + '" data-tlon="' + nt.lon + '" data-jlat="' + lat + '" data-jlon="' + lon + '" style="color:#9fb0c0;"></span></div>';
+    }
+    // Fill the .job-eta slot in the rail's Job-details card with the truck→job drive time (traffic-aware,
+    // via crewlogic-estimate pointDistance = Google Distance Matrix). Fire-and-forget after the card renders.
+    async function _fillJobEta() {
+      const el = document.querySelector('#dashLeftJobBody .job-eta'); if (!el) return;
+      const tlat = el.getAttribute('data-tlat'), tlon = el.getAttribute('data-tlon');
+      const jlat = el.getAttribute('data-jlat'), jlon = el.getAttribute('data-jlon');
+      if (!tlat || !tlon || !jlat || !jlon) return;
+      el.textContent = ' · …';
+      try {
+        const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: tlat + ',' + tlon, dest: jlat + ',' + jlon });
+        el.textContent = (data && data.success && data.durationText)
+          ? ' · ~' + data.durationText + ' drive' + (data.inTraffic ? ' in traffic' : '')
+          : '';
+      } catch (_e) { el.textContent = ''; }
+    }
+    // Recompute the nearest-truck line from CURRENT truck positions each time a job card opens — trucks
+    // move, so this must refresh per click, not be baked at marker-load. Then fill the drive-time ETA.
+    function _fillNearestTruck() {
+      const slot = document.querySelector('#dashLeftJobBody .rail-nearest'); if (!slot) return;
+      const jlat = Number(slot.getAttribute('data-jlat')), jlon = Number(slot.getAttribute('data-jlon'));
+      if (!Number.isFinite(jlat) || !Number.isFinite(jlon)) return;
+      slot.innerHTML = _nearestTruckHtml(jlat, jlon); // fresh nearest truck (name + mi) + a .job-eta slot
+      _fillJobEta();                                  // fill the drive-time ETA from the fresh truck coords
     }
     // Format a US phone for display: 8603878366 → 860-387-8366 (the tel: link still uses raw digits).
     function _fmtPhone(raw) {
@@ -7838,6 +7866,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // symmetric bounds around the trucks' centroid reaching the farthest point. NaN-safe.
     function _fitTrucksCentered() {
       if (typeof L === 'undefined' || !_trucksMap) return;
+      // Re-measure the pane's CURRENT width before fitting. With the column layout the map is created
+      // before the flex row finishes laying out, so Leaflet can hold a stale/too-narrow size — fitting
+      // into that picks a too-low (zoomed-out) zoom. invalidateSize syncs the real width first.
+      try { _trucksMap.invalidateSize(false); } catch (e) {}
       const _xy = (p) => p && (Array.isArray(p) ? { lat: +p[0], lng: +p[1] } : { lat: +p.lat, lng: +(p.lng != null ? p.lng : p.lon) });
       const _ok = (p) => p && isFinite(p.lat) && isFinite(p.lng);
       const truckPts = (_truckMarkers || []).map(m => _xy(m.getLatLng())).filter(_ok);
@@ -7895,7 +7927,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '<br>' + _truckEsc(j.clientName || 'Job')
             + (Number(j.price) > 0 ? '<br><span style="font-weight:800;color:#00E785;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>' : '')
             + (addr ? '<br>' + _addrLink(addr, addr, _truckEsc, '#6db3ff') : '')
-            + _nearestTruckHtml(j.lat, j.lon)
+            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '"></div>'
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
             + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
             + '</div>';
@@ -8265,7 +8297,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + (Number(j.price) > 0 ? '<div style="font-weight:800;color:#00E785;font-size:13px;margin-top:2px;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</div>' : '')
             + '<div style="margin-top:3px;">🏠 ' + _truckEsc(j.clientName || 'Job') + '</div>'
             + (addr ? '<div>' + _addrLink(addr, addr, _truckEsc, '#6db3ff') + '</div>' : '')
-            + _nearestTruckHtml(j.lat, j.lon)
+            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '"></div>'
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
             + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
             + itemsHtml
@@ -9175,6 +9207,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const hdr = body.previousElementSibling, chev = hdr && hdr.querySelector('span'); if (chev) chev.textContent = '▾';
       body.scrollTop = 0;
       if (jobID) _prefetchJobPhone(jobID).then(ph => _renderJobPhoneSlot(jobID, ph)); // fill the phone slot like the hover box did
+      _fillNearestTruck(); // recompute nearest truck + drive-time ETA from CURRENT positions on every open
     }
     // Render arbitrary (non-job) info — trucks, sites, measure result — into the left rail's Details section.
     // Same visual wrapper as _railShowJob but NO phone-slot wiring (no jobID for non-job content).
