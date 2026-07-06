@@ -139,6 +139,30 @@ async function geocodeCensus(address: string): Promise<{ lat: number; lon: numbe
   return { lat, lon };
 }
 
+// Google Geocoding — rooftop-accurate; the PRIMARY geocoder for job pins (and thus the job-site
+// geofences + the <60m "arrived" house-on-truck icon, which all derive from the same coordinate).
+// Returns {found:true,lat,lon} on a hit, {found:false} on a definitive ZERO_RESULTS (cache it, don't
+// retry), or null on a transient error (OVER_QUERY_LIMIT / REQUEST_DENIED / network) so the caller
+// falls back to Census and retries Google next time.
+async function geocodeGoogle(apiKey: string, address: string): Promise<{ found: boolean; lat?: number; lon?: number } | null> {
+  try {
+    const url = 'https://maps.googleapis.com/maps/api/geocode/json?address='
+      + encodeURIComponent(address) + '&key=' + apiKey;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null);
+    const status = data?.status;
+    if (status === 'OK') {
+      const loc = data.results?.[0]?.geometry?.location;
+      const lat = Number(loc?.lat), lon = Number(loc?.lng);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) return { found: true, lat, lon };
+      return null;
+    }
+    if (status === 'ZERO_RESULTS') return { found: false }; // definitive not-found → cache, don't retry
+    return null;                                            // transient → fall back to Census, retry later
+  } catch (_e) { return null; }
+}
+
 // Parse Vonigo's multi-checkbox field format into an array of CHECKED labels.
 // Format: "optionID!~!Label!`!1!!~~!!optionID!~!Label!`!0!!~~!!..."
 // The bit between `!\`!` and `!!` is 1 if checked, 0 if unchecked.
@@ -384,9 +408,11 @@ Deno.serve(async (req: Request) => {
 
     // Geocode jobs (only when asked) so the truck map can drop house pins. Includes COMPLETED jobs now
     // (they render grayed on the map), so geocode every job with an address — not just open ones.
-    // Cache-first via geocode_cache; misses go to the free US Census Geocoder and
-    // are written back (including "not found", so bad addresses aren't retried).
+    // Cache-first via geocode_cache. Google (rooftop) is the PRIMARY geocoder; Census is a fallback on a
+    // transient Google failure. A cached row is trusted ONLY if provider='google' — Census-sourced or
+    // missing rows get (re)geocoded with Google, so old inaccurate Census pins auto-upgrade on next fetch.
     if (includeCoords) {
+      const GKEY = Deno.env.get('GOOGLE_GEOCODING_API_KEY') || Deno.env.get('GOOGLE_MAPS_API_KEY') || '';
       const toGeocode = workOrders.filter((w) => w.address);
       await Promise.all(toGeocode.map(async (w) => {
         const oneLine = w.address.replace(/\n/g, ', ').replace(/\s+/g, ' ').trim();
@@ -394,23 +420,30 @@ Deno.serve(async (req: Request) => {
         try {
           const { data: cached } = await supabase
             .from('geocode_cache')
-            .select('lat, lon, found')
+            .select('lat, lon, found, provider')
             .eq('address_key', key)
             .maybeSingle();
-          if (cached) {
+          if (cached && cached.provider === 'google') {
             if (cached.found) { w.lat = cached.lat; w.lon = cached.lon; }
             return;
           }
-          const g = await geocodeCensus(oneLine);
+          // Google first (rooftop). Census only if Google errors transiently (so we retry Google later).
+          let provider = 'google';
+          let g: { found: boolean; lat?: number; lon?: number } | null = GKEY ? await geocodeGoogle(GKEY, oneLine) : null;
+          if (g === null) {
+            const c = await geocodeCensus(oneLine);
+            provider = 'census';
+            g = c ? { found: true, lat: c.lat, lon: c.lon } : { found: false };
+          }
           await supabase.from('geocode_cache').upsert({
             address_key: key,
-            lat: g?.lat ?? null,
-            lon: g?.lon ?? null,
-            found: !!g,
-            provider: 'census',
+            lat: g.found ? g.lat : null,
+            lon: g.found ? g.lon : null,
+            found: g.found,
+            provider,
             updated_at: new Date().toISOString(),
           });
-          if (g) { w.lat = g.lat; w.lon = g.lon; }
+          if (g.found) { w.lat = g.lat; w.lon = g.lon; }
         } catch (e) {
           console.warn('[workorders] geocode failed for one job (non-fatal):', (e as Error).message);
         }
