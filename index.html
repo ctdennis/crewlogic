@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.4 | 2026-07-06">
+  <meta name="crewlogic-version" content="v5.50.5 | 2026-07-06">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7419,6 +7419,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _trucksJobsData = []; // latest loaded job overlay (for the "job under truck" badge proximity check)
     // Toggleable overlay layer groups (trucks / jobs / cost-section sites / truck home) + the layers control.
     let _truckLayer = null, _jobLayer = null, _disposalLayer = null, _recyclingLayer = null, _donationLayer = null, _homeLayer = null, _sitesGeocoded = false;
+    // Site divIcon builder — hoisted to module scope so the disposal-route drawing can reuse it. Uses only its
+    // params (no closure state). bare = just the emoji graphic (no white circle / colored ring) with a subtle
+    // shadow for legibility; the home marker keeps its ring.
+    const mkIcon = (emoji, color, size, bare) => {
+      const sz = size || 28;
+      const inner = bare
+        ? '<div style="font-size:' + sz + 'px;line-height:1;text-shadow:0 1px 3px rgba(0,0,0,.55),0 0 3px rgba(255,255,255,.85);">' + emoji + '</div>'
+        : '<div style="background:#fff;width:' + sz + 'px;height:' + sz + 'px;border-radius:50%;border:3px solid ' + color + ';box-shadow:0 1px 3px rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-size:' + Math.round(sz * 0.5) + 'px;line-height:1;">' + emoji + '</div>';
+      return L.divIcon({ className: 'site-marker', html: inner, iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2], popupAnchor: [0, -(sz / 2) - 2] });
+    };
+    // Map a site type → its bare emoji icon (reuses the same emoji/colors as renderSiteMarkers); disposal is the default.
+    function _siteIconFor(type) {
+      if (type === 'recycling') return mkIcon('♻️', '#10b981', 20, true);
+      if (type === 'donation') return mkIcon('🎁', '#ec4899', 20, true);
+      return mkIcon('🗑️', '#8b5cf6', 20, true); // disposal (default)
+    }
     // Geocode the cost-section sites + truck home (once per session) and place them on their layer groups.
     async function renderSiteMarkers() {
       if (_sitesGeocoded || !_trucksMap) return;
@@ -7439,15 +7455,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'geocodeAddresses', addresses: addrList });
         (data.results || []).forEach(r => { if (r.lat != null) coordsByAddr[r.address] = r; });
       } catch (_e) { return; } // leave _sitesGeocoded false so a later open retries
-      const mkIcon = (emoji, color, size, bare) => {
-        const sz = size || 28;
-        // bare = just the emoji graphic (no white circle / colored ring), with a subtle shadow for legibility —
-        // used for disposal/recycling/donation per owner request; the home marker keeps its ring.
-        const inner = bare
-          ? '<div style="font-size:' + sz + 'px;line-height:1;text-shadow:0 1px 3px rgba(0,0,0,.55),0 0 3px rgba(255,255,255,.85);">' + emoji + '</div>'
-          : '<div style="background:#fff;width:' + sz + 'px;height:' + sz + 'px;border-radius:50%;border:3px solid ' + color + ';box-shadow:0 1px 3px rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-size:' + Math.round(sz * 0.5) + 'px;line-height:1;">' + emoji + '</div>';
-        return L.divIcon({ className: 'site-marker', html: inner, iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2], popupAnchor: [0, -(sz / 2) - 2] });
-      };
+      // mkIcon + _siteIconFor are now module-scope (hoisted for disposal-route reuse).
       // In measure mode (started from a truck), tapping a site measures truck→site (same as a job).
       // Bind both click and mouseover so a mobile first-tap (synthesized hover) triggers it too.
       const attachMeasure = (m, lat, lon, label) => { const go = () => { if (_measureFrom) { try { m.closePopup(); } catch (e) {} _measureToJob({ lat: lat, lon: lon, clientName: label }); } }; m.on('click', go); m.on('mouseover', () => { if (_mtIsTouch()) go(); }); };
@@ -7459,8 +7467,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           if (!c) return;
           const costLine = (t.costSuffix && s.cost != null && s.cost !== '') ? '<br><span style="color:#6e8194;">$' + _truckEsc(String(s.cost)) + t.costSuffix + '</span>' : '';
           const label = t.emoji + ' ' + (s.name || t.label);
-          const m = L.marker([c.lat, c.lon], { icon: mkIcon(t.emoji, t.color, 20, true) }) // ~75% of the old size — bare emoji reads too big at full 26
-            .bindPopup('<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + _truckEsc(label) + '</b><br>' + _addrLink(_truckProperAddr(s.address), s.address, _truckEsc) + costLine + '</div>', { autoPan: false });
+          const siteHtml = '<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + _truckEsc(label) + '</b><br>' + _addrLink(_truckProperAddr(s.address), s.address, _truckEsc) + costLine + '</div>';
+          const m = L.marker([c.lat, c.lon], { icon: mkIcon(t.emoji, t.color, 20, true) }); // ~75% of the old size — bare emoji reads too big at full 26
+          // Details show in the left rail on click; in measure mode attachMeasure's handler wins instead.
+          m.on('click', function () { if (!_measureFrom) _railShowInfo(siteHtml); });
           attachMeasure(m, c.lat, c.lon, label);
           m.addTo(t.layer);
         });
@@ -7485,6 +7495,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // ── "Measure to a job" (tap a truck's "Distance to a job", then tap a job) ──
     // Next job isn't the closest, so the owner picks the job; we draw a line + show driving distance + ETA.
     let _measureFrom = null, _measureLine = null;
+    // Remove the drawn measure line from the map (shared by the rail-info path and _mapHoverHide).
+    function _clearMeasureLine() { if (_measureLine && _trucksMap) { try { _trucksMap.removeLayer(_measureLine); } catch (e) {} _measureLine = null; } }
     function _mtIsTouch() { return ('ontouchstart' in window) || navigator.maxTouchPoints > 0; } // touch = measure on first tap; desktop = measure on click (not hover)
     // In-map hover panel: job details show in a FIXED box inside the map (top-left, below the zoom) instead of
     // a marker popup — so the map never pans and the box never clips off an edge (owner request).
@@ -7508,8 +7520,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function _mapHoverHide() {
       const b = document.querySelector('.map-hover-box'); if (b) b.style.display = 'none';
-      // Dismissing the box also clears the measure line — otherwise the green dotted line lingers with no way off.
-      if (_measureLine && _trucksMap) { try { _trucksMap.removeLayer(_measureLine); } catch (e) {} _measureLine = null; }
+      // Dismissing the box also clears the measure line — otherwise the dotted line lingers with no way off.
+      _clearMeasureLine();
     }
     function _mtBanner(text) {
       let b = document.getElementById('mtMeasureBanner');
@@ -7526,7 +7538,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!t || t.lat == null || t.lon == null) { alert('That truck has no current location.'); return; }
       _measureFrom = { lat: t.lat, lon: t.lon, label: (i + 1) + '. ' + (t.name || 'Truck') };
       if (_trucksMap) _trucksMap.closePopup();
-      _mapHoverHide(); // clear the truck info box while measuring
+      _clearMeasureLine(); // clear any lingering measure line
+      _railShowInfo('<div style="font-size:13px;padding:8px;">Measuring… tap a job on the map.</div>');
       _mtBanner('📏 Tap a job or facility to measure from ' + _measureFrom.label + '  ·  tap here to cancel');
     }
     function mtMeasureCancel() {
@@ -7648,22 +7661,32 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!_trucksMap) return;
       _dispClearRoutes();
       const tk = _dispPick.truck, jb = _dispPick.job; if (!tk || !jb) return;
+      const DOT = { dashArray: '2,9', lineCap: 'round' }; // round dots for the site→job leg
       const leg = (site, color, dash) => {
         if (!site || site.latitude == null || site.longitude == null) return;
         const s = [Number(site.latitude), Number(site.longitude)];
-        // Draw a straight line immediately (instant feedback + fallback), plus the site marker.
-        let line = L.polyline([[tk.lat, tk.lon], s, [jb.lat, jb.lon]], { color, weight: 4, opacity: 0.9, dashArray: dash }).addTo(_trucksMap);
-        _dispRouteLayers.push(line);
-        _dispRouteLayers.push(L.circleMarker(s, { radius: 8, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1 }).addTo(_trucksMap)
+        // Two straight lines immediately (instant feedback + fallback): truck→site SOLID, site→job DOTTED.
+        let line1 = L.polyline([[tk.lat, tk.lon], s], { color, weight: 4, opacity: 0.9 }).addTo(_trucksMap);
+        let line2 = L.polyline([s, [jb.lat, jb.lon]], Object.assign({ color, weight: 4, opacity: 0.9 }, DOT)).addTo(_trucksMap);
+        _dispRouteLayers.push(line1); _dispRouteLayers.push(line2);
+        // Site marker: bare emoji icon by type (all engine sites are disposal → 🗑️), with its cost/time popup.
+        _dispRouteLayers.push(L.marker(s, { icon: _siteIconFor(site.type || 'disposal') }).addTo(_trucksMap)
           .bindPopup('<b>' + _truckEsc(site.name) + '</b><br>' + dispMoney(site.totalCost) + ' · ' + dispMins(site.totalTimeWithWait), { autoPan: false }));
-        // Upgrade the straight line to the real TomTom road route (truck → site → job in one call).
-        // Ranking is already road-based server-side; this just makes the drawn line follow the road.
-        _tomtomRoutePoints([[tk.lat, tk.lon], s, [jb.lat, jb.lon]]).then(pts => {
-          if (!pts || !_trucksMap || !line || !_trucksMap.hasLayer(line)) return; // failed, or run cleared/superseded
-          _dispRouteLayers.push(L.polyline(pts, { color, weight: 4, opacity: 0.9, dashArray: dash }).addTo(_trucksMap));
-          _trucksMap.removeLayer(line);
-          const i = _dispRouteLayers.indexOf(line); if (i >= 0) _dispRouteLayers.splice(i, 1);
-          line = null;
+        // Upgrade each straight leg to the real TomTom road route, in its own call, replacing only its own line.
+        // Ranking is already road-based server-side; this just makes the drawn lines follow the road.
+        _tomtomRoutePoints([[tk.lat, tk.lon], s]).then(pts => {
+          if (!pts || !_trucksMap || !line1 || !_trucksMap.hasLayer(line1)) return; // failed, or run cleared/superseded
+          _dispRouteLayers.push(L.polyline(pts, { color, weight: 4, opacity: 0.9 }).addTo(_trucksMap));
+          _trucksMap.removeLayer(line1);
+          const i = _dispRouteLayers.indexOf(line1); if (i >= 0) _dispRouteLayers.splice(i, 1);
+          line1 = null;
+        });
+        _tomtomRoutePoints([s, [jb.lat, jb.lon]]).then(pts => {
+          if (!pts || !_trucksMap || !line2 || !_trucksMap.hasLayer(line2)) return; // failed, or run cleared/superseded
+          _dispRouteLayers.push(L.polyline(pts, Object.assign({ color, weight: 4, opacity: 0.9 }, DOT)).addTo(_trucksMap));
+          _trucksMap.removeLayer(line2);
+          const i = _dispRouteLayers.indexOf(line2); if (i >= 0) _dispRouteLayers.splice(i, 1);
+          line2 = null;
         });
       };
       const lc = data.leastCost, lt = data.leastTime, same = lc && lt && lc.facilityId === lt.facilityId;
@@ -7684,8 +7707,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const b = document.getElementById('mtMeasureBanner'); if (b) b.style.display = 'none';
       _trucksMap.closePopup(); // close any marker popup the tap opened
       const dest = _truckEsc(j.clientName || 'Job');
-      // Show the result in the FIXED in-map box (top-left) — never pans/clips off the edge (unlike a popup).
-      _mapHoverShow('<div style="font-size:13px;">Measuring…</div>');
+      // Show the result in the left rail (Details section); the measure line stays drawn on the map.
+      _railShowInfo('<div style="font-size:13px;">Measuring…</div>');
       // Fallback = the pre-routing behavior: straight dashed line + Google pointDistance. Used if TomTom routing fails.
       const _straightFallback = async () => {
         _measureLine = L.polyline([[from.lat, from.lon], [j.lat, j.lon]], { color: '#1e6fff', weight: 4, dashArray: '7,6', opacity: 0.95 }).addTo(_trucksMap);
@@ -7694,8 +7717,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const html = (data && data.success)
             ? '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(data.distanceText) + ' · ~' + _truckEsc(data.durationText) + ' drive' + (data.inTraffic ? '<br><span style="color:#9fb0c0;font-size:11px;">in current traffic</span>' : '')
             : 'Could not measure distance — try again.';
-          _mapHoverShow('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
-        } catch (_e) { _mapHoverShow('<div style="font-size:13px;">Could not measure distance.</div>'); }
+          _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
+        } catch (_e) { _railShowInfo('<div style="font-size:13px;">Could not measure distance.</div>'); }
       };
       // Primary: TomTom Calculate Route — real road-following geometry + traffic-aware ETA (same TomTom key as the traffic tiles).
       if (TOMTOM_TRAFFIC_KEY && TOMTOM_TRAFFIC_KEY !== 'PASTE_TOMTOM_KEY_HERE') {
@@ -7718,7 +7741,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const html = '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(distText)
             + ((distText && durText) ? ' · ' : '') + _truckEsc(durText)
             + (traffic ? '<br><span style="color:#9fb0c0;font-size:11px;">in current traffic</span>' : '');
-          _mapHoverShow('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
+          _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
           return;
         } catch (_e) {
           if (_measureLine) { _trucksMap.removeLayer(_measureLine); _measureLine = null; }
@@ -7878,8 +7901,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap);
           // Details in the fixed in-map hover box (no popup → no clip/pan); measure + disposal-pick first.
-          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } else _mapHoverShow(tip, j.jobID); });
-          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _mapHoverShow(tip, j.jobID); });
+          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } });
+          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _railShowJob(tip, j.jobID); });
           _lookaheadMarkers.push(m);
         });
       });
@@ -8128,7 +8151,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + '</div>';
         const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: 1000 }).addTo(_truckLayer || _trucksMap); // trucks above job houses
         // Truck details show in the fixed in-map hover box (no popup → no clip/pan); disposal mode picks the truck.
-        m.on('click', function () { if (_dispMode) { _dispTapTruck(i, t); } else _mapHoverShow(pop, null); });
+        m.on('click', function () { if (_dispMode) { _dispTapTruck(i, t); } else _railShowInfo(pop); });
         _truckMarkers.push(m);
         pts.push([t.lat, t.lon]);
       });
@@ -8250,7 +8273,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const m = L.marker([j.lat, j.lon], { icon, opacity: done ? 0.6 : 1 }).addTo(_jobLayer || _trucksMap);
           // Job details show in the fixed in-map hover box (no marker popup → never clips/pans). Measuring +
           // disposal-pick still take priority on the first interaction.
-          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } else _railShowJob(pop, j.jobID); });
+          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } });
           m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _railShowJob(pop, j.jobID); });
           _jobMarkers.push(m);
           jobPts.push([j.lat, j.lon]);
@@ -9015,7 +9038,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + '<div id="dashMapWrap" style="display:flex;gap:10px;align-items:stretch;">'
         +   '<div id="dashLeftRail" style="flex:0 0 400px;width:400px;height:42vh;min-height:320px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);padding:8px;">'
         +     '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input,#1e2f40);overflow:hidden;">'
-        +       '<div onclick="_railToggle(this)" style="padding:9px 12px;font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">📍 Job details<span style="margin-left:auto;font-size:12px;color:var(--text-muted);">▾</span></div>'
+        +       '<div onclick="_railToggle(this)" style="padding:9px 12px;font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">📍 Details<span style="margin-left:auto;font-size:12px;color:var(--text-muted);">▾</span></div>'
         +       '<div id="dashLeftJobBody" style="padding:2px 6px 8px;"><div class="dash-rail-empty" style="color:var(--text-muted);font-size:13px;padding:10px;">Tap a job or truck for details.</div></div>'
         +     '</div>'
         +     '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input,#1e2f40);overflow:hidden;">'
@@ -9152,6 +9175,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const hdr = body.previousElementSibling, chev = hdr && hdr.querySelector('span'); if (chev) chev.textContent = '▾';
       body.scrollTop = 0;
       if (jobID) _prefetchJobPhone(jobID).then(ph => _renderJobPhoneSlot(jobID, ph)); // fill the phone slot like the hover box did
+    }
+    // Render arbitrary (non-job) info — trucks, sites, measure result — into the left rail's Details section.
+    // Same visual wrapper as _railShowJob but NO phone-slot wiring (no jobID for non-job content).
+    function _railShowInfo(html) {
+      const body = document.getElementById('dashLeftJobBody'); if (!body) return;
+      body.innerHTML = '<div style="text-align:right;margin:-2px -2px 2px 0;"><span onclick="_railClearJob()" style="cursor:pointer;color:#6e8194;font-size:18px;line-height:1;">×</span></div>' + (html || '');
+      body.style.display = ''; // make sure the section is open
+      const hdr = body.previousElementSibling, chev = hdr && hdr.querySelector('span'); if (chev) chev.textContent = '▾';
+      body.scrollTop = 0;
     }
     function dashMountMap() {
       const pane = document.getElementById('dashMapPane'); if (!pane) return;
