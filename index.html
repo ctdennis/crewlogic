@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.10 | 2026-07-06">
+  <meta name="crewlogic-version" content="v5.50.11 | 2026-07-06">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8973,12 +8973,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const name = mjEsc((String(j.client || '').split(',')[0]) || j.client || 'Job');
           const city = mjAddrParts(j.address).city, jidA = mjEsc(String(j.jobID || '')), wkey = mjEsc(String(j.woID || j.jobID || '')); // jidA = display JobID; wkey = UNIQUE per-appointment lookup key (woID)
           // Body = label color (Vonigo parity); gray when done. Left stripe = pricing zone (inset box-shadow).
-          // 3 states: PAID/dead (status 164/165, or Lost 9993 / Est-Only 9996) → gray + faded + locked;
-          // ESTIMATE TAKEN (label 245 — priced but UNPAID) → reserved amber, still an ACTIVE job (draggable,
-          // no ✓); anything else → its label color. (Estimate 245 no longer grays — verified 2026-07-06 that
-          // 245 fires at estimate-create, before payment; gray is now reserved for truly-paid.)
-          const done = (!!j.completed || j.labelOpt === 9993 || j.labelOpt === 9996);
-          const estTaken = (!done && j.labelOpt === 245);
+          // 3 states (owner rule 2026-07-06):
+          //   PAID/dead — status Completed/Archived (164/165, = payment) OR Lost (9993) → gray + faded + locked.
+          //   NOT STARTED — New Appt (9984) or no label yet → normal color (nothing estimated).
+          //   ESTIMATE TAKEN — anything else while UNPAID (an estimate/price exists, e.g. Est Converted 9975,
+          //     Est Completed 245) → reserved amber, still an ACTIVE job (draggable, no ✓). Gray is reserved
+          //     for truly-paid; the estimate label no longer grays a job (245 fires pre-payment and flaps).
+          const done = (!!j.completed || j.labelOpt === 9993);
+          const notStarted = (!j.labelOpt || j.labelOpt === 9984);
+          const estTaken = (!done && !notStarted);
           const bg = done ? '#5b6b7a' : (estTaken ? EST_TAKEN_COLOR : mjLabelColor(j.labelOpt)), zoneStripe = mjZoneColor(j.zoneID);
           const canDrag = dnd && !done;
           const dragAttrs = canDrag ? ' draggable="true" ondragstart="dashDragStart(event)" ondragend="dashClearDragGhost()" data-wo="' + mjEsc(String(j.woID || '')) + '" data-dur="' + (j.durationMin || 90) + '" data-zip="' + mjEsc(String(j.zip || '')) + '" data-client="' + mjEsc(String(j.client || '')) + '" data-day="' + mjEsc(String(data.dayID || '')) + '" data-route="' + mjEsc(rc) + '" data-tlabel="' + mjEsc(String(j.timeLabel || '')) + '" data-tmin="' + (j.timeMin != null ? j.timeMin : '') + '"' : '';
