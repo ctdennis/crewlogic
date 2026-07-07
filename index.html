@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.25 | 2026-07-07">
+  <meta name="crewlogic-version" content="v5.50.26 | 2026-07-07">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7402,7 +7402,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     // ===== "Where are my trucks?" — telematics truck locations (Linxup/Motive via crewlogic-trucks) =====
     let _trucksMap = null, _truckMarkers = [], _jobMarkers = [], _trucksRefreshTimer = null, _trucksJobDay = 0, _trucksLookahead = false, _lookaheadMarkers = [], _trucksData = [];
-    let _facilitySites = []; // geocoded disposal/recycling/donation sites {emoji,color,name,lat,lon} — powers the "truck at a site" badge (mirrors the at-home house badge)
+    let _truckCurrentFacility = {}; // normalized vehicle name -> {emoji,color,name} of the facility geofence the truck is CURRENTLY inside (from geofence_alerts) — powers the at-site truck badge
     let _trucksMapEl = 'trucksMap'; // which container the trucks map mounts into ('trucksMap' screen | 'dashMapPane' dashboard)
     let _dashMapRO = null; // ResizeObserver that keeps the dashboard map sized to its pane (fixes the half-width race)
     let _dashNeedsFit = false; // request a one-time coverage-fit once the dashboard map's layout + markers are ready
@@ -7462,14 +7462,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // In measure mode (started from a truck), tapping a site measures truck→site (same as a job).
       // Bind both click and mouseover so a mobile first-tap (synthesized hover) triggers it too.
       const attachMeasure = (m, lat, lon, label) => { const go = () => { if (_measureFrom) { try { m.closePopup(); } catch (e) {} _measureToJob({ lat: lat, lon: lon, clientName: label }); } }; m.on('click', go); m.on('mouseover', () => { if (_mtIsTouch()) go(); }); };
-      _facilitySites = []; // rebuild the at-site badge source from the freshly geocoded facilities
       types.forEach(t => {
         if (!t.layer) return;
         t.layer.clearLayers();
         (t.sites || []).forEach(s => {
           const c = s && s.address && coordsByAddr[s.address];
           if (!c) return;
-          _facilitySites.push({ emoji: t.emoji, color: t.color, name: s.name || t.label, lat: c.lat, lon: c.lon });
           const costLine = (t.costSuffix && s.cost != null && s.cost !== '') ? '<br><span style="color:#6e8194;">$' + _truckEsc(String(s.cost)) + t.costSuffix + '</span>' : '';
           const label = t.emoji + ' ' + (s.name || t.label);
           const siteHtml = '<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + _truckEsc(label) + '</b><br>' + _addrLink(_truckProperAddr(s.address), s.address, _truckEsc) + costLine + '</div>';
@@ -8225,12 +8223,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           ? (_trucksJobsData || []).filter(j => j.lat != null && j.lon != null && _distM(t.lat, t.lon, j.lat, j.lon) <= 60)
           : [];
         const jobBadge = nearJobs.length ? '<path d="M31 25.5 L37.5 31 L37.5 37.5 L24.5 37.5 L24.5 31 Z" fill="#F59E0B" stroke="#fff" stroke-width="1.3"/>' : '';
-        // A disposal/recycling/donation site under/near this truck (≤60 m) → badge its emoji (🗑️/♻️/🎁),
-        // mirroring the at-home house badge, so the ops manager sees which trucks are at a facility.
-        const nearSite = (t.lat != null && t.lon != null) ? _facilitySites.find(s => _distM(t.lat, t.lon, s.lat, s.lon) <= 60) : null;
-        const siteBadge = nearSite
-          ? '<circle cx="30" cy="30" r="8.5" fill="#fff" stroke="' + nearSite.color + '" stroke-width="1.4"/><text x="30" y="33.6" text-anchor="middle" font-size="10.5">' + nearSite.emoji + '</text>'
-          : '';
+        // Truck currently INSIDE a disposal/recycling/donation geofence (telematics, via geofence_alerts)
+        // → badge its emoji (🗑️/♻️/🎁) bare, matching the standalone facility markers on the map.
+        const nearSite = _truckCurrentFacility[_normVeh(t.name)] || null;
+        const siteBadge = nearSite ? '<text x="31" y="37" text-anchor="middle" font-size="15">' + nearSite.emoji + '</text>' : '';
         const icon = L.divIcon({
           className: 'truck-num-marker',
           html: '<svg width="40" height="40" viewBox="0 0 40 40" style="filter:drop-shadow(0 1px 3px rgba(0,0,0,.55));">'
@@ -8455,12 +8451,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // (dwelling since its created_at). Everything else = traveling / historical → no dwell badge.
       const _activeDwell = new Map();
       const _seenVeh = new Set();
+      const _cs = (currentUser && currentUser.costSettings) || {};
+      _truckCurrentFacility = {}; // rebuilt each render: which disposal/recycling/donation geofence each truck is currently inside
       rows.forEach(r => {
         const veh = r && r.vehicle_number;
         if (veh == null || _seenVeh.has(veh)) return;
         _seenVeh.add(veh);
         const et = String(r.event_type || '');
         if (et === 'geofence_entry' || et === 'job_arrive') _activeDwell.set(r.id, { sinceIso: r.created_at || r.start_time });
+        // Truck's most-recent event is entry into a classified facility geofence → badge it on the map.
+        if (et === 'geofence_entry') {
+          const cls = _dwellFacilityClass(r.geofence_name, _cs);
+          if (cls && cls.emoji) _truckCurrentFacility[_normVeh(veh)] = { emoji: cls.emoji, color: cls.color, name: r.geofence_name };
+        }
       });
       const html = rows.length ? rows.map(r => _geofenceAlertRow(r, _activeDwell)).join('') : '<div style="padding:14px 10px;color:var(--text-muted,#6e8194);font-size:12px;text-align:center;">No recent alerts.</div>';
       lists.forEach(l => { l.innerHTML = html; });
@@ -8515,16 +8518,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const target = norm(name);
       if (!target) return null;
       const groups = [
-        { sites: cs.disposalSites,  threshold: parseFloat(cs.disposalWait)  || 40 },
-        { sites: cs.recyclingSites, threshold: parseFloat(cs.recyclingWait) || 15 },
-        { sites: cs.donationSites,  threshold: parseFloat(cs.donationWait)  || 15 },
+        { sites: cs.disposalSites,  threshold: parseFloat(cs.disposalWait)  || 40, emoji: '🗑️', color: '#8b5cf6' },
+        { sites: cs.recyclingSites, threshold: parseFloat(cs.recyclingWait) || 15, emoji: '♻️', color: '#10b981' },
+        { sites: cs.donationSites,  threshold: parseFloat(cs.donationWait)  || 15, emoji: '🎁', color: '#ec4899' },
       ];
       for (const g of groups) {
         const arr = Array.isArray(g.sites) ? g.sites : [];
         for (const s of arr) {
           const sn = norm(s && s.name);
           if (!sn) continue;
-          if (sn === target || ((target.indexOf(sn) >= 0 || sn.indexOf(target) >= 0) && sn.length >= 4)) return { threshold: g.threshold };
+          if (sn === target || ((target.indexOf(sn) >= 0 || sn.indexOf(target) >= 0) && sn.length >= 4)) return { threshold: g.threshold, emoji: g.emoji, color: g.color };
         }
       }
       return null;
@@ -8533,6 +8536,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _dwellWoFromName(name) { const m = String(name || '').match(/#(\d+)/); return m ? m[1] : null; }
     // Local midnight today (franchise/browser local) in epoch ms — job time/duration are minutes from it.
     function _localMidnightMs() { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
+    // Normalize a truck/vehicle name for matching telematics positions (t.name) to alert vehicle_number.
+    function _normVeh(s) { return String(s == null ? '' : s).trim().toLowerCase(); }
 
     function _geofenceAlertRow(a, activeDwell) {
       const et = String(a.event_type || '');
