@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.13 | 2026-07-06">
+  <meta name="crewlogic-version" content="v5.50.14 | 2026-07-07">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7704,6 +7704,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // No map recenter: a cheapest/fastest result updates the rail + draws routes WITHOUT panning/zooming
       // the trucks map (owner request). Routes are drawn above; the map keeps its current view.
     }
+    // now + drive minutes → expected-arrival clock time, e.g. "arrive ~2:47 PM" (browser-local). '' if unknown.
+    function _arriveText(mins) { return (mins != null && isFinite(Number(mins))) ? 'arrive ~' + new Date(Date.now() + Number(mins) * 60000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : ''; }
     async function _measureToJob(j) {
       if (!_measureFrom || j.lat == null || j.lon == null || !_trucksMap) return;
       const from = _measureFrom;
@@ -7719,8 +7721,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _measureLine = L.polyline([[from.lat, from.lon], [j.lat, j.lon]], { color: '#1e6fff', weight: 4, dashArray: '7,6', opacity: 0.95, _measure: true }).addTo(_trucksMap);
         try {
           const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: from.lat + ',' + from.lon, dest: j.lat + ',' + j.lon });
+          const arr = _arriveText(data && data.minutes);
           const html = (data && data.success)
-            ? '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(data.distanceText) + ' · ~' + _truckEsc(data.durationText) + ' drive' + (data.inTraffic ? '<br><span style="color:#9fb0c0;font-size:11px;">in current traffic</span>' : '')
+            ? '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(data.distanceText) + ' · ~' + _truckEsc(data.durationText) + ' drive' + (arr ? '<br>' + _truckEsc(arr) : '') + (data.inTraffic ? '<br><span style="color:#9fb0c0;font-size:11px;">in current traffic</span>' : '')
             : 'Could not measure distance — try again.';
           _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
         } catch (_e) { _railShowInfo('<div style="font-size:13px;">Could not measure distance.</div>'); }
@@ -7743,8 +7746,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const distText = (miles != null) ? ((miles < 10 ? miles.toFixed(1) : String(Math.round(miles))) + ' mi') : '';
           const durText = (mins != null) ? ('~' + mins + ' min drive') : '';
           const traffic = !!(sum.trafficDelayInSeconds && sum.trafficDelayInSeconds > 0);
+          const arr = _arriveText(mins);
           const html = '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(distText)
             + ((distText && durText) ? ' · ' : '') + _truckEsc(durText)
+            + (arr ? '<br>' + _truckEsc(arr) : '')
             + (traffic ? '<br><span style="color:#9fb0c0;font-size:11px;">in current traffic</span>' : '');
           _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
           return;
@@ -7784,12 +7789,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       try {
         const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: tlat + ',' + tlon, dest: jlat + ',' + jlon });
         if (data && data.success && data.durationText) {
-          let out = ' · ~' + data.durationText + ' drive' + (data.inTraffic ? ' in traffic' : '');
-          if (data.minutes != null) {
-            const arr = new Date(Date.now() + Number(data.minutes) * 60000); // now + drive time = expected arrival
-            out += ' · arrive ~' + arr.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-          }
-          el.textContent = out;
+          const arr = _arriveText(data.minutes);
+          el.textContent = ' · ~' + data.durationText + ' drive' + (data.inTraffic ? ' in traffic' : '') + (arr ? ' · ' + arr : '');
         } else { el.textContent = ''; }
       } catch (_e) { el.textContent = ''; }
     }
