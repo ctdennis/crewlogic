@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.15 | 2026-07-07">
+  <meta name="crewlogic-version" content="v5.50.16 | 2026-07-07">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7704,8 +7704,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // No map recenter: a cheapest/fastest result updates the rail + draws routes WITHOUT panning/zooming
       // the trucks map (owner request). Routes are drawn above; the map keeps its current view.
     }
-    // now + drive minutes → expected-arrival clock time, e.g. "arrive ~2:47 PM" (browser-local). '' if unknown.
-    function _arriveText(mins) { return (mins != null && isFinite(Number(mins))) ? 'Expected Arrival: ' + new Date(Date.now() + Number(mins) * 60000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : ''; }
+    // Expected-arrival + 2h arrival-window status. Returns {text, late} where text = "Expected Arrival: <clock>"
+    // (browser-local; correct while browser tz == franchise tz) and late = true (after start+2h) / false (within,
+    // incl. early) / null (no job start time → e.g. a site measure → no window, plain arrival).
+    function _arrivalInfo(driveMins, jobStartMin, timeLabel) {
+      if (driveMins == null || !isFinite(Number(driveMins))) return null;
+      const expected = new Date(Date.now() + Number(driveMins) * 60000);
+      const text = 'Expected Arrival: ' + expected.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      let startMin = (jobStartMin != null && jobStartMin !== '' && isFinite(Number(jobStartMin))) ? Number(jobStartMin)
+        : (timeLabel ? _dispClockToMin(timeLabel) : null);
+      if (startMin == null || !isFinite(startMin)) return { text, late: null };
+      const d = new Date(); d.setHours(0, 0, 0, 0);
+      const windowEnd = d.getTime() + (startMin + 120) * 60000; // job start + 2h
+      return { text, late: expected.getTime() > windowEnd };
+    }
     async function _measureToJob(j) {
       if (!_measureFrom || j.lat == null || j.lon == null || !_trucksMap) return;
       const from = _measureFrom;
@@ -7721,11 +7733,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _measureLine = L.polyline([[from.lat, from.lon], [j.lat, j.lon]], { color: '#1e6fff', weight: 4, dashArray: '7,6', opacity: 0.95, _measure: true }).addTo(_trucksMap);
         try {
           const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: from.lat + ',' + from.lon, dest: j.lat + ',' + j.lon });
-          const arr = _arriveText(data && data.minutes);
+          const info = _arrivalInfo(data && data.minutes, j.time, j.timeLabel);
+          let arrHtml = '';
+          if (info) {
+            if (info.late === true && j.jobID) {
+              arrHtml = '<br><span style="color:#ef4444;font-weight:600;">⚠️ ' + _truckEsc(info.text) + ' — outside arrival window</span>'
+                + '<br><span style="color:#ef4444;">Contact customer:</span> <span id="jobph-' + _truckEsc(String(j.jobID)) + '">…</span>';
+            } else if (info.late === false) {
+              arrHtml = '<br><span style="color:#22c55e;font-weight:600;">✅ ' + _truckEsc(info.text) + '</span>';
+            } else {
+              arrHtml = '<br>' + _truckEsc(info.text);
+            }
+          }
           const html = (data && data.success)
-            ? '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(data.distanceText) + ' · ~' + _truckEsc(data.durationText) + ' drive' + (arr ? '<br>' + _truckEsc(arr) : '') + (data.inTraffic ? '<br><span style="color:#9fb0c0;font-size:11px;">in current traffic</span>' : '')
+            ? '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(data.distanceText) + ' · ~' + _truckEsc(data.durationText) + ' drive' + arrHtml + (data.inTraffic ? '<br><span style="color:#9fb0c0;font-size:11px;">in current traffic</span>' : '')
             : 'Could not measure distance — try again.';
           _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
+          if (data && data.success && info && info.late === true && j.jobID) {
+            _prefetchJobPhone(j.jobID).then(function (ph) { _renderJobPhoneSlot(j.jobID, ph); });
+          }
         } catch (_e) { _railShowInfo('<div style="font-size:13px;">Could not measure distance.</div>'); }
       };
       // Primary: TomTom Calculate Route — real road-following geometry + traffic-aware ETA (same TomTom key as the traffic tiles).
@@ -7746,12 +7772,26 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const distText = (miles != null) ? ((miles < 10 ? miles.toFixed(1) : String(Math.round(miles))) + ' mi') : '';
           const durText = (mins != null) ? ('~' + mins + ' min drive') : '';
           const traffic = !!(sum.trafficDelayInSeconds && sum.trafficDelayInSeconds > 0);
-          const arr = _arriveText(mins);
+          const info = _arrivalInfo(mins, j.time, j.timeLabel);
+          let arrHtml = '';
+          if (info) {
+            if (info.late === true && j.jobID) {
+              arrHtml = '<br><span style="color:#ef4444;font-weight:600;">⚠️ ' + _truckEsc(info.text) + ' — outside arrival window</span>'
+                + '<br><span style="color:#ef4444;">Contact customer:</span> <span id="jobph-' + _truckEsc(String(j.jobID)) + '">…</span>';
+            } else if (info.late === false) {
+              arrHtml = '<br><span style="color:#22c55e;font-weight:600;">✅ ' + _truckEsc(info.text) + '</span>';
+            } else {
+              arrHtml = '<br>' + _truckEsc(info.text);
+            }
+          }
           const html = '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(distText)
             + ((distText && durText) ? ' · ' : '') + _truckEsc(durText)
-            + (arr ? '<br>' + _truckEsc(arr) : '')
+            + arrHtml
             + (traffic ? '<br><span style="color:#9fb0c0;font-size:11px;">in current traffic</span>' : '');
           _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
+          if (info && info.late === true && j.jobID) {
+            _prefetchJobPhone(j.jobID).then(function (ph) { _renderJobPhoneSlot(j.jobID, ph); });
+          }
           return;
         } catch (_e) {
           if (_measureLine) { _trucksMap.removeLayer(_measureLine); _measureLine = null; }
@@ -7770,13 +7810,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       });
       return best;
     }
-    function _nearestTruckHtml(lat, lon) {
+    function _nearestTruckHtml(lat, lon, jtime, jtlabel) {
       const nt = _nearestTruck(lat, lon);
       if (!nt) return '';
       // Straight-line "mi away" renders instantly; the drive-time ETA (Google, traffic-aware) fills the
       // .job-eta slot async once the card is in the rail (see _fillJobEta), using the embedded coords.
       return '<div style="color:#cdd6df;">🚚 ' + _truckEsc(nt.name) + ' — ' + nt.mi.toFixed(1) + ' mi away'
-        + '<span class="job-eta" data-tlat="' + nt.lat + '" data-tlon="' + nt.lon + '" data-jlat="' + lat + '" data-jlon="' + lon + '" style="color:#9fb0c0;"></span></div>';
+        + '<span class="job-eta" data-tlat="' + nt.lat + '" data-tlon="' + nt.lon + '" data-jlat="' + lat + '" data-jlon="' + lon + '" data-jtime="' + (jtime != null ? jtime : '') + '" data-jtlabel="' + _truckEsc(String(jtlabel || '')) + '" style="color:#9fb0c0;"></span></div>';
     }
     // Fill the .job-eta slot in the rail's Job-details card with the truck→job drive time (traffic-aware,
     // via crewlogic-estimate pointDistance = Google Distance Matrix). Fire-and-forget after the card renders.
@@ -7784,13 +7824,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const el = document.querySelector('#dashLeftJobBody .job-eta'); if (!el) return;
       const tlat = el.getAttribute('data-tlat'), tlon = el.getAttribute('data-tlon');
       const jlat = el.getAttribute('data-jlat'), jlon = el.getAttribute('data-jlon');
+      const jtime = el.getAttribute('data-jtime'), jtlabel = el.getAttribute('data-jtlabel');
       if (!tlat || !tlon || !jlat || !jlon) return;
       el.textContent = ' · …';
       try {
         const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: tlat + ',' + tlon, dest: jlat + ',' + jlon });
         if (data && data.success && data.durationText) {
-          const arr = _arriveText(data.minutes);
-          el.textContent = ' · ~' + data.durationText + ' drive' + (data.inTraffic ? ' in traffic' : '') + (arr ? ' · ' + arr : '');
+          const info = _arrivalInfo(data.minutes, jtime, jtlabel);
+          let arrHtml = '';
+          if (info) {
+            if (info.late === true) arrHtml = ' · <span style="color:#ef4444;font-weight:600;">⚠️ ' + _truckEsc(info.text) + ' — outside window, contact customer</span>';
+            else if (info.late === false) arrHtml = ' · <span style="color:#22c55e;font-weight:600;">✅ ' + _truckEsc(info.text) + '</span>';
+            else arrHtml = ' · ' + _truckEsc(info.text);
+          }
+          el.innerHTML = ' · ~' + _truckEsc(data.durationText) + ' drive' + (data.inTraffic ? ' in traffic' : '') + arrHtml;
         } else { el.textContent = ''; }
       } catch (_e) { el.textContent = ''; }
     }
@@ -7799,8 +7846,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _fillNearestTruck() {
       const slot = document.querySelector('#dashLeftJobBody .rail-nearest'); if (!slot) return;
       const jlat = Number(slot.getAttribute('data-jlat')), jlon = Number(slot.getAttribute('data-jlon'));
+      const jtime = slot.getAttribute('data-jtime'), jtlabel = slot.getAttribute('data-jtlabel');
       if (!Number.isFinite(jlat) || !Number.isFinite(jlon)) return;
-      slot.innerHTML = _nearestTruckHtml(jlat, jlon); // fresh nearest truck (name + mi) + a .job-eta slot
+      slot.innerHTML = _nearestTruckHtml(jlat, jlon, jtime, jtlabel); // fresh nearest truck (name + mi) + a .job-eta slot
       _fillJobEta();                                  // fill the drive-time ETA from the fresh truck coords
     }
     // Format a US phone for display: 8603878366 → 860-387-8366 (the tel: link still uses raw digits).
@@ -7938,7 +7986,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '<br>' + _truckEsc(j.clientName || 'Job')
             + (Number(j.price) > 0 ? '<br><span style="font-weight:800;color:#00E785;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>' : '')
             + (addr ? '<br>' + _addrLink(addr, addr, _truckEsc, '#6db3ff') : '')
-            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '"></div>'
+            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '"></div>'
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
             + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
             + '</div>';
@@ -8312,7 +8360,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + (Number(j.price) > 0 ? '<div style="font-weight:800;color:#00E785;font-size:13px;margin-top:2px;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</div>' : '')
             + '<div style="margin-top:3px;">🏠 ' + _truckEsc(j.clientName || 'Job') + '</div>'
             + (addr ? '<div>' + _addrLink(addr, addr, _truckEsc, '#6db3ff') + '</div>' : '')
-            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '"></div>'
+            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '"></div>'
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
             + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
             + itemsHtml
