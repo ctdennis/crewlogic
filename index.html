@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.19 | 2026-07-07">
+  <meta name="crewlogic-version" content="v5.50.20 | 2026-07-07">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7404,6 +7404,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _trucksMap = null, _truckMarkers = [], _jobMarkers = [], _trucksRefreshTimer = null, _trucksJobDay = 0, _trucksLookahead = false, _lookaheadMarkers = [], _trucksData = [];
     let _trucksMapEl = 'trucksMap'; // which container the trucks map mounts into ('trucksMap' screen | 'dashMapPane' dashboard)
     let _dashMapRO = null; // ResizeObserver that keeps the dashboard map sized to its pane (fixes the half-width race)
+    let _dashNeedsFit = false; // request a one-time coverage-fit once the dashboard map's layout + markers are ready
     // Drop + rebuild the trucks map if it's stale (container detached, e.g. dashboard re-rendered) or the
     // target container changed — so the same map machinery (markers, layers, measure) serves both contexts.
     function _ensureTrucksMapFresh(elId) {
@@ -9307,11 +9308,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _updateTrucksDayToggle();              // initialize the date picker to today
       showTrucks();
       _startTrucksAutoRefresh();
-      // Fix the "half-width tiles" race: the map is created before the dashboard's wide layout finishes
-      // reflowing, so Leaflet measures a too-narrow container. invalidateSize once layout settles, AND a
-      // ResizeObserver fires the instant the pane reaches its final width (so we don't wait for a refresh).
-      const fix = () => { if (_trucksMap && _trucksMapEl === 'dashMapPane') _trucksMap.invalidateSize(); };
-      requestAnimationFrame(fix); setTimeout(fix, 250); setTimeout(fix, 700);
+      // Fix the "half-width tiles" + "zoomed-out on load" races: the map is created before the dashboard's
+      // wide layout finishes reflowing, so Leaflet measures a too-narrow container AND any early fit picks a
+      // too-low zoom that nothing corrects. invalidateSize keeps the size current; and once the layout has
+      // settled AND markers exist, we re-fit the coverage area ONCE. _dashNeedsFit guards it so divider drags
+      // / auto-refreshes never re-zoom after the user has the view they want.
+      _dashNeedsFit = true;
+      const fix = () => {
+        if (!_trucksMap || _trucksMapEl !== 'dashMapPane') return;
+        _trucksMap.invalidateSize();
+        if (_dashNeedsFit && ((_truckMarkers && _truckMarkers.length) || (_jobMarkers && _jobMarkers.length))) {
+          _fitTrucksCentered(); _dashNeedsFit = false;
+        }
+      };
+      requestAnimationFrame(fix); setTimeout(fix, 250); setTimeout(fix, 700); setTimeout(fix, 1500);
       if (window.ResizeObserver) {
         if (_dashMapRO) { try { _dashMapRO.disconnect(); } catch (e) {} }
         _dashMapRO = new ResizeObserver(fix); _dashMapRO.observe(pane);
@@ -15004,7 +15014,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const ctx = _getFeedbackContext();
       const parts = [];
       parts.push('Screen: ' + ctx.screen);
-      if (ctx.estimate_id) parts.push('Estimate: ' + ctx.estimate_id.slice(-8));
+      if (ctx.estimate_id) parts.push('Estimate: ' + String(ctx.estimate_id).slice(-8));
       parts.push('Version: ' + ctx.app_version);
       document.getElementById('feedbackContextSummary').textContent =
         'We\'ll also include: ' + parts.join(' · ');
