@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.22 | 2026-07-07">
+  <meta name="crewlogic-version" content="v5.50.23 | 2026-07-07">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8438,8 +8438,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const cnt = rows.length ? (rows.length + (rows.length >= 50 ? '+' : '')) : '';
       document.querySelectorAll('.gf-alerts-count').forEach(c => { c.textContent = cnt; });
     }
-    // Poll fallback: re-fetch the authoritative newest-first list; if it contains any id we're not
-    // showing (realtime dropped it), re-render in place (scroll preserved). Self-stops when hidden.
+    // 30s refresh: re-fetch the authoritative newest-first list and ALWAYS re-render so the relative
+    // "Xm ago" ages stay current (the panel feels live even when no NEW alert arrived) and anything
+    // realtime dropped is backfilled. Scroll preserved. Self-stops when hidden.
     async function _pollGeofenceAlerts() {
       const lists = document.querySelectorAll('.gf-alerts-list');
       const anyVisible = Array.prototype.some.call(lists, l => l.offsetParent !== null);
@@ -8452,8 +8453,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       try {
         const rows = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&select=id,franchise_id,action,event_type,vehicle_number,geofence_id,geofence_name,start_time,created_at&order=created_at.desc&limit=50');
         if (!Array.isArray(rows)) return;
-        const missing = rows.some(r => !_shownAlertIds.has(r.id));
-        if (!missing) return; // nothing realtime dropped — don't disturb the list/scroll
+        // Always re-render so the "Xm ago" ages refresh each cycle — feels live even with no NEW alert.
         const scrolls = Array.prototype.map.call(lists, l => l.scrollTop);
         _renderGeofenceAlerts(rows); // authoritative order, dedups, resets _shownAlertIds
         Array.prototype.forEach.call(document.querySelectorAll('.gf-alerts-list'), (l, i) => { if (scrolls[i] != null) l.scrollTop = scrolls[i]; });
