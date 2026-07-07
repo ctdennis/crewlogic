@@ -357,6 +357,7 @@ Deno.serve(async (req: Request) => {
 
         const jobRel = relations.find((r) => r.relationType === 'job');
         const routeRel = relations.find((r) => r.relationType === 'route');
+        const clientRel = relations.find((r) => r.relationType === 'client'); // CLIENT account name (e.g. "Clean City Pros"); field 183 is the on-site CONTACT — wrong for commercial clients
 
         const timeMin = parseInt(getField(fields, F_TIME_MINUTES)?.fieldValue || '0', 10);
         const dateService = parseInt(getField(fields, F_DATE_SERVICE)?.fieldValue || '0', 10);
@@ -365,7 +366,7 @@ Deno.serve(async (req: Request) => {
         const base = {
           jobID: jobRel?.objectID ? String(jobRel.objectID) : null,
           workOrderID: wo.objectID,
-          clientName: getField(fields, F_CLIENT_NAME)?.fieldValue || '',
+          clientName: clientRel?.name || getField(fields, F_CLIENT_NAME)?.fieldValue || '',
           address: getField(fields, F_ADDRESS)?.fieldValue || '',
           items: getField(fields, F_ITEMS)?.fieldValue || '',
           time: timeMin,
