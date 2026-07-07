@@ -62,34 +62,36 @@ async function candidates(sb: SupabaseClient, fExternal: string | null): Promise
   return out;
 }
 
-// geofence_id -> name (cache first, else fetch the franchise's Motive geofences and cache all).
-async function resolveGeofenceName(sb: SupabaseClient, franchiseUuid: string, geofenceId: number): Promise<string | null> {
-  const { data: cached } = await sb.from("motive_geofences").select("name").eq("franchise_id", franchiseUuid).eq("geofence_id", geofenceId).maybeSingle();
-  if (cached && cached.name != null) return cached.name;
+// geofence_id -> { name, category } (cache first, else fetch the franchise's Motive geofences and cache all).
+// The telematics `category` (e.g. "Recycling", "Transfer Station", "Donation") is the reliable facility
+// signal; the frontend classifies on it, falling back to name-match for pre-category rows / other providers.
+async function resolveGeofenceName(sb: SupabaseClient, franchiseUuid: string, geofenceId: number): Promise<{ name: string | null; category: string | null }> {
+  const { data: cached } = await sb.from("motive_geofences").select("name, category").eq("franchise_id", franchiseUuid).eq("geofence_id", geofenceId).maybeSingle();
+  if (cached && cached.name != null) return { name: cached.name, category: cached.category ?? null };
   try {
     const { data: cred } = await sb.rpc("get_telematics_credential", { p_franchise_id: franchiseUuid });
     const row = Array.isArray(cred) ? cred[0] : cred;
     const provider = String(row?.provider || "").toLowerCase();
     const token = String(row?.token || "");
-    if (provider !== "motive" || !token) return null;
+    if (provider !== "motive" || !token) return { name: null, category: null };
     const res = await fetch("https://api.gomotive.com/v1/geofences?per_page=100", { headers: { accept: "application/json", "x-api-key": token } });
-    if (!res.ok) { console.error("[motive-webhook] geofences GET", res.status); return null; }
+    if (!res.ok) { console.error("[motive-webhook] geofences GET", res.status); return { name: null, category: null }; }
     const data = await res.json().catch(() => ({}));
     const list: any[] = Array.isArray(data) ? data : (data.geofences || []);
     const rows: any[] = [];
-    let found: string | null = null;
+    let found: { name: string | null; category: string | null } = { name: null, category: null };
     for (const item of list) {
       const g = item?.geofence || item;
       if (g && g.id != null) {
-        rows.push({ franchise_id: franchiseUuid, geofence_id: Number(g.id), name: g.name ?? null });
-        if (Number(g.id) === Number(geofenceId)) found = g.name ?? null;
+        rows.push({ franchise_id: franchiseUuid, geofence_id: Number(g.id), name: g.name ?? null, category: g.category ?? null });
+        if (Number(g.id) === Number(geofenceId)) found = { name: g.name ?? null, category: g.category ?? null };
       }
     }
     if (rows.length) await sb.from("motive_geofences").upsert(rows, { onConflict: "franchise_id,geofence_id" });
     return found;
   } catch (e) {
     console.error("[motive-webhook] geofence name resolve failed:", (e as Error).message);
-    return null;
+    return { name: null, category: null };
   }
 }
 
@@ -170,6 +172,7 @@ Deno.serve(async (req: Request) => {
 
   let eventType = ev.event_type;
   let geofenceName: string | null = null;
+  let geofenceCategory: string | null = null;
   if (jobGeo) {
     // A truck LEAVING is never a delete signal: multi-truck jobs have trucks arrive/leave/return
     // (dump-and-come-back) in any order, so the geofence must persist through the whole job.
@@ -178,14 +181,16 @@ Deno.serve(async (req: Request) => {
     eventType = ev.event_type === "geofence_exit" ? "job_leave" : "job_arrive";
     geofenceName = jobGeo.name; // no Motive name lookup needed — we created it
   } else if (ev.geofence_id != null) {
-    geofenceName = await resolveGeofenceName(sb, matched.uuid, ev.geofence_id);
+    const resolved = await resolveGeofenceName(sb, matched.uuid, ev.geofence_id);
+    geofenceName = resolved.name;
+    geofenceCategory = resolved.category;
   }
 
   const { error } = await sb.from("geofence_alerts").insert({
     franchise_id: matched.uuid, tenant_id: matched.tenant_id,
     action: ev.action, event_type: eventType,
     vehicle_id: ev.vehicle_id, vehicle_number: ev.vehicle_number,
-    geofence_id: ev.geofence_id, geofence_name: geofenceName, event_id: ev.event_id,
+    geofence_id: ev.geofence_id, geofence_name: geofenceName, category: geofenceCategory, event_id: ev.event_id,
     start_time: ev.start_time, end_time: ev.end_time, duration: ev.duration,
     raw: parsed,
   });
