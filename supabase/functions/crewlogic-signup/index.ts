@@ -22,6 +22,22 @@ function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 }
 
+// Best-effort owner notification. Fires the shared crewlogic-notify sender; a failure here must
+// NEVER break provisioning, so everything is wrapped and only logged.
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+async function notifyOwner(subject: string, text: string): Promise<void> {
+  try {
+    const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    await fetch(SUPABASE_URL + "/functions/v1/crewlogic-notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": key, "Authorization": "Bearer " + key },
+      body: JSON.stringify({ subject, text }),
+    });
+  } catch (e) {
+    console.error("[signup] notify failed:", e);
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ success: false, error: "method_not_allowed" }, 405);
@@ -68,6 +84,8 @@ Deno.serve(async (req: Request) => {
       pending_trial_ends_at: trialEndsAt,
     });
     if (jErr) return json({ success: false, error: "profile_create_failed", detail: jErr.message }, 500);
+    await notifyOwner("🎉 New CrewLogic trial signup",
+      `Email: ${email}\nCompany: ${companyName}\nType: Junkluggers prospect\nTrial ends: ${trialEndsAt || "n/a"}\nFranchise: (pending)`);
     return json({ success: true, email, franchiseId: null, vonigoPending: true, trialEndsAt });
   }
 
@@ -91,5 +109,7 @@ Deno.serve(async (req: Request) => {
   });
   if (pErr) return json({ success: false, error: "profile_create_failed", detail: pErr.message }, 500);
 
+  await notifyOwner("🎉 New CrewLogic trial signup",
+    `Email: ${email}\nCompany: ${companyName}\nType: native\nTrial ends: n/a\nFranchise: ${franchiseId}`);
   return json({ success: true, email, franchiseId });
 });
