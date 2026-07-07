@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.28 | 2026-07-07">
+  <meta name="crewlogic-version" content="v5.50.29 | 2026-07-07">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15286,6 +15286,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         });
         feedbackEl.textContent = '✓ Thanks! Your feedback was sent.';
         feedbackEl.style.color = 'var(--accent-green)';
+        // Best-effort owner notification (fire-and-forget; never blocks/fails the feedback submit).
+        try {
+          const fbCtx = payload.context;
+          edgeFunctionCall('crewlogic-notify', {
+            subject: '💬 New CrewLogic feedback',
+            text: 'From: ' + (payload.user_name || payload.user_email || 'anon') + ' (' + (payload.user_role || '?') + ')\nScreen: ' + (fbCtx && fbCtx.screen || '?') + '\nVersion: ' + (fbCtx && fbCtx.app_version || '?') + '\n\n' + text
+          });
+        } catch (e) {}
         setTimeout(closeFeedbackModal, 1500);
       } catch (e) {
         console.error('[feedback] submit failed:', e);
