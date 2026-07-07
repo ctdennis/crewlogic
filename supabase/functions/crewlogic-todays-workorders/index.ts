@@ -56,6 +56,7 @@ const F_CLIENT_NAME = 183;
 const F_ADDRESS = 184;
 const F_DATE_SERVICE = 185;
 const F_TIME_MINUTES = 9082; // minutes from midnight of the appointment
+const F_DURATION = 186; // appointment duration in minutes (arrival-window length)
 const F_PRICE = 813;
 const F_ITEMS = 10336; // customer-facing items list (safe to display)
 const F_LABEL = 201;   // appointment label/category (drives the Vonigo schedule pill color)
@@ -369,6 +370,7 @@ Deno.serve(async (req: Request) => {
           items: getField(fields, F_ITEMS)?.fieldValue || '',
           time: timeMin,
           timeLabel: formatTimeLabel(timeMin),
+          durationMin: parseInt(getField(fields, F_DURATION)?.fieldValue || '0', 10),
           status: statusLabel,
           statusOptionID,
           route: routeRel?.name || '',
