@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.21 | 2026-07-07">
+  <meta name="crewlogic-version" content="v5.50.22 | 2026-07-07">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8410,8 +8410,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function _fetchAndRenderAlerts() {
       const lists = document.querySelectorAll('.gf-alerts-list');
       if (!lists.length) return;
+      const fid = currentUser && currentUser.franchiseInternalID;
+      if (!fid) { _renderGeofenceAlerts([]); return; } // fail closed — never surface another franchise's alerts
       try {
-        const rows = await supabaseFetch('/rest/v1/geofence_alerts?select=id,franchise_id,action,event_type,vehicle_number,geofence_id,geofence_name,start_time,created_at&order=created_at.desc&limit=50');
+        const rows = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&select=id,franchise_id,action,event_type,vehicle_number,geofence_id,geofence_name,start_time,created_at&order=created_at.desc&limit=50');
         _renderGeofenceAlerts(Array.isArray(rows) ? rows : []);
       } catch (e) {
         lists.forEach(l => { l.innerHTML = '<div style="padding:12px;color:var(--text-muted,#6e8194);font-size:12px;">Could not load alerts.</div>'; });
@@ -8445,8 +8447,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (_geofenceAlertsPollTimer) { clearInterval(_geofenceAlertsPollTimer); _geofenceAlertsPollTimer = null; }
         return;
       }
+      const fid = currentUser && currentUser.franchiseInternalID;
+      if (!fid) return; // fail closed — never surface another franchise's alerts
       try {
-        const rows = await supabaseFetch('/rest/v1/geofence_alerts?select=id,franchise_id,action,event_type,vehicle_number,geofence_id,geofence_name,start_time,created_at&order=created_at.desc&limit=50');
+        const rows = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&select=id,franchise_id,action,event_type,vehicle_number,geofence_id,geofence_name,start_time,created_at&order=created_at.desc&limit=50');
         if (!Array.isArray(rows)) return;
         const missing = rows.some(r => !_shownAlertIds.has(r.id));
         if (!missing) return; // nothing realtime dropped — don't disturb the list/scroll
@@ -8529,9 +8533,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       try {
         if (_geofenceAlertsChannel) { supabaseClient.removeChannel(_geofenceAlertsChannel); _geofenceAlertsChannel = null; }
         const fid = currentUser && currentUser.franchiseInternalID;
+        if (!fid) return; // no franchise → don't subscribe (fail closed against cross-franchise leaks)
         _geofenceAlertsChannel = supabaseClient
           .channel('geofence_alerts_live')
-          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'geofence_alerts' }, (payload) => {
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'geofence_alerts', filter: 'franchise_id=eq.' + fid }, (payload) => {
             const row = payload && payload.new;
             if (!row) return;
             if (fid && row.franchise_id && row.franchise_id !== fid) return; // franchise safety net (realtime RLS should already scope)
