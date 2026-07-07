@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.26 | 2026-07-07">
+  <meta name="crewlogic-version" content="v5.50.27 | 2026-07-07">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8427,7 +8427,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const fid = currentUser && currentUser.franchiseInternalID;
       if (!fid) { _renderGeofenceAlerts([]); return; } // fail closed — never surface another franchise's alerts
       try {
-        const rows = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&select=id,franchise_id,action,event_type,vehicle_number,geofence_id,geofence_name,start_time,created_at&order=created_at.desc&limit=50');
+        const rows = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&select=id,franchise_id,action,event_type,vehicle_number,geofence_id,geofence_name,category,start_time,created_at&order=created_at.desc&limit=50');
         _renderGeofenceAlerts(Array.isArray(rows) ? rows : []);
       } catch (e) {
         lists.forEach(l => { l.innerHTML = '<div style="padding:12px;color:var(--text-muted,#6e8194);font-size:12px;">Could not load alerts.</div>'; });
@@ -8461,7 +8461,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (et === 'geofence_entry' || et === 'job_arrive') _activeDwell.set(r.id, { sinceIso: r.created_at || r.start_time });
         // Truck's most-recent event is entry into a classified facility geofence → badge it on the map.
         if (et === 'geofence_entry') {
-          const cls = _dwellFacilityClass(r.geofence_name, _cs);
+          const cls = _facilityForAlert(r, _cs);
           if (cls && cls.emoji) _truckCurrentFacility[_normVeh(veh)] = { emoji: cls.emoji, color: cls.color, name: r.geofence_name };
         }
       });
@@ -8484,7 +8484,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const fid = currentUser && currentUser.franchiseInternalID;
       if (!fid) return; // fail closed — never surface another franchise's alerts
       try {
-        const rows = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&select=id,franchise_id,action,event_type,vehicle_number,geofence_id,geofence_name,start_time,created_at&order=created_at.desc&limit=50');
+        const rows = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&select=id,franchise_id,action,event_type,vehicle_number,geofence_id,geofence_name,category,start_time,created_at&order=created_at.desc&limit=50');
         if (!Array.isArray(rows)) return;
         // Always re-render so the "Xm ago" ages refresh each cycle — feels live even with no NEW alert.
         const scrolls = Array.prototype.map.call(lists, l => l.scrollTop);
@@ -8531,6 +8531,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         }
       }
       return null;
+    }
+    // Facility type for an alert — prefer the telematics CATEGORY (reliable), fall back to the
+    // geofence-name↔settings-site name match for alerts that predate category capture / other providers.
+    function _facilityForAlert(a, cs) {
+      const cat = a && a.category ? String(a.category) : '';
+      if (cat) {
+        if (/transfer|disposal|landfill|dump/i.test(cat)) return { emoji: '🗑️', color: '#8b5cf6', threshold: parseFloat(cs.disposalWait)  || 40 };
+        if (/recycl/i.test(cat))                          return { emoji: '♻️', color: '#10b981', threshold: parseFloat(cs.recyclingWait) || 15 };
+        if (/donat/i.test(cat))                           return { emoji: '🎁', color: '#ec4899', threshold: parseFloat(cs.donationWait)  || 15 };
+        return null; // Job Site / Truck Stop / Restricted / Uncategorized → not a facility badge
+      }
+      return _dwellFacilityClass(a.geofence_name, cs); // fallback: name match (returns {threshold,emoji,color} or null)
     }
     // Pull the "#<woID>" segment out of a job geofence name ("<client> · #<woID> · <town>").
     function _dwellWoFromName(name) { const m = String(name || '').match(/#(\d+)/); return m ? m[1] : null; }
@@ -8583,7 +8595,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const sinceMs = new Date(dwell.sinceIso).getTime();
         let over = false, amber = false, note = '';
         if (et === 'geofence_entry') {
-          const cls = _dwellFacilityClass(a.geofence_name, cs); // no match → no flag (fuel/depot geofences)
+          const cls = _facilityForAlert(a, cs); // category-first, name-match fallback; no match → no flag
           if (cls) {
             const elapsedMin = (Date.now() - sinceMs) / 60000;
             if (elapsedMin > cls.threshold) { over = true; note = ' · over ' + cls.threshold + 'm'; }
