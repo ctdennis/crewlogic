@@ -1,6 +1,6 @@
 # Plan — Yard Signs Split-off (standalone app + CrewLogic SSO hand-off)
 
-**Status:** DRAFT for Owner approval (2026-07-07). No code until approved.
+**Status:** APPROVED (Owner, 2026-07-07). Executing by phase. Decisions resolved below.
 **Owner:** charles.dennis@junkluggers.com
 **Author:** Claude (master session)
 **Related:** the CrewLogic yard-signs feature map (2026-07-05 recon); `docs/plan-payments.md` (CrewLogic billing); the Blue Collar Technology umbrella (`bluecollartechai.com`).
@@ -73,13 +73,13 @@ Junkluggers' existing yard-signs data lives in CrewLogic's Supabase today. Once 
 5. **Entitlement + independent billing** — CrewLogic tier→token gate; Yard Signs Stripe live.
 6. **Junkluggers migration + cutover** — migrate data; flip the tile; retire the in-CrewLogic signs screens.
 
-## Open decisions (need Owner)
-1. **Rewards in v1** — gamification only (credits + leaderboard; the compelling core) with reward-issuance behind a pluggable seam, **or** wire gift-cards (PromoVault) at launch? *(Recommend: gamification-only v1 — a generic customer has no PromoVault account.)*
-2. **Pricing / go-to-market** — free beta first to validate, or paid from day one? *(Recommend: free beta; Stripe wired but tiers TBD — doesn't block the build.)*
-3. **Which CrewLogic tiers include Yard Signs** — the entitlement mapping (ties to `plan-payments.md`). Owner's call.
-4. **Junkluggers data** — migrate existing signs into the new app (recommend), or start fresh?
-5. **Token signing** — HS256 shared secret (simpler, both services are yours) vs asymmetric EdDSA/RS256 (RP can't mint). *(Recommend HS256 for v1, asymmetric as a hardening follow-up.)*
-6. **New repo** for the Yard Signs app (recommend yes) + new Supabase project (recommend yes).
+## Resolved decisions (Owner, 2026-07-07)
+1. **Rewards — LEFT OUT of v1.** It only works in test today and the production model isn't fleshed out. **Future prod model (Owner):** the *customer* enters their own credit-card / account on **PromoVault** and configures rewards **there**; Yard Sign AI is only responsible for **maintaining the connection to their PromoVault account** (bring-your-own-account integration, not us funding/reselling rewards). Revisit as a later phase; keep a pluggable reward-provider seam so it drops in.
+2. **Go-to-market — free beta first.** Stripe wired but dormant; tiers TBD later.
+3. **Entitlement — the CrewLogic PRO tier includes Yard Signs.** (Pro-and-above; the SSO token is minted only for Pro-tier CrewLogic users.)
+4. **Junkluggers data — migrate.** One-time migration of the yard_signs cluster into the new project; Junkluggers = first company.
+5. **Token signing — HS256 shared secret** for v1 (asymmetric later as hardening).
+6. **New repo + new Supabase project** for Yard Sign AI — yes (clean isolation). Marketing on the apex `yardsignai.com`, the app on `app.yardsignai.com` (mirrors CrewLogic).
 
 ## Risks / notes
 - **Shared `crewlogic-ai` / `estimate-photos` coupling** must be cleanly split out of CrewLogic when porting (recon flagged these as the top coupling points).
