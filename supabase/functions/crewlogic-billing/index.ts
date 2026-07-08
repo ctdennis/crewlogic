@@ -76,7 +76,7 @@ async function sbPatch(path: string, body: unknown): Promise<void> {
   if (!res.ok) { const t = await res.text().catch(() => ""); throw new Error(`Supabase PATCH ${path} -> ${res.status} ${t}`); }
 }
 
-type Franchise = { id: string; external_id: string | null; tenant_id: string; stripe_customer_id: string | null };
+type Franchise = { id: string; external_id: string | null; tenant_id: string; stripe_customer_id: string | null; stripe_subscription_id: string | null };
 
 // Resolve the caller's OWN franchise from their Supabase Auth token (never trust client IDs).
 async function franchiseForCaller(token: string | null): Promise<{ franchise: Franchise; email: string } | null> {
@@ -87,7 +87,7 @@ async function franchiseForCaller(token: string | null): Promise<{ franchise: Fr
   const profs = await sbGet(`/rest/v1/profiles?auth_user_id=eq.${encodeURIComponent(user.id)}&select=franchise_id`);
   const fid = profs[0]?.franchise_id;
   if (!fid) return null;
-  const fr = await sbGet(`/rest/v1/franchises?id=eq.${encodeURIComponent(fid)}&select=id,external_id,tenant_id,stripe_customer_id`);
+  const fr = await sbGet(`/rest/v1/franchises?id=eq.${encodeURIComponent(fid)}&select=id,external_id,tenant_id,stripe_customer_id,stripe_subscription_id`);
   if (!fr[0]) return null;
   return { franchise: fr[0] as Franchise, email: user.email || "" };
 }
@@ -233,6 +233,12 @@ Deno.serve(async (req: Request) => {
         return json({ url: ps.url });
       }
 
+      // Guard: never create a SECOND subscription. If this franchise already has a live Stripe
+      // subscription, a plan change must go through the Customer Portal ("Manage billing"), NOT a new
+      // Checkout — otherwise the customer ends up double-billed on two concurrent subscriptions.
+      if (who.franchise.stripe_subscription_id) {
+        return json({ error: "You already have an active subscription. Use “Manage billing” to change your plan.", code: "already_subscribed" }, 409);
+      }
       const tier = String(body.tier || "starter").toLowerCase();
       const priceId = priceForTier(tier);
       if (!priceId) { console.error(`[billing] no price for tier ${tier}`); return json({ error: "Billing isn’t configured yet." }, 500); }

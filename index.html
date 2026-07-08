@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.32 | 2026-07-08">
+  <meta name="crewlogic-version" content="v5.50.33 | 2026-07-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -2162,8 +2162,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">
               Subscribe to a plan, or manage an existing subscription — update your card or cancel anytime.
             </div>
-            <button class="btn-surface" onclick="openSubscribeModal()" style="padding:8px 16px;font-size:13px;font-weight:700;margin-right:8px;">Choose a plan</button>
-            <button class="btn-surface" onclick="openBillingPortal()" style="padding:8px 16px;font-size:13px;font-weight:700;">Manage billing</button>
+            <button id="choosePlanBtn" class="btn-surface" onclick="openSubscribeModal()" style="padding:8px 16px;font-size:13px;font-weight:700;margin-right:8px;">Choose a plan</button>
+            <button id="manageBillingBtn" class="btn-surface" onclick="openBillingPortal()" style="padding:8px 16px;font-size:13px;font-weight:700;">Manage billing</button>
           </div>
 
           <!-- Account -->
@@ -4171,10 +4171,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       try {
         const data = await billingCall('createCheckoutSession', { returnUrl: window.location.origin, tier: t });
         if (data && data.url) { window.location.href = data.url; return; }
+        // Already-subscribed guard (server-enforced): route to the Customer Portal to CHANGE plans,
+        // never a second Checkout (which would create a duplicate, double-billed subscription).
+        if (data && data.code === 'already_subscribed') {
+          if (btn) { btn.disabled = false; btn.textContent = orig; }
+          closeSubscribeModal();
+          alert(data.error || 'You already have an active subscription. Use “Manage billing” to change your plan.');
+          openBillingPortal();
+          return;
+        }
         alert((data && data.error) || 'Could not start checkout. Please try again.');
       } catch (_e) { alert('Could not start checkout. Please try again.'); }
       if (btn) { btn.disabled = false; btn.textContent = orig; }
     }
+    // True when the franchise has a live PAID subscription (webhook sets status 'active'). UX signal to
+    // steer plan changes to the Portal; the billing fn independently enforces the real anti-double-sub guard.
+    function _hasActiveSub() { return !!(currentUser && currentUser.subscriptionStatus === 'active'); }
     // Fill the tier-picker prices live from Stripe (so the displayed $ can't drift from the real price).
     async function renderTierPrices() {
       try {
@@ -4190,6 +4202,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // Settings "Choose a plan" → tier-picker modal (proactive upgrade, any time — not just at the paywall).
     function openSubscribeModal() {
+      // Already subscribed? Plan changes go through the Customer Portal, never a second Checkout.
+      if (_hasActiveSub()) { openBillingPortal(); return; }
       const m = document.getElementById('subscribeModal');
       if (!m) return;
       m.style.display = 'flex';
@@ -7085,9 +7099,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
       document.getElementById('paywallScreen').style.display = 'none';
       document.getElementById('appShell').classList.add('active');
-      // Settings "Manage billing" card — visible only when billing is live.
+      // Settings Billing card — visible only when billing is live. Subscribed → "Manage billing"
+      // (Portal, for plan changes); not subscribed → "Choose a plan" (Checkout). Never both.
       const _billSettings = document.getElementById('billingSettingsCard');
       if (_billSettings) _billSettings.style.display = BILLING_ENABLED ? 'block' : 'none';
+      const _hasSub = _hasActiveSub();
+      const _chooseBtn = document.getElementById('choosePlanBtn');
+      const _manageBtn = document.getElementById('manageBillingBtn');
+      if (_chooseBtn) _chooseBtn.style.display = _hasSub ? 'none' : '';
+      if (_manageBtn) _manageBtn.style.display = _hasSub ? '' : 'none';
 
       // Apply this franchise's brand color to the app theme (falls back to default green)
       const brandHex = (currentUser.costSettings && currentUser.costSettings.brandColor) || DEFAULT_BRAND_COLOR;
