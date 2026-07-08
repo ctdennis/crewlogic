@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.31 | 2026-07-08">
+  <meta name="crewlogic-version" content="v5.50.32 | 2026-07-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1249,6 +1249,37 @@
     </div>
   </div>
 
+  <!-- Subscribe modal — proactive plan picker (Settings → Billing → "Choose a plan"). Reuses startCheckout();
+       prices filled live from Stripe by renderTierPrices() into the mprice-* spans. -->
+  <div id="subscribeModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)closeSubscribeModal()">
+    <div style="width:100%;max-width:400px;background:var(--bg-card);border-radius:var(--radius);padding:20px;border:1px solid var(--border);text-align:left;margin:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <div style="font-size:18px;font-weight:700;color:var(--text-primary);">Choose your plan</div>
+        <button onclick="closeSubscribeModal()" aria-label="Close" style="background:none;border:none;color:var(--text-muted);font-size:24px;line-height:1;cursor:pointer;padding:0 4px;">&times;</button>
+      </div>
+      <div style="font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:14px;">Subscribe any time — billed monthly per location, cancel whenever.</div>
+
+      <div style="border:1px solid var(--border);border-radius:10px;padding:13px;margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;"><span style="font-weight:700;color:var(--text-primary);">Starter</span><span style="font-weight:800;color:var(--text-primary);"><span id="mprice-starter">$29.99</span><span style="font-size:11px;color:var(--text-muted);font-weight:600;">/mo</span></span></div>
+        <div style="font-size:12px;color:var(--text-muted);margin:5px 0 10px;line-height:1.5;">AI estimating, volume check, price lookup, yard signs.</div>
+        <button onclick="startCheckout('starter')" style="width:100%;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-weight:700;font-size:14px;padding:11px;border-radius:var(--radius-sm);cursor:pointer;">Choose Starter</button>
+      </div>
+
+      <div style="border:2px solid var(--accent-green);border-radius:10px;padding:13px;margin-bottom:10px;position:relative;">
+        <div style="position:absolute;top:-9px;right:12px;background:var(--accent-green);color:var(--accent-text);font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;">MOST POPULAR</div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;"><span style="font-weight:700;color:var(--text-primary);">Pro</span><span style="font-weight:800;color:var(--text-primary);"><span id="mprice-pro">$59.99</span><span style="font-size:11px;color:var(--text-muted);font-weight:600;">/mo</span></span></div>
+        <div style="font-size:12px;color:var(--text-muted);margin:5px 0 10px;line-height:1.5;">Everything in Starter + Vonigo dispatch, trucks map, job plan, job router.</div>
+        <button onclick="startCheckout('pro')" style="width:100%;background:var(--accent-green);color:var(--accent-text);font-weight:700;font-size:14px;padding:11px;border:none;border-radius:var(--radius-sm);cursor:pointer;">Choose Pro</button>
+      </div>
+
+      <div style="border:1px solid var(--border);border-radius:10px;padding:13px;margin-bottom:4px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;"><span style="font-weight:700;color:var(--text-primary);">Enterprise</span><span style="font-weight:800;color:var(--text-primary);"><span id="mprice-enterprise">$129.99</span><span style="font-size:11px;color:var(--text-muted);font-weight:600;">/mo</span></span></div>
+        <div style="font-size:12px;color:var(--text-muted);margin:5px 0 10px;line-height:1.5;">Everything in Pro + higher usage limits + dedicated support.</div>
+        <button onclick="startCheckout('enterprise')" style="width:100%;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-weight:700;font-size:14px;padding:11px;border-radius:var(--radius-sm);cursor:pointer;">Choose Enterprise</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== APP SHELL ===== -->
   <div class="app-shell" id="appShell">
     <div class="app-header" style="flex-direction:column;align-items:stretch;padding:0;">
@@ -2129,8 +2160,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           <div class="settings-card fade-in fade-in-delay-4" id="billingSettingsCard" style="display:none;">
             <div class="settings-card-title">Billing</div>
             <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">
-              Manage your CrewLogicAI subscription — update your card or cancel anytime.
+              Subscribe to a plan, or manage an existing subscription — update your card or cancel anytime.
             </div>
+            <button class="btn-surface" onclick="openSubscribeModal()" style="padding:8px 16px;font-size:13px;font-weight:700;margin-right:8px;">Choose a plan</button>
             <button class="btn-surface" onclick="openBillingPortal()" style="padding:8px 16px;font-size:13px;font-weight:700;">Manage billing</button>
           </div>
 
@@ -4150,11 +4182,24 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const p = (data && data.prices) || {};
         const fmt = (c) => '$' + (c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         ['starter', 'pro', 'enterprise'].forEach(t => {
-          const el = document.getElementById('price-' + t);
-          if (el && p[t] && p[t].amount != null) el.textContent = fmt(p[t].amount);
+          if (!(p[t] && p[t].amount != null)) return;
+          const txt = fmt(p[t].amount);
+          ['price-' + t, 'mprice-' + t].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = txt; }); // paywall + Settings modal
         });
       } catch (_e) { /* keep fallback amounts */ }
     }
+    // Settings "Choose a plan" → tier-picker modal (proactive upgrade, any time — not just at the paywall).
+    function openSubscribeModal() {
+      const m = document.getElementById('subscribeModal');
+      if (!m) return;
+      m.style.display = 'flex';
+      if (BILLING_ENABLED) renderTierPrices(); // fill live prices into the mprice-* spans
+    }
+    function closeSubscribeModal() {
+      const m = document.getElementById('subscribeModal');
+      if (m) m.style.display = 'none';
+    }
+
     // Settings "Manage billing" → Stripe Customer Portal (update card / cancel).
     async function openBillingPortal() {
       const data = await billingCall('createPortalSession', { returnUrl: window.location.origin });
