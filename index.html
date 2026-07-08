@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.30 | 2026-07-07">
+  <meta name="crewlogic-version" content="v5.50.31 | 2026-07-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -23048,8 +23048,17 @@ Please review the estimate below. If you have any questions or would like to adj
     // to avoid repeated signed-URL fetches every time we render the home screen).
     let _cachedLogoUrl = null;
     let _cachedLogoUrlForPath = null;
+    // Junkluggers franchises with no logo of their own default to the shared Junkluggers brand logo
+    // (the one set up on #90). Uploading a logo sets logoPath, which overrides this default.
+    const JL_TENANT_ID = '946a4535-aa61-45b6-a6fb-9190ff546d41';
+    const JL_DEFAULT_LOGO_PATH = 'franchise-logos/90/logo.png';
+    function _effectiveLogoPath() {
+      const own = currentUser && currentUser.costSettings && currentUser.costSettings.logoPath;
+      if (own) return own;
+      return (currentUser && currentUser.tenantID === JL_TENANT_ID) ? JL_DEFAULT_LOGO_PATH : null;
+    }
     async function getBrandLogoUrl() {
-      const path = currentUser && currentUser.costSettings && currentUser.costSettings.logoPath;
+      const path = _effectiveLogoPath();
       if (!path) { _cachedLogoUrl = null; _cachedLogoUrlForPath = null; return null; }
       if (_cachedLogoUrlForPath === path && _cachedLogoUrl) return _cachedLogoUrl;
       try {
@@ -23085,10 +23094,11 @@ Please review the estimate below. If you have any questions or would like to adj
       const previewEl = document.getElementById('brandLogoPreview');
       const removeBtn = document.getElementById('brandLogoRemoveBtn');
       if (!previewEl) return;
+      const ownPath = currentUser && currentUser.costSettings && currentUser.costSettings.logoPath; // their OWN upload (vs the shared JL default)
       const url = await getBrandLogoUrl();
       if (url) {
-        previewEl.innerHTML = '<img src="' + url + '" style="max-width:100%;max-height:100%;object-fit:contain;" alt="Logo preview" />';
-        if (removeBtn) removeBtn.style.display = '';
+        previewEl.innerHTML = '<img src="' + url + '" title="' + (ownPath ? 'Your logo' : 'Junkluggers default — upload to use your own') + '" style="max-width:100%;max-height:100%;object-fit:contain;" alt="Logo preview" />';
+        if (removeBtn) removeBtn.style.display = ownPath ? '' : 'none'; // only removable when it's their own logo, not the shared default
       } else {
         previewEl.innerHTML = 'No logo uploaded';
         if (removeBtn) removeBtn.style.display = 'none';
@@ -23101,7 +23111,7 @@ Please review the estimate below. If you have any questions or would like to adj
     let _cachedLogoBase64ForPath = null;
     let _cachedLogoMime = null;
     async function getBrandLogoBase64() {
-      const path = currentUser && currentUser.costSettings && currentUser.costSettings.logoPath;
+      const path = _effectiveLogoPath();
       if (!path) return null;
       if (_cachedLogoBase64ForPath === path && _cachedLogoBase64) {
         return { base64: _cachedLogoBase64, format: _cachedLogoMime };
