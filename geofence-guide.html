@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Geofence Setup Guide — CrewLogic Dispatch</title>
+<style>
+  :root {
+    --bg:#f6f8f6; --panel:#ffffff; --panel-2:#eef2ef; --line:#dde6e0;
+    --ink:#12201b; --muted:#5b6b64; --faint:#8a988f;
+    --accent:#0b9d5f; --accent-bright:#00c46e;
+    --disposal:#7c53e0; --recycling:#0e9d6e; --donation:#d63c93;
+    --shadow:0 1px 2px rgba(18,32,27,.06), 0 8px 24px rgba(18,32,27,.05);
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0e1613; --panel:#16211d; --panel-2:#1b2721; --line:#28352e;
+      --ink:#e8f1ec; --muted:#93a69c; --faint:#6f8177;
+      --accent:#2fd08a; --accent-bright:#57e6a6;
+      --disposal:#a688f0; --recycling:#3fd39b; --donation:#f174b8;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  * { box-sizing:border-box; }
+  html { -webkit-text-size-adjust:100%; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
+    line-height:1.6; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:780px; margin:0 auto; padding:clamp(24px,5vw,64px) clamp(18px,4vw,32px) 80px; }
+
+  .eyebrow { font-size:12px; font-weight:700; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--accent); margin:0 0 12px; display:flex; align-items:center; gap:9px; }
+  .eyebrow .dot { width:7px; height:7px; border-radius:50%; background:var(--accent-bright);
+    box-shadow:0 0 0 4px color-mix(in srgb, var(--accent-bright) 22%, transparent); }
+
+  h1 { font-size:clamp(30px,5.4vw,46px); line-height:1.05; letter-spacing:-.02em;
+    text-wrap:balance; margin:0 0 14px; font-weight:800; }
+  .lede { font-size:clamp(16px,2.3vw,18.5px); color:var(--muted); max-width:62ch; margin:0; }
+  .lede strong { color:var(--ink); font-weight:600; }
+
+  h2 { font-size:20px; letter-spacing:-.01em; margin:0 0 4px; font-weight:750; }
+  section { margin-top:clamp(40px,6vw,60px); }
+  .sec-head { display:flex; align-items:baseline; gap:12px; margin-bottom:18px;
+    padding-bottom:12px; border-bottom:1px solid var(--line); }
+  .sec-num { font-family:var(--mono); font-size:13px; font-weight:600; color:var(--faint);
+    font-variant-numeric:tabular-nums; }
+  .sec-sub { color:var(--muted); font-size:14px; margin-left:auto; text-align:right; }
+
+  p { margin:0 0 14px; }
+  .key { font-family:var(--mono); font-size:.88em; background:var(--panel-2);
+    border:1px solid var(--line); border-radius:5px; padding:1px 6px; white-space:nowrap; }
+
+  .thesis { background:var(--panel); border:1px solid var(--line); border-radius:16px;
+    padding:22px 24px; box-shadow:var(--shadow); margin:26px 0 0; border-left:4px solid var(--accent); }
+  .thesis p { margin:0; font-size:16.5px; }
+  .thesis .lead { font-weight:700; color:var(--ink); }
+
+  /* naming map — the centerpiece: one row per site type, both provider terms */
+  .cats { display:flex; flex-direction:column; gap:12px; }
+  .cat { display:grid; grid-template-columns:52px 1fr auto; align-items:center; gap:18px;
+    background:var(--panel); border:1px solid var(--line); border-left:5px solid var(--c);
+    border-radius:14px; padding:16px 20px; box-shadow:var(--shadow); }
+  .cat .badge { font-size:26px; line-height:1; text-align:center; }
+  .cat .name { font-weight:700; font-size:16px; }
+  .cat .name .term { display:block; font-weight:500; font-size:12.5px; color:var(--faint); margin-top:3px; }
+  .cat .name .term b { color:var(--muted); font-weight:700; }
+  .cat .uses { font-size:13px; color:var(--muted); text-align:right; white-space:nowrap; }
+  .cat .uses b { color:var(--ink); font-weight:650; display:block; font-size:14px; }
+  .cat.muted { border-left-color:var(--line); }
+  .cat.muted .badge { font-size:15px; color:var(--faint); }
+
+  ol.steps { list-style:none; counter-reset:s; margin:0; padding:0; display:flex; flex-direction:column; gap:14px; }
+  ol.steps li { counter-increment:s; display:grid; grid-template-columns:30px 1fr; gap:16px; align-items:start; }
+  ol.steps li::before { content:counter(s); font-family:var(--mono); font-weight:700; font-size:13px;
+    color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent);
+    border:1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    width:30px; height:30px; border-radius:9px; display:grid; place-items:center; }
+  ol.steps li b { color:var(--ink); }
+  .path { font-family:var(--mono); font-size:.9em; color:var(--accent); }
+
+  .note { background:var(--panel-2); border:1px solid var(--line); border-radius:14px;
+    padding:16px 20px; display:flex; gap:14px; align-items:flex-start; }
+  .note .ic { font-size:20px; line-height:1.3; }
+  .note .body { font-size:14.5px; color:var(--muted); }
+  .note .body b { color:var(--ink); }
+
+  ul.pts { list-style:none; margin:16px 0 0; padding:0; display:flex; flex-direction:column; gap:11px; }
+  ul.pts li { display:grid; grid-template-columns:22px 1fr; gap:12px; align-items:start; font-size:15px; }
+  ul.pts li .tick { color:var(--accent); font-weight:800; }
+  ul.pts li b { color:var(--ink); }
+
+  .check { background:var(--panel); border:1px solid var(--line); border-radius:16px;
+    padding:20px 22px; box-shadow:var(--shadow); }
+  .check .row { display:grid; grid-template-columns:24px 1fr; gap:13px; align-items:center;
+    padding:11px 0; border-bottom:1px dashed var(--line); }
+  .check .row:last-child { border-bottom:0; padding-bottom:0; }
+  .check .row:first-child { padding-top:0; }
+  .check .box { width:20px; height:20px; border:2px solid var(--accent); border-radius:6px; }
+  .check .row span { font-size:15px; }
+
+  footer { margin-top:64px; padding-top:22px; border-top:1px solid var(--line);
+    color:var(--faint); font-size:13px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+  a { color:var(--accent); }
+  @media (max-width:560px) {
+    .cat { grid-template-columns:44px 1fr; }
+    .cat .uses { grid-column:1 / -1; text-align:left; padding-top:8px; border-top:1px dashed var(--line); }
+    .sec-sub { display:none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow"><span class="dot"></span> CrewLogic · Dispatch</p>
+    <h1>Geofence Setup Guide</h1>
+    <p class="lede">CrewLogic reads your telematics geofences to show, on the dispatch map, <strong>which truck is at which site, how long it's been there, and a flag when it's been there too long.</strong> Getting that working comes down to labeling each geofence — a <strong>Category</strong> in Motive, a <strong>Group</strong> in Linxup.</p>
+
+    <div class="thesis">
+      <p><span class="lead">The label drives it — not the geofence's name.</span> &nbsp;In <b>Motive</b> you set a geofence's <b>Category</b>; in <b>Linxup</b> you put the geofence in a <b>Group</b>. Use the same words either way — CrewLogic reads both.</p>
+    </div>
+  </header>
+
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">01</span>
+      <h2>What to label each site</h2>
+      <span class="sec-sub">Motive Category = Linxup Group</span>
+    </div>
+
+    <div class="cats">
+      <div class="cat" style="--c:var(--disposal)">
+        <div class="badge">🗑️</div>
+        <div class="name">Transfer / disposal sites<span class="term">Motive Category <b>Transfer Station</b> · Linxup Group <b>Transfer Station</b> <span style="color:var(--faint)">(also “Disposal”, “Landfill”)</span></span></div>
+        <div class="uses"><b>Disposal</b> wait-time</div>
+      </div>
+      <div class="cat" style="--c:var(--recycling)">
+        <div class="badge">♻️</div>
+        <div class="name">Recyclers<span class="term">Motive Category <b>Recycling</b> · Linxup Group <b>Recycling</b></span></div>
+        <div class="uses"><b>Recycling</b> wait-time</div>
+      </div>
+      <div class="cat" style="--c:var(--donation)">
+        <div class="badge">🎁</div>
+        <div class="name">Donation drop-offs<span class="term">Motive Category <b>Donations</b> · Linxup Group <b>Donations</b></span></div>
+        <div class="uses"><b>Donation</b> wait-time</div>
+      </div>
+      <div class="cat muted" style="--c:var(--line)">
+        <div class="badge">🚚</div>
+        <div class="name" style="color:var(--muted)">Job sites — automatic<span class="term">CrewLogic builds job geofences from your schedule; no setup.</span></div>
+        <div class="uses" style="color:var(--faint)">job's duration</div>
+      </div>
+      <div class="cat muted" style="--c:var(--line)">
+        <div class="badge">—</div>
+        <div class="name" style="color:var(--muted)">Everything else<span class="term">Uncategorized / no group, fuel &amp; rest stops, yards → <b style="color:var(--muted)">no badge, on purpose</b> (so they don't false-alarm).</span></div>
+        <div class="uses" style="color:var(--faint)">—</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">02</span><h2>Motive — set the Category</h2></div>
+    <ol class="steps">
+      <li><div>Open <span class="path">Fleet → Geofences</span> and click the geofence.</div></li>
+      <li><div>Set its <b>Category</b> to the matching one above, then <b>Save</b>.</div></li>
+      <li><div>Make sure the geofence is <b>Active</b>.</div></li>
+    </ol>
+    <ul class="pts">
+      <li><span class="tick">→</span><div>Leave a site <b>Uncategorized</b> and it gets no badge — so categorize every transfer, recycling, and donation site you use.</div></li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">03</span><h2>Linxup — set the Group + the webhook</h2></div>
+    <p>Linxup pushes events to CrewLogic, so there are two parts: put each geofence in the right <b>Group</b>, and connect the webhook once.</p>
+    <ol class="steps">
+      <li><div>Put each geofence in a <b>Group</b> named <span class="key">Transfer Station</span>, <span class="key">Recycling</span>, or <span class="key">Donations</span>.</div></li>
+      <li><div>In CrewLogic → <b>Settings → Trucks</b>, copy the <b>webhook URL</b> shown (it already includes your account) and click <b>Generate token</b>.</div></li>
+      <li><div>In Linxup's <b>Push API</b> config: paste that URL into <b>Geofence Event URL</b>, and paste CrewLogic's <b>generated token</b> into <b>Bearer Token</b>.</div></li>
+    </ol>
+    <div class="note">
+      <div class="ic">⚠️</div>
+      <div class="body"><b>The Bearer Token must be the token CrewLogic generated</b> — not your Linxup API key. CrewLogic makes the token; you paste it <b>into</b> Linxup. (Your Linxup API key goes in the separate "Linxup REST token" box in CrewLogic, which pulls truck positions.)</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">04</span><h2>Set your wait-times</h2></div>
+    <p>The <b>red “too long” flag</b> fires when a truck has been at a site past your wait-time for that type.</p>
+    <div class="note">
+      <div class="ic">⏱</div>
+      <div class="body"><b>CrewLogic → Settings → Wait Times (minutes per load)</b> — one number each for <b>Disposal</b>, <b>Recycling</b>, and <b>Donation</b>.</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">05</span><h2>Quick checklist</h2></div>
+    <div class="check">
+      <div class="row"><span class="box"></span><span>Every transfer/disposal, recycling, and donation site has a geofence</span></div>
+      <div class="row"><span class="box"></span><span>Each has the right <b>Category</b> (Motive) or <b>Group</b> (Linxup) — not left blank</span></div>
+      <div class="row"><span class="box"></span><span>Each geofence is <b>Active</b></span></div>
+      <div class="row"><span class="box"></span><span>Linxup only: webhook URL + CrewLogic-generated token pasted into Linxup</span></div>
+      <div class="row"><span class="box"></span><span><b>Wait Times</b> set in CrewLogic Settings</span></div>
+    </div>
+  </section>
+
+  <footer>
+    <span>CrewLogic Dispatch — geofence setup</span>
+    <span>Label once · badges + dwell timers work everywhere</span>
+  </footer>
+
+</div>
+</body>
+</html>

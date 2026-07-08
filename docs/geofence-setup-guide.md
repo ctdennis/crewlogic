@@ -10,7 +10,7 @@ CrewLogic reads your telematics **geofences** (Motive / Linxup) to power the dis
 - **how long it's been there** (a live "on-site 42m" dwell timer), and
 - **a red flag when it's been too long** (past your wait time for that kind of site).
 
-For that to work, each geofence needs the right **Category**. CrewLogic classifies off the **category — not the geofence name** — so you can name your geofences however you like; just set the category correctly.
+For that to work, each geofence needs the right label — a **Category** in Motive, a **Group** in Linxup. CrewLogic classifies off that label — **not the geofence name** — so name your geofences however you like; just set the Category/Group correctly. (Both use the same words: Transfer Station / Recycling / Donations.)
 
 ---
 
@@ -37,7 +37,12 @@ For that to work, each geofence needs the right **Category**. CrewLogic classifi
 ---
 
 ## Linxup
-Linxup uses **Groups** instead of Categories. **(Support coming — CrewLogic will read your Linxup groups.)** When it lands, name your group `Transfer Station`, `Recycling`, or `Donations` to match.
+Linxup's equivalent of Motive's Category is a **Group** — CrewLogic reads it the same way (from the `fenceGroup` on each pushed event). Put each geofence in a Group named `Transfer Station`, `Recycling`, or `Donations`.
+
+**Webhook setup** (Linxup pushes events to CrewLogic):
+1. In CrewLogic → **Settings → Trucks**, copy the **webhook URL** shown and click **Generate token**.
+2. In Linxup's **Push API** config: paste the URL into **Geofence Event URL**, and paste CrewLogic's **generated token** into **Bearer Token**.
+3. **Not** your Linxup API key — that token goes in CrewLogic's separate "Linxup REST token" box (for pulling live truck positions). CrewLogic generates the webhook token; you paste it *into* Linxup.
 
 ---
 
@@ -50,6 +55,6 @@ The red "too long" flag fires when a truck has been at a site longer than **your
 
 ## Quick checklist
 - [ ] Every transfer/disposal, recycling, and donation site you use has a geofence.
-- [ ] Each is set to the **correct Category** (not "Uncategorized").
+- [ ] Each is set to the **correct Category** (Motive) or **Group** (Linxup) — not left blank/Uncategorized.
 - [ ] Each geofence is **Active**.
 - [ ] **Wait Times** are set in CrewLogic Settings.

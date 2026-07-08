@@ -67,6 +67,7 @@ interface ParsedLinxup {
   direction: "enter" | "exit" | null;
   eventType: string | null;       // normalized: 'geofence_entry' | 'geofence_exit'
   fenceName: string | null;
+  fenceGroup: string | null;      // Linxup's classification label (geofence.fenceGroup) → geofence_alerts.category
   truckName: string | null;
   geofenceId: number | null;      // numeric only (geofence_alerts.geofence_id is bigint)
   eventTimeIso: string | null;
@@ -101,12 +102,20 @@ function parseLinxup(p: any): ParsedLinxup {
   const geofence = p?.geofence || {};
 
   const fenceName = (flat ? p?.fenceName : geofence?.name) ?? p?.fenceName ?? geofence?.name ?? null;
+  // The classification label. Documented V3 shape nests it as geofence.fenceGroup; FLAT variants call it
+  // fenceGroup/groupName. Stamped into geofence_alerts.category so the map treats it like a Motive category.
+  const fenceGroup = (flat ? (p?.fenceGroup ?? p?.groupName) : (geofence?.fenceGroup ?? geofence?.groupName)) ?? null;
   const truckName =
     (flat ? (p?.deviceName || p?.trackerName || p?.assetName || p?.driverName || p?.personName)
           : (tracker?.name || tracker?.label || tracker?.deviceName || tracker?.assetName))
     ?? null;
-  const geofenceId = toNumericOrNull(flat ? p?.fenceId : (geofence?.id ?? geofence?.fenceId));
-  const eventTimeIso = toIsoOrNull(flat ? (p?.eventDate ?? p?.date ?? p?.timestamp) : (p?.eventTime ?? p?.timestamp ?? p?.date));
+  const geofenceId = toNumericOrNull(flat ? p?.fenceId : (geofence?.geofenceId ?? geofence?.id ?? geofence?.fenceId));
+  // V3 carries enterDateTime + (on exit) exitDateTime; FLAT uses eventDate/date/timestamp.
+  const eventTimeIso = toIsoOrNull(
+    flat
+      ? (p?.eventDate ?? p?.date ?? p?.timestamp)
+      : ((direction === "exit" ? (p?.exitDateTime ?? p?.enterDateTime) : p?.enterDateTime) ?? p?.eventTime ?? p?.timestamp ?? p?.date),
+  );
 
   return {
     discriminator: flat ? String(p?.pushType || "") : (v3 ? String(p?.eventType || "") : "unknown"),
@@ -114,6 +123,7 @@ function parseLinxup(p: any): ParsedLinxup {
     direction,
     eventType,
     fenceName: fenceName != null ? String(fenceName) : null,
+    fenceGroup: fenceGroup != null ? String(fenceGroup) : null,
     truckName: truckName != null ? String(truckName) : null,
     geofenceId,
     eventTimeIso,
@@ -175,6 +185,7 @@ Deno.serve(async (req: Request) => {
     vehicle_number: ev.truckName,
     geofence_id: ev.geofenceId,               // numeric fence id when present, else null
     geofence_name: ev.fenceName,
+    category: ev.fenceGroup,                  // Linxup Group → same column Motive stamps its Category into (drives the badge)
     event_id: null,
     start_time: ev.eventTimeIso,
     end_time: null,
