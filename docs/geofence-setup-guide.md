@@ -23,7 +23,7 @@ For that to work, each geofence needs the right label — a **Category** in Moti
 
 | Motive Category | Truck badge | Wait-time it uses (Settings) |
 |---|---|---|
-| **Transfer Station** (also Disposal / Landfill) | 🗑️ | Disposal |
+| **Transfer** or **Disposal** _(either works — also Landfill / Dump)_ | 🗑️ | Disposal |
 | **Recycling** | ♻️ | Recycling |
 | **Donations** | 🎁 | Donation |
 | **Job Site** | _(automatic — CrewLogic creates job geofences from your schedule)_ | the job's scheduled duration |
