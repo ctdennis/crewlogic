@@ -38,11 +38,14 @@ function timingSafeEqualStr(a: string, b: string): boolean {
   return r === 0;
 }
 
-// Pull "Bearer <token>" from a header value; returns the raw token or "".
+// Extract the token from an auth header. Accepts BOTH "Bearer <token>" (strip the scheme) and a
+// RAW "<token>" with no scheme — because it's sender-dependent whether Linxup prepends "Bearer "
+// or sends the field value verbatim. Either way we compare the bare token to the stored secret.
 function bearerOf(headerVal: string | null): string {
   if (!headerVal) return "";
-  const m = headerVal.match(/^\s*Bearer\s+(.+)\s*$/i);
-  return m ? m[1].trim() : "";
+  const m = headerVal.match(/^\s*Bearer\s+(.+)$/i);
+  if (m) return m[1].trim();   // "Bearer <token>" → strip the scheme
+  return headerVal.trim();     // raw "<token>" with no "Bearer " prefix → accept as-is
 }
 
 // Resolve the franchise from ?f=<external_id> (same attribution as the Motive receiver).
