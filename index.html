@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.39 | 2026-07-10">
+  <meta name="crewlogic-version" content="v5.50.40 | 2026-07-10">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4268,26 +4268,38 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       try {
         rows = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&event_type=eq.geofence_exit&duration=not.is.null&select=geofence_name,category,duration&limit=2000');
       } catch (e) { body.innerHTML = '<div style="color:var(--text-muted);">Could not load the report.</div>'; return; }
-      if (!Array.isArray(rows) || !rows.length) { body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;line-height:1.6;">No completed facility visits yet. This fills in as trucks <b>exit</b> their geofences — each exit carries its on-site time.</div>'; return; }
+      const MIN_SEC = 480; // a stop under 8 min at a fence = drive-through / false positive — excluded
+      const kept = (Array.isArray(rows) ? rows : []).filter(r => (parseFloat(r.duration) || 0) >= MIN_SEC);
+      const dropped = (Array.isArray(rows) ? rows.length : 0) - kept.length;
+      if (!kept.length) { body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;line-height:1.6;">No qualifying facility visits yet — stops under 8 min are treated as drive-throughs and excluded. This fills in as trucks spend real time at their sites.</div>'; return; }
       const fmtDur = (sec) => { sec = Math.round(sec || 0); const h = Math.floor(sec / 3600), mn = Math.round((sec % 3600) / 60); return h ? (h + 'h ' + mn + 'm') : (mn + 'm'); };
       const typeOf = (cat, name) => { const t = (s) => { s = String(s || '').toLowerCase(); if (/transfer|disposal|landfill|dump/.test(s)) return { k: 'Disposal', e: '🗑️' }; if (/recycl/.test(s)) return { k: 'Recycling', e: '♻️' }; if (/donat/.test(s)) return { k: 'Donation', e: '🎁' }; return null; }; return t(cat) || t(name) || { k: 'Other', e: '📍' }; }; // category-first, name fallback (mirrors _facilityForAlert)
-      const rowHtml = (label, count, sec) => '<div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:9px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;"><div style="font-size:13px;color:var(--text-primary);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + label + '</div><div style="font-size:12px;color:var(--text-secondary);white-space:nowrap;text-align:right;">' + count + ' · ' + fmtDur(sec) + ' · avg ' + fmtDur(sec / count) + '</div></div>';
-      let totalSec = 0; const byType = {}, byFacility = {};
-      rows.forEach(r => {
+      const vlabel = (c) => c + (c === 1 ? ' visit' : ' visits');
+      const metrics = (count, sec) => vlabel(count) + ' · ' + fmtDur(sec) + ' total · ' + fmtDur(sec / count) + ' avg';
+      let totalSec = 0; const cats = {}; // {cat: {e, n, sec, fac:{name:{n,sec}}}}
+      kept.forEach(r => {
         const d = parseFloat(r.duration) || 0; totalSec += d;
         const t = typeOf(r.category, r.geofence_name);
-        byType[t.k] = byType[t.k] || { e: t.e, n: 0, sec: 0 }; byType[t.k].n++; byType[t.k].sec += d;
+        const c = cats[t.k] = cats[t.k] || { e: t.e, n: 0, sec: 0, fac: {} };
+        c.n++; c.sec += d;
         const fn = r.geofence_name || '(unnamed)';
-        byFacility[fn] = byFacility[fn] || { e: t.e, n: 0, sec: 0 }; byFacility[fn].n++; byFacility[fn].sec += d;
+        const f = c.fac[fn] = c.fac[fn] || { n: 0, sec: 0 }; f.n++; f.sec += d;
       });
-      const n = rows.length;
+      const n = kept.length;
       const stat = (label, val) => '<div style="flex:1;text-align:center;padding:12px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;"><div style="font-size:20px;font-weight:800;color:var(--text-primary);">' + val + '</div><div style="font-size:10.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px;">' + label + '</div></div>';
       let html = '<div style="display:flex;gap:10px;margin-bottom:20px;">' + stat('Visits', n) + stat('Total on-site', fmtDur(totalSec)) + stat('Avg / visit', fmtDur(totalSec / n)) + '</div>';
-      html += '<div style="font-weight:700;color:var(--text-primary);font-size:14px;margin-bottom:8px;">By category</div><div style="display:flex;flex-direction:column;gap:6px;margin-bottom:20px;">';
-      Object.keys(byType).sort((a, b) => byType[b].sec - byType[a].sec).forEach(k => { const x = byType[k]; html += rowHtml(x.e + ' ' + k, x.n, x.sec); });
-      html += '</div><div style="font-weight:700;color:var(--text-primary);font-size:14px;margin-bottom:8px;">By facility</div><div style="display:flex;flex-direction:column;gap:6px;">';
-      Object.keys(byFacility).sort((a, b) => byFacility[b].sec - byFacility[a].sec).forEach(fn => { const x = byFacility[fn]; html += rowHtml(x.e + ' ' + fn, x.n, x.sec); });
-      html += '</div><div style="font-size:11px;color:var(--text-muted);margin-top:16px;">Based on ' + n + ' completed geofence visits.</div>';
+      // Facilities grouped UNDER their category (Disposal → Recycling → Donation → Other).
+      ['Disposal', 'Recycling', 'Donation', 'Other'].filter(k => cats[k]).forEach(k => {
+        const c = cats[k];
+        html += '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:7px;"><div style="font-weight:800;color:var(--text-primary);font-size:14px;">' + c.e + ' ' + k + '</div><div style="font-size:11.5px;color:var(--text-muted);white-space:nowrap;">' + metrics(c.n, c.sec) + '</div></div>';
+        html += '<div style="display:flex;flex-direction:column;gap:5px;margin:0 0 18px 4px;">';
+        Object.keys(c.fac).sort((a, b) => c.fac[b].sec - c.fac[a].sec).forEach(fn => {
+          const f = c.fac[fn];
+          html += '<div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:8px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;"><div style="font-size:13px;color:var(--text-primary);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + fn + '</div><div style="font-size:11.5px;color:var(--text-secondary);white-space:nowrap;text-align:right;">' + metrics(f.n, f.sec) + '</div></div>';
+        });
+        html += '</div>';
+      });
+      html += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">' + n + ' qualifying visits' + (dropped ? ' · ' + dropped + ' short drive-through' + (dropped === 1 ? '' : 's') + ' (&lt;8 min) excluded' : '') + '.</div>';
       body.innerHTML = html;
     }
     function closeAlertsReport() { const m = document.getElementById('alertsReportModal'); if (m) m.style.display = 'none'; }
