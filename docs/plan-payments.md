@@ -144,6 +144,53 @@ memory `route-optimizer-rearchitecture`.
 
 ---
 
+## 4. Roles, seats & feature access — REFINED (2026-07-10, validated against real metering)
+
+**Real cost data** (`usage_events`, ALL franchises, 2026-06-16 → 07-10, ~24 days): Sonnet 890K in / 97K out
+≈ **$4.13**; Haiku 94K in / 13K out ≈ $0.16 → **~$4.29 total AI for the entire customer base over 3+ weeks**
+(~$5.50/mo). **421 photos drove the $4.13 of Sonnet → ~$0.01 per photo** (dead-on the estimate). #90 = 220
+photos in June ≈ $2/mo. **Confirms: photos are THE variable-cost driver, and every AI event is an
+ESTIMATOR action** (analyze-estimate, volume-check). Dispatch/owner activity (board, truck map, job plans on
+Haiku) is effectively free. At the 1,500-photo Pro cap the AI cost is ~$15/mo *if maxed* — comfortably inside
+$59.99. **1,500 photos kept** (owner 2026-07-10).
+
+**Real seat reality today:** every franchise is **1 owner + 0–1 estimator** (max 2 users) — nobody near 5. A
+flat "5 users" count is both unused and mispriced against the cost driver.
+
+### 4.1 Three roles — the billable unit is the ESTIMATOR
+- **Primary owner/admin** — **1 included** on every tier. Full access, can also estimate.
+- **Estimator** — the **billable, capped seat**. Estimators consume the photo/estimate allowance and the AI
+  spend. Per-tier estimator seats: **Starter 2 · Pro 5 · Enterprise unlimited** (the §1.7 counts, now
+  explicitly *estimators*, not "users").
+- **Dispatch-only (NEW role)** — **free / unlimited** on every tier. Board, truck map, routes, job plans;
+  **cannot create estimates** → zero marginal cost, so not charged. (Today only `owner`/`estimator` exist;
+  this adds a third role.)
+
+Price tracks cost: pay for estimators (the drivers), dispatchers are free, more estimators = the upsell lever.
+
+### 4.2 Two-layer feature gating
+1. **Tier / add-on = the CEILING** — what the plan makes *available* (Starter native tools → Pro full
+   Vonigo/ops suite; future add-ons like yard signs).
+2. **Owner toggles = WITHIN the ceiling** — the owner turns home-page tiles on/off **per estimator** (or for
+   all). A Pro owner can grant estimators anything Pro includes, and dial each seat back individually.
+
+The plan controls what a franchise *can* have; the owner controls what each *seat* actually sees.
+
+### 4.3 Yard signs → future separate add-on (NOT yet)
+- **Now:** yard signs is just another home tile — **ON for everyone, including guest testers.** Do not gate.
+- **Later:** spin it into its **own add-on** at the tier/add-on layer (gate #1); the owner toggle (gate #2)
+  still governs which estimators see it. When flipped, **grandfather current users/testers** so nothing breaks.
+
+### 4.4 Build order (post-blueprint)
+1. **Enable billing for the trial testers FIRST** — account cleared 2026-07-10 (`charges_enabled=true`,
+   `payouts_enabled=true`). The urgent unblock so ending trials can subscribe: flip `BILLING_ENABLED`, decide
+   `ENFORCE_TRIAL` (soft vs hard), stamp the testers' `trial_ends_at`, promote, verify one live subscription.
+2. **Dispatch-only role** + **owner per-estimator feature toggles** (home-tile on/off).
+3. **Usage/seat enforcement** — caps + bundled overage on the `usage_events` backbone; soft-cap seat guard.
+4. **Yard-signs add-on gate** (grandfather current users/testers).
+
+---
+
 ## 4. Subscription field model (clean separation)
 
 - **Access state → `subscription_status`** (`trialing / active / tester / canceled / past_due`),
