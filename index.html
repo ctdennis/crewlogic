@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.40 | 2026-07-10">
+  <meta name="crewlogic-version" content="v5.50.41 | 2026-07-10">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4257,6 +4257,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       } catch (_e) { /* keep fallback amounts */ }
     }
     // 📊 Alerts report (button next to Live Alerts) — high-level reporting on completed facility visits (geofence exits).
+    let _alertsRows = [];        // fetched exit rows (already >=8min filtered), cached so the range tabs don't re-query
+    let _alertsRange = 'week';   // today | week | month
+    function _alertsRangeStart(range) {
+      const now = new Date();
+      if (range === 'today') { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime(); }
+      if (range === 'month') return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+      const d = new Date(now); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - d.getDay()); return d.getTime(); // week: since Sunday
+    }
     async function openAlertsReport() {
       const m = document.getElementById('alertsReportModal'), body = document.getElementById('alertsReportBody');
       if (!m || !body) return;
@@ -4266,29 +4274,38 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!fid) { body.innerHTML = '<div style="color:var(--text-muted);">No franchise on this session.</div>'; return; }
       let rows;
       try {
-        rows = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&event_type=eq.geofence_exit&duration=not.is.null&select=geofence_name,category,duration&limit=2000');
+        rows = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&event_type=eq.geofence_exit&duration=not.is.null&select=geofence_name,category,duration,created_at&limit=5000');
       } catch (e) { body.innerHTML = '<div style="color:var(--text-muted);">Could not load the report.</div>'; return; }
-      const MIN_SEC = 480; // a stop under 8 min at a fence = drive-through / false positive — excluded
-      const kept = (Array.isArray(rows) ? rows : []).filter(r => (parseFloat(r.duration) || 0) >= MIN_SEC);
-      const dropped = (Array.isArray(rows) ? rows.length : 0) - kept.length;
-      if (!kept.length) { body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;line-height:1.6;">No qualifying facility visits yet — stops under 8 min are treated as drive-throughs and excluded. This fills in as trucks spend real time at their sites.</div>'; return; }
+      const MIN_SEC = 480; // a stop under 8 min at a fence = drive-through / false positive — excluded everywhere
+      _alertsRows = (Array.isArray(rows) ? rows : []).filter(r => (parseFloat(r.duration) || 0) >= MIN_SEC);
+      renderAlertsReport();
+    }
+    function setAlertsRange(range) { _alertsRange = range; renderAlertsReport(); }
+    function renderAlertsReport() {
+      const body = document.getElementById('alertsReportBody');
+      if (!body) return;
       const fmtDur = (sec) => { sec = Math.round(sec || 0); const h = Math.floor(sec / 3600), mn = Math.round((sec % 3600) / 60); return h ? (h + 'h ' + mn + 'm') : (mn + 'm'); };
-      const typeOf = (cat, name) => { const t = (s) => { s = String(s || '').toLowerCase(); if (/transfer|disposal|landfill|dump/.test(s)) return { k: 'Disposal', e: '🗑️' }; if (/recycl/.test(s)) return { k: 'Recycling', e: '♻️' }; if (/donat/.test(s)) return { k: 'Donation', e: '🎁' }; return null; }; return t(cat) || t(name) || { k: 'Other', e: '📍' }; }; // category-first, name fallback (mirrors _facilityForAlert)
+      const typeOf = (cat, name) => { const t = (s) => { s = String(s || '').toLowerCase(); if (/transfer|disposal|landfill|dump/.test(s)) return { k: 'Disposal', e: '🗑️' }; if (/recycl/.test(s)) return { k: 'Recycling', e: '♻️' }; if (/donat/.test(s)) return { k: 'Donation', e: '🎁' }; return null; }; return t(cat) || t(name) || { k: 'Other', e: '📍' }; };
       const vlabel = (c) => c + (c === 1 ? ' visit' : ' visits');
       const metrics = (count, sec) => vlabel(count) + ' · ' + fmtDur(sec) + ' total · ' + fmtDur(sec / count) + ' avg';
-      let totalSec = 0; const cats = {}; // {cat: {e, n, sec, fac:{name:{n,sec}}}}
+      let html = '<div style="display:flex;gap:6px;margin-bottom:18px;">';
+      [['today', 'Today'], ['week', 'This week'], ['month', 'This month']].forEach(t => {
+        const on = _alertsRange === t[0];
+        html += '<button onclick="setAlertsRange(\'' + t[0] + '\')" style="flex:1;padding:8px;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;border:1px solid ' + (on ? 'var(--accent-green)' : 'var(--border)') + ';background:' + (on ? 'var(--accent-green)' : 'var(--bg-input)') + ';color:' + (on ? 'var(--accent-text)' : 'var(--text-secondary)') + ';">' + t[1] + '</button>';
+      });
+      html += '</div>';
+      const since = _alertsRangeStart(_alertsRange);
+      const kept = _alertsRows.filter(r => new Date(r.created_at).getTime() >= since);
+      if (!kept.length) { body.innerHTML = html + '<div style="color:var(--text-muted);font-size:14px;line-height:1.6;padding:6px 0;">No facility visits in this range.</div>'; return; }
+      const cats = {};
       kept.forEach(r => {
-        const d = parseFloat(r.duration) || 0; totalSec += d;
+        const d = parseFloat(r.duration) || 0;
         const t = typeOf(r.category, r.geofence_name);
         const c = cats[t.k] = cats[t.k] || { e: t.e, n: 0, sec: 0, fac: {} };
         c.n++; c.sec += d;
         const fn = r.geofence_name || '(unnamed)';
         const f = c.fac[fn] = c.fac[fn] || { n: 0, sec: 0 }; f.n++; f.sec += d;
       });
-      const n = kept.length;
-      const stat = (label, val) => '<div style="flex:1;text-align:center;padding:12px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;"><div style="font-size:20px;font-weight:800;color:var(--text-primary);">' + val + '</div><div style="font-size:10.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px;">' + label + '</div></div>';
-      let html = '<div style="display:flex;gap:10px;margin-bottom:20px;">' + stat('Visits', n) + stat('Total on-site', fmtDur(totalSec)) + stat('Avg / visit', fmtDur(totalSec / n)) + '</div>';
-      // Facilities grouped UNDER their category (Disposal → Recycling → Donation → Other).
       ['Disposal', 'Recycling', 'Donation', 'Other'].filter(k => cats[k]).forEach(k => {
         const c = cats[k];
         html += '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:7px;"><div style="font-weight:800;color:var(--text-primary);font-size:14px;">' + c.e + ' ' + k + '</div><div style="font-size:11.5px;color:var(--text-muted);white-space:nowrap;">' + metrics(c.n, c.sec) + '</div></div>';
@@ -4299,7 +4316,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         });
         html += '</div>';
       });
-      html += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">' + n + ' qualifying visits' + (dropped ? ' · ' + dropped + ' short drive-through' + (dropped === 1 ? '' : 's') + ' (&lt;8 min) excluded' : '') + '.</div>';
       body.innerHTML = html;
     }
     function closeAlertsReport() { const m = document.getElementById('alertsReportModal'); if (m) m.style.display = 'none'; }
