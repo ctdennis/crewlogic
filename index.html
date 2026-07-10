@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.37 | 2026-07-10">
+  <meta name="crewlogic-version" content="v5.50.38 | 2026-07-10">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1246,6 +1246,17 @@
         <a href="tel:7742812800" style="display:block;background:var(--accent-green);color:var(--accent-text);font-weight:700;font-size:16px;padding:14px 24px;border-radius:var(--radius-sm);text-decoration:none;margin-bottom:8px;">📞 (774) 281-2800</a>
       </div>
       <div style="font-size:12px;color:var(--text-muted);">Signed in as <span id="paywallEmail" style="color:var(--text-secondary);"></span> · <a href="#" onclick="signOut();return false;" style="color:var(--accent-green);">Sign out</a></div>
+    </div>
+  </div>
+
+  <!-- Alerts report (📊 button next to Live Alerts) — high-level reporting on geofence facility visits. Body filled by openAlertsReport(). -->
+  <div id="alertsReportModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)closeAlertsReport()">
+    <div style="width:100%;max-width:640px;background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border);margin:auto;">
+      <div style="position:sticky;top:0;background:var(--bg-card);display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-bottom:1px solid var(--border);border-radius:var(--radius) var(--radius) 0 0;z-index:1;">
+        <div style="font-size:18px;font-weight:800;color:var(--text-primary);">📊 Alerts Report</div>
+        <button onclick="closeAlertsReport()" aria-label="Close" style="background:none;border:none;color:var(--text-muted);font-size:26px;line-height:1;cursor:pointer;padding:0 4px;">&times;</button>
+      </div>
+      <div id="alertsReportBody" style="padding:20px 22px;">Loading…</div>
     </div>
   </div>
 
@@ -4245,6 +4256,42 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         });
       } catch (_e) { /* keep fallback amounts */ }
     }
+    // 📊 Alerts report (button next to Live Alerts) — high-level reporting on completed facility visits (geofence exits).
+    async function openAlertsReport() {
+      const m = document.getElementById('alertsReportModal'), body = document.getElementById('alertsReportBody');
+      if (!m || !body) return;
+      m.style.display = 'flex';
+      body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;">Loading…</div>';
+      const fid = currentUser && currentUser.franchiseInternalID;
+      if (!fid) { body.innerHTML = '<div style="color:var(--text-muted);">No franchise on this session.</div>'; return; }
+      let rows;
+      try {
+        rows = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&event_type=eq.geofence_exit&duration=not.is.null&select=geofence_name,category,duration&limit=2000');
+      } catch (e) { body.innerHTML = '<div style="color:var(--text-muted);">Could not load the report.</div>'; return; }
+      if (!Array.isArray(rows) || !rows.length) { body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;line-height:1.6;">No completed facility visits yet. This fills in as trucks <b>exit</b> their geofences — each exit carries its on-site time.</div>'; return; }
+      const fmtDur = (sec) => { sec = Math.round(sec || 0); const h = Math.floor(sec / 3600), mn = Math.round((sec % 3600) / 60); return h ? (h + 'h ' + mn + 'm') : (mn + 'm'); };
+      const typeOf = (cat) => { const c = String(cat || '').toLowerCase(); if (/transfer|disposal|landfill|dump/.test(c)) return { k: 'Disposal', e: '🗑️' }; if (/recycl/.test(c)) return { k: 'Recycling', e: '♻️' }; if (/donat/.test(c)) return { k: 'Donation', e: '🎁' }; return { k: 'Other', e: '📍' }; };
+      const rowHtml = (label, count, sec) => '<div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:9px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;"><div style="font-size:13px;color:var(--text-primary);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + label + '</div><div style="font-size:12px;color:var(--text-secondary);white-space:nowrap;text-align:right;">' + count + ' · ' + fmtDur(sec) + ' · avg ' + fmtDur(sec / count) + '</div></div>';
+      let totalSec = 0; const byType = {}, byFacility = {};
+      rows.forEach(r => {
+        const d = parseFloat(r.duration) || 0; totalSec += d;
+        const t = typeOf(r.category);
+        byType[t.k] = byType[t.k] || { e: t.e, n: 0, sec: 0 }; byType[t.k].n++; byType[t.k].sec += d;
+        const fn = r.geofence_name || '(unnamed)';
+        byFacility[fn] = byFacility[fn] || { e: t.e, n: 0, sec: 0 }; byFacility[fn].n++; byFacility[fn].sec += d;
+      });
+      const n = rows.length;
+      const stat = (label, val) => '<div style="flex:1;text-align:center;padding:12px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;"><div style="font-size:20px;font-weight:800;color:var(--text-primary);">' + val + '</div><div style="font-size:10.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px;">' + label + '</div></div>';
+      let html = '<div style="display:flex;gap:10px;margin-bottom:20px;">' + stat('Visits', n) + stat('Total on-site', fmtDur(totalSec)) + stat('Avg / visit', fmtDur(totalSec / n)) + '</div>';
+      html += '<div style="font-weight:700;color:var(--text-primary);font-size:14px;margin-bottom:8px;">By category</div><div style="display:flex;flex-direction:column;gap:6px;margin-bottom:20px;">';
+      Object.keys(byType).sort((a, b) => byType[b].sec - byType[a].sec).forEach(k => { const x = byType[k]; html += rowHtml(x.e + ' ' + k, x.n, x.sec); });
+      html += '</div><div style="font-weight:700;color:var(--text-primary);font-size:14px;margin-bottom:8px;">By facility</div><div style="display:flex;flex-direction:column;gap:6px;">';
+      Object.keys(byFacility).sort((a, b) => byFacility[b].sec - byFacility[a].sec).forEach(fn => { const x = byFacility[fn]; html += rowHtml(x.e + ' ' + fn, x.n, x.sec); });
+      html += '</div><div style="font-size:11px;color:var(--text-muted);margin-top:16px;">Based on ' + n + ' completed geofence visits.</div>';
+      body.innerHTML = html;
+    }
+    function closeAlertsReport() { const m = document.getElementById('alertsReportModal'); if (m) m.style.display = 'none'; }
+
     // Settings → Trucks "📖 Geofence setup guide" → in-app modal (reliable; a hosted page gets shadowed by the SPA catch-all).
     function openGeofenceGuide() { const m = document.getElementById('geofenceGuideModal'); if (m) m.style.display = 'flex'; }
     function closeGeofenceGuide() { const m = document.getElementById('geofenceGuideModal'); if (m) m.style.display = 'none'; }
@@ -9406,7 +9453,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<div id="dashMapPane" style="flex:1;min-width:0;height:42vh;min-height:320px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);"></div>'
         +   '<div class="dash-divider" data-side="right" title="Drag to resize" style="flex:0 0 6px;align-self:stretch;cursor:col-resize;background:var(--btn-surface,#34485d);border-radius:3px;"></div>'
         +   '<div id="dashAlertsPanel" style="flex:0 0 300px;width:300px;height:42vh;min-height:320px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);overflow:hidden;display:flex;flex-direction:column;">'
-        +     '<div style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;">📡 Live Alerts<span class="gf-alerts-count" style="font-size:11px;font-weight:600;color:var(--text-muted);margin-left:auto;"></span></div>'
+        +     '<div style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;">📡 Live Alerts<button onclick="openAlertsReport()" title="Alerts report" style="margin-left:8px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;cursor:pointer;">📊 Report</button><span class="gf-alerts-count" style="font-size:11px;font-weight:600;color:var(--text-muted);margin-left:auto;"></span></div>'
         +     '<div id="dashAlertsList" class="gf-alerts-list" style="flex:1;overflow-y:auto;padding:6px 6px 10px;"></div>'
         +   '</div>'
         + '</div>';
