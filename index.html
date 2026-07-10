@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.37 | 2026-07-10">
+  <meta name="crewlogic-version" content="v5.50.41 | 2026-07-10">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1246,6 +1246,17 @@
         <a href="tel:7742812800" style="display:block;background:var(--accent-green);color:var(--accent-text);font-weight:700;font-size:16px;padding:14px 24px;border-radius:var(--radius-sm);text-decoration:none;margin-bottom:8px;">📞 (774) 281-2800</a>
       </div>
       <div style="font-size:12px;color:var(--text-muted);">Signed in as <span id="paywallEmail" style="color:var(--text-secondary);"></span> · <a href="#" onclick="signOut();return false;" style="color:var(--accent-green);">Sign out</a></div>
+    </div>
+  </div>
+
+  <!-- Alerts report (📊 button next to Live Alerts) — high-level reporting on geofence facility visits. Body filled by openAlertsReport(). -->
+  <div id="alertsReportModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)closeAlertsReport()">
+    <div style="width:100%;max-width:640px;background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border);margin:auto;">
+      <div style="position:sticky;top:0;background:var(--bg-card);display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-bottom:1px solid var(--border);border-radius:var(--radius) var(--radius) 0 0;z-index:1;">
+        <div style="font-size:18px;font-weight:800;color:var(--text-primary);">📊 Alerts Report</div>
+        <button onclick="closeAlertsReport()" aria-label="Close" style="background:none;border:none;color:var(--text-muted);font-size:26px;line-height:1;cursor:pointer;padding:0 4px;">&times;</button>
+      </div>
+      <div id="alertsReportBody" style="padding:20px 22px;">Loading…</div>
     </div>
   </div>
 
@@ -4245,6 +4256,70 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         });
       } catch (_e) { /* keep fallback amounts */ }
     }
+    // 📊 Alerts report (button next to Live Alerts) — high-level reporting on completed facility visits (geofence exits).
+    let _alertsRows = [];        // fetched exit rows (already >=8min filtered), cached so the range tabs don't re-query
+    let _alertsRange = 'week';   // today | week | month
+    function _alertsRangeStart(range) {
+      const now = new Date();
+      if (range === 'today') { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime(); }
+      if (range === 'month') return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+      const d = new Date(now); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - d.getDay()); return d.getTime(); // week: since Sunday
+    }
+    async function openAlertsReport() {
+      const m = document.getElementById('alertsReportModal'), body = document.getElementById('alertsReportBody');
+      if (!m || !body) return;
+      m.style.display = 'flex';
+      body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;">Loading…</div>';
+      const fid = currentUser && currentUser.franchiseInternalID;
+      if (!fid) { body.innerHTML = '<div style="color:var(--text-muted);">No franchise on this session.</div>'; return; }
+      let rows;
+      try {
+        rows = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&event_type=eq.geofence_exit&duration=not.is.null&select=geofence_name,category,duration,created_at&limit=5000');
+      } catch (e) { body.innerHTML = '<div style="color:var(--text-muted);">Could not load the report.</div>'; return; }
+      const MIN_SEC = 480; // a stop under 8 min at a fence = drive-through / false positive — excluded everywhere
+      _alertsRows = (Array.isArray(rows) ? rows : []).filter(r => (parseFloat(r.duration) || 0) >= MIN_SEC);
+      renderAlertsReport();
+    }
+    function setAlertsRange(range) { _alertsRange = range; renderAlertsReport(); }
+    function renderAlertsReport() {
+      const body = document.getElementById('alertsReportBody');
+      if (!body) return;
+      const fmtDur = (sec) => { sec = Math.round(sec || 0); const h = Math.floor(sec / 3600), mn = Math.round((sec % 3600) / 60); return h ? (h + 'h ' + mn + 'm') : (mn + 'm'); };
+      const typeOf = (cat, name) => { const t = (s) => { s = String(s || '').toLowerCase(); if (/transfer|disposal|landfill|dump/.test(s)) return { k: 'Disposal', e: '🗑️' }; if (/recycl/.test(s)) return { k: 'Recycling', e: '♻️' }; if (/donat/.test(s)) return { k: 'Donation', e: '🎁' }; return null; }; return t(cat) || t(name) || { k: 'Other', e: '📍' }; };
+      const vlabel = (c) => c + (c === 1 ? ' visit' : ' visits');
+      const metrics = (count, sec) => vlabel(count) + ' · ' + fmtDur(sec) + ' total · ' + fmtDur(sec / count) + ' avg';
+      let html = '<div style="display:flex;gap:6px;margin-bottom:18px;">';
+      [['today', 'Today'], ['week', 'This week'], ['month', 'This month']].forEach(t => {
+        const on = _alertsRange === t[0];
+        html += '<button onclick="setAlertsRange(\'' + t[0] + '\')" style="flex:1;padding:8px;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;border:1px solid ' + (on ? 'var(--accent-green)' : 'var(--border)') + ';background:' + (on ? 'var(--accent-green)' : 'var(--bg-input)') + ';color:' + (on ? 'var(--accent-text)' : 'var(--text-secondary)') + ';">' + t[1] + '</button>';
+      });
+      html += '</div>';
+      const since = _alertsRangeStart(_alertsRange);
+      const kept = _alertsRows.filter(r => new Date(r.created_at).getTime() >= since);
+      if (!kept.length) { body.innerHTML = html + '<div style="color:var(--text-muted);font-size:14px;line-height:1.6;padding:6px 0;">No facility visits in this range.</div>'; return; }
+      const cats = {};
+      kept.forEach(r => {
+        const d = parseFloat(r.duration) || 0;
+        const t = typeOf(r.category, r.geofence_name);
+        const c = cats[t.k] = cats[t.k] || { e: t.e, n: 0, sec: 0, fac: {} };
+        c.n++; c.sec += d;
+        const fn = r.geofence_name || '(unnamed)';
+        const f = c.fac[fn] = c.fac[fn] || { n: 0, sec: 0 }; f.n++; f.sec += d;
+      });
+      ['Disposal', 'Recycling', 'Donation', 'Other'].filter(k => cats[k]).forEach(k => {
+        const c = cats[k];
+        html += '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:7px;"><div style="font-weight:800;color:var(--text-primary);font-size:14px;">' + c.e + ' ' + k + '</div><div style="font-size:11.5px;color:var(--text-muted);white-space:nowrap;">' + metrics(c.n, c.sec) + '</div></div>';
+        html += '<div style="display:flex;flex-direction:column;gap:5px;margin:0 0 18px 4px;">';
+        Object.keys(c.fac).sort((a, b) => c.fac[b].sec - c.fac[a].sec).forEach(fn => {
+          const f = c.fac[fn];
+          html += '<div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:8px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;"><div style="font-size:13px;color:var(--text-primary);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + fn + '</div><div style="font-size:11.5px;color:var(--text-secondary);white-space:nowrap;text-align:right;">' + metrics(f.n, f.sec) + '</div></div>';
+        });
+        html += '</div>';
+      });
+      body.innerHTML = html;
+    }
+    function closeAlertsReport() { const m = document.getElementById('alertsReportModal'); if (m) m.style.display = 'none'; }
+
     // Settings → Trucks "📖 Geofence setup guide" → in-app modal (reliable; a hosted page gets shadowed by the SPA catch-all).
     function openGeofenceGuide() { const m = document.getElementById('geofenceGuideModal'); if (m) m.style.display = 'flex'; }
     function closeGeofenceGuide() { const m = document.getElementById('geofenceGuideModal'); if (m) m.style.display = 'none'; }
@@ -9406,7 +9481,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<div id="dashMapPane" style="flex:1;min-width:0;height:42vh;min-height:320px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);"></div>'
         +   '<div class="dash-divider" data-side="right" title="Drag to resize" style="flex:0 0 6px;align-self:stretch;cursor:col-resize;background:var(--btn-surface,#34485d);border-radius:3px;"></div>'
         +   '<div id="dashAlertsPanel" style="flex:0 0 300px;width:300px;height:42vh;min-height:320px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);overflow:hidden;display:flex;flex-direction:column;">'
-        +     '<div style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;">📡 Live Alerts<span class="gf-alerts-count" style="font-size:11px;font-weight:600;color:var(--text-muted);margin-left:auto;"></span></div>'
+        +     '<div style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;">📡 Live Alerts<button onclick="openAlertsReport()" title="Alerts report" style="margin-left:8px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;cursor:pointer;">📊 Report</button><span class="gf-alerts-count" style="font-size:11px;font-weight:600;color:var(--text-muted);margin-left:auto;"></span></div>'
         +     '<div id="dashAlertsList" class="gf-alerts-list" style="flex:1;overflow-y:auto;padding:6px 6px 10px;"></div>'
         +   '</div>'
         + '</div>';
