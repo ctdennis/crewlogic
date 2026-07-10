@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.33 | 2026-07-08">
+  <meta name="crewlogic-version" content="v5.50.37 | 2026-07-10">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1249,6 +1249,50 @@
     </div>
   </div>
 
+  <!-- Geofence setup guide — in-app modal (Settings → Trucks → "📖 Geofence setup guide"). In-app rather than a
+       hosted page because the Pages SPA catch-all shadows standalone static HTML; this renders reliably. -->
+  <div id="geofenceGuideModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)closeGeofenceGuide()">
+    <div style="width:100%;max-width:560px;background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border);margin:auto;">
+      <div style="position:sticky;top:0;background:var(--bg-card);display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-bottom:1px solid var(--border);border-radius:var(--radius) var(--radius) 0 0;z-index:1;">
+        <div style="font-size:18px;font-weight:800;color:var(--text-primary);">📍 Geofence Setup Guide</div>
+        <button onclick="closeGeofenceGuide()" aria-label="Close" style="background:none;border:none;color:var(--text-muted);font-size:26px;line-height:1;cursor:pointer;padding:0 4px;">&times;</button>
+      </div>
+      <div style="padding:20px 22px;">
+        <div style="font-size:13.5px;color:var(--text-muted);line-height:1.6;margin-bottom:18px;">CrewLogic reads your telematics geofences to show which truck is at which site, how long it's been there, and a flag when it's too long. It comes down to <strong style="color:var(--text-primary);">labeling each geofence</strong> — a <strong style="color:var(--text-primary);">Category</strong> in Motive, a <strong style="color:var(--text-primary);">Group</strong> in Linxup (same words). The label drives the badge — not the geofence name.</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;">
+          <div style="display:grid;grid-template-columns:40px 1fr auto;align-items:center;gap:12px;background:var(--bg-input);border:1px solid var(--border);border-left:4px solid #7c53e0;border-radius:10px;padding:11px 14px;">
+            <div style="font-size:22px;text-align:center;">🗑️</div>
+            <div><div style="font-weight:700;color:var(--text-primary);font-size:14px;">Transfer / disposal</div><div style="font-size:11.5px;color:var(--text-muted);">Category / Group: <b style="color:var(--text-secondary);">Transfer</b> or <b style="color:var(--text-secondary);">Disposal</b> (either works)</div></div>
+            <div style="font-size:12px;color:var(--text-muted);white-space:nowrap;">Disposal wait</div>
+          </div>
+          <div style="display:grid;grid-template-columns:40px 1fr auto;align-items:center;gap:12px;background:var(--bg-input);border:1px solid var(--border);border-left:4px solid #10b981;border-radius:10px;padding:11px 14px;">
+            <div style="font-size:22px;text-align:center;">♻️</div>
+            <div><div style="font-weight:700;color:var(--text-primary);font-size:14px;">Recycling</div><div style="font-size:11.5px;color:var(--text-muted);">Category / Group: <b style="color:var(--text-secondary);">Recycling</b></div></div>
+            <div style="font-size:12px;color:var(--text-muted);white-space:nowrap;">Recycling wait</div>
+          </div>
+          <div style="display:grid;grid-template-columns:40px 1fr auto;align-items:center;gap:12px;background:var(--bg-input);border:1px solid var(--border);border-left:4px solid #ec4899;border-radius:10px;padding:11px 14px;">
+            <div style="font-size:22px;text-align:center;">🎁</div>
+            <div><div style="font-weight:700;color:var(--text-primary);font-size:14px;">Donations</div><div style="font-size:11.5px;color:var(--text-muted);">Category / Group: <b style="color:var(--text-secondary);">Donations</b></div></div>
+            <div style="font-size:12px;color:var(--text-muted);white-space:nowrap;">Donation wait</div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);background:var(--bg-input);border:1px solid var(--border);border-radius:8px;padding:10px 12px;line-height:1.55;margin-bottom:20px;">Everything else gets <b style="color:var(--text-secondary);">no badge</b> — on purpose. Tag your home base <b style="color:var(--text-secondary);">Headquarters</b> and service areas (Cape Cod, Rhode Island, etc.) <b style="color:var(--text-secondary);">Region</b> so they stay labeled and out of the facility badges. Job sites are automatic.</div>
+        <div style="font-weight:700;color:var(--text-primary);font-size:14px;margin-bottom:6px;">Motive</div>
+        <div style="font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:16px;">Fleet → Geofences → open the geofence → set <b style="color:var(--text-secondary);">Category</b> → Save. Make sure it's Active. Anything left Uncategorized gets no badge.</div>
+        <div style="font-weight:700;color:var(--text-primary);font-size:14px;margin-bottom:6px;">Linxup</div>
+        <div style="font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:8px;">Put each geofence in a <b style="color:var(--text-secondary);">Group</b> named Transfer Station / Recycling / Donations, then connect the webhook once:</div>
+        <ol style="font-size:13px;color:var(--text-muted);line-height:1.7;margin:0 0 10px 18px;padding:0;">
+          <li>In CrewLogic → Settings → Trucks: copy the <b style="color:var(--text-secondary);">webhook URL</b> and click <b style="color:var(--text-secondary);">Generate token</b>.</li>
+          <li>In Linxup's Push API config: paste the URL into <b style="color:var(--text-secondary);">Geofence Event URL</b> and CrewLogic's <b style="color:var(--text-secondary);">generated token</b> into <b style="color:var(--text-secondary);">Bearer Token</b>.</li>
+        </ol>
+        <div style="font-size:12px;color:var(--text-muted);background:var(--bg-input);border:1px solid var(--border);border-radius:8px;padding:10px 12px;line-height:1.55;margin-bottom:16px;">⚠️ The Bearer Token must be the token <b style="color:var(--text-secondary);">CrewLogic generated</b> — not your Linxup API key. Each "Generate" mints a NEW token, so generate once, paste it into Linxup, and don't regenerate.</div>
+        <div style="font-weight:700;color:var(--text-primary);font-size:14px;margin-bottom:6px;">Wait times</div>
+        <div style="font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:18px;">The red "too long" flag uses your per-type wait time: Settings → <b style="color:var(--text-secondary);">Wait Times</b> (Disposal · Recycling · Donation).</div>
+        <button onclick="closeGeofenceGuide()" style="width:100%;background:var(--accent-green);color:var(--accent-text);border:none;font-weight:700;font-size:14px;padding:12px;border-radius:var(--radius-sm);cursor:pointer;">Got it</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Subscribe modal — proactive plan picker (Settings → Billing → "Choose a plan"). Reuses startCheckout();
        prices filled live from Stripe by renderTierPrices() into the mprice-* spans. -->
   <div id="subscribeModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)closeSubscribeModal()">
@@ -1992,6 +2036,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">
               Connect your GPS provider to see your trucks live on the <strong>Where Are My Trucks?</strong> screen. Each provider has an <strong>API (pull)</strong> connection for live truck positions and an optional <strong>Webhook (push)</strong> for geofence alerts. You can configure both providers, but only one feeds the trucks map at a time.
             </div>
+            <button onclick="openGeofenceGuide()" style="display:inline-flex;align-items:center;gap:7px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-size:13px;font-weight:700;padding:9px 14px;border-radius:var(--radius-sm);margin-bottom:16px;cursor:pointer;">📖 Geofence setup guide</button>
 
             <!-- Which provider currently feeds the trucks map -->
             <div id="telematicsActiveHeader" style="font-size:13px;margin-bottom:16px;"></div>
@@ -4200,6 +4245,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         });
       } catch (_e) { /* keep fallback amounts */ }
     }
+    // Settings → Trucks "📖 Geofence setup guide" → in-app modal (reliable; a hosted page gets shadowed by the SPA catch-all).
+    function openGeofenceGuide() { const m = document.getElementById('geofenceGuideModal'); if (m) m.style.display = 'flex'; }
+    function closeGeofenceGuide() { const m = document.getElementById('geofenceGuideModal'); if (m) m.style.display = 'none'; }
+
     // Settings "Choose a plan" → tier-picker modal (proactive upgrade, any time — not just at the paywall).
     function openSubscribeModal() {
       // Already subscribed? Plan changes go through the Customer Portal, never a second Checkout.

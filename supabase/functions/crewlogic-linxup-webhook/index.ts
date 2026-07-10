@@ -38,11 +38,14 @@ function timingSafeEqualStr(a: string, b: string): boolean {
   return r === 0;
 }
 
-// Pull "Bearer <token>" from a header value; returns the raw token or "".
+// Extract the token from an auth header. Accepts BOTH "Bearer <token>" (strip the scheme) and a
+// RAW "<token>" with no scheme — because it's sender-dependent whether Linxup prepends "Bearer "
+// or sends the field value verbatim. Either way we compare the bare token to the stored secret.
 function bearerOf(headerVal: string | null): string {
   if (!headerVal) return "";
-  const m = headerVal.match(/^\s*Bearer\s+(.+)\s*$/i);
-  return m ? m[1].trim() : "";
+  const m = headerVal.match(/^\s*Bearer\s+(.+)$/i);
+  if (m) return m[1].trim();   // "Bearer <token>" → strip the scheme
+  return headerVal.trim();     // raw "<token>" with no "Bearer " prefix → accept as-is
 }
 
 // Resolve the franchise from ?f=<external_id> (same attribution as the Motive receiver).
@@ -67,6 +70,7 @@ interface ParsedLinxup {
   direction: "enter" | "exit" | null;
   eventType: string | null;       // normalized: 'geofence_entry' | 'geofence_exit'
   fenceName: string | null;
+  fenceGroup: string | null;      // Linxup's classification label (geofence.fenceGroup) → geofence_alerts.category
   truckName: string | null;
   geofenceId: number | null;      // numeric only (geofence_alerts.geofence_id is bigint)
   eventTimeIso: string | null;
@@ -101,12 +105,20 @@ function parseLinxup(p: any): ParsedLinxup {
   const geofence = p?.geofence || {};
 
   const fenceName = (flat ? p?.fenceName : geofence?.name) ?? p?.fenceName ?? geofence?.name ?? null;
+  // The classification label. Documented V3 shape nests it as geofence.fenceGroup; FLAT variants call it
+  // fenceGroup/groupName. Stamped into geofence_alerts.category so the map treats it like a Motive category.
+  const fenceGroup = (flat ? (p?.fenceGroup ?? p?.groupName) : (geofence?.fenceGroup ?? geofence?.groupName)) ?? null;
   const truckName =
     (flat ? (p?.deviceName || p?.trackerName || p?.assetName || p?.driverName || p?.personName)
           : (tracker?.name || tracker?.label || tracker?.deviceName || tracker?.assetName))
     ?? null;
-  const geofenceId = toNumericOrNull(flat ? p?.fenceId : (geofence?.id ?? geofence?.fenceId));
-  const eventTimeIso = toIsoOrNull(flat ? (p?.eventDate ?? p?.date ?? p?.timestamp) : (p?.eventTime ?? p?.timestamp ?? p?.date));
+  const geofenceId = toNumericOrNull(flat ? p?.fenceId : (geofence?.geofenceId ?? geofence?.id ?? geofence?.fenceId));
+  // V3 carries enterDateTime + (on exit) exitDateTime; FLAT uses eventDate/date/timestamp.
+  const eventTimeIso = toIsoOrNull(
+    flat
+      ? (p?.eventDate ?? p?.date ?? p?.timestamp)
+      : ((direction === "exit" ? (p?.exitDateTime ?? p?.enterDateTime) : p?.enterDateTime) ?? p?.eventTime ?? p?.timestamp ?? p?.date),
+  );
 
   return {
     discriminator: flat ? String(p?.pushType || "") : (v3 ? String(p?.eventType || "") : "unknown"),
@@ -114,6 +126,7 @@ function parseLinxup(p: any): ParsedLinxup {
     direction,
     eventType,
     fenceName: fenceName != null ? String(fenceName) : null,
+    fenceGroup: fenceGroup != null ? String(fenceGroup) : null,
     truckName: truckName != null ? String(truckName) : null,
     geofenceId,
     eventTimeIso,
@@ -132,6 +145,20 @@ Deno.serve(async (req: Request) => {
 
   const sb = createClient(SUPABASE_URL, SERVICE_KEY);
   const fExternal = url.searchParams.get("f");
+
+  // TEMP DEBUG (remove after diagnosing #56): capture every incoming POST so we can SEE what Linxup
+  // actually sends — which ?f=, whether an auth header arrived + its token prefix, and a body snippet.
+  // Best-effort; never blocks the webhook.
+  try {
+    const _presented = bearerOf(req.headers.get("Authentication")) || bearerOf(req.headers.get("Authorization"));
+    await sb.from("linxup_webhook_debug").insert({
+      f_param: fExternal,
+      method: req.method,
+      auth_present: !!(req.headers.get("Authentication") || req.headers.get("Authorization")),
+      presented_prefix: _presented ? _presented.slice(0, 8) : null,
+      body_snippet: rawBody.slice(0, 500),
+    });
+  } catch (_e) { /* debug is best-effort */ }
 
   // Attribution first — no franchise, no auth possible.
   const franchise = await resolveFranchise(sb, fExternal);
@@ -175,6 +202,7 @@ Deno.serve(async (req: Request) => {
     vehicle_number: ev.truckName,
     geofence_id: ev.geofenceId,               // numeric fence id when present, else null
     geofence_name: ev.fenceName,
+    category: ev.fenceGroup,                  // Linxup Group → same column Motive stamps its Category into (drives the badge)
     event_id: null,
     start_time: ev.eventTimeIso,
     end_time: null,

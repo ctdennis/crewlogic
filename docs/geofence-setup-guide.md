@@ -10,7 +10,7 @@ CrewLogic reads your telematics **geofences** (Motive / Linxup) to power the dis
 - **how long it's been there** (a live "on-site 42m" dwell timer), and
 - **a red flag when it's been too long** (past your wait time for that kind of site).
 
-For that to work, each geofence needs the right **Category**. CrewLogic classifies off the **category — not the geofence name** — so you can name your geofences however you like; just set the category correctly.
+For that to work, each geofence needs the right label — a **Category** in Motive, a **Group** in Linxup. CrewLogic classifies off that label — **not the geofence name** — so name your geofences however you like; just set the Category/Group correctly. (Both use the same words: Transfer Station / Recycling / Donations.)
 
 ---
 
@@ -23,7 +23,7 @@ For that to work, each geofence needs the right **Category**. CrewLogic classifi
 
 | Motive Category | Truck badge | Wait-time it uses (Settings) |
 |---|---|---|
-| **Transfer Station** (also Disposal / Landfill) | 🗑️ | Disposal |
+| **Transfer** or **Disposal** _(either works — also Landfill / Dump)_ | 🗑️ | Disposal |
 | **Recycling** | ♻️ | Recycling |
 | **Donations** | 🎁 | Donation |
 | **Job Site** | _(automatic — CrewLogic creates job geofences from your schedule)_ | the job's scheduled duration |
@@ -32,12 +32,18 @@ For that to work, each geofence needs the right **Category**. CrewLogic classifi
 ### Key points
 - **Category drives it, not the name.** e.g. a geofence named "Lost Brothers Pallets" set to category **Recycling** shows ♻️ — correctly.
 - **Anything left "Uncategorized" gets no badge.** Categorize every transfer/disposal, recycling, and donation site.
+- **Non-facility geofences (no badge, on purpose):** tag your home base **Headquarters** and service areas (Cape Cod, Rhode Island, etc.) **Region** so they stay labeled and out of the facility badges.
 - Make sure the geofence is **Active**.
 
 ---
 
 ## Linxup
-Linxup uses **Groups** instead of Categories. **(Support coming — CrewLogic will read your Linxup groups.)** When it lands, name your group `Transfer Station`, `Recycling`, or `Donations` to match.
+Linxup's equivalent of Motive's Category is a **Group** — CrewLogic reads it the same way (from the `fenceGroup` on each pushed event). Put each geofence in a Group named `Transfer Station`, `Recycling`, or `Donations`.
+
+**Webhook setup** (Linxup pushes events to CrewLogic):
+1. In CrewLogic → **Settings → Trucks**, copy the **webhook URL** shown and click **Generate token**.
+2. In Linxup's **Push API** config: paste the URL into **Geofence Event URL**, and paste CrewLogic's **generated token** into **Bearer Token**.
+3. **Not** your Linxup API key — that token goes in CrewLogic's separate "Linxup REST token" box (for pulling live truck positions). CrewLogic generates the webhook token; you paste it *into* Linxup.
 
 ---
 
@@ -50,6 +56,6 @@ The red "too long" flag fires when a truck has been at a site longer than **your
 
 ## Quick checklist
 - [ ] Every transfer/disposal, recycling, and donation site you use has a geofence.
-- [ ] Each is set to the **correct Category** (not "Uncategorized").
+- [ ] Each is set to the **correct Category** (Motive) or **Group** (Linxup) — not left blank/Uncategorized.
 - [ ] Each geofence is **Active**.
 - [ ] **Wait Times** are set in CrewLogic Settings.
