@@ -32,6 +32,7 @@ For that to work, each geofence needs the right label — a **Category** in Moti
 ### Key points
 - **Category drives it, not the name.** e.g. a geofence named "Lost Brothers Pallets" set to category **Recycling** shows ♻️ — correctly.
 - **Anything left "Uncategorized" gets no badge.** Categorize every transfer/disposal, recycling, and donation site.
+- **Non-facility geofences (no badge, on purpose):** tag your home base **Headquarters** and service areas (Cape Cod, Rhode Island, etc.) **Region** so they stay labeled and out of the facility badges.
 - Make sure the geofence is **Active**.
 
 ---
