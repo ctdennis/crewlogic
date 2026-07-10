@@ -1,7 +1,13 @@
 # Plan — Truck Setup: persistent truck table + drag/drop map ordering
 
-Status: BUILT on dev (v5.50.46, 2026-07-10) — awaiting Owner test on dev.crewlogic.pages.dev, then promote to prod.
-Backend verified on dev #90: setupList synced 3 trucks (keyed by VIN), reorder persisted, default position call returns sorted → map-dot numbers follow order.
+Status: LIVE IN PROD (v5.50.47, 2026-07-10). Owner confirmed mobile drag works on dev; promoted.
+Prod: migration 0035 applied, crewlogic-trucks deployed (smoke-tested #90 Motive), frontend live on app.crewlogicai.com.
+Drag uses SortableJS (already loaded; same config as the home-card reorder) — mobile touch verified by Owner.
+Backend verified on dev #90: setupList synced 3 trucks (keyed by VIN), reorder persisted, default call returns sorted → map-dot numbers follow order.
+Owner: Charles Dennis · Created 2026-07-10 · Shipped 2026-07-10
+
+## Reserved fast-follow (not built)
+- Per-truck custom map label (column reserved; UI later) — lets an owner override the telematics name shown on the dot.
 Owner: Charles Dennis · Created 2026-07-10 · Target: dev → prod
 
 ## Goal
