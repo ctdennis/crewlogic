@@ -1,6 +1,7 @@
 # Plan — Truck Setup: persistent truck table + drag/drop map ordering
 
-Status: DRAFT — awaiting Owner approval before migration is written.
+Status: BUILT on dev (v5.50.46, 2026-07-10) — awaiting Owner test on dev.crewlogic.pages.dev, then promote to prod.
+Backend verified on dev #90: setupList synced 3 trucks (keyed by VIN), reorder persisted, default position call returns sorted → map-dot numbers follow order.
 Owner: Charles Dennis · Created 2026-07-10 · Target: dev → prod
 
 ## Goal
