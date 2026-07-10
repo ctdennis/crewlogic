@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.42 | 2026-07-10">
+  <meta name="crewlogic-version" content="v5.50.47 | 2026-07-10">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1076,6 +1076,14 @@
     }
   /* Numbered map markers — neutralize Leaflet's default white div-icon box */
   .truck-num-marker, .job-stop-marker, .job-lookahead-dot { background: transparent !important; border: none !important; }
+  /* Truck map-order modal rows (drag to reorder) */
+  .tsetup-row { display:flex; align-items:center; gap:10px; background:var(--bg-input); border:1px solid var(--border); border-radius:10px; padding:10px 12px; user-select:none; }
+  .tsetup-row.tsetup-dragging { opacity:0.9; box-shadow:0 6px 18px rgba(0,0,0,.4); border-color:var(--accent-green); }
+  .tsetup-row { cursor:grab; }
+  .tsetup-handle { color:var(--text-muted); font-size:17px; line-height:1; padding:2px 5px; }
+  .tsetup-num { min-width:22px; height:22px; border-radius:11px; background:var(--accent-green); color:var(--accent-text); font-weight:800; font-size:12px; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; }
+  .tsetup-name { flex:1; color:var(--text-primary); font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tsetup-chip { font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:9px; flex:0 0 auto; }
   </style>
 </head>
 <body>
@@ -1300,6 +1308,27 @@
         <div style="font-weight:700;color:var(--text-primary);font-size:14px;margin-bottom:6px;">Wait times</div>
         <div style="font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:18px;">The red "too long" flag uses your per-type wait time: Settings → <b style="color:var(--text-secondary);">Wait Times</b> (Disposal · Recycling · Donation).</div>
         <button onclick="closeGeofenceGuide()" style="width:100%;background:var(--accent-green);color:var(--accent-text);border:none;font-weight:700;font-size:14px;padding:12px;border-radius:var(--radius-sm);cursor:pointer;">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Truck map order — in-app modal (Settings → Trucks → "🚚 Truck map order"). Drag to reorder; the green
+       map-dot numbers follow this order so "Truck 1" is always the same truck. Trucks are pulled live from the
+       telematics feed via crewlogic-trucks (action=setupList); the order persists via action=reorder. -->
+  <div id="truckSetupModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)closeTruckSetup()">
+    <div style="width:100%;max-width:460px;background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border);margin:auto;">
+      <div style="position:sticky;top:0;background:var(--bg-card);display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-bottom:1px solid var(--border);border-radius:var(--radius) var(--radius) 0 0;z-index:1;">
+        <div style="font-size:18px;font-weight:800;color:var(--text-primary);">🚚 Truck map order</div>
+        <button onclick="closeTruckSetup()" aria-label="Close" style="background:none;border:none;color:var(--text-muted);font-size:26px;line-height:1;cursor:pointer;padding:0 4px;">&times;</button>
+      </div>
+      <div style="padding:18px 22px;">
+        <div style="font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:16px;">Drag your trucks into the order you want — <b style="color:var(--text-primary);">on a phone, press and hold a truck, then drag</b>. The number on each green map dot follows this list, so <b style="color:var(--text-primary);">Truck 1</b> is always the same truck. Names come straight from Linxup/Motive.</div>
+        <div id="truckSetupList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;"></div>
+        <div id="truckSetupMsg" style="font-size:12.5px;color:var(--text-muted);min-height:16px;margin-bottom:12px;"></div>
+        <div style="display:flex;gap:10px;">
+          <button onclick="closeTruckSetup()" style="flex:1;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-weight:700;font-size:14px;padding:12px;border-radius:var(--radius-sm);cursor:pointer;">Cancel</button>
+          <button id="truckSetupSaveBtn" onclick="saveTruckOrder()" style="flex:1;background:var(--accent-green);color:var(--accent-text);border:none;font-weight:700;font-size:14px;padding:12px;border-radius:var(--radius-sm);cursor:pointer;">Save order</button>
+        </div>
       </div>
     </div>
   </div>
@@ -2047,7 +2076,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">
               Connect your GPS provider to see your trucks live on the <strong>Where Are My Trucks?</strong> screen. Each provider has an <strong>API (pull)</strong> connection for live truck positions and an optional <strong>Webhook (push)</strong> for geofence alerts. You can configure both providers, but only one feeds the trucks map at a time.
             </div>
-            <button onclick="openGeofenceGuide()" style="display:inline-flex;align-items:center;gap:7px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-size:13px;font-weight:700;padding:9px 14px;border-radius:var(--radius-sm);margin-bottom:16px;cursor:pointer;">📖 Geofence setup guide</button>
+            <button onclick="openGeofenceGuide()" style="display:inline-flex;align-items:center;gap:7px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-size:13px;font-weight:700;padding:9px 14px;border-radius:var(--radius-sm);margin:0 8px 16px 0;cursor:pointer;">📖 Geofence setup guide</button>
+            <button onclick="openTruckSetup()" style="display:inline-flex;align-items:center;gap:7px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-size:13px;font-weight:700;padding:9px 14px;border-radius:var(--radius-sm);margin-bottom:16px;cursor:pointer;">🚚 Truck map order</button>
 
             <!-- Which provider currently feeds the trucks map -->
             <div id="telematicsActiveHeader" style="font-size:13px;margin-bottom:16px;"></div>
@@ -4323,6 +4353,83 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Settings → Trucks "📖 Geofence setup guide" → in-app modal (reliable; a hosted page gets shadowed by the SPA catch-all).
     function openGeofenceGuide() { const m = document.getElementById('geofenceGuideModal'); if (m) m.style.display = 'flex'; }
     function closeGeofenceGuide() { const m = document.getElementById('geofenceGuideModal'); if (m) m.style.display = 'none'; }
+
+    // ── Truck map order (Settings → Trucks → "🚚 Truck map order") ──────────────────────────────────
+    // Drag to reorder; the green map-dot numbers follow this order (crewlogic-trucks sorts its default
+    // response by the saved sort_order). Trucks come from the telematics feed via action=setupList; the
+    // order persists via action=reorder. Pointer-events drag → works for both mouse and touch, no library.
+    function closeTruckSetup() { const m = document.getElementById('truckSetupModal'); if (m) m.style.display = 'none'; }
+    async function openTruckSetup() {
+      const modal = document.getElementById('truckSetupModal');
+      const list = document.getElementById('truckSetupList');
+      const msg = document.getElementById('truckSetupMsg');
+      if (!modal || !list) return;
+      if (msg) msg.textContent = '';
+      list.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0;">Loading trucks…</div>';
+      modal.style.display = 'flex';
+      try {
+        const data = await edgeFunctionCall('crewlogic-trucks', { franchiseID: currentUser.franchiseInternalID, action: 'setupList' });
+        if (!data || !data.success) {
+          list.innerHTML = '<div style="color:#ef4444;font-size:13px;padding:8px 0;">Couldn\'t load trucks: ' + _truckEsc((data && data.error) || 'no telematics provider is configured for this account') + '</div>';
+          return;
+        }
+        const trucks = data.trucks || [];
+        if (!trucks.length) { list.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0;">No trucks found in your telematics account yet.</div>'; return; }
+        list.innerHTML = trucks.map((t, i) => {
+          const chip = t.active
+            ? '<span class="tsetup-chip" style="background:rgba(0,231,133,.15);color:#00E785;">online</span>'
+            : '<span class="tsetup-chip" style="background:var(--bg-card);color:var(--text-muted);border:1px solid var(--border);">offline</span>';
+          return '<div class="tsetup-row" data-key="' + _truckEsc(t.key) + '">'
+            + '<span class="tsetup-handle" title="Drag to reorder">⠿</span>'
+            + '<span class="tsetup-num">' + (i + 1) + '</span>'
+            + '<span class="tsetup-name">' + _truckEsc(t.name || t.key) + '</span>'
+            + chip + '</div>';
+        }).join('');
+        _tsetupDragInit(list);
+      } catch (e) {
+        console.error('[truckSetup] load failed', e);
+        list.innerHTML = '<div style="color:#ef4444;font-size:13px;padding:8px 0;">Failed to load trucks. Try again.</div>';
+      }
+    }
+    function _tsetupRenumber(container) {
+      Array.prototype.slice.call(container.querySelectorAll('.tsetup-row')).forEach((row, i) => {
+        const n = row.querySelector('.tsetup-num'); if (n) n.textContent = String(i + 1);
+      });
+    }
+    // Reuse SortableJS (already loaded; same pattern as the home-card reorder) — reliable touch + mouse
+    // drag. The whole row is the drag target; delayOnTouchOnly (200ms hold) lets a quick swipe still
+    // scroll the list. onEnd renumbers after Sortable has reordered the DOM.
+    function _tsetupDragInit(container) {
+      if (typeof Sortable === 'undefined') { console.warn('[truckSetup] Sortable not loaded'); return; }
+      Sortable.create(container, {
+        animation: 150,
+        delay: 200,
+        delayOnTouchOnly: true,
+        onEnd: function () { _tsetupRenumber(container); }
+      });
+    }
+    async function saveTruckOrder() {
+      const list = document.getElementById('truckSetupList');
+      const msg = document.getElementById('truckSetupMsg');
+      const btn = document.getElementById('truckSetupSaveBtn');
+      if (!list) return;
+      const order = Array.prototype.slice.call(list.querySelectorAll('.tsetup-row')).map(r => r.getAttribute('data-key')).filter(Boolean);
+      if (!order.length) { closeTruckSetup(); return; }
+      if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+      try {
+        const data = await edgeFunctionCall('crewlogic-trucks', { franchiseID: currentUser.franchiseInternalID, action: 'reorder', order });
+        if (data && data.success) {
+          if (msg) { msg.style.color = 'var(--accent-green)'; msg.textContent = 'Saved — map order updated.'; }
+          if (typeof showTrucks === 'function') { try { showTrucks(true); } catch (_) {} }
+          setTimeout(closeTruckSetup, 800);
+        } else if (msg) { msg.style.color = '#ef4444'; msg.textContent = 'Save failed: ' + ((data && data.error) || 'try again'); }
+      } catch (e) {
+        console.error('[truckSetup] save failed', e);
+        if (msg) { msg.style.color = '#ef4444'; msg.textContent = 'Save failed. Try again.'; }
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Save order'; }
+      }
+    }
 
     // Settings "Choose a plan" → tier-picker modal (proactive upgrade, any time — not just at the paywall).
     function openSubscribeModal() {
@@ -8411,8 +8518,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (t.lat == null || t.lon == null) return;
         const active = _truckActive(t);
         const color = active ? '#00E785' : '#6e8194';
-        // Round marker: colored circle (green active / gray stale) with the truck number; a direction arrow
-        // rotated to the heading (course over ground) shows only while moving — heading is stale when parked.
+        // Round marker: colored circle (green active / gray stale) with the truck's map-order number; a
+        // direction arrow rotated to the heading shows only while moving — heading is stale when parked.
+        // Hover (<title>) and tap (popup) show the full telematics name. The number reflects the franchise's
+        // drag/drop map order set in Truck Setup; until that's configured it's the render sequence.
         const moving = t.speed != null && t.speed > 0 && t.bearingDeg != null;
         const arrow = moving ? '<path d="M20 1.5 L24.5 9 L15.5 9 Z" fill="' + color + '" stroke="#fff" stroke-width="1.2" transform="rotate(' + t.bearingDeg + ' 20 20)"/>' : '';
         // Jobs sitting under/near this truck (≤60 m) — the truck would otherwise hide them. Badge + popup list.
@@ -8427,6 +8536,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const icon = L.divIcon({
           className: 'truck-num-marker',
           html: '<svg width="40" height="40" viewBox="0 0 40 40" style="filter:drop-shadow(0 1px 3px rgba(0,0,0,.55));">'
+            + '<title>' + _truckEsc(t.name || ('Truck ' + (i + 1))) + '</title>'
             + arrow
             + '<circle cx="20" cy="20" r="11" fill="' + color + '" stroke="#fff" stroke-width="2"/>'
             + '<text x="20" y="24.3" text-anchor="middle" font-size="12" font-weight="800" fill="#06121d" font-family="sans-serif">' + (i + 1) + '</text>'
