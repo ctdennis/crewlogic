@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.46 | 2026-07-10">
+  <meta name="crewlogic-version" content="v5.50.47 | 2026-07-10">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1079,7 +1079,8 @@
   /* Truck map-order modal rows (drag to reorder) */
   .tsetup-row { display:flex; align-items:center; gap:10px; background:var(--bg-input); border:1px solid var(--border); border-radius:10px; padding:10px 12px; user-select:none; }
   .tsetup-row.tsetup-dragging { opacity:0.9; box-shadow:0 6px 18px rgba(0,0,0,.4); border-color:var(--accent-green); }
-  .tsetup-handle { cursor:grab; color:var(--text-muted); font-size:17px; line-height:1; padding:2px 5px; touch-action:none; }
+  .tsetup-row { cursor:grab; }
+  .tsetup-handle { color:var(--text-muted); font-size:17px; line-height:1; padding:2px 5px; }
   .tsetup-num { min-width:22px; height:22px; border-radius:11px; background:var(--accent-green); color:var(--accent-text); font-weight:800; font-size:12px; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; }
   .tsetup-name { flex:1; color:var(--text-primary); font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .tsetup-chip { font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:9px; flex:0 0 auto; }
@@ -1321,7 +1322,7 @@
         <button onclick="closeTruckSetup()" aria-label="Close" style="background:none;border:none;color:var(--text-muted);font-size:26px;line-height:1;cursor:pointer;padding:0 4px;">&times;</button>
       </div>
       <div style="padding:18px 22px;">
-        <div style="font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:16px;">Drag your trucks into the order you want. The number on each green map dot follows this list — so <b style="color:var(--text-primary);">Truck 1</b> is always the same truck. Names come straight from Linxup/Motive.</div>
+        <div style="font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:16px;">Drag your trucks into the order you want — <b style="color:var(--text-primary);">on a phone, press and hold a truck, then drag</b>. The number on each green map dot follows this list, so <b style="color:var(--text-primary);">Truck 1</b> is always the same truck. Names come straight from Linxup/Motive.</div>
         <div id="truckSetupList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;"></div>
         <div id="truckSetupMsg" style="font-size:12.5px;color:var(--text-muted);min-height:16px;margin-bottom:12px;"></div>
         <div style="display:flex;gap:10px;">
@@ -4395,30 +4396,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const n = row.querySelector('.tsetup-num'); if (n) n.textContent = String(i + 1);
       });
     }
+    // Reuse SortableJS (already loaded; same pattern as the home-card reorder) — reliable touch + mouse
+    // drag. The whole row is the drag target; delayOnTouchOnly (200ms hold) lets a quick swipe still
+    // scroll the list. onEnd renumbers after Sortable has reordered the DOM.
     function _tsetupDragInit(container) {
-      container.querySelectorAll('.tsetup-row').forEach(row => {
-        const handle = row.querySelector('.tsetup-handle');
-        if (!handle) return;
-        let dragging = false;
-        handle.addEventListener('pointerdown', e => {
-          e.preventDefault(); dragging = true; row.classList.add('tsetup-dragging');
-          try { handle.setPointerCapture(e.pointerId); } catch (_) {}
-        });
-        handle.addEventListener('pointermove', e => {
-          if (!dragging) return;
-          const y = e.clientY;
-          const others = Array.prototype.slice.call(container.querySelectorAll('.tsetup-row:not(.tsetup-dragging)'));
-          const after = others.find(s => { const r = s.getBoundingClientRect(); return y < r.top + r.height / 2; });
-          if (after) container.insertBefore(row, after); else container.appendChild(row);
-        });
-        const end = e => {
-          if (!dragging) return;
-          dragging = false; row.classList.remove('tsetup-dragging');
-          try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
-          _tsetupRenumber(container);
-        };
-        handle.addEventListener('pointerup', end);
-        handle.addEventListener('pointercancel', end);
+      if (typeof Sortable === 'undefined') { console.warn('[truckSetup] Sortable not loaded'); return; }
+      Sortable.create(container, {
+        animation: 150,
+        delay: 200,
+        delayOnTouchOnly: true,
+        onEnd: function () { _tsetupRenumber(container); }
       });
     }
     async function saveTruckOrder() {
