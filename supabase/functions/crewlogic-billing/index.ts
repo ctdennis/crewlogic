@@ -195,6 +195,14 @@ Deno.serve(async (req: Request) => {
   try {
     if (action === "ping") return json({ ok: true, hasSecret: !!STRIPE_SECRET_KEY, hasWebhook: !!STRIPE_WEBHOOK_SECRET, prices: { starter: !!STRIPE_PRICE.starter, pro: !!STRIPE_PRICE.pro, enterprise: !!STRIPE_PRICE.enterprise } });
 
+    // Diagnostic: is the Stripe account cleared to take LIVE charges yet? charges_enabled is the real signal.
+    if (action === "accountStatus") {
+      try {
+        const acct: any = await getStripe().accounts.retrieve();
+        return json({ ok: true, charges_enabled: acct.charges_enabled, payouts_enabled: acct.payouts_enabled, details_submitted: acct.details_submitted, disabled_reason: acct.requirements?.disabled_reason || null, currently_due: acct.requirements?.currently_due || [], past_due: acct.requirements?.past_due || [] });
+      } catch (e) { console.error("[billing] accountStatus:", (e as Error).message); return json({ ok: false, error: (e as Error).message.slice(0, 160) }); }
+    }
+
     // Public pricing for the paywall tier picker — live amounts from Stripe (so display can't drift from
     // the real price; no caller auth needed, it's just pricing). Returns cents per tier.
     if (action === "getPrices") {
