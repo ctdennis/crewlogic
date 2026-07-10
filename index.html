@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.42 | 2026-07-10">
+  <meta name="crewlogic-version" content="v5.50.43 | 2026-07-10">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8411,29 +8411,48 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (t.lat == null || t.lon == null) return;
         const active = _truckActive(t);
         const color = active ? '#00E785' : '#6e8194';
-        // Round marker: colored circle (green active / gray stale) with the truck number; a direction arrow
-        // rotated to the heading (course over ground) shows only while moving — heading is stale when parked.
+        // Pill marker: colored rounded label (green active / gray stale) showing the truck's REAL name
+        // exactly as set in the telematics portal (Linxup/Motive) — verbatim, no parsing rule, so any
+        // franchise's naming convention (\"Ford 101\", \"T - 01\", \"Tundra\") reads correctly. Falls back to
+        // the render-sequence number only if the feed sends no name. Long names cap at 10 chars + \"…\" (the
+        // full name is in the <title> hover + the tap popup). A heading arrow hugs the pill edge while moving.
+        const _rawName = (t.name != null ? String(t.name).trim() : '');
+        let _label = _rawName || String(i + 1);
+        if (_label.length > 11) _label = _label.slice(0, 10).replace(/\s+$/, '') + '…';
+        const pillW = Math.max(26, Math.round(_label.length * 7.3) + 16);
+        const pillH = 22, hw = pillW / 2, hh = pillH / 2;
+        const mx = hw + 12, my = hh + 12;               // SVG half-extents leave room for arrow + corner badges
+        const cx = mx, cy = my, svgW = mx * 2, svgH = my * 2;
         const moving = t.speed != null && t.speed > 0 && t.bearingDeg != null;
-        const arrow = moving ? '<path d="M20 1.5 L24.5 9 L15.5 9 Z" fill="' + color + '" stroke="#fff" stroke-width="1.2" transform="rotate(' + t.bearingDeg + ' 20 20)"/>' : '';
+        let arrow = '';
+        if (moving) {                                   // triangle hugging the pill edge, pointing along the heading
+          const b = t.bearingDeg * Math.PI / 180, ux = Math.sin(b), uy = -Math.cos(b), px = -uy, py = ux;
+          const bx = cx + ux * hw, by = cy + uy * hh;   // base midpoint on the pill's bounding ellipse
+          const tx = cx + ux * (hw + 8), ty = cy + uy * (hh + 8), w = 4.5;
+          arrow = '<path d="M' + tx.toFixed(1) + ' ' + ty.toFixed(1) + ' L' + (bx + px * w).toFixed(1) + ' ' + (by + py * w).toFixed(1)
+            + ' L' + (bx - px * w).toFixed(1) + ' ' + (by - py * w).toFixed(1) + ' Z" fill="' + color + '" stroke="#fff" stroke-width="1.1"/>';
+        }
         // Jobs sitting under/near this truck (≤60 m) — the truck would otherwise hide them. Badge + popup list.
         const nearJobs = (t.lat != null && t.lon != null)
           ? (_trucksJobsData || []).filter(j => j.lat != null && j.lon != null && _distM(t.lat, t.lon, j.lat, j.lon) <= 60)
           : [];
-        const jobBadge = nearJobs.length ? '<path d="M31 25.5 L37.5 31 L37.5 37.5 L24.5 37.5 L24.5 31 Z" fill="#F59E0B" stroke="#fff" stroke-width="1.3"/>' : '';
+        const _bgx = cx + hw - 2, _bgy = cy + hh - 2;   // badge anchor: pill bottom-right corner
+        const jobBadge = nearJobs.length ? '<path d="M' + _bgx + ' ' + (_bgy - 5.5) + ' L' + (_bgx + 6.5) + ' ' + _bgy + ' L' + (_bgx + 6.5) + ' ' + (_bgy + 6.5) + ' L' + (_bgx - 6.5) + ' ' + (_bgy + 6.5) + ' L' + (_bgx - 6.5) + ' ' + _bgy + ' Z" fill="#F59E0B" stroke="#fff" stroke-width="1.3"/>' : '';
         // Truck currently INSIDE a disposal/recycling/donation geofence (telematics, via geofence_alerts)
         // → badge its emoji (🗑️/♻️/🎁) bare, matching the standalone facility markers on the map.
         const nearSite = _truckCurrentFacility[_normVeh(t.name)] || null;
-        const siteBadge = nearSite ? '<text x="31" y="37" text-anchor="middle" font-size="15">' + nearSite.emoji + '</text>' : '';
+        const siteBadge = nearSite ? '<text x="' + _bgx + '" y="' + (_bgy + 5.5) + '" text-anchor="middle" font-size="15">' + nearSite.emoji + '</text>' : '';
         const icon = L.divIcon({
           className: 'truck-num-marker',
-          html: '<svg width="40" height="40" viewBox="0 0 40 40" style="filter:drop-shadow(0 1px 3px rgba(0,0,0,.55));">'
+          html: '<svg width="' + svgW + '" height="' + svgH + '" viewBox="0 0 ' + svgW + ' ' + svgH + '" style="filter:drop-shadow(0 1px 3px rgba(0,0,0,.55));overflow:visible;">'
+            + '<title>' + _truckEsc(_rawName || String(i + 1)) + '</title>'
             + arrow
-            + '<circle cx="20" cy="20" r="11" fill="' + color + '" stroke="#fff" stroke-width="2"/>'
-            + '<text x="20" y="24.3" text-anchor="middle" font-size="12" font-weight="800" fill="#06121d" font-family="sans-serif">' + (i + 1) + '</text>'
+            + '<rect x="' + (cx - hw) + '" y="' + (cy - hh) + '" width="' + pillW + '" height="' + pillH + '" rx="' + hh + '" ry="' + hh + '" fill="' + color + '" stroke="#fff" stroke-width="2"/>'
+            + '<text x="' + cx + '" y="' + (cy + 4.3) + '" text-anchor="middle" font-size="12" font-weight="800" fill="#06121d" font-family="sans-serif">' + _truckEsc(_label) + '</text>'
             + jobBadge
             + siteBadge
             + '</svg>',
-          iconSize: [40, 40], iconAnchor: [20, 20], popupAnchor: [0, -18]
+          iconSize: [svgW, svgH], iconAnchor: [cx, cy], popupAnchor: [0, -(cy - 2)]
         });
         const veh = [t.year, t.make, t.model].filter(Boolean).join(' ');
         const move = [(t.speed != null ? t.speed + ' mph' : ''), (t.heading || '')].filter(Boolean).join(' ');
