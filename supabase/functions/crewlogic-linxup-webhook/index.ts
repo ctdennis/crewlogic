@@ -71,6 +71,7 @@ interface ParsedLinxup {
   eventType: string | null;       // normalized: 'geofence_entry' | 'geofence_exit'
   fenceName: string | null;
   fenceGroup: string | null;      // Linxup's classification label (geofence.fenceGroup) → geofence_alerts.category
+  durationSec: number | null;     // on-site seconds (from durationMinutes on exit) → geofence_alerts.duration
   truckName: string | null;
   geofenceId: number | null;      // numeric only (geofence_alerts.geofence_id is bigint)
   eventTimeIso: string | null;
@@ -119,6 +120,9 @@ function parseLinxup(p: any): ParsedLinxup {
       ? (p?.eventDate ?? p?.date ?? p?.timestamp)
       : ((direction === "exit" ? (p?.exitDateTime ?? p?.enterDateTime) : p?.enterDateTime) ?? p?.eventTime ?? p?.timestamp ?? p?.date),
   );
+  // Linxup sends durationMinutes on exit → store as SECONDS (matches Motive's `duration`) in geofence_alerts.duration.
+  const durMin = toNumericOrNull(flat ? (p?.durationMinutes ?? p?.duration) : p?.durationMinutes);
+  const durationSec = durMin != null ? Math.round(durMin * 60) : null;
 
   return {
     discriminator: flat ? String(p?.pushType || "") : (v3 ? String(p?.eventType || "") : "unknown"),
@@ -127,6 +131,7 @@ function parseLinxup(p: any): ParsedLinxup {
     eventType,
     fenceName: fenceName != null ? String(fenceName) : null,
     fenceGroup: fenceGroup != null ? String(fenceGroup) : null,
+    durationSec,
     truckName: truckName != null ? String(truckName) : null,
     geofenceId,
     eventTimeIso,
@@ -206,7 +211,7 @@ Deno.serve(async (req: Request) => {
     event_id: null,
     start_time: ev.eventTimeIso,
     end_time: null,
-    duration: null,
+    duration: ev.durationSec,                 // on-site seconds (exit events) — powers the alerts report
     raw: parsed,
   });
   if (error) {
