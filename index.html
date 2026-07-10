@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.38 | 2026-07-10">
+  <meta name="crewlogic-version" content="v5.50.39 | 2026-07-10">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4270,12 +4270,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       } catch (e) { body.innerHTML = '<div style="color:var(--text-muted);">Could not load the report.</div>'; return; }
       if (!Array.isArray(rows) || !rows.length) { body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;line-height:1.6;">No completed facility visits yet. This fills in as trucks <b>exit</b> their geofences — each exit carries its on-site time.</div>'; return; }
       const fmtDur = (sec) => { sec = Math.round(sec || 0); const h = Math.floor(sec / 3600), mn = Math.round((sec % 3600) / 60); return h ? (h + 'h ' + mn + 'm') : (mn + 'm'); };
-      const typeOf = (cat) => { const c = String(cat || '').toLowerCase(); if (/transfer|disposal|landfill|dump/.test(c)) return { k: 'Disposal', e: '🗑️' }; if (/recycl/.test(c)) return { k: 'Recycling', e: '♻️' }; if (/donat/.test(c)) return { k: 'Donation', e: '🎁' }; return { k: 'Other', e: '📍' }; };
+      const typeOf = (cat, name) => { const t = (s) => { s = String(s || '').toLowerCase(); if (/transfer|disposal|landfill|dump/.test(s)) return { k: 'Disposal', e: '🗑️' }; if (/recycl/.test(s)) return { k: 'Recycling', e: '♻️' }; if (/donat/.test(s)) return { k: 'Donation', e: '🎁' }; return null; }; return t(cat) || t(name) || { k: 'Other', e: '📍' }; }; // category-first, name fallback (mirrors _facilityForAlert)
       const rowHtml = (label, count, sec) => '<div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:9px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;"><div style="font-size:13px;color:var(--text-primary);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + label + '</div><div style="font-size:12px;color:var(--text-secondary);white-space:nowrap;text-align:right;">' + count + ' · ' + fmtDur(sec) + ' · avg ' + fmtDur(sec / count) + '</div></div>';
       let totalSec = 0; const byType = {}, byFacility = {};
       rows.forEach(r => {
         const d = parseFloat(r.duration) || 0; totalSec += d;
-        const t = typeOf(r.category);
+        const t = typeOf(r.category, r.geofence_name);
         byType[t.k] = byType[t.k] || { e: t.e, n: 0, sec: 0 }; byType[t.k].n++; byType[t.k].sec += d;
         const fn = r.geofence_name || '(unnamed)';
         byFacility[fn] = byFacility[fn] || { e: t.e, n: 0, sec: 0 }; byFacility[fn].n++; byFacility[fn].sec += d;
