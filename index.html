@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.43 | 2026-07-10">
+  <meta name="crewlogic-version" content="v5.50.44 | 2026-07-10">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7608,6 +7608,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     const _expandedTrucks = new Set(); // which truck cards are expanded (by index; survives auto-refresh)
     function _truckEsc(s) { return String(s == null ? '' : s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c])); }
+    // Compact map-pill code from a truck's telematics name: the unit number if the name has digits
+    // ("Ford 101"→101, "T - 01"→01, "Truck 3"→3, "F350 #3"→3), else the first 3 letters ("Tundra"→Tun,
+    // "Bobcat"→Bob). No per-franchise config. The full real name is always on hover (<title>) and tap
+    // (popup), so an ambiguous/duplicate code is never a dead end — you see the real name instantly.
+    function _truckShortCode(name, seq) {
+      const s = (name == null ? '' : String(name)).trim();
+      if (!s) return String(seq);
+      const runs = s.match(/\d+/g);
+      if (runs) return runs[runs.length - 1];
+      const alpha = s.replace(/[^A-Za-z0-9]/g, '');
+      return alpha.slice(0, 3) || String(seq);
+    }
     let _trucksJobsData = []; // latest loaded job overlay (for the "job under truck" badge proximity check)
     let _jobsByWo = {}; // {String(woID|jobID) -> {startMin, durationMin}} — populated by loadJobMarkers; used by the Live Alerts dwell-time job thresholds
     // Toggleable overlay layer groups (trucks / jobs / cost-section sites / truck home) + the layers control.
@@ -8411,14 +8423,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (t.lat == null || t.lon == null) return;
         const active = _truckActive(t);
         const color = active ? '#00E785' : '#6e8194';
-        // Pill marker: colored rounded label (green active / gray stale) showing the truck's REAL name
-        // exactly as set in the telematics portal (Linxup/Motive) — verbatim, no parsing rule, so any
-        // franchise's naming convention (\"Ford 101\", \"T - 01\", \"Tundra\") reads correctly. Falls back to
-        // the render-sequence number only if the feed sends no name. Long names cap at 10 chars + \"…\" (the
-        // full name is in the <title> hover + the tap popup). A heading arrow hugs the pill edge while moving.
+        // Pill marker: small colored rounded code (green active / gray stale). The pill shows a COMPACT
+        // auto-code derived from the truck's telematics name (Ford 101→101, T-01→01, Tundra→Tun) so a busy
+        // map (Koby's 11-truck cluster) stays readable; the FULL real name is one hover (<title>) or tap
+        // (popup) away. No parsing-as-sole-identifier risk — the real name is always instantly visible.
+        // Falls back to the render-sequence number only if the feed sends no name. Arrow hugs the pill edge.
         const _rawName = (t.name != null ? String(t.name).trim() : '');
-        let _label = _rawName || String(i + 1);
-        if (_label.length > 11) _label = _label.slice(0, 10).replace(/\s+$/, '') + '…';
+        const _label = _truckShortCode(_rawName, i + 1);
         const pillW = Math.max(26, Math.round(_label.length * 7.3) + 16);
         const pillH = 22, hw = pillW / 2, hh = pillH / 2;
         const mx = hw + 12, my = hh + 12;               // SVG half-extents leave room for arrow + corner badges
