@@ -1,7 +1,96 @@
 # Plan — Caps, Roles & Enforcement (pre-billing build)
 
-Status: SCOPE for Owner review (2026-07-11). Nothing built yet. Execution detail for
-`plan-payments.md` §4.4. Companion strategy/decisions live in `plan-payments.md` (§4, §7).
+Status: IN PROGRESS. Execution detail for `plan-payments.md` §4.4. Companion strategy/decisions
+live in `plan-payments.md` (§4, §7).
+
+Progress:
+- **Epic A DONE — LIVE IN PROD (v5.50.48).** Access = subscription_status only; provisionNative 'free'.
+- **Epic B CANCELLED** (model change — no dispatch role).
+- **Epic C DONE ON DEV (v5.50.50), Owner-verified ("looks good, exactly as expected").** Per-user tile
+  toggles + owner editor + login read + showApp filter + trio layering fix. NOT yet promoted to prod
+  (backfill runs at promotion). Ready to promote.
+- **Epic D DONE ON DEV (v5.50.51).** tier_limits config · countUsage helper · usageSummary action ·
+  dormant ENFORCE_USAGE_CAPS gate · home usage banner (80/90/95%) · seat soft-flag · transparency copy.
+  Enforcement soft at launch (flag off). NOT promoted; ready to test. Fast-follow = overage + $10/seat
+  billing. Remaining epics: F (marketing pricing), E (enable billing).
+- Duplicate-franchise dedup: confirmed already handled (409 + UNIQUE(external_id)); pay-last checkout
+  gate logged under Epic E.
+
+## MODEL — REVISED & LOCKED (Owner 2026-07-11) — supersedes §4.1 of plan-payments.md
+
+Owner simplified away the role-based billing entirely:
+- **Billable unit = a user ID (headcount), NOT the estimator.** Every account counts toward the tier
+  cap regardless of what they do. Owner chose headcount over metering-by-estimator for simplicity,
+  knowing estimates drive the underlying cost.
+- **Seat caps = TOTAL users incl. the owner:** Starter **2**, Pro **5**, Enterprise **∞** (unchanged
+  numbers, now *users* not *estimators*). No free seats.
+- **Exactly ONE admin per franchise = the owner.** Only the owner controls per-user tile assignment,
+  billing, and settings. **No co-admin, no "dispatch role."** The son in the father/son case is a
+  normal user with all tiles assigned; the father remains sole admin.
+- **"Dispatch" and "Estimates" are TILES the owner assigns**, not roles. The existing `profiles.role`
+  = `owner` (sole admin) vs `estimator` (a normal non-admin user) already models this — no new role.
+
+### Impact on the epics below
+- **Epic B (dispatch role): CANCELLED.** No 3rd role, no invite role-picker, no role gating. Keep
+  owner/estimator as-is. The dev-only role CHECK (migration 0036) will be simplified to
+  `owner/estimator` (drop the unused `dispatch`); it never reached prod.
+- **Epic C (per-user tile toggles): now THE core access build.** Owner assigns each user's tiles via
+  the `profile_feature_toggles` table. This IS the access model.
+- **Epic D: seat enforcement = count user IDs (profiles) per franchise vs the tier cap** (2/5/∞ incl.
+  owner). Photo/estimate *usage* caps (§7) still apply per franchise.
+- Epics F (marketing pricing) and E (enable billing) unchanged.
+
+Revised order: **C (tile toggles) → D (headcount + usage caps) → F (marketing) → E (enable billing).**
+
+### Epic C — build detail (IN PROGRESS on dev)
+- **Table `profile_feature_toggles`** (migration 0037) — DONE on dev. `(profile_id, feature_key,
+  enabled)`, RLS permissive (matches existing anon team-mgmt posture; tiles aren't a security
+  boundary — server enforces real access/caps).
+- **12 tile keys:** estimates, volumeCheck, router, trucks, truckAlerts, disposalRouter, manageJobs,
+  dashboard, estimatesDashboard, priceLookup, signs, jobPlan.
+- **New-user default (Owner):** volumeCheck, priceLookup, manageJobs (applied in code when a profile
+  has no toggle rows).
+- **Visibility rule:** `capability-allowed(tile: CRM/telematics/desktop — unchanged) AND (owner OR
+  toggle-on)`. Owner sees all. The existing role-only hiding of trucks/truckAlerts/router becomes
+  owner-assignable via toggles.
+- **REGRESSION-GUARD BACKFILL (Owner 2026-07-11, refined):** existing non-owner profiles get explicit
+  ON toggles for the deliberate estimator set — **{estimates, volumeCheck, priceLookup, manageJobs,
+  jobPlan, signs}**. Owner explicitly EXCLUDED dispatch/dashboard, estimatesDashboard/Estimates Desk,
+  and disposalRouter/Job Router from estimators (even though a Vonigo+desktop estimator could see the
+  first two today — intended). Yard signs is alpha but granted for now. Prod has 4 estimators to
+  backfill (dev 0). Backfill SQL in migration 0037.
+
+### Epic D — build detail (headcount seats + usage caps) — decisions Owner 2026-07-11
+- **`tier_limits` table (pricing-in-DB):** tier → included_user_seats (Starter 2 / Pro 5 / Ent ∞),
+  included_estimates (250/750/2500), included_photos (500/1500/5000), overage_block_price (10),
+  overage_estimates (25), overage_photos (50), **additional_user_price (10 /user/mo)**.
+- **Usage period = Stripe billing cycle** (current_period_start→end per franchise); trials = calendar month.
+- **Seat model:** effective cap = included + purchased additional seats. Additional user = **$10/user/mo**
+  as a Stripe subscription **quantity**, bidirectional + prorated: add over cap → qty+1 (+$10); remove →
+  qty−1 (−$10). **Downgrade MUST drop the charge.** Owner counts toward included.
+- **Usage counting (CONFIRMED Owner 2026-07-11, verified against usage_events):**
+  - **Estimates cap** = COUNT of `ai.analyze_estimate` events. A **volume check is NOT an estimate.**
+  - **Photos cap** = SUM(`metadata.images`) over **`ai.analyze_estimate` + `ai.volume_check`** (volume-check
+    photos DO count — they cost the same). `ai.job_plan` touches neither cap.
+- **FOLLOWUP (Owner 2026-07-11) — transparency:** make it *painfully clear* on BOTH the **app** (by the
+  usage/allowance display) and the **marketing site** (pricing, Epic F) that (1) volume-check photos count
+  toward the photo allowance, and (2) a volume check does NOT count as an estimate. Users must understand
+  what burns their allowance. Tracked here; app copy in D, marketing copy in F.
+- **Warnings 80/90/95%** on estimates AND photos.
+- **Enforcement:** usage 100% → soft-block (5-day grace) → hard-block. Seat cap → **soft-block + flag** at
+  launch.
+- **Launch scope:** `tier_limits` + usage counting + 80/90/95% warnings + usage soft/hard block + seat
+  soft-flag. **Fast-follow (same Stripe-add-on plumbing):** overage-block purchase ($10 = +25 est/+50
+  photos, one-time top-up) + additional-user seat billing ($10/user/mo, add AND remove/downgrade).
+- **Pricing:** additional_user_price = **$10/user/mo** (SET 2026-07-11). Overage block ~$10 (§7).
+
+### Future / backlog (NOT now — Owner 2026-07-11)
+- **Possible "crew" role** (or expand the per-tier user counts) for crew members who'd get a narrow
+  set — price lookup, volume check, yard signs. Deferred; revisit after C/D/E ship.
+- **Remaining (frontend/edge):** (1) buildSession nests `profile_feature_toggles(feature_key,enabled)`
+  → `currentUser.tileToggles`; (2) showApp filters non-owner tiles by the toggle map (default set if
+  none); (3) Team Members owner UI — per-user tile checklist + save via supabaseFetch upsert.
+- **Cleanup:** simplify dev role CHECK (0036) to owner/estimator (drop unused 'dispatch').
 
 Owner: Charles Dennis · Testers to onboard after this ships: **Koby (#56) + Eric Doherty**.
 
@@ -95,6 +184,30 @@ After A–D built + F published + verified:
 - E1: flip `BILLING_ENABLED` on prod; set `ENFORCE_TRIAL` = soft-5-days-then-hard.
 - E2: stamp Koby (#56) + Eric Doherty `trial_ends_at`.
 - E3: verify ONE real live subscription end-to-end (checkout → webhook → status flip → access).
+
+#### E — HARD onboarding/checkout requirements (Owner 2026-07-11)
+**Duplicate-franchise protection ALREADY EXISTS** and must not regress:
+- App guard: `crewlogic-settings` Vonigo-connect returns **409 "already owned by another user"** when a
+  franchise with the connecting user's Vonigo franchise ID already has a different owner (dedup key =
+  Vonigo `Session.franchiseID` → `franchises.external_id`).
+- DB backstop: `franchises_external_id_unique UNIQUE(external_id)` — VERIFIED live on prod.
+- A @junkluggers.com Google sign-in creates a profile with `franchise_id = NULL` (Vonigo-pending); the
+  franchise only materializes at Vonigo-connect, where the dedup fires. First to connect a given Vonigo
+  ID wins; the second is blocked.
+
+**PAY-LAST ordering (the actual requirement):** never charge a card before the franchise is established
+and deduped, so a duplicate is blocked BEFORE payment (no refund mess).
+- **Checkout gate:** for a Vonigo account, `startCheckout` MUST refuse until Vonigo is connected
+  (franchise resolved). Force the skip-trial/pay-now path through Vonigo-connect first.
+- Funnel: Google sign-in → **Connect Vonigo (dedup here, free)** → trial/use → **Subscribe (card, last)**.
+- **Belt-and-suspenders:** wire a programmatic Stripe **auto-refund + sub-cancel** into any post-charge
+  block path, so an accidental charge is a no-op instead of a manual refund.
+
+**Onboarding polish (fold into E):**
+- Improve the 409 message → "Franchise N is already set up by <owner>; ask them to invite you" + link the
+  invite flow (don't dead-end).
+- Clean up / convert the orphan NULL-franchise pending profile after a block.
+- Formalize `UNIQUE(external_id)` as a numbered migration (currently baseline-snapshot only).
 
 ---
 

@@ -146,6 +146,12 @@ memory `route-optimizer-rearchitecture`.
 
 ## 4. Roles, seats & feature access — REFINED (2026-07-10, validated against real metering)
 
+> **SUPERSEDED 2026-07-11** — Owner replaced the estimator-as-billable-unit model with flat
+> **headcount**: billable unit = a user ID (owner included), caps Starter 2 / Pro 5 / Ent ∞ *users*;
+> exactly one admin (the owner) who assigns each user's tiles; NO dispatch role. "Dispatch"/"Estimates"
+> are assignable tiles, not roles. See `plan-caps-roles-enforcement.md` → "MODEL — REVISED & LOCKED".
+> The §4.1–4.4 text below is retained for history only.
+
 **Real cost data** (`usage_events`, ALL franchises, 2026-06-16 → 07-10, ~24 days): Sonnet 890K in / 97K out
 ≈ **$4.13**; Haiku 94K in / 13K out ≈ $0.16 → **~$4.29 total AI for the entire customer base over 3+ weeks**
 (~$5.50/mo). **421 photos drove the $4.13 of Sonnet → ~$0.01 per photo** (dead-on the estimate). #90 = 220
@@ -235,7 +241,7 @@ The plan controls what a franchise *can* have; the owner controls what each *sea
 ## 7. Open items
 
 - [x] **Tier prices — decided 2026-06-25: Starter $29.99 · Pro $59.99 · Enterprise $129.99** (per location). Set in Stripe.
-- [x] **Included caps — decided 2026-06-25:** Starter 250 est / 500 photos · Pro 750 / 1,500 · Enterprise 2,500 / 5,000.
+- [x] **Included caps — estimates recalibrated 2026-07-11** (750 was unreachable → no upsell ever triggers): Starter **25** est / 500 photos · Pro **75** / 1,500 · Enterprise **250** / 5,000. (Photos unchanged; revisit if also unreachable.) Config lives in `tier_limits` — change there, no code.
 - [x] **Overage block — decided 2026-06-25:** ONE bundled block ~$10 = +25 estimates AND +50 photos.
 - [x] **Warnings — decided 2026-06-25:** 80% / 90% / 95% of included, on BOTH estimates and photos.
 - [x] Seat enforcement model — **decided 2026-06-23: soft + hard ceiling; counts 2/5/∞** (see §1.7). Time-lock temp seat = v2.
