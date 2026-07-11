@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.48 | 2026-07-11">
+  <meta name="crewlogic-version" content="v5.50.49 | 2026-07-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1328,6 +1328,26 @@
         <div style="display:flex;gap:10px;">
           <button onclick="closeTruckSetup()" style="flex:1;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-weight:700;font-size:14px;padding:12px;border-radius:var(--radius-sm);cursor:pointer;">Cancel</button>
           <button id="truckSetupSaveBtn" onclick="saveTruckOrder()" style="flex:1;background:var(--accent-green);color:var(--accent-text);border:none;font-weight:700;font-size:14px;padding:12px;border-radius:var(--radius-sm);cursor:pointer;">Save order</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tile assignment editor — owner-only (Settings → Team Members → "Tiles"). Assigns which home tiles a
+       non-owner user sees. Writes profile_feature_toggles; the user sees the change on next app open. -->
+  <div id="tileEditorModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)closeTileEditor()">
+    <div style="width:100%;max-width:460px;background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border);margin:auto;">
+      <div style="position:sticky;top:0;background:var(--bg-card);display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-bottom:1px solid var(--border);border-radius:var(--radius) var(--radius) 0 0;z-index:1;">
+        <div style="font-size:17px;font-weight:800;color:var(--text-primary);">🎛️ Tiles for <span id="tileEditorName">user</span></div>
+        <button onclick="closeTileEditor()" aria-label="Close" style="background:none;border:none;color:var(--text-muted);font-size:26px;line-height:1;cursor:pointer;padding:0 4px;">&times;</button>
+      </div>
+      <div style="padding:18px 22px;">
+        <div style="font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:16px;">Check the home-screen tiles this user should see. Tiles that need Vonigo or telematics only appear if your franchise has them connected.</div>
+        <div id="tileEditorList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;"></div>
+        <div id="tileEditorMsg" style="font-size:12.5px;color:var(--text-muted);min-height:16px;margin-bottom:12px;"></div>
+        <div style="display:flex;gap:10px;">
+          <button onclick="closeTileEditor()" style="flex:1;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-weight:700;font-size:14px;padding:12px;border-radius:var(--radius-sm);cursor:pointer;">Cancel</button>
+          <button id="tileEditorSaveBtn" onclick="saveTileEditor()" style="flex:1;background:var(--accent-green);color:var(--accent-text);border:none;font-weight:700;font-size:14px;padding:12px;border-radius:var(--radius-sm);cursor:pointer;">Save tiles</button>
         </div>
       </div>
     </div>
@@ -6674,6 +6694,69 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       });
     }
 
+    // ── Owner tile-assignment editor (Epic C) — Settings → Team Members → "Tiles" ─────────────────
+    let _teamToggles = {};   // profileId -> { feature_key: enabled }, stashed by loadTeamMembers
+    let _tileEditPid = null;
+    const TILE_CATALOG = [
+      { key: 'estimates', label: 'Estimates', icon: '📝' },
+      { key: 'volumeCheck', label: 'Volume Check', icon: '📐' },
+      { key: 'priceLookup', label: 'Price Lookup', icon: '💲' },
+      { key: 'manageJobs', label: 'Manage Jobs', icon: '🎤' },
+      { key: 'jobPlan', label: 'Job Plan', icon: '📋' },
+      { key: 'signs', label: 'Yard Signs', icon: '🪧' },
+      { key: 'router', label: 'Route Optimizer', icon: '🚛' },
+      { key: 'trucks', label: 'Where Are My Trucks?', icon: '🚚' },
+      { key: 'truckAlerts', label: 'Truck Alerts', icon: '📡' },
+      { key: 'disposalRouter', label: 'Job Router', icon: '♻️' },
+      { key: 'dashboard', label: 'Dispatch', icon: '🗺️' },
+      { key: 'estimatesDashboard', label: 'Estimates Desk', icon: '📋' },
+    ];
+    function closeTileEditor() { const m = document.getElementById('tileEditorModal'); if (m) m.style.display = 'none'; _tileEditPid = null; }
+    function openTileEditor(btn) {
+      _tileEditPid = btn.getAttribute('data-pid');
+      const map = _teamToggles[_tileEditPid] || {};
+      const hasRows = Object.keys(map).length > 0;
+      const nameEl = document.getElementById('tileEditorName');
+      if (nameEl) nameEl.textContent = btn.getAttribute('data-name') || 'user';
+      const listEl = document.getElementById('tileEditorList');
+      if (listEl) listEl.innerHTML = TILE_CATALOG.map(function (t) {
+        const on = hasRows ? !!map[t.key] : (TILE_DEFAULT_ON.indexOf(t.key) !== -1);
+        return '<label style="display:flex;align-items:center;gap:10px;padding:9px 11px;background:var(--bg-input);border:1px solid var(--border);border-radius:9px;cursor:pointer;">' +
+          '<input type="checkbox" data-key="' + t.key + '"' + (on ? ' checked' : '') + ' style="width:17px;height:17px;flex:0 0 auto;accent-color:var(--accent-green);">' +
+          '<span style="font-size:14px;">' + t.icon + '</span>' +
+          '<span style="flex:1;color:var(--text-primary);font-size:14px;">' + _truckEsc(t.label) + '</span></label>';
+      }).join('');
+      const msg = document.getElementById('tileEditorMsg'); if (msg) msg.textContent = '';
+      const modal = document.getElementById('tileEditorModal'); if (modal) modal.style.display = 'flex';
+    }
+    async function saveTileEditor() {
+      if (!_tileEditPid) return;
+      const listEl = document.getElementById('tileEditorList');
+      const msg = document.getElementById('tileEditorMsg');
+      const btn = document.getElementById('tileEditorSaveBtn');
+      if (!listEl) return;
+      const rows = TILE_CATALOG.map(function (t) {
+        const cb = listEl.querySelector('input[data-key="' + t.key + '"]');
+        return { profile_id: _tileEditPid, feature_key: t.key, enabled: !!(cb && cb.checked) };
+      });
+      if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+      try {
+        // Replace the user's toggle set: delete existing rows, insert the current 12.
+        await supabaseFetch('/rest/v1/profile_feature_toggles?profile_id=eq.' + encodeURIComponent(_tileEditPid), { method: 'DELETE' });
+        const res = await supabaseFetch('/rest/v1/profile_feature_toggles', { method: 'POST', body: JSON.stringify(rows) });
+        if (res !== null) {
+          _teamToggles[_tileEditPid] = rows.reduce(function (a, r) { a[r.feature_key] = r.enabled; return a; }, {});
+          if (msg) { msg.style.color = 'var(--accent-green)'; msg.textContent = 'Saved — the user sees this next time they open the app.'; }
+          setTimeout(closeTileEditor, 900);
+        } else if (msg) { msg.style.color = '#ef4444'; msg.textContent = 'Save failed. Try again.'; }
+      } catch (e) {
+        console.error('[tileEditor] save failed', e);
+        if (msg) { msg.style.color = '#ef4444'; msg.textContent = 'Save failed. Try again.'; }
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Save tiles'; }
+      }
+    }
+
     async function loadTeamMembers() {
       const listEl = document.getElementById('teamMembersList');
       if (!listEl) return;
@@ -6684,7 +6767,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!franchiseUUID) { listEl.textContent = 'Could not load team.'; return; }
 
       const members = await supabaseFetch(
-        '/rest/v1/profiles?select=name,email,role,created_at&franchise_id=eq.' + franchiseUUID + '&order=created_at.asc'
+        '/rest/v1/profiles?select=id,name,email,role,created_at,profile_feature_toggles(feature_key,enabled)&franchise_id=eq.' + franchiseUUID + '&order=created_at.asc'
       );
 
       if (!members || members.length === 0) {
@@ -6692,11 +6775,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         return;
       }
 
+      _teamToggles = {};
       listEl.innerHTML = members.map(m => {
         const isYou = m.email === currentUser.email;
         const safeEmail = m.email.replace(/"/g, '&quot;');
+        _teamToggles[m.id] = (m.profile_feature_toggles || []).reduce(function (a, r) { a[r.feature_key] = !!r.enabled; return a; }, {});
         const removeBtn = !isYou
           ? '<button onclick="removeTeamMember(this)" data-email="' + safeEmail + '" style="padding:3px 8px;background:none;border:1px solid var(--accent-red);border-radius:var(--radius-sm);color:var(--accent-red);font-size:11px;cursor:pointer;margin-left:8px;">Remove</button>'
+          : '';
+        // Owner-only: assign which home tiles this (non-owner) user sees.
+        const tilesBtn = (m.role !== 'owner')
+          ? '<button onclick="openTileEditor(this)" data-pid="' + m.id + '" data-name="' + (m.name || m.email).replace(/"/g, '&quot;') + '" style="padding:3px 8px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm);color:var(--text-primary);font-size:11px;cursor:pointer;margin-left:8px;">Tiles</button>'
           : '';
         return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">' +
           '<div style="flex:1;min-width:0;">' +
@@ -6705,6 +6794,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '</div>' +
           '<div style="display:flex;align-items:center;flex-shrink:0;">' +
             '<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--bg-input);color:' + (m.role === 'owner' ? 'var(--accent-green)' : 'var(--text-muted)') + ';">' + m.role + '</span>' +
+            tilesBtn +
             removeBtn +
           '</div>' +
         '</div>';
