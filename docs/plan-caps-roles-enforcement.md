@@ -3,8 +3,15 @@
 Status: IN PROGRESS. Execution detail for `plan-payments.md` §4.4. Companion strategy/decisions
 live in `plan-payments.md` (§4, §7).
 
-Progress: **Epic A DONE — LIVE IN PROD (v5.50.48, 2026-07-11).** Access = subscription_status only;
-provisionNative writes 'free'; verified no lockout; CLAUDE.md updated.
+Progress:
+- **Epic A DONE — LIVE IN PROD (v5.50.48).** Access = subscription_status only; provisionNative 'free'.
+- **Epic B CANCELLED** (model change — no dispatch role).
+- **Epic C DONE ON DEV (v5.50.50), Owner-verified ("looks good, exactly as expected").** Per-user tile
+  toggles + owner editor + login read + showApp filter + trio layering fix. NOT yet promoted to prod
+  (backfill runs at promotion). Ready to promote.
+- **Epic D (headcount seats + usage caps) — STARTING.**
+- Duplicate-franchise dedup: confirmed already handled (409 + UNIQUE(external_id)); pay-last checkout
+  gate logged under Epic E.
 
 ## MODEL — REVISED & LOCKED (Owner 2026-07-11) — supersedes §4.1 of plan-payments.md
 
@@ -150,6 +157,30 @@ After A–D built + F published + verified:
 - E1: flip `BILLING_ENABLED` on prod; set `ENFORCE_TRIAL` = soft-5-days-then-hard.
 - E2: stamp Koby (#56) + Eric Doherty `trial_ends_at`.
 - E3: verify ONE real live subscription end-to-end (checkout → webhook → status flip → access).
+
+#### E — HARD onboarding/checkout requirements (Owner 2026-07-11)
+**Duplicate-franchise protection ALREADY EXISTS** and must not regress:
+- App guard: `crewlogic-settings` Vonigo-connect returns **409 "already owned by another user"** when a
+  franchise with the connecting user's Vonigo franchise ID already has a different owner (dedup key =
+  Vonigo `Session.franchiseID` → `franchises.external_id`).
+- DB backstop: `franchises_external_id_unique UNIQUE(external_id)` — VERIFIED live on prod.
+- A @junkluggers.com Google sign-in creates a profile with `franchise_id = NULL` (Vonigo-pending); the
+  franchise only materializes at Vonigo-connect, where the dedup fires. First to connect a given Vonigo
+  ID wins; the second is blocked.
+
+**PAY-LAST ordering (the actual requirement):** never charge a card before the franchise is established
+and deduped, so a duplicate is blocked BEFORE payment (no refund mess).
+- **Checkout gate:** for a Vonigo account, `startCheckout` MUST refuse until Vonigo is connected
+  (franchise resolved). Force the skip-trial/pay-now path through Vonigo-connect first.
+- Funnel: Google sign-in → **Connect Vonigo (dedup here, free)** → trial/use → **Subscribe (card, last)**.
+- **Belt-and-suspenders:** wire a programmatic Stripe **auto-refund + sub-cancel** into any post-charge
+  block path, so an accidental charge is a no-op instead of a manual refund.
+
+**Onboarding polish (fold into E):**
+- Improve the 409 message → "Franchise N is already set up by <owner>; ask them to invite you" + link the
+  invite flow (don't dead-end).
+- Clean up / convert the orphan NULL-franchise pending profile after a block.
+- Formalize `UNIQUE(external_id)` as a numbered migration (currently baseline-snapshot only).
 
 ---
 
