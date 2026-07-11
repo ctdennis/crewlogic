@@ -35,6 +35,10 @@ const STRIPE_PRICE: Record<string, string> = {
   pro: Deno.env.get("STRIPE_PRICE_PRO") || "",
   enterprise: Deno.env.get("STRIPE_PRICE_ENTERPRISE") || "",
 };
+// Add-on prices (Epic D revenue). Overage = one-time $10 (+25 est/+50 photos). Additional user =
+// $10/mo recurring, added as a QUANTITY line item on the SAME subscription → one combined invoice.
+const STRIPE_PRICE_OVERAGE = Deno.env.get("STRIPE_PRICE_OVERAGE") || "";
+const STRIPE_PRICE_ADDITIONAL_USER = Deno.env.get("STRIPE_PRICE_ADDITIONAL_USER") || "";
 function priceForTier(tier: unknown): string {
   const t = String(tier || "starter").toLowerCase();
   return STRIPE_PRICE[t] || STRIPE_PRICE.starter;
@@ -263,6 +267,53 @@ Deno.serve(async (req: Request) => {
         subscription_data: { metadata: meta },
       });
       return json({ url: session.url });
+    }
+
+    // Add credits — a ONE-TIME $10 overage top-up (+25 est / +50 photos). Separate charge, its own
+    // Checkout (mode=payment). Any caller with a customer can buy it.
+    if (action === "buyOverage") {
+      const who = await franchiseForCaller(token);
+      if (!who) return json({ error: "Please sign in again." }, 401);
+      if (!returnUrl) return json({ error: "returnUrl required" }, 400);
+      if (!STRIPE_PRICE_OVERAGE) return json({ error: "Overage isn’t configured yet." }, 500);
+      const stripe = getStripe();
+      const customer = await ensureCustomer(who.franchise, who.email);
+      const meta = { franchise_id: who.franchise.id, external_id: who.franchise.external_id || "", tenant_id: who.franchise.tenant_id, addon: "overage" };
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        customer,
+        line_items: [{ price: STRIPE_PRICE_OVERAGE, quantity: 1 }],
+        success_url: returnUrl + (returnUrl.includes("?") ? "&" : "?") + "billing=overage_success",
+        cancel_url: returnUrl + (returnUrl.includes("?") ? "&" : "?") + "billing=cancel",
+        metadata: meta,
+        payment_intent_data: { metadata: meta },
+      });
+      return json({ url: session.url });
+    }
+
+    // Add / remove a user SEAT — a $10/mo quantity line item on the EXISTING subscription, so it bills
+    // as ONE combined invoice (Pro $59.99 + N×$10). Bidirectional: delta +1 adds, -1 removes (downgrade
+    // drops the charge). Requires an active subscription; a trial user must subscribe first.
+    if (action === "adjustSeats") {
+      const who = await franchiseForCaller(token);
+      if (!who) return json({ error: "Please sign in again." }, 401);
+      if (!STRIPE_PRICE_ADDITIONAL_USER) return json({ error: "Seats aren’t configured yet." }, 500);
+      const subId = who.franchise.stripe_subscription_id;
+      if (!subId) return json({ error: "Subscribe to a plan first, then you can add seats.", code: "no_subscription" }, 409);
+      const delta = Number(body.delta) || 0;
+      const stripe = getStripe();
+      const sub: any = await stripe.subscriptions.retrieve(subId);
+      const item = sub.items.data.find((it: any) => it.price?.id === STRIPE_PRICE_ADDITIONAL_USER);
+      const currentQty = item ? (item.quantity || 0) : 0;
+      const newQty = Math.max(0, currentQty + delta);
+      if (item && newQty === 0) {
+        await stripe.subscriptions.update(subId, { items: [{ id: item.id, deleted: true }], proration_behavior: "create_prorations" });
+      } else if (item) {
+        await stripe.subscriptions.update(subId, { items: [{ id: item.id, quantity: newQty }], proration_behavior: "create_prorations" });
+      } else if (delta > 0) {
+        await stripe.subscriptions.update(subId, { items: [{ price: STRIPE_PRICE_ADDITIONAL_USER, quantity: newQty }], proration_behavior: "create_prorations" });
+      }
+      return json({ ok: true, seats: newQty });
     }
 
     return json({ error: "unknown action" }, 400);

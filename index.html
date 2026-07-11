@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.53 | 2026-07-11">
+  <meta name="crewlogic-version" content="v5.50.54 | 2026-07-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7467,11 +7467,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       } catch (e) { console.error('[usage] warning check failed', e); el.style.display = 'none'; }
     }
 
-    // Revenue one-click (Epic D). For now both open the plan picker (the working purchase entry — a
-    // trial user must be on a paid plan before buying add-ons). The dedicated overage-block + additional-
-    // seat purchases (for already-subscribed users) are the next build — this is where they hook in.
-    function openAddCredits() { if (typeof openSubscribeModal === 'function') openSubscribeModal(); }
-    function openAddUsers() { if (typeof openSubscribeModal === 'function') openSubscribeModal(); }
+    // Add credits (Epic D) — one-time $10 overage top-up (+25 estimates / +50 photos), its own charge.
+    // Opens the Stripe checkout in a NEW TAB (popup-safe: open blank on click, redirect once URL returns).
+    async function openAddCredits() {
+      const w = window.open('', '_blank');
+      try {
+        const data = await billingCall('buyOverage', { returnUrl: window.location.origin });
+        if (data && data.url) { if (w) { w.location.href = data.url; } else { window.open(data.url, '_blank'); } return; }
+        if (w) w.close();
+        alert((data && data.error) || 'Could not start the overage purchase. Please try again.');
+      } catch (_e) { if (w) w.close(); alert('Could not start the overage purchase. Please try again.'); }
+    }
+    // Add a user seat (Epic D) — a $10/mo quantity on the EXISTING subscription → one combined charge.
+    // Needs an active plan first; a trial user is routed to the plan picker. In-app (no Stripe page).
+    async function openAddUsers() {
+      if (!_hasActiveSub()) { if (typeof openSubscribeModal === 'function') openSubscribeModal(); return; }
+      if (!confirm('Add 1 user seat for $10/month?\n\nIt\'s added to your current plan as one combined charge, and you can remove it any time to drop the $10.')) return;
+      try {
+        const data = await billingCall('adjustSeats', { delta: 1 });
+        if (data && data.ok) { alert('Done — a user seat was added to your plan ($10/mo). Remove it any time to drop the charge.'); if (typeof loadTeamMembers === 'function') loadTeamMembers(); }
+        else if (data && data.code === 'no_subscription') { if (typeof openSubscribeModal === 'function') openSubscribeModal(); }
+        else alert((data && data.error) || 'Could not add a seat. Please try again.');
+      } catch (_e) { alert('Could not add a seat. Please try again.'); }
+    }
 
     function showApp() {
       document.getElementById('loginScreen').style.display = 'none';
