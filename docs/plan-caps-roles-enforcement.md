@@ -1,7 +1,11 @@
 # Plan — Caps, Roles & Enforcement (pre-billing build)
 
-Status: SCOPE for Owner review (2026-07-11). Nothing built yet. Execution detail for
-`plan-payments.md` §4.4. Companion strategy/decisions live in `plan-payments.md` (§4, §7).
+Status: IN PROGRESS. Execution detail for `plan-payments.md` §4.4. Companion strategy/decisions
+live in `plan-payments.md` (§4, §7).
+
+Progress: **Epic A DONE — LIVE IN PROD (v5.50.48, 2026-07-11).** Access = subscription_status only;
+provisionNative writes 'free'; verified no lockout (prod 9 + dev 4, all grant via status);
+CLAUDE.md updated. **Epic B (dispatch role) — IN PROGRESS.**
 
 Owner: Charles Dennis · Testers to onboard after this ships: **Koby (#56) + Eric Doherty**.
 
