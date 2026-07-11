@@ -9,7 +9,10 @@ Progress:
 - **Epic C DONE ON DEV (v5.50.50), Owner-verified ("looks good, exactly as expected").** Per-user tile
   toggles + owner editor + login read + showApp filter + trio layering fix. NOT yet promoted to prod
   (backfill runs at promotion). Ready to promote.
-- **Epic D (headcount seats + usage caps) — STARTING.**
+- **Epic D DONE ON DEV (v5.50.51).** tier_limits config · countUsage helper · usageSummary action ·
+  dormant ENFORCE_USAGE_CAPS gate · home usage banner (80/90/95%) · seat soft-flag · transparency copy.
+  Enforcement soft at launch (flag off). NOT promoted; ready to test. Fast-follow = overage + $10/seat
+  billing. Remaining epics: F (marketing pricing), E (enable billing).
 - Duplicate-franchise dedup: confirmed already handled (409 + UNIQUE(external_id)); pay-last checkout
   gate logged under Epic E.
 
