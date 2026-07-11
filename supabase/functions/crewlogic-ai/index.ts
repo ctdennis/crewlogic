@@ -65,7 +65,12 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { logUsage } from '../_shared/usage.ts';
+import { logUsage, countUsage, calendarMonthPeriod } from '../_shared/usage.ts';
+
+// Usage-cap enforcement (Epic D). SOFT at launch: default OFF → the analyze path is unchanged (no
+// added latency, never blocks). Set the ENFORCE_USAGE_CAPS secret to 'true' to hard-block at 100%
+// once the overage-buy escape hatch ships. Warnings are always available via the usageSummary action.
+const ENFORCE_USAGE_CAPS = (Deno.env.get('ENFORCE_USAGE_CAPS') || '').toLowerCase() === 'true';
 
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
@@ -285,6 +290,27 @@ async function handleAnalyzeEstimate(payload: Record<string, unknown>): Promise<
 
   if (!transcript && photos.length === 0) {
     throw new Error('transcript or photos required');
+  }
+
+  // Usage-cap enforcement (Epic D). Gated by ENFORCE_USAGE_CAPS — OFF at launch, so this whole block
+  // is skipped (no added latency, never blocks). When ON, hard-blocks at 100% with a safe envelope
+  // (no internals leaked). The estimate cap ignores volume checks; the photo cap applies to both.
+  if (ENFORCE_USAGE_CAPS) {
+    const fId = (payload.franchiseID ?? payload.franchiseInternalID) as string | undefined;
+    const status = fId ? await getUsageStatus(fId) : null;
+    if (status) {
+      const isVolumeCheck = (payload.source as string | undefined) === 'volume_check';
+      const overEstimates = !isVolumeCheck && status.estimates.cap != null && status.estimates.used >= status.estimates.cap;
+      const overPhotos = status.photos.cap != null && status.photos.used >= status.photos.cap;
+      if (overEstimates || overPhotos) {
+        return {
+          blocked: true,
+          code: 'allowance_reached',
+          message: "You've reached this month's allowance. Add an overage block or upgrade to keep going.",
+          usage: status,
+        };
+      }
+    }
   }
 
   let userContent: unknown;
@@ -1085,6 +1111,42 @@ async function handleIssueReward(payload: Record<string, unknown>): Promise<unkn
 // ════════════════════════════════════════════════════════════════════════════
 // ACTION ROUTER
 // ════════════════════════════════════════════════════════════════════════════
+// ── Usage status (Epic D): a franchise's tier + caps + current-period usage. Fail-open (null) so it
+// never blocks the AI path on a metering hiccup. Trials/free (no tier_limits row) fall back to the
+// Starter allowance for display; hard enforcement stays gated by ENFORCE_USAGE_CAPS. ──
+async function getUsageStatus(franchiseId: string): Promise<{
+  tier: string;
+  estimates: { used: number; cap: number | null };
+  photos: { used: number; cap: number | null };
+} | null> {
+  try {
+    if (!franchiseId) return null;
+    const { data: fr } = await _usageClient.from('franchises').select('subscription_tier').eq('id', franchiseId).maybeSingle();
+    const rawTier = (fr && (fr as { subscription_tier?: string }).subscription_tier) || 'free';
+    // Trials/free/tester have no plan row → show the Starter allowance (entry tier) for warnings.
+    const capTier = ['starter', 'pro', 'enterprise'].indexOf(rawTier) !== -1 ? rawTier : 'starter';
+    const { data: tl } = await _usageClient.from('tier_limits').select('included_estimates, included_photos').eq('tier', capTier).maybeSingle();
+    const period = calendarMonthPeriod(Date.now());
+    const counts = await countUsage(_usageClient, franchiseId, period.startIso, period.endIso);
+    const t = tl as { included_estimates?: number; included_photos?: number } | null;
+    return {
+      tier: rawTier,
+      estimates: { used: counts.estimates, cap: t ? (t.included_estimates ?? null) : null },
+      photos: { used: counts.photos, cap: t ? (t.included_photos ?? null) : null },
+    };
+  } catch (e) {
+    console.error('[usage] status failed:', e);
+    return null;
+  }
+}
+
+// Frontend-facing: returns { usage } for the 80/90/95% warnings + allowance display. Read-only.
+async function handleUsageSummary(payload: Record<string, unknown>): Promise<unknown> {
+  const franchiseId = (payload.franchiseID ?? payload.franchiseInternalID) as string | undefined;
+  if (!franchiseId) return { usage: null };
+  return { usage: await getUsageStatus(franchiseId) };
+}
+
 const ACTION_HANDLERS: Record<string, (payload: Record<string, unknown>) => Promise<unknown>> = {
   analyzeEstimate: handleAnalyzeEstimate,
   generateJobSummary: handleGenerateJobSummary,
@@ -1092,6 +1154,7 @@ const ACTION_HANDLERS: Record<string, (payload: Record<string, unknown>) => Prom
   detectYardSign: handleDetectYardSign,
   reverseGeocode: handleReverseGeocode,
   issueReward: handleIssueReward,
+  usageSummary: handleUsageSummary,
 };
 
 
