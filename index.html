@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.50 | 2026-07-11">
+  <meta name="crewlogic-version" content="v5.50.51 | 2026-07-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1467,6 +1467,7 @@
         </div>
 
         <div id="trialBanner" class="fade-in" style="display:none;"></div>
+        <div id="usageBanner" class="fade-in" style="display:none;"></div>
 
         <div class="module-grid">
           <div class="module-card fade-in fade-in-delay-2" data-card="estimates" onclick="openModule('estimates')">
@@ -6799,6 +6800,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '</div>' +
         '</div>';
       }).join('');
+
+      // Seat soft-flag (Epic D) — headcount vs the tier's included seats (owner counts). Flag when over;
+      // billing (the $10/user add/remove) lands with the fast-follow. Non-blocking.
+      try {
+        const tier = ['starter', 'pro', 'enterprise'].indexOf(currentUser.subscriptionTier) !== -1 ? currentUser.subscriptionTier : 'starter';
+        const tl = await supabaseFetch('/rest/v1/tier_limits?tier=eq.' + tier + '&select=included_user_seats,additional_user_price');
+        const cap = (tl && tl[0]) ? tl[0].included_user_seats : null;
+        if (cap != null && members.length > cap) {
+          const over = members.length - cap;
+          const price = (tl[0].additional_user_price != null) ? tl[0].additional_user_price : 10;
+          listEl.insertAdjacentHTML('beforeend',
+            '<div style="margin-top:12px;background:rgba(245,171,0,.12);border:1px solid #ffab00;border-radius:10px;padding:11px 13px;">' +
+            '<div style="font-weight:700;color:#e0940a;font-size:12.5px;margin-bottom:3px;">You have ' + members.length + ' users — your ' + tier.charAt(0).toUpperCase() + tier.slice(1) + ' plan includes ' + cap + '.</div>' +
+            '<div style="font-size:11.5px;color:var(--text-muted);line-height:1.5;">' + over + ' additional user' + (over > 1 ? 's' : '') + ' at $' + price + '/user/mo once billing is on. Remove a user to drop the charge.</div></div>');
+        }
+      } catch (e) { console.error('[seatflag] failed', e); }
     }
 
     async function removeTeamMember(btn) {
@@ -7412,6 +7429,33 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         }).catch(function (e) { console.error('[tileToggles] fetch failed', e); });
     }
 
+    // Usage warnings (Epic D) — home banner at 80/90/95% of the estimate OR photo allowance. Reads the
+    // server-side usageSummary (period-scoped). Non-blocking; hidden under 80% or on error. Includes the
+    // transparency note (volume-check photos count toward photos; a volume check isn't an estimate).
+    async function checkUsageWarnings() {
+      const el = document.getElementById('usageBanner');
+      if (!el) return;
+      if (!currentUser || !currentUser.franchiseInternalID) { el.style.display = 'none'; return; }
+      try {
+        const data = await edgeFunctionCall('crewlogic-ai', { action: 'usageSummary', franchiseID: currentUser.franchiseInternalID });
+        const u = data && data.usage;
+        if (!u) { el.style.display = 'none'; return; }
+        const pct = (used, cap) => (cap && cap > 0) ? (used / cap) * 100 : 0;
+        const top = Math.max(pct(u.estimates.used, u.estimates.cap), pct(u.photos.used, u.photos.cap));
+        if (top < 80) { el.style.display = 'none'; return; }
+        const t = top >= 95 ? { bg: 'rgba(239,68,68,.12)', bd: '#ef4444', tx: '#ef4444', word: 'reached' }
+          : top >= 90 ? { bg: 'rgba(249,115,22,.12)', bd: '#f97316', tx: '#f97316', word: 'almost at' }
+          : { bg: 'rgba(245,171,0,.12)', bd: '#ffab00', tx: '#e0940a', word: 'approaching' };
+        const line = (label, used, cap) => cap ? '<span style="white-space:nowrap;">' + label + ' <b>' + used + '</b>/' + cap + '</span>' : '';
+        el.innerHTML = '<div style="background:' + t.bg + ';border:1px solid ' + t.bd + ';border-radius:12px;padding:12px 14px;margin-bottom:14px;">'
+          + '<div style="font-weight:800;color:' + t.tx + ';font-size:13px;margin-bottom:5px;">You\'re ' + t.word + ' your monthly allowance</div>'
+          + '<div style="display:flex;gap:16px;flex-wrap:wrap;color:var(--text-secondary);font-size:12.5px;margin-bottom:6px;">' + line('Estimates', u.estimates.used, u.estimates.cap) + line('Photos', u.photos.used, u.photos.cap) + '</div>'
+          + '<div style="font-size:11px;color:var(--text-muted);line-height:1.5;">Volume-check photos count toward your photo allowance; a volume check isn\'t an estimate.</div>'
+          + '</div>';
+        el.style.display = 'block';
+      } catch (e) { console.error('[usage] warning check failed', e); el.style.display = 'none'; }
+    }
+
     function showApp() {
       document.getElementById('loginScreen').style.display = 'none';
 
@@ -7545,6 +7589,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // non-owner user. Runs AFTER the capability gating above; it only hides, never reveals a
       // capability-hidden tile. Owners see everything.
       applyTileToggles();
+
+      // Usage warnings (Epic D) — home banner at 80/90/95% of the estimate/photo allowance.
+      checkUsageWarnings();
 
       // Drain any photos that were queued while offline
       drainPhotoQueue();
