@@ -5588,7 +5588,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // a Supabase-Auth-authenticated email, by reading profile→franchise→tenant (incl. the
     // per-capability provider flags). Returns null if no profile exists for that email.
     async function buildSessionFromSupabaseAuth(email, _retried) {
-      const rows = await supabaseFetch('/rest/v1/profiles?select=role,franchise_id,name,auth_user_id,pending_trial_ends_at,home_card_order,sms_template,franchises(external_id,franchise_name,cost_settings,subscription_tier,subscription_status,trial_ends_at,vonigo_configured,tenants(id,subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(email));
+      const rows = await supabaseFetch('/rest/v1/profiles?select=role,franchise_id,name,auth_user_id,pending_trial_ends_at,home_card_order,sms_template,profile_feature_toggles(feature_key,enabled),franchises(external_id,franchise_name,cost_settings,subscription_tier,subscription_status,trial_ends_at,vonigo_configured,tenants(id,subscription_status,trial_ends_at,pricing_source,customer_source,submission_target))&email=eq.' + encodeURIComponent(email));
       const p = rows && rows[0];
       if (!p) return null;
       const f = p.franchises || {};
@@ -5640,6 +5640,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           return ts || 'trialing';                    // else keep real status (paywall messaging) or default
         })(),
         subscriptionTier: f.subscription_tier || null,
+        // Per-user home-tile visibility (Epic C). Map feature_key -> enabled from the owner's toggles.
+        // Empty {} = never configured → showApp applies the new-user default set. Owners ignore this.
+        tileToggles: (function () { var m = {}; (p.profile_feature_toggles || []).forEach(function (r) { m[r.feature_key] = !!r.enabled; }); return m; })(),
         // Trial clock resolution: per-franchise trial wins, then the profile's pending trial (a
         // Vonigo-pending marketing signup before they've connected — clock started at signup), then
         // the tenant's. Lets one franchise in a shared tenant run its own 14-day trial.
@@ -7292,6 +7295,33 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         card.style.display = (currentUser.telematicsConfigured && _vonigo) ? '' : 'none';
       }
     }
+    // ── Per-user home-tile visibility (Epic C) ─────────────────────────────────────────────────
+    // The owner assigns which tiles each OTHER user sees (Settings → Team Members). A user with NO
+    // saved toggles gets the new-user default set. This filter only HIDES a tile (display:none); it
+    // never reveals one the capability gating (CRM/telematics/desktop) already hid.
+    const TILE_DEFAULT_ON = ['volumeCheck', 'priceLookup', 'manageJobs'];
+    function _applyTileMap(map) {
+      const hasRows = map && Object.keys(map).length > 0;
+      document.querySelectorAll('.module-card[data-card]').forEach(function (card) {
+        const key = card.getAttribute('data-card');
+        const enabled = hasRows ? !!map[key] : (TILE_DEFAULT_ON.indexOf(key) !== -1);
+        if (!enabled) card.style.display = 'none';
+      });
+    }
+    function applyTileToggles() {
+      if (!currentUser || currentUser.role === 'owner') return; // owner sees every capability-allowed tile
+      if (currentUser.tileToggles) { _applyTileMap(currentUser.tileToggles); return; }
+      // Fallback: session built by a path that didn't preload toggles — fetch by email, then apply.
+      if (!currentUser.email) return;
+      supabaseFetch('/rest/v1/profiles?select=profile_feature_toggles(feature_key,enabled)&email=eq.' + encodeURIComponent(currentUser.email))
+        .then(function (rows) {
+          const m = {};
+          if (rows && rows[0] && rows[0].profile_feature_toggles) rows[0].profile_feature_toggles.forEach(function (r) { m[r.feature_key] = !!r.enabled; });
+          currentUser.tileToggles = m;
+          _applyTileMap(m);
+        }).catch(function (e) { console.error('[tileToggles] fetch failed', e); });
+    }
+
     function showApp() {
       document.getElementById('loginScreen').style.display = 'none';
 
@@ -7420,6 +7450,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       // Initialize Signs module visibility
       initSignsModule();
+
+      // Per-user tile visibility (Epic C) — hide home tiles the owner hasn't granted to this
+      // non-owner user. Runs AFTER the capability gating above; it only hides, never reveals a
+      // capability-hidden tile. Owners see everything.
+      applyTileToggles();
 
       // Drain any photos that were queued while offline
       drainPhotoQueue();
