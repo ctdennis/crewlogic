@@ -4,8 +4,33 @@ Status: IN PROGRESS. Execution detail for `plan-payments.md` §4.4. Companion st
 live in `plan-payments.md` (§4, §7).
 
 Progress: **Epic A DONE — LIVE IN PROD (v5.50.48, 2026-07-11).** Access = subscription_status only;
-provisionNative writes 'free'; verified no lockout (prod 9 + dev 4, all grant via status);
-CLAUDE.md updated. **Epic B (dispatch role) — IN PROGRESS.**
+provisionNative writes 'free'; verified no lockout; CLAUDE.md updated.
+
+## MODEL — REVISED & LOCKED (Owner 2026-07-11) — supersedes §4.1 of plan-payments.md
+
+Owner simplified away the role-based billing entirely:
+- **Billable unit = a user ID (headcount), NOT the estimator.** Every account counts toward the tier
+  cap regardless of what they do. Owner chose headcount over metering-by-estimator for simplicity,
+  knowing estimates drive the underlying cost.
+- **Seat caps = TOTAL users incl. the owner:** Starter **2**, Pro **5**, Enterprise **∞** (unchanged
+  numbers, now *users* not *estimators*). No free seats.
+- **Exactly ONE admin per franchise = the owner.** Only the owner controls per-user tile assignment,
+  billing, and settings. **No co-admin, no "dispatch role."** The son in the father/son case is a
+  normal user with all tiles assigned; the father remains sole admin.
+- **"Dispatch" and "Estimates" are TILES the owner assigns**, not roles. The existing `profiles.role`
+  = `owner` (sole admin) vs `estimator` (a normal non-admin user) already models this — no new role.
+
+### Impact on the epics below
+- **Epic B (dispatch role): CANCELLED.** No 3rd role, no invite role-picker, no role gating. Keep
+  owner/estimator as-is. The dev-only role CHECK (migration 0036) will be simplified to
+  `owner/estimator` (drop the unused `dispatch`); it never reached prod.
+- **Epic C (per-user tile toggles): now THE core access build.** Owner assigns each user's tiles via
+  the `profile_feature_toggles` table. This IS the access model.
+- **Epic D: seat enforcement = count user IDs (profiles) per franchise vs the tier cap** (2/5/∞ incl.
+  owner). Photo/estimate *usage* caps (§7) still apply per franchise.
+- Epics F (marketing pricing) and E (enable billing) unchanged.
+
+Revised order: **C (tile toggles) → D (headcount + usage caps) → F (marketing) → E (enable billing).**
 
 Owner: Charles Dennis · Testers to onboard after this ships: **Koby (#56) + Eric Doherty**.
 
