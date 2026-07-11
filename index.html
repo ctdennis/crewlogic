@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.52 | 2026-07-11">
+  <meta name="crewlogic-version" content="v5.50.53 | 2026-07-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4274,10 +4274,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const t = (tier || 'pro').toLowerCase();
       const btn = document.getElementById('subBtn-' + t);
       const orig = btn ? btn.textContent : '';
-      if (btn) { btn.disabled = true; btn.textContent = 'Redirecting…'; }
+      if (btn) { btn.disabled = true; btn.textContent = 'Opening checkout…'; }
+      // Open the checkout tab NOW (on the click) so the popup blocker allows it; redirect it once the
+      // Stripe session URL returns. Keeps CrewLogic open in the original tab instead of navigating away.
+      const _coTab = window.open('', '_blank');
       try {
         const data = await billingCall('createCheckoutSession', { returnUrl: window.location.origin, tier: t });
-        if (data && data.url) { window.location.href = data.url; return; }
+        if (data && data.url) {
+          if (_coTab) { _coTab.location.href = data.url; } else { window.open(data.url, '_blank'); }
+          if (btn) { btn.disabled = false; btn.textContent = orig; }
+          closeSubscribeModal();
+          return;
+        }
+        if (_coTab) _coTab.close();
         // Already-subscribed guard (server-enforced): route to the Customer Portal to CHANGE plans,
         // never a second Checkout (which would create a duplicate, double-billed subscription).
         if (data && data.code === 'already_subscribed') {
