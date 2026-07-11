@@ -1121,18 +1121,26 @@ async function getUsageStatus(franchiseId: string): Promise<{
 } | null> {
   try {
     if (!franchiseId) return null;
-    const { data: fr } = await _usageClient.from('franchises').select('subscription_tier').eq('id', franchiseId).maybeSingle();
-    const rawTier = (fr && (fr as { subscription_tier?: string }).subscription_tier) || 'free';
+    const { data: fr } = await _usageClient.from('franchises').select('subscription_tier, overage_period, overage_est_credit, overage_photo_credit').eq('id', franchiseId).maybeSingle();
+    const frr = fr as { subscription_tier?: string; overage_period?: string; overage_est_credit?: number; overage_photo_credit?: number } | null;
+    const rawTier = (frr && frr.subscription_tier) || 'free';
     // Trials/free/tester have no plan row → show the Starter allowance (entry tier) for warnings.
     const capTier = ['starter', 'pro', 'enterprise'].indexOf(rawTier) !== -1 ? rawTier : 'starter';
     const { data: tl } = await _usageClient.from('tier_limits').select('included_estimates, included_photos').eq('tier', capTier).maybeSingle();
     const period = calendarMonthPeriod(Date.now());
     const counts = await countUsage(_usageClient, franchiseId, period.startIso, period.endIso);
     const t = tl as { included_estimates?: number; included_photos?: number } | null;
+    // One-time overage credits count only while overage_period matches the current month (YYYY-MM).
+    const periodKey = new Date().toISOString().slice(0, 7);
+    const active = frr && frr.overage_period === periodKey;
+    const overEst = active ? (frr!.overage_est_credit || 0) : 0;
+    const overPhoto = active ? (frr!.overage_photo_credit || 0) : 0;
+    const estCap = t ? (t.included_estimates ?? null) : null;
+    const photoCap = t ? (t.included_photos ?? null) : null;
     return {
       tier: rawTier,
-      estimates: { used: counts.estimates, cap: t ? (t.included_estimates ?? null) : null },
-      photos: { used: counts.photos, cap: t ? (t.included_photos ?? null) : null },
+      estimates: { used: counts.estimates, cap: estCap != null ? estCap + overEst : null },
+      photos: { used: counts.photos, cap: photoCap != null ? photoCap + overPhoto : null },
     };
   } catch (e) {
     console.error('[usage] status failed:', e);

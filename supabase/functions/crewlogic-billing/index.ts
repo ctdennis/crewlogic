@@ -127,6 +127,27 @@ async function franchiseIdForEvent(obj: any): Promise<string | null> {
   return null;
 }
 
+function currentPeriodKey(): string { return new Date().toISOString().slice(0, 7); } // YYYY-MM (matches the usage-count calendar-month window)
+
+// One-time overage top-up: add the tier's overage_estimates/overage_photos to the franchise's period
+// credits. Resets the credits if overage_period has rolled to a new month, so a $10 block only boosts
+// the month it's bought in. usageSummary adds these to the caps while overage_period == the current month.
+async function creditOverage(fid: string): Promise<void> {
+  const frRows = await sbGet(`/rest/v1/franchises?id=eq.${encodeURIComponent(fid)}&select=subscription_tier,overage_period,overage_est_credit,overage_photo_credit`);
+  const fr = frRows[0];
+  if (!fr) return;
+  const tier = ["starter", "pro", "enterprise"].indexOf(fr.subscription_tier) !== -1 ? fr.subscription_tier : "starter";
+  const tlRows = await sbGet(`/rest/v1/tier_limits?tier=eq.${tier}&select=overage_estimates,overage_photos`);
+  const tl = tlRows[0] || { overage_estimates: 25, overage_photos: 50 };
+  const period = currentPeriodKey();
+  const rolled = fr.overage_period !== period;
+  await sbPatch(`/rest/v1/franchises?id=eq.${encodeURIComponent(fid)}`, {
+    overage_period: period,
+    overage_est_credit: (rolled ? 0 : (fr.overage_est_credit || 0)) + (tl.overage_estimates ?? 25),
+    overage_photo_credit: (rolled ? 0 : (fr.overage_photo_credit || 0)) + (tl.overage_photos ?? 50),
+  });
+}
+
 async function handleWebhook(req: Request): Promise<Response> {
   const sig = req.headers.get("stripe-signature");
   const raw = await req.text();
@@ -144,20 +165,26 @@ async function handleWebhook(req: Request): Promise<Response> {
     const obj: any = event.data.object;
     if (event.type === "checkout.session.completed") {
       const fid = await franchiseIdForEvent(obj);
-      const subId = typeof obj.subscription === "string" ? obj.subscription : obj.subscription?.id;
-      let priceId: string | null = null, periodEnd: number | null = null;
-      if (subId) {
-        const sub = await stripe.subscriptions.retrieve(subId);
-        priceId = sub.items.data[0]?.price?.id || null;
-        periodEnd = (sub as any).current_period_end || null;
+      if (obj.metadata?.addon === "overage") {
+        // One-time overage top-up — credit +25 est / +50 photos for the CURRENT period. Must NOT touch
+        // subscription fields (a payment session has no subscription; running the sub logic would null them).
+        if (fid) await creditOverage(fid);
+      } else {
+        const subId = typeof obj.subscription === "string" ? obj.subscription : obj.subscription?.id;
+        let priceId: string | null = null, periodEnd: number | null = null;
+        if (subId) {
+          const sub = await stripe.subscriptions.retrieve(subId);
+          priceId = sub.items.data[0]?.price?.id || null;
+          periodEnd = (sub as any).current_period_end || null;
+        }
+        const tier = tierForPrice(priceId || "") || (obj.metadata?.tier ? String(obj.metadata.tier) : null);
+        if (fid) await sbPatch(`/rest/v1/franchises?id=eq.${encodeURIComponent(fid)}`, {
+          subscription_status: "active", stripe_subscription_id: subId || null,
+          stripe_customer_id: typeof obj.customer === "string" ? obj.customer : obj.customer?.id,
+          stripe_price_id: priceId, subscription_current_period_end: isoOrNull(periodEnd),
+          ...(tier ? { subscription_tier: tier } : {}),
+        });
       }
-      const tier = tierForPrice(priceId || "") || (obj.metadata?.tier ? String(obj.metadata.tier) : null);
-      if (fid) await sbPatch(`/rest/v1/franchises?id=eq.${encodeURIComponent(fid)}`, {
-        subscription_status: "active", stripe_subscription_id: subId || null,
-        stripe_customer_id: typeof obj.customer === "string" ? obj.customer : obj.customer?.id,
-        stripe_price_id: priceId, subscription_current_period_end: isoOrNull(periodEnd),
-        ...(tier ? { subscription_tier: tier } : {}),
-      });
     } else if (event.type === "customer.subscription.updated") {
       const fid = await franchiseIdForEvent(obj);
       const upPrice = obj.items?.data?.[0]?.price?.id || null;
@@ -323,6 +350,32 @@ Deno.serve(async (req: Request) => {
       // delta:0 is a pure SYNC (reads Stripe, writes DB, no charge).
       await sbPatch(`/rest/v1/franchises?id=eq.${encodeURIComponent(who.franchise.id)}`, { additional_seats: newQty });
       return json({ ok: true, seats: newQty });
+    }
+
+    // Reconcile paid seats DOWN after a user is removed — target = max(0, members - included). Only ever
+    // decreases (adds are opt-in via adjustSeats), so "remove a user drops the $10" holds automatically.
+    if (action === "reconcileSeats") {
+      const who = await franchiseForCaller(token);
+      if (!who) return json({ error: "Please sign in again." }, 401);
+      const subId = who.franchise.stripe_subscription_id;
+      if (!subId || !STRIPE_PRICE_ADDITIONAL_USER) return json({ ok: true, seats: 0 });
+      const frRows = await sbGet(`/rest/v1/franchises?id=eq.${encodeURIComponent(who.franchise.id)}&select=subscription_tier`);
+      const tier = ["starter", "pro", "enterprise"].indexOf(frRows[0]?.subscription_tier) !== -1 ? frRows[0].subscription_tier : "starter";
+      const tlRows = await sbGet(`/rest/v1/tier_limits?tier=eq.${tier}&select=included_user_seats`);
+      const included = tlRows[0]?.included_user_seats;
+      if (included == null) return json({ ok: true, seats: 0 });
+      const memRows = await sbGet(`/rest/v1/profiles?franchise_id=eq.${encodeURIComponent(who.franchise.id)}&select=id`);
+      const needed = Math.max(0, memRows.length - included);
+      const stripe = getStripe();
+      const sub: any = await stripe.subscriptions.retrieve(subId);
+      const item = sub.items.data.find((it: any) => it.price?.id === STRIPE_PRICE_ADDITIONAL_USER);
+      const current = item ? (item.quantity || 0) : 0;
+      if (item && current > needed) {
+        if (needed === 0) await stripe.subscriptions.update(subId, { items: [{ id: item.id, deleted: true }], proration_behavior: "create_prorations" });
+        else await stripe.subscriptions.update(subId, { items: [{ id: item.id, quantity: needed }], proration_behavior: "create_prorations" });
+        await sbPatch(`/rest/v1/franchises?id=eq.${encodeURIComponent(who.franchise.id)}`, { additional_seats: needed });
+      }
+      return json({ ok: true, seats: Math.min(current, needed) });
     }
 
     return json({ error: "unknown action" }, 400);
