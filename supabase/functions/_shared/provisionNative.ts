@@ -7,8 +7,10 @@
 //   - crewlogic-oauth-callback  (Google; future Microsoft/Apple reuse the same helper)
 //
 // Scoped to tenant+franchise only — each caller keeps its own profile-insert (the two paths build
-// the profile differently). subscription_tier is left NULL so trial access is governed by the
-// tenant's subscription_status default, not the paywalling 'free' tier default.
+// the profile differently). subscription_tier is set to 'free' (the canonical "no paid plan" value
+// — so NULL and 'free' don't both mean the same thing). Tier is NOT an access signal (access =
+// subscription_status, per Epic A 2026-07-11), so 'free' cannot paywall; trial access is governed by
+// the tenant's subscription_status ('trialing' for signups, 'tester' for invites).
 //
 // Trial vs tester (opts): the DEFAULT front door is a marketing / self-serve signup →
 // subscription_status='trialing' with a 14-day trial clock. Invite-provisioned workspaces (guest
@@ -54,7 +56,7 @@ export async function createNativeTenantAndFranchise(
       tenant_id: tenant.id,
       external_id: "native-" + String(tenant.id).slice(0, 8),
       franchise_name: name,
-      subscription_tier: null,
+      subscription_tier: 'free',
     })
     .select("id")
     .single();
