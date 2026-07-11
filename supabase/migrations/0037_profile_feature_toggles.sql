@@ -8,10 +8,10 @@
 --   AND (user is owner OR toggle enabled). Tiles are a UI concern, NOT a hard security boundary —
 --   server endpoints still enforce actual access/usage caps (Epic D).
 --
--- REGRESSION GUARD (Owner 2026-07-11): existing users must NOT be downgraded. A backfill grants every
--- existing NON-owner profile explicit ON toggles for all tiles EXCEPT the owner-only trio
--- (router, trucks, truckAlerts) — i.e. exactly what estimators could already see — so nobody loses a
--- tile when this ships. New users created afterward get the default set.
+-- REGRESSION GUARD (Owner 2026-07-11): existing non-owner profiles are backfilled with the deliberate
+-- estimator set — { estimates, volumeCheck, priceLookup, manageJobs, jobPlan, signs } (Owner refined
+-- 2026-07-11: estimators do NOT get dispatch/dashboard, estimatesDashboard/Estimates Desk, or
+-- disposalRouter/Job Router; yard signs is alpha but granted for now). New users get the default set.
 --
 -- RLS: enabled with a permissive policy matching the app's existing anon team-management posture
 -- (profiles are already read AND deleted via the anon key, franchise-scoped client-side). Tighter
@@ -43,8 +43,8 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 --   INSERT INTO public.profile_feature_toggles (profile_id, feature_key, enabled)
 --   SELECT p.id, k.key, true
 --   FROM public.profiles p
---   CROSS JOIN (VALUES ('estimates'),('volumeCheck'),('priceLookup'),('manageJobs'),('dashboard'),
---                      ('estimatesDashboard'),('jobPlan'),('signs'),('disposalRouter')) AS k(key)
+--   CROSS JOIN (VALUES ('estimates'),('volumeCheck'),('priceLookup'),('manageJobs'),
+--                      ('jobPlan'),('signs')) AS k(key)
 --   WHERE COALESCE(p.role,'owner') <> 'owner'
 --   ON CONFLICT (profile_id, feature_key) DO NOTHING;
 --

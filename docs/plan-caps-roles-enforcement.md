@@ -43,11 +43,16 @@ Revised order: **C (tile toggles) → D (headcount + usage caps) → F (marketin
 - **Visibility rule:** `capability-allowed(tile: CRM/telematics/desktop — unchanged) AND (owner OR
   toggle-on)`. Owner sees all. The existing role-only hiding of trucks/truckAlerts/router becomes
   owner-assignable via toggles.
-- **REGRESSION-GUARD BACKFILL (Owner 2026-07-11):** what an estimator sees today = everything EXCEPT
-  the owner-only trio (router, trucks, truckAlerts). So existing non-owner profiles get explicit ON
-  toggles for {estimates, volumeCheck, priceLookup, manageJobs, dashboard, estimatesDashboard,
-  jobPlan, signs, disposalRouter} → they keep exactly their current set; nobody is downgraded. Prod
-  has 4 estimators to backfill (dev has 0). Backfill SQL lives in migration 0037.
+- **REGRESSION-GUARD BACKFILL (Owner 2026-07-11, refined):** existing non-owner profiles get explicit
+  ON toggles for the deliberate estimator set — **{estimates, volumeCheck, priceLookup, manageJobs,
+  jobPlan, signs}**. Owner explicitly EXCLUDED dispatch/dashboard, estimatesDashboard/Estimates Desk,
+  and disposalRouter/Job Router from estimators (even though a Vonigo+desktop estimator could see the
+  first two today — intended). Yard signs is alpha but granted for now. Prod has 4 estimators to
+  backfill (dev 0). Backfill SQL in migration 0037.
+
+### Future / backlog (NOT now — Owner 2026-07-11)
+- **Possible "crew" role** (or expand the per-tier user counts) for crew members who'd get a narrow
+  set — price lookup, volume check, yard signs. Deferred; revisit after C/D/E ship.
 - **Remaining (frontend/edge):** (1) buildSession nests `profile_feature_toggles(feature_key,enabled)`
   → `currentUser.tileToggles`; (2) showApp filters non-owner tiles by the toggle map (default set if
   none); (3) Team Members owner UI — per-user tile checklist + save via supabaseFetch upsert.
