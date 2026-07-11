@@ -241,7 +241,7 @@ The plan controls what a franchise *can* have; the owner controls what each *sea
 ## 7. Open items
 
 - [x] **Tier prices — decided 2026-06-25: Starter $29.99 · Pro $59.99 · Enterprise $129.99** (per location). Set in Stripe.
-- [x] **Included caps — decided 2026-06-25:** Starter 250 est / 500 photos · Pro 750 / 1,500 · Enterprise 2,500 / 5,000.
+- [x] **Included caps — estimates recalibrated 2026-07-11** (750 was unreachable → no upsell ever triggers): Starter **25** est / 500 photos · Pro **75** / 1,500 · Enterprise **250** / 5,000. (Photos unchanged; revisit if also unreachable.) Config lives in `tier_limits` — change there, no code.
 - [x] **Overage block — decided 2026-06-25:** ONE bundled block ~$10 = +25 estimates AND +50 photos.
 - [x] **Warnings — decided 2026-06-25:** 80% / 90% / 95% of included, on BOTH estimates and photos.
 - [x] Seat enforcement model — **decided 2026-06-23: soft + hard ceiling; counts 2/5/∞** (see §1.7). Time-lock temp seat = v2.

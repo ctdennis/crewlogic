@@ -32,9 +32,9 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 INSERT INTO public.tier_limits
   (tier, included_user_seats, included_estimates, included_photos, overage_block_price, overage_estimates, overage_photos, additional_user_price)
 VALUES
-  ('starter',    2,  250,  500, 10, 25, 50, 10),
-  ('pro',        5,  750, 1500, 10, 25, 50, 10),
-  ('enterprise', NULL, 2500, 5000, 10, 25, 50, 10)
+  ('starter',    2,   25,  500, 10, 25, 50, 10),
+  ('pro',        5,   75, 1500, 10, 25, 50, 10),
+  ('enterprise', NULL, 250, 5000, 10, 25, 50, 10)
 ON CONFLICT (tier) DO UPDATE SET
   included_user_seats = EXCLUDED.included_user_seats,
   included_estimates  = EXCLUDED.included_estimates,
