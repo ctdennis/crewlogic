@@ -41,8 +41,13 @@ gate on clean semantics.
 
 ### EPIC B — Dispatch-only role · size M
 Third role: board/trucks/routes/job-plans, **cannot create estimates → free/unlimited**.
-- B1 (data): allow `profiles.role='dispatch'` (column already text; document allowed values +
-  a CHECK constraint). No table add.
+- **B0 — REGRESSION GUARD (Owner 2026-07-11):** this rollout MUST NOT change any existing
+  `profiles.role`. Every current owner stays owner, every estimator stays estimator; `dispatch` is
+  only ever assigned to NEW invites or an explicit owner change. Invite default = **Estimator** so
+  no existing user's privileges are elevated by this push. No bulk role UPDATE, ever.
+- B1 (data): allow `profiles.role='dispatch'`. Column is already text. **First enumerate existing
+  distinct `role` values** (dev + prod, read-only) so a CHECK constraint permits every legacy value
+  + `dispatch` and rejects nothing in use. Add CHECK only after that audit.
 - B2 (frontend): invite UI (~6563) + Team Members — add **role picker** (Estimator vs Dispatch).
 - B3 (frontend): extend `applyRoleRestrictions` (~7201) — dispatch hides estimator/volumeCheck/
   priceLookup tiles + blocks estimate creation; keeps dispatch tiles.
