@@ -32,6 +32,27 @@ Owner simplified away the role-based billing entirely:
 
 Revised order: **C (tile toggles) → D (headcount + usage caps) → F (marketing) → E (enable billing).**
 
+### Epic C — build detail (IN PROGRESS on dev)
+- **Table `profile_feature_toggles`** (migration 0037) — DONE on dev. `(profile_id, feature_key,
+  enabled)`, RLS permissive (matches existing anon team-mgmt posture; tiles aren't a security
+  boundary — server enforces real access/caps).
+- **12 tile keys:** estimates, volumeCheck, router, trucks, truckAlerts, disposalRouter, manageJobs,
+  dashboard, estimatesDashboard, priceLookup, signs, jobPlan.
+- **New-user default (Owner):** volumeCheck, priceLookup, manageJobs (applied in code when a profile
+  has no toggle rows).
+- **Visibility rule:** `capability-allowed(tile: CRM/telematics/desktop — unchanged) AND (owner OR
+  toggle-on)`. Owner sees all. The existing role-only hiding of trucks/truckAlerts/router becomes
+  owner-assignable via toggles.
+- **REGRESSION-GUARD BACKFILL (Owner 2026-07-11):** what an estimator sees today = everything EXCEPT
+  the owner-only trio (router, trucks, truckAlerts). So existing non-owner profiles get explicit ON
+  toggles for {estimates, volumeCheck, priceLookup, manageJobs, dashboard, estimatesDashboard,
+  jobPlan, signs, disposalRouter} → they keep exactly their current set; nobody is downgraded. Prod
+  has 4 estimators to backfill (dev has 0). Backfill SQL lives in migration 0037.
+- **Remaining (frontend/edge):** (1) buildSession nests `profile_feature_toggles(feature_key,enabled)`
+  → `currentUser.tileToggles`; (2) showApp filters non-owner tiles by the toggle map (default set if
+  none); (3) Team Members owner UI — per-user tile checklist + save via supabaseFetch upsert.
+- **Cleanup:** simplify dev role CHECK (0036) to owner/estimator (drop unused 'dispatch').
+
 Owner: Charles Dennis · Testers to onboard after this ships: **Koby (#56) + Eric Doherty**.
 
 ## Goal & guardrail
