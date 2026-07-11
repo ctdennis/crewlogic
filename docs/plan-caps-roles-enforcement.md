@@ -9,10 +9,16 @@ Progress:
 - **Epic C DONE ON DEV (v5.50.50), Owner-verified ("looks good, exactly as expected").** Per-user tile
   toggles + owner editor + login read + showApp filter + trio layering fix. NOT yet promoted to prod
   (backfill runs at promotion). Ready to promote.
-- **Epic D DONE ON DEV (v5.50.51).** tier_limits config · countUsage helper · usageSummary action ·
-  dormant ENFORCE_USAGE_CAPS gate · home usage banner (80/90/95%) · seat soft-flag · transparency copy.
-  Enforcement soft at launch (flag off). NOT promoted; ready to test. Fast-follow = overage + $10/seat
-  billing. Remaining epics: F (marketing pricing), E (enable billing).
+- **Epics C + D DONE — LIVE IN PROD (v5.50.56, 2026-07-11).** Migrations 0036-0039 applied to prod;
+  live add-on secrets set; crewlogic-ai + crewlogic-billing deployed; frontend merged to main; estimator
+  backfill (4 estimators × 6 tiles = 24 rows) so no downgrade; dev test rows cleaned. Verified prod
+  usageSummary (#90 est 26/75, photos 46/1500). Estimate caps recalibrated 25/75/250.
+  - Per-user tile toggles (C) · usage caps + 80/90/95% warnings + dormant ENFORCE_USAGE_CAPS gate ·
+    seat add/remove (bidirectional, one combined charge) · overage buy→credit (one-month) all live.
+  - **NOTE — add-on buttons take REAL money on prod now** (buyOverage/adjustSeats use LIVE prices).
+    The SUBSCRIBE/paywall is still gated by BILLING_ENABLED (prod off). Decide: leave add-ons live for
+    revenue, or gate them behind BILLING_ENABLED until Epic E.
+- **Remaining epics: F (marketing pricing), E (enable billing — the subscribe paywall + trial enforcement).**
 - Duplicate-franchise dedup: confirmed already handled (409 + UNIQUE(external_id)); pay-last checkout
   gate logged under Epic E.
 

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.56 | 2026-07-11">
+  <meta name="crewlogic-version" content="v5.50.57 | 2026-07-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -6826,7 +6826,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             '<div style="margin-top:12px;background:rgba(245,171,0,.12);border:1px solid #ffab00;border-radius:10px;padding:11px 13px;">' +
             '<div style="font-weight:700;color:#e0940a;font-size:12.5px;margin-bottom:3px;">You have ' + members.length + ' users — your ' + tierName + ' plan includes ' + included + (paid ? ' + ' + paid + ' paid' : '') + '.</div>' +
             '<div style="font-size:11.5px;color:var(--text-muted);line-height:1.5;margin-bottom:9px;">Add ' + over + ' more seat' + (over > 1 ? 's' : '') + ' at $' + price + '/user/mo — one combined charge. Remove a user any time to drop it.</div>' +
-            '<button onclick="openAddUsers()" style="background:var(--accent-green);color:var(--accent-text);border:none;font-weight:800;font-size:12px;padding:7px 14px;border-radius:8px;cursor:pointer;">＋ Add a user seat</button></div>');
+            (BILLING_ENABLED ? '<button onclick="openAddUsers()" style="background:var(--accent-green);color:var(--accent-text);border:none;font-weight:800;font-size:12px;padding:7px 14px;border-radius:8px;cursor:pointer;">＋ Add a user seat</button>' : '') + '</div>');
         } else if (paid > 0) {
           listEl.insertAdjacentHTML('beforeend',
             '<div style="margin-top:12px;background:rgba(0,231,133,.10);border:1px solid var(--border);border-radius:10px;padding:11px 13px;">' +
@@ -7471,7 +7471,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + '<div style="font-weight:800;color:' + t.tx + ';font-size:13px;margin-bottom:5px;">You\'re ' + t.word + ' your monthly allowance</div>'
           + '<div style="display:flex;gap:16px;flex-wrap:wrap;color:var(--text-secondary);font-size:12.5px;margin-bottom:6px;">' + line('Estimates', u.estimates.used, u.estimates.cap) + line('Photos', u.photos.used, u.photos.cap) + '</div>'
           + '<div style="font-size:11px;color:var(--text-muted);line-height:1.5;margin-bottom:9px;">Volume-check photos count toward your photo allowance; a volume check isn\'t an estimate.</div>'
-          + '<button onclick="openAddCredits()" style="background:var(--accent-green);color:var(--accent-text);border:none;font-weight:800;font-size:12.5px;padding:8px 15px;border-radius:8px;cursor:pointer;">＋ Add credits</button>'
+          + (BILLING_ENABLED ? '<button onclick="openAddCredits()" style="background:var(--accent-green);color:var(--accent-text);border:none;font-weight:800;font-size:12.5px;padding:8px 15px;border-radius:8px;cursor:pointer;">＋ Add credits</button>' : '')
           + '</div>';
         el.style.display = 'block';
       } catch (e) { console.error('[usage] warning check failed', e); el.style.display = 'none'; }
@@ -7480,6 +7480,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Add credits (Epic D) — one-time $10 overage top-up (+25 estimates / +50 photos), its own charge.
     // Opens the Stripe checkout in a NEW TAB (popup-safe: open blank on click, redirect once URL returns).
     async function openAddCredits() {
+      if (!BILLING_ENABLED) return; // add-ons gated until billing is enabled (Epic E)
       const w = window.open('', '_blank');
       try {
         const data = await billingCall('buyOverage', { returnUrl: window.location.origin });
@@ -7491,6 +7492,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Add a user seat (Epic D) — a $10/mo quantity on the EXISTING subscription → one combined charge.
     // Needs an active plan first; a trial user is routed to the plan picker. In-app (no Stripe page).
     async function openAddUsers() {
+      if (!BILLING_ENABLED) return; // add-ons gated until billing is enabled (Epic E)
       if (!_hasActiveSub()) { if (typeof openSubscribeModal === 'function') openSubscribeModal(); return; }
       if (!confirm('Add 1 user seat for $10/month?\n\nIt\'s added to your current plan as one combined charge, and you can remove it any time to drop the $10.')) return;
       try {
