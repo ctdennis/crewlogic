@@ -65,8 +65,14 @@ Revised order: **C (tile toggles) → D (headcount + usage caps) → F (marketin
 - **Seat model:** effective cap = included + purchased additional seats. Additional user = **$10/user/mo**
   as a Stripe subscription **quantity**, bidirectional + prorated: add over cap → qty+1 (+$10); remove →
   qty−1 (−$10). **Downgrade MUST drop the charge.** Owner counts toward included.
-- **Usage counting:** count `usage_events` per franchise per period — estimates (analyze-estimate events)
-  + photos (sum metadata.images). Verify event_type/metadata shape when building D3.
+- **Usage counting (CONFIRMED Owner 2026-07-11, verified against usage_events):**
+  - **Estimates cap** = COUNT of `ai.analyze_estimate` events. A **volume check is NOT an estimate.**
+  - **Photos cap** = SUM(`metadata.images`) over **`ai.analyze_estimate` + `ai.volume_check`** (volume-check
+    photos DO count — they cost the same). `ai.job_plan` touches neither cap.
+- **FOLLOWUP (Owner 2026-07-11) — transparency:** make it *painfully clear* on BOTH the **app** (by the
+  usage/allowance display) and the **marketing site** (pricing, Epic F) that (1) volume-check photos count
+  toward the photo allowance, and (2) a volume check does NOT count as an estimate. Users must understand
+  what burns their allowance. Tracked here; app copy in D, marketing copy in F.
 - **Warnings 80/90/95%** on estimates AND photos.
 - **Enforcement:** usage 100% → soft-block (5-day grace) → hard-block. Seat cap → **soft-block + flag** at
   launch.
