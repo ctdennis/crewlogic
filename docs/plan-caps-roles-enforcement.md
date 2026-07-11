@@ -57,6 +57,24 @@ Revised order: **C (tile toggles) → D (headcount + usage caps) → F (marketin
   first two today — intended). Yard signs is alpha but granted for now. Prod has 4 estimators to
   backfill (dev 0). Backfill SQL in migration 0037.
 
+### Epic D — build detail (headcount seats + usage caps) — decisions Owner 2026-07-11
+- **`tier_limits` table (pricing-in-DB):** tier → included_user_seats (Starter 2 / Pro 5 / Ent ∞),
+  included_estimates (250/750/2500), included_photos (500/1500/5000), overage_block_price (10),
+  overage_estimates (25), overage_photos (50), **additional_user_price (10 /user/mo)**.
+- **Usage period = Stripe billing cycle** (current_period_start→end per franchise); trials = calendar month.
+- **Seat model:** effective cap = included + purchased additional seats. Additional user = **$10/user/mo**
+  as a Stripe subscription **quantity**, bidirectional + prorated: add over cap → qty+1 (+$10); remove →
+  qty−1 (−$10). **Downgrade MUST drop the charge.** Owner counts toward included.
+- **Usage counting:** count `usage_events` per franchise per period — estimates (analyze-estimate events)
+  + photos (sum metadata.images). Verify event_type/metadata shape when building D3.
+- **Warnings 80/90/95%** on estimates AND photos.
+- **Enforcement:** usage 100% → soft-block (5-day grace) → hard-block. Seat cap → **soft-block + flag** at
+  launch.
+- **Launch scope:** `tier_limits` + usage counting + 80/90/95% warnings + usage soft/hard block + seat
+  soft-flag. **Fast-follow (same Stripe-add-on plumbing):** overage-block purchase ($10 = +25 est/+50
+  photos, one-time top-up) + additional-user seat billing ($10/user/mo, add AND remove/downgrade).
+- **Pricing:** additional_user_price = **$10/user/mo** (SET 2026-07-11). Overage block ~$10 (§7).
+
 ### Future / backlog (NOT now — Owner 2026-07-11)
 - **Possible "crew" role** (or expand the per-tier user counts) for crew members who'd get a narrow
   set — price lookup, volume check, yard signs. Deferred; revisit after C/D/E ship.
