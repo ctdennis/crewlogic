@@ -225,11 +225,15 @@ Deno.serve(async (req: Request) => {
     // Temp dev diagnostic: validates the secret key + that a tier price resolves (default starter).
     if (action === "verify") {
       try {
-        const p = await getStripe().prices.retrieve(priceForTier(body.tier));
+        const stripe = getStripe();
+        if (body.addon === "config") return json({ ok: true, tiers: { starter: STRIPE_PRICE.starter, pro: STRIPE_PRICE.pro, enterprise: STRIPE_PRICE.enterprise }, overage: STRIPE_PRICE_OVERAGE, additionalUser: STRIPE_PRICE_ADDITIONAL_USER });
+        if (body.addon === "overage") { const p: any = await stripe.prices.retrieve(STRIPE_PRICE_OVERAGE); return json({ ok: true, id: STRIPE_PRICE_OVERAGE, amount: p.unit_amount, type: p.type, recurring: p.recurring, active: p.active }); }
+        if (body.addon === "seat") { const p: any = await stripe.prices.retrieve(STRIPE_PRICE_ADDITIONAL_USER); return json({ ok: true, id: STRIPE_PRICE_ADDITIONAL_USER, amount: p.unit_amount, type: p.type, recurring: p.recurring, active: p.active }); }
+        const p = await stripe.prices.retrieve(priceForTier(body.tier));
         return json({ ok: true, amount: p.unit_amount, currency: p.currency, interval: p.recurring?.interval, active: p.active });
       } catch (e) {
         console.error("[billing] verify failed:", (e as Error).message);
-        return json({ ok: false, reason: (e as Error).message.slice(0, 120) });
+        return json({ ok: false, reason: (e as Error).message.slice(0, 160) });
       }
     }
 
