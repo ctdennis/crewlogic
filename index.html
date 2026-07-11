@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.54 | 2026-07-11">
+  <meta name="crewlogic-version" content="v5.50.55 | 2026-07-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -6810,20 +6810,28 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         '</div>';
       }).join('');
 
-      // Seat soft-flag (Epic D) — headcount vs the tier's included seats (owner counts). Flag when over;
-      // billing (the $10/user add/remove) lands with the fast-follow. Non-blocking.
+      // Seat soft-flag (Epic D) — headcount vs the EFFECTIVE cap = tier included + PAID additional seats
+      // (franchises.additional_seats, synced by crewlogic-billing adjustSeats). Owner counts. Non-blocking.
       try {
         const tier = ['starter', 'pro', 'enterprise'].indexOf(currentUser.subscriptionTier) !== -1 ? currentUser.subscriptionTier : 'starter';
         const tl = await supabaseFetch('/rest/v1/tier_limits?tier=eq.' + tier + '&select=included_user_seats,additional_user_price');
-        const cap = (tl && tl[0]) ? tl[0].included_user_seats : null;
-        if (cap != null && members.length > cap) {
-          const over = members.length - cap;
-          const price = (tl[0].additional_user_price != null) ? tl[0].additional_user_price : 10;
+        const included = (tl && tl[0]) ? tl[0].included_user_seats : null;
+        const price = (tl && tl[0] && tl[0].additional_user_price != null) ? tl[0].additional_user_price : 10;
+        const frow = await supabaseFetch('/rest/v1/franchises?id=eq.' + franchiseUUID + '&select=additional_seats');
+        const paid = (frow && frow[0] && frow[0].additional_seats) || 0;
+        const tierName = tier.charAt(0).toUpperCase() + tier.slice(1);
+        if (included != null && members.length > included + paid) {
+          const over = members.length - (included + paid);
           listEl.insertAdjacentHTML('beforeend',
             '<div style="margin-top:12px;background:rgba(245,171,0,.12);border:1px solid #ffab00;border-radius:10px;padding:11px 13px;">' +
-            '<div style="font-weight:700;color:#e0940a;font-size:12.5px;margin-bottom:3px;">You have ' + members.length + ' users — your ' + tier.charAt(0).toUpperCase() + tier.slice(1) + ' plan includes ' + cap + '.</div>' +
-            '<div style="font-size:11.5px;color:var(--text-muted);line-height:1.5;margin-bottom:9px;">' + over + ' additional user' + (over > 1 ? 's' : '') + ' at $' + price + '/user/mo. Remove a user any time to drop the charge.</div>' +
+            '<div style="font-weight:700;color:#e0940a;font-size:12.5px;margin-bottom:3px;">You have ' + members.length + ' users — your ' + tierName + ' plan includes ' + included + (paid ? ' + ' + paid + ' paid' : '') + '.</div>' +
+            '<div style="font-size:11.5px;color:var(--text-muted);line-height:1.5;margin-bottom:9px;">Add ' + over + ' more seat' + (over > 1 ? 's' : '') + ' at $' + price + '/user/mo — one combined charge. Remove a user any time to drop it.</div>' +
             '<button onclick="openAddUsers()" style="background:var(--accent-green);color:var(--accent-text);border:none;font-weight:800;font-size:12px;padding:7px 14px;border-radius:8px;cursor:pointer;">＋ Add a user seat</button></div>');
+        } else if (paid > 0) {
+          listEl.insertAdjacentHTML('beforeend',
+            '<div style="margin-top:12px;background:rgba(0,231,133,.10);border:1px solid var(--border);border-radius:10px;padding:11px 13px;">' +
+            '<div style="font-weight:700;color:var(--text-secondary);font-size:12.5px;margin-bottom:3px;">' + members.length + ' users — ' + included + ' included + ' + paid + ' paid seat' + (paid > 1 ? 's' : '') + ' ($' + (paid * price) + '/mo).</div>' +
+            '<div style="font-size:11.5px;color:var(--text-muted);line-height:1.5;">Remove a user to drop a paid seat and $' + price + '/mo.</div></div>');
         }
       } catch (e) { console.error('[seatflag] failed', e); }
     }

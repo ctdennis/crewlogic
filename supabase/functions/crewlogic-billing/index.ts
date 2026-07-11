@@ -227,6 +227,8 @@ Deno.serve(async (req: Request) => {
       try {
         const stripe = getStripe();
         if (body.addon === "config") return json({ ok: true, tiers: { starter: STRIPE_PRICE.starter, pro: STRIPE_PRICE.pro, enterprise: STRIPE_PRICE.enterprise }, overage: STRIPE_PRICE_OVERAGE, additionalUser: STRIPE_PRICE_ADDITIONAL_USER });
+        if (body.resetSeats && body.subId) { const s: any = await stripe.subscriptions.retrieve(String(body.subId)); const it = s.items.data.find((x: any) => x.price?.id === STRIPE_PRICE_ADDITIONAL_USER); if (it) await stripe.subscriptions.update(String(body.subId), { items: [{ id: it.id, deleted: true }], proration_behavior: "create_prorations" }); return json({ ok: true, reset: true, removed: it ? (it.quantity || 0) : 0 }); }
+        if (body.subId) { const s: any = await stripe.subscriptions.retrieve(String(body.subId)); const it = s.items.data.find((x: any) => x.price?.id === STRIPE_PRICE_ADDITIONAL_USER); return json({ ok: true, seatQty: it ? (it.quantity || 0) : 0, items: s.items.data.map((x: any) => ({ price: x.price?.id, qty: x.quantity })) }); }
         if (body.addon === "overage") { const p: any = await stripe.prices.retrieve(STRIPE_PRICE_OVERAGE); return json({ ok: true, id: STRIPE_PRICE_OVERAGE, amount: p.unit_amount, type: p.type, recurring: p.recurring, active: p.active }); }
         if (body.addon === "seat") { const p: any = await stripe.prices.retrieve(STRIPE_PRICE_ADDITIONAL_USER); return json({ ok: true, id: STRIPE_PRICE_ADDITIONAL_USER, amount: p.unit_amount, type: p.type, recurring: p.recurring, active: p.active }); }
         const p = await stripe.prices.retrieve(priceForTier(body.tier));
@@ -317,6 +319,9 @@ Deno.serve(async (req: Request) => {
       } else if (delta > 0) {
         await stripe.subscriptions.update(subId, { items: [{ price: STRIPE_PRICE_ADDITIONAL_USER, quantity: newQty }], proration_behavior: "create_prorations" });
       }
+      // Reflect the paid seat count in the app so the seat flag / effective user cap update. Passing
+      // delta:0 is a pure SYNC (reads Stripe, writes DB, no charge).
+      await sbPatch(`/rest/v1/franchises?id=eq.${encodeURIComponent(who.franchise.id)}`, { additional_seats: newQty });
       return json({ ok: true, seats: newQty });
     }
 
