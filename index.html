@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.60 | 2026-07-12">
+  <meta name="crewlogic-version" content="v5.50.61 | 2026-07-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10918,15 +10918,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       let ov = document.getElementById('mjReschedOverlay');
       if (!ov) { ov = document.createElement('div'); ov.id = 'mjReschedOverlay'; document.body.appendChild(ov); }
       ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(3,8,14,0.62);display:flex;align-items:center;justify-content:center;';
+      let defDate = ''; if (_mjBoardDayID && /^\d{8}$/.test(_mjBoardDayID)) defDate = _mjBoardDayID.slice(0, 4) + '-' + _mjBoardDayID.slice(4, 6) + '-' + _mjBoardDayID.slice(6, 8);
+      const inCss = 'width:100%;padding:11px;margin-bottom:12px;background:var(--bg-input);border:1px solid var(--btn-surface-border,#46596d);border-radius:8px;color:var(--text-primary);font-size:15px;box-sizing:border-box;';
       ov.innerHTML = '<div style="background:var(--bg-card,#1e2f40);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.5);padding:18px 20px;max-width:360px;width:92%;font-size:13px;color:var(--text-primary);">'
         + '<div style="font-size:15px;font-weight:800;margin-bottom:4px;">Reschedule job</div>'
         + '<div style="margin-bottom:12px;font-weight:700;">' + mjEsc(j.client || 'Job') + (j.jobID ? ' <span style="color:var(--text-muted);font-weight:500;">#' + mjEsc(String(j.jobID)) + '</span>' : '')
         +   '<div style="color:var(--text-muted);font-weight:500;font-size:12px;margin-top:2px;">Currently ' + mjEsc(j.timeLabel || '—') + (j.routeCode ? ' · ' + mjEsc(j.routeCode) : '') + '</div></div>'
-        + '<label style="display:block;color:var(--text-muted);margin-bottom:4px;">New date</label>'
-        + '<input id="mjReschedDate" type="date" style="width:100%;padding:11px;margin-bottom:12px;background:var(--bg-input);border:1px solid var(--btn-surface-border,#46596d);border-radius:8px;color:var(--text-primary);font-size:15px;box-sizing:border-box;">'
-        + '<label style="display:block;color:var(--text-muted);margin-bottom:4px;">New time</label>'
-        + '<input id="mjReschedTime" type="time" step="900" style="width:100%;padding:11px;margin-bottom:8px;background:var(--bg-input);border:1px solid var(--btn-surface-border,#46596d);border-radius:8px;color:var(--text-primary);font-size:15px;box-sizing:border-box;">'
-        + '<div style="color:var(--text-muted);font-size:11px;margin-bottom:10px;">We\'ll find the open slot and confirm zoning — nothing changes until you confirm.</div>'
+        + '<label style="display:block;color:var(--text-muted);margin-bottom:4px;">Date</label>'
+        + '<input id="mjReschedDate" type="date" value="' + defDate + '" onchange="_mjReschedLoadRoutes()" style="' + inCss + '">'
+        + '<label style="display:block;color:var(--text-muted);margin-bottom:4px;">Route</label>'
+        + '<select id="mjReschedRoute" style="' + inCss + '"><option>Loading routes…</option></select>'
+        + '<label style="display:block;color:var(--text-muted);margin-bottom:4px;">Time</label>'
+        + '<input id="mjReschedTime" type="time" step="900" style="' + inCss.replace('margin-bottom:12px', 'margin-bottom:8px') + '">'
+        + '<div style="color:var(--text-muted);font-size:11px;margin-bottom:10px;">Same date + a different route moves it between routes; change the date/time to move it to another day. We confirm the open slot and zoning before anything changes.</div>'
         + '<div id="mjReschedErr" style="color:#ff6b6b;font-size:12px;min-height:1px;margin-bottom:6px;"></div>'
         + '<div style="display:flex;gap:10px;justify-content:flex-end;">'
         +   '<button onclick="mjReschedClose()" style="padding:9px 16px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;font-weight:600;cursor:pointer;">Cancel</button>'
@@ -10935,16 +10939,31 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       ov.style.display = 'flex';
       ov.onclick = null; setTimeout(function () { ov.onclick = function (e) { if (e.target === ov) mjReschedClose(); }; }, 400); // ignore the opening tap's mobile ghost-click
       const ti = document.getElementById('mjReschedTime'); const t24 = _mjParseTimeLabel(j.timeLabel); if (ti && t24) ti.value = t24;
+      _mjReschedLoadRoutes(); // populate routes for the default day (incl. empty ones) so route-to-route moves work
     }
     function mjReschedClose() { const ov = document.getElementById('mjReschedOverlay'); if (ov) ov.style.display = 'none'; _mjRescheduleJob = null; }
+    async function _mjReschedLoadRoutes() {
+      const sel = document.getElementById('mjReschedRoute'); if (!sel) return;
+      const dv = (document.getElementById('mjReschedDate') || {}).value || '';
+      const dayID = dv ? dv.replace(/-/g, '') : (_mjBoardDayID || '');
+      if (!dayID) { sel.innerHTML = '<option value="">Pick a date first</option>'; return; }
+      sel.innerHTML = '<option>Loading routes…</option>';
+      let data = null; try { data = await edgeFunctionCall('crewlogic-dispatch', { action: 'boardGrid', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, dayID }); } catch (e) {}
+      const routes = (data && data.success && data.routes) ? data.routes : [];
+      if (!routes.length) { sel.innerHTML = '<option value="">No routes for this day</option>'; return; }
+      const cur = (_mjRescheduleJob && _mjRescheduleJob.routeCode) || '';
+      sel.innerHTML = routes.map(function (rt) { const code = String(rt.code || ''); const nOpen = (rt.open || []).length; const lbl = code + (rt.name && rt.name !== code ? ' — ' + rt.name : '') + (nOpen ? '  (' + nOpen + ' open)' : ''); return '<option value="' + mjEsc(code) + '"' + (code === cur ? ' selected' : '') + '>' + mjEsc(lbl) + '</option>'; }).join('');
+    }
     function mjQuickRescheduleGo() {
       const j = _mjRescheduleJob; if (!j) return;
       const dateV = (document.getElementById('mjReschedDate') || {}).value || '';
       const timeV = (document.getElementById('mjReschedTime') || {}).value || '';
+      const routeV = (document.getElementById('mjReschedRoute') || {}).value || '';
       const err = document.getElementById('mjReschedErr');
       if (!dateV) { if (err) err.textContent = 'Pick a date.'; return; }
+      if (!routeV) { if (err) err.textContent = 'Pick a route.'; return; }
       if (!timeV) { if (err) err.textContent = 'Pick a time.'; return; }
-      const cmd = 'Move Job ' + (j.jobID || '') + ' (' + (j.client || '') + ') to ' + _mjHumanDateTime(dateV, timeV);
+      const cmd = 'Move Job ' + (j.jobID || '') + ' (' + (j.client || '') + ') to route ' + routeV + ' on ' + _mjHumanDateTime(dateV, timeV);
       mjReschedClose();
       mjSendCommand(cmd); // -> dispatcher resolves slot/zoning -> standard confirm card -> mjExecute
     }
