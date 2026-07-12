@@ -22,9 +22,13 @@ Progress:
   recalibrated caps 25/75/250 est · 500/1500/5000 photos, seats 2/5/∞, $10 add-ons, transparency line) +
   nav Pricing link. Matches site design. Tweak on prod as needed.
 - **Add-ons GATED on prod (v5.50.57)** behind BILLING_ENABLED until E.
-- **Remaining: E (enable billing) — the LAST epic.** Flip BILLING_ENABLED on prod · subscribe paywall ·
-  soft-5-then-hard trial (ENFORCE_TRIAL) · pay-last checkout gate (Vonigo-connect before checkout) ·
-  flip add-ons on · flip ENFORCE_USAGE_CAPS when ready · stamp Koby+Eric trial_ends_at · verify 1 live sub.
+- **Epic E DONE — BILLING LIVE IN PROD (v5.50.58, 2026-07-12).** BILLING_ENABLED on (subscribe paywall +
+  add-ons live), ENFORCE_TRIAL on (soft-5-then-hard, grace 5d), pay-last checkout gate. Verified at flip:
+  7 testers free, 2 on trial (Koby #56 + Eric #102, expire 2026-07-21 + grace → paywall ~7-26), 0 locked out.
+
+## ROADMAP COMPLETE — A · C · D · F · E all in prod (B cancelled). 2026-07-12.
+Open follow-ups (not blockers): flip ENFORCE_USAGE_CAPS to hard when comfortable · #56 Koby Linxup token
+still a URL (0 stored) · reserved fast-follows (truck custom-label, crew role) · watch first live sub by ~7-26.
 - Duplicate-franchise dedup: confirmed already handled (409 + UNIQUE(external_id)); pay-last checkout
   gate logged under Epic E.
 

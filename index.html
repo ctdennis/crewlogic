@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.58 | 2026-07-11">
+  <meta name="crewlogic-version" content="v5.50.59 | 2026-07-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8745,12 +8745,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (t.lat == null || t.lon == null) return;
         const active = _truckActive(t);
         const color = active ? '#00E785' : '#6e8194';
-        // Round marker: colored circle (green active / gray stale) with the truck's map-order number; a
-        // direction arrow rotated to the heading shows only while moving — heading is stale when parked.
-        // Hover (<title>) and tap (popup) show the full telematics name. The number reflects the franchise's
-        // drag/drop map order set in Truck Setup; until that's configured it's the render sequence.
+        // Motive/Linxup-style directional pointer: a colored disc (green active / gray stale) with the
+        // truck's map-order number, and a prominent NOSE that sticks out toward the heading while moving —
+        // the icon itself points the way the truck is going. Parked trucks show a plain disc (heading is
+        // stale). Number stays upright. Hover (<title>) + tap (popup) show the full telematics name.
         const moving = t.speed != null && t.speed > 0 && t.bearingDeg != null;
-        const arrow = moving ? '<path d="M20 1.5 L24.5 9 L15.5 9 Z" fill="' + color + '" stroke="#fff" stroke-width="1.2" transform="rotate(' + t.bearingDeg + ' 20 20)"/>' : '';
+        const nose = moving ? '<path d="M20 0.5 L28 13.5 L12 13.5 Z" fill="' + color + '" stroke="#fff" stroke-width="1.4" stroke-linejoin="round" transform="rotate(' + t.bearingDeg + ' 20 20)"/>' : '';
         // Jobs sitting under/near this truck (≤60 m) — the truck would otherwise hide them. Badge + popup list.
         const nearJobs = (t.lat != null && t.lon != null)
           ? (_trucksJobsData || []).filter(j => j.lat != null && j.lon != null && _distM(t.lat, t.lon, j.lat, j.lon) <= 60)
@@ -8762,11 +8762,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const siteBadge = nearSite ? '<text x="31" y="37" text-anchor="middle" font-size="15">' + nearSite.emoji + '</text>' : '';
         const icon = L.divIcon({
           className: 'truck-num-marker',
-          html: '<svg width="40" height="40" viewBox="0 0 40 40" style="filter:drop-shadow(0 1px 3px rgba(0,0,0,.55));">'
+          html: '<svg width="40" height="40" viewBox="0 0 40 40" style="filter:drop-shadow(0 1px 3px rgba(0,0,0,.55));overflow:visible;">'
             + '<title>' + _truckEsc(t.name || ('Truck ' + (i + 1))) + '</title>'
-            + arrow
-            + '<circle cx="20" cy="20" r="11" fill="' + color + '" stroke="#fff" stroke-width="2"/>'
-            + '<text x="20" y="24.3" text-anchor="middle" font-size="12" font-weight="800" fill="#06121d" font-family="sans-serif">' + (i + 1) + '</text>'
+            + nose
+            + '<circle cx="20" cy="20" r="10" fill="' + color + '" stroke="#fff" stroke-width="2"/>'
+            + '<text x="20" y="24" text-anchor="middle" font-size="12" font-weight="800" fill="#06121d" font-family="sans-serif">' + (i + 1) + '</text>'
             + jobBadge
             + siteBadge
             + '</svg>',
