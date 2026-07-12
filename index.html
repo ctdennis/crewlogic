@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.57 | 2026-07-11">
+  <meta name="crewlogic-version" content="v5.50.58 | 2026-07-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4191,20 +4191,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // So flipping ENFORCE_TRIAL=true enforces ONLY workspaces created after this shipped — exactly
     // "enforce new users, grandfather existing testers" — with no migration or allow-list.
     const TRIAL_DAYS = 14;
-    const ENFORCE_TRIAL = false; // false = countdown banner only, never blocks. Flip to enforce.
+    const ENFORCE_TRIAL = true; // Epic E: enforce trials. Soft for TRIAL_GRACE_DAYS after expiry, then paywall.
+    const TRIAL_GRACE_DAYS = 5; // after the trial ends, full access continues this many days, THEN the paywall.
     // Billing master switch — gates the customer-facing subscribe / manage-billing UI. The full Stripe
     // stack (schema, crewlogic-billing fn, live secrets, webhook) ships to prod DORMANT: dev=on (for
     // testing), prod=off until launch. Flip to `true` (e.g. `const BILLING_ENABLED = true;`) when ready to
     // advertise + take subscriptions — no other change needed. While false: the paywall shows the original
     // contact card (no Subscribe button) and the Settings "Manage billing" link is hidden.
-    const BILLING_ENABLED = IS_DEV_ENV; // dev: ON · prod: OFF until launch.
+    const BILLING_ENABLED = true; // Epic E: billing LIVE — subscribe paywall + add-ons on. (Was IS_DEV_ENV.)
     function trialState(user) {
       const u = user || currentUser;
       if (!u || u.subscriptionStatus !== 'trialing' || !u.trialEndsAt) return { applies: false };
       const end = new Date(u.trialEndsAt).getTime();
       if (isNaN(end)) return { applies: false };
       const msLeft = end - Date.now();
-      return { applies: true, daysLeft: Math.ceil(msLeft / 86400000), expired: msLeft <= 0, endsAt: end };
+      const graceMsLeft = (end + TRIAL_GRACE_DAYS * 86400000) - Date.now();
+      // expired = trial clock passed (drives the banner); hardExpired = past the grace too (drives the paywall).
+      return { applies: true, daysLeft: Math.ceil(msLeft / 86400000), expired: msLeft <= 0, hardExpired: graceMsLeft <= 0, graceDaysLeft: Math.ceil(graceMsLeft / 86400000), endsAt: end };
     }
 
     // Render the home-screen trial countdown. Hidden for anyone not on the clock (trialState
@@ -4217,9 +4220,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!t.applies) { el.style.display = 'none'; return; }
       let label;
       if (t.expired) {
-        label = ENFORCE_TRIAL
-          ? '⚠️ Your free trial has ended.'
-          : '⚠️ Your free trial has ended — full access continues for now.';
+        label = (t.graceDaysLeft && t.graceDaysLeft > 0)
+          ? `⚠️ Your free trial has ended — full access for ${t.graceDaysLeft} more day${t.graceDaysLeft === 1 ? '' : 's'}. Subscribe to keep it.`
+          : '⚠️ Your free trial has ended.';
       } else if (t.daysLeft <= 1) {
         label = '⏳ Last day of your free trial.';
       } else {
@@ -4271,6 +4274,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Paywall tier picker → Stripe Checkout (hosted) for the chosen tier. On success Stripe returns to the
     // app; the webhook flips subscription_status='active' + subscription_tier so the next load grants access.
     async function startCheckout(tier) {
+      // Pay-last / duplicate-franchise guard (Epic E): a Vonigo account must connect Vonigo (which runs
+      // the duplicate-franchise check) BEFORE we take a card, so a duplicate is caught before any charge.
+      const _isVonigo = currentUser && currentUser.submissionTarget !== 'none' && currentUser.pricingSource !== 'native';
+      if (_isVonigo && !currentUser.vonigoConfigured) {
+        alert('Please connect your Vonigo account first — Settings → Vonigo Integration. We verify your franchise before starting a subscription, so you\'re never charged for a duplicate.');
+        return;
+      }
       const t = (tier || 'pro').toLowerCase();
       const btn = document.getElementById('subBtn-' + t);
       const orig = btn ? btn.textContent : '';
@@ -7514,7 +7524,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // passed. NULL-dated (grandfathered) / tester / paid accounts return applies:false and are
       // never affected. trialState() recomputes from the timestamp on each load.
       const _trial = trialState(currentUser);
-      const _trialExpired = ENFORCE_TRIAL && _trial.applies && _trial.expired;
+      // Soft-5-then-hard: an expired trial keeps full access during the grace window; the paywall only
+      // fires once the trial is past the grace too (hardExpired). renderTrialBanner shows the warning meanwhile.
+      const _trialExpired = ENFORCE_TRIAL && _trial.applies && _trial.hardExpired;
       if (_trialExpired) hasAccess = false;
       if (!hasAccess) {
         document.getElementById('paywallScreen').style.display = 'flex';
