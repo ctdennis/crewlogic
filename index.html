@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.59 | 2026-07-12">
+  <meta name="crewlogic-version" content="v5.50.60 | 2026-07-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10827,7 +10827,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         return;
       }
       if (data.intent === 'jobs') {
-        const jobs = data.jobs || [];
+        const jobs = data.jobs || []; _mjJobsList = jobs; // stash for the per-row Reschedule button (mobile move)
         const hdr = ((data.route || 'All routes')) + (data.dayLabel ? ' · ' + data.dayLabel : '') + ' — ' + jobs.length + ' job' + (jobs.length !== 1 ? 's' : '');
         let h = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">';
         h += '<div style="padding:11px 14px;font-weight:700;font-size:13px;color:var(--text-primary);border-bottom:1px solid var(--border);">' + mjEsc(hdr) + '</div>';
@@ -10844,6 +10844,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '<br>' + mjEsc((j.durationMin || '') + ' min') + (j.routeCode ? '  ·  ' + mjEsc(j.routeCode) : '') + (j.status ? '  ·  ' + mjEsc(j.status) : '')
             + '<div id="mjjobph-' + jid + '" style="margin-top:5px;">Loading phone…</div>'
             + '<div style="margin-top:4px;"><a href="https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(j.jobID || '')) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#6db3ff;font-weight:600;text-decoration:none;">🔗 Job ' + mjEsc(j.jobID || '') + ' in Vonigo</a></div>'
+            + '<div style="margin-top:9px;"><button onclick="event.stopPropagation();mjQuickReschedule(' + i + ')" style="padding:8px 14px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:var(--radius-sm);font-weight:700;font-size:13px;cursor:pointer;">📅 Reschedule</button></div>'
             + '</div>';
           h += '</div>';
         });
@@ -10886,6 +10887,66 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const msg = (data && (data.error || (data.move && data.move.errMsg) || (data.cancel && data.cancel.errMsg) || (data.edit && data.edit.errMsg))) || 'The change could not be completed.';
         r.innerHTML = '<div style="color:#ff6b6b;font-size:13px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;">⚠ ' + mjEsc(msg) + '</div>';
       }
+    }
+
+    // --- Mobile per-job Reschedule (tap-to-move) ---------------------------------------------------
+    // The desktop dispatch board's drag-to-move is width-gated (>=1024px), so mobile had no way to
+    // move a job except a typed/spoken command. This adds a Reschedule button to each Manage Jobs
+    // row: pick a date + time, and we SYNTHESIZE the same natural-language move command the dispatcher
+    // already handles -> crewlogic-dispatch resolves the open slot + zoning -> the standard confirm
+    // card appears -> mjExecute writes to Vonigo. Reuses the fully-validated path; a human still
+    // confirms the resolved From/To before anything changes.
+    let _mjJobsList = [];
+    let _mjRescheduleJob = null;
+    function _mjParseTimeLabel(lbl) {
+      if (!lbl) return '';
+      const m = String(lbl).match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i); if (!m) return '';
+      let h = +m[1]; const min = m[2]; const ap = (m[3] || '').toUpperCase();
+      if (ap === 'PM' && h < 12) h += 12; if (ap === 'AM' && h === 12) h = 0;
+      return String(h).padStart(2, '0') + ':' + min;
+    }
+    function _mjHumanDateTime(dateISO, time24) {
+      const p = dateISO.split('-'); const dt = new Date(+p[0], +p[1] - 1, +p[2]); // local wall-clock — display only; backend resolves the franchise-day slot
+      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const mons = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      const tp = time24.split(':'); let h = +tp[0]; const min = tp[1]; const ap = h >= 12 ? 'PM' : 'AM'; let h12 = h % 12; if (h12 === 0) h12 = 12;
+      return days[dt.getDay()] + ', ' + mons[dt.getMonth()] + ' ' + (+p[2]) + ', ' + p[0] + ' at ' + h12 + ':' + min + ' ' + ap;
+    }
+    function mjQuickReschedule(i) {
+      const j = _mjJobsList[i]; if (!j) return;
+      _mjRescheduleJob = j;
+      let ov = document.getElementById('mjReschedOverlay');
+      if (!ov) { ov = document.createElement('div'); ov.id = 'mjReschedOverlay'; document.body.appendChild(ov); }
+      ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(3,8,14,0.62);display:flex;align-items:center;justify-content:center;';
+      ov.innerHTML = '<div style="background:var(--bg-card,#1e2f40);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.5);padding:18px 20px;max-width:360px;width:92%;font-size:13px;color:var(--text-primary);">'
+        + '<div style="font-size:15px;font-weight:800;margin-bottom:4px;">Reschedule job</div>'
+        + '<div style="margin-bottom:12px;font-weight:700;">' + mjEsc(j.client || 'Job') + (j.jobID ? ' <span style="color:var(--text-muted);font-weight:500;">#' + mjEsc(String(j.jobID)) + '</span>' : '')
+        +   '<div style="color:var(--text-muted);font-weight:500;font-size:12px;margin-top:2px;">Currently ' + mjEsc(j.timeLabel || '—') + (j.routeCode ? ' · ' + mjEsc(j.routeCode) : '') + '</div></div>'
+        + '<label style="display:block;color:var(--text-muted);margin-bottom:4px;">New date</label>'
+        + '<input id="mjReschedDate" type="date" style="width:100%;padding:11px;margin-bottom:12px;background:var(--bg-input);border:1px solid var(--btn-surface-border,#46596d);border-radius:8px;color:var(--text-primary);font-size:15px;box-sizing:border-box;">'
+        + '<label style="display:block;color:var(--text-muted);margin-bottom:4px;">New time</label>'
+        + '<input id="mjReschedTime" type="time" step="900" style="width:100%;padding:11px;margin-bottom:8px;background:var(--bg-input);border:1px solid var(--btn-surface-border,#46596d);border-radius:8px;color:var(--text-primary);font-size:15px;box-sizing:border-box;">'
+        + '<div style="color:var(--text-muted);font-size:11px;margin-bottom:10px;">We\'ll find the open slot and confirm zoning — nothing changes until you confirm.</div>'
+        + '<div id="mjReschedErr" style="color:#ff6b6b;font-size:12px;min-height:1px;margin-bottom:6px;"></div>'
+        + '<div style="display:flex;gap:10px;justify-content:flex-end;">'
+        +   '<button onclick="mjReschedClose()" style="padding:9px 16px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;font-weight:600;cursor:pointer;">Cancel</button>'
+        +   '<button onclick="mjQuickRescheduleGo()" style="padding:9px 18px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;font-weight:800;cursor:pointer;">Continue</button>'
+        + '</div></div>';
+      ov.style.display = 'flex';
+      ov.onclick = null; setTimeout(function () { ov.onclick = function (e) { if (e.target === ov) mjReschedClose(); }; }, 400); // ignore the opening tap's mobile ghost-click
+      const ti = document.getElementById('mjReschedTime'); const t24 = _mjParseTimeLabel(j.timeLabel); if (ti && t24) ti.value = t24;
+    }
+    function mjReschedClose() { const ov = document.getElementById('mjReschedOverlay'); if (ov) ov.style.display = 'none'; _mjRescheduleJob = null; }
+    function mjQuickRescheduleGo() {
+      const j = _mjRescheduleJob; if (!j) return;
+      const dateV = (document.getElementById('mjReschedDate') || {}).value || '';
+      const timeV = (document.getElementById('mjReschedTime') || {}).value || '';
+      const err = document.getElementById('mjReschedErr');
+      if (!dateV) { if (err) err.textContent = 'Pick a date.'; return; }
+      if (!timeV) { if (err) err.textContent = 'Pick a time.'; return; }
+      const cmd = 'Move Job ' + (j.jobID || '') + ' (' + (j.client || '') + ') to ' + _mjHumanDateTime(dateV, timeV);
+      mjReschedClose();
+      mjSendCommand(cmd); // -> dispatcher resolves slot/zoning -> standard confirm card -> mjExecute
     }
 
     function openModule(module) {
