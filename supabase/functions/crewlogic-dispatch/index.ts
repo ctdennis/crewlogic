@@ -567,24 +567,44 @@ Deno.serve(async (req: Request) => {
         // fails cleanly at step B if the original start can't fit the longer block.
         const { woID, dayID } = plan;
         const newDur = String(plan.durationMin || ''), origStart = String(plan.startTime), zip = String(plan.zip || '');
+        // The job's CURRENT length (client sends it). Used to (1) STAGE at the shorter length so a valid
+        // extend isn't falsely blocked, and (2) RESTORE the job to its original slot+length if the extend
+        // truly can't fit — so a failed extend never leaves the job stranded at the staging slot.
+        const oldDur = String(plan.fromDurationMin || newDur);
+        const stagingDur = String(Math.min(parseInt(oldDur, 10) || parseInt(newDur, 10), parseInt(newDur, 10)));
         const routeID = await resolveRouteID(token, String(dayID), String(plan.routeCode || plan.routeID || ''));
         if (!woID || !routeID || !dayID || plan.startTime == null || !newDur) return json({ success: false, error: 'duration plan missing woID / resolvable routeCode / dayID / startTime / durationMin', routeID }, 400);
-        // find a free staging slot on the same route that fits the new duration (any time but the current one)
+        // Find a free staging slot on the same route (any time but the current one), searched at the SHORTER
+        // (staging) duration — searching at the longer NEW duration falsely reports "no room" when the only
+        // block that fits newDur is the job's own slot, even though the job fits the longer length IN PLACE.
         const ds = dayEpoch(String(dayID)), de = ds + 79200;
-        const av = await vpost(token, '/resources/availability/', { method: '0', dateStart: String(ds), dateEnd: String(de), duration: newDur, locationID: '1', serviceTypeID: '11', routeID, pageNo: '1', pageSize: '400' });
+        const av = await vpost(token, '/resources/availability/', { method: '0', dateStart: String(ds), dateEnd: String(de), duration: stagingDur, locationID: '1', serviceTypeID: '11', routeID, pageNo: '1', pageSize: '400' });
         const slots = (av.Availability || []).filter((s: any) => String(s.dayID) === String(dayID) && String(parseInt(s.startTime, 10)) !== origStart).map((s: any) => parseInt(s.startTime, 10)).sort((a: number, b: number) => b - a);
-        if (!slots.length) { console.error('[dispatch] duration: no staging slot', JSON.stringify({ routeID, dayID, newDur })); return json({ success: false, error: `No room on ${plan.routeCode || 'that route'} to set it to ${durLabel(newDur)} — try a different day, or free up time first.` }, 409); }
+        if (!slots.length) { console.error('[dispatch] duration: no staging slot', JSON.stringify({ routeID, dayID, newDur, stagingDur })); return json({ success: false, error: `No room on ${plan.routeCode || 'that route'} to reschedule around — try a different day, or free up time first.` }, 409); }
         const staging = String(slots[0]);
-        // Step A: park the job at the staging slot at the NEW duration (sets field 186; frees the original slot)
-        const lkA = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID, zip, serviceTypeID: '11', duration: newDur, startTime: staging });
+        // Step A: park the job at the staging slot (at the staging duration) — frees the original slot
+        const lkA = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID, zip, serviceTypeID: '11', duration: stagingDur, startTime: staging });
         const lockA = lkA.Ids && (lkA.Ids.lockID || lkA.Ids.LockID);
         if (!lockA) { console.error('[dispatch] duration staging lock failed:', JSON.stringify({ errNo: lkA.errNo, errors: lkA.Errors || null })); return json({ success: false, error: 'Couldn’t apply the duration change right now — please try again, or adjust it in Vonigo.' }, 409); }
         const mvA = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockA) });
-        if (mvA.errNo !== 0) { console.error('[dispatch] duration staging move failed:', JSON.stringify({ errNo: mvA.errNo, errMsg: mvA.errMsg, errors: mvA.Errors || null })); await audit({ franchiseID, action: 'duration', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan, routeID, staging, step: 'A' }, fieldsWritten: { method: 16, objectID: String(woID), lockID: String(lockA), durationMin: newDur, staging }, vonigoErrno: mvA.errNo, success: false, result: { errMsg: mvA.errMsg || null, errors: mvA.Errors || null } }); return json({ success: false, error: 'Couldn’t apply the duration change — please try again.' }, 502); }
-        // Step B: re-lock the original start at the NEW duration and move it back
+        if (mvA.errNo !== 0) { console.error('[dispatch] duration staging move failed:', JSON.stringify({ errNo: mvA.errNo, errMsg: mvA.errMsg, errors: mvA.Errors || null })); await audit({ franchiseID, action: 'duration', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan, routeID, staging, step: 'A' }, fieldsWritten: { method: 16, objectID: String(woID), lockID: String(lockA), durationMin: stagingDur, staging }, vonigoErrno: mvA.errNo, success: false, result: { errMsg: mvA.errMsg || null, errors: mvA.Errors || null } }); return json({ success: false, error: 'Couldn’t apply the duration change — please try again.' }, 502); }
+        // Step B: re-lock the original start at the NEW duration and move it back (the real extend + validation)
         const lkB = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID, zip, serviceTypeID: '11', duration: newDur, startTime: origStart });
         const lockB = lkB.Ids && (lkB.Ids.lockID || lkB.Ids.LockID);
-        if (!lockB) { console.error('[dispatch] duration return-lock failed (job parked):', JSON.stringify({ errNo: lkB.errNo, errors: lkB.Errors || null, stagedAt: staging })); await audit({ franchiseID, action: 'duration', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan, routeID, staging, step: 'B', strandedAt: staging }, fieldsWritten: { method: 16, objectID: String(woID), durationMin: newDur }, vonigoErrno: lkB.errNo, success: false, result: { errMsg: 'return lock failed', errors: lkB.Errors || null } }); return json({ success: false, error: `Can’t extend to ${durLabel(newDur)} at ${plan.startLabel || timeLabel(+origStart)} — something’s booked right after. Pick a shorter length or a slot with more room. (The job is temporarily at ${timeLabel(+staging)} — adjust in Vonigo.)`, stagedAt: staging }, 409); }
+        if (!lockB) {
+          // The original start genuinely can't fit the longer block. RECOVER: move the job back to its original
+          // start at its ORIGINAL length so it is NOT left stranded at the staging slot, then report cleanly.
+          let restored = false;
+          try {
+            const lkR = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID, zip, serviceTypeID: '11', duration: oldDur, startTime: origStart });
+            const lockR = lkR.Ids && (lkR.Ids.lockID || lkR.Ids.LockID);
+            if (lockR) { const mvR = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockR) }); restored = mvR.errNo === 0; }
+          } catch (_e) { /* fall through to the stranded message */ }
+          console.error('[dispatch] duration extend: origStart cannot fit new duration', JSON.stringify({ errNo: lkB.errNo, errors: lkB.Errors || null, staging, restored }));
+          await audit({ franchiseID, action: 'duration', actorEmail: body.actorEmail, commandText: body.commandText, resolved: { ...plan, routeID, staging, step: 'B', restored, strandedAt: restored ? null : staging }, fieldsWritten: { method: 16, objectID: String(woID), durationMin: newDur }, vonigoErrno: lkB.errNo, success: false, result: { errMsg: 'return lock failed', restored, errors: lkB.Errors || null } });
+          return json({ success: false, error: restored
+            ? `Can’t extend to ${durLabel(newDur)} at ${plan.startLabel || timeLabel(+origStart)} — something’s booked right after. Pick a shorter length, or free up the slot right after it.`
+            : `Can’t extend to ${durLabel(newDur)} at ${plan.startLabel || timeLabel(+origStart)} — something’s booked right after. (The job is temporarily at ${timeLabel(+staging)} — adjust in Vonigo.)`, stagedAt: restored ? undefined : staging }, 409); }
         const mvB = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockB) });
         const ok = mvB.errNo === 0;
         console.log(`[dispatch][AUDIT] execute duration wo=${woID} -> ${newDur}min (two-step via staging ${staging}) errNo=${mvB.errNo}`);
