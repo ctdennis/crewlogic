@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.64 | 2026-07-13">
+  <meta name="crewlogic-version" content="v5.50.65 | 2026-07-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10710,12 +10710,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (ds && ds.offsetParent !== null) { dashReloadOne('src', true); dashReloadOne('dest', true); }
       else if (_mjBoardDayID) { try { mjSelectDate(_mjBoardDayID); } catch (e) {} }
     }
-    // ── Schedule-board auto-refresh (every 5 min) — keeps the visible board live without a manual reload.
+    // ── Schedule-board auto-refresh (every 90s) — keeps the visible board live without a manual reload.
     // Uses the QUIET reloads in _dispatchRefreshVisible (swap-in-place, no flash). One shared interval,
     // cleared-before-set so re-entering a board never piles up duplicates; self-stops off all board surfaces.
     let _boardRefreshTimer = null;
     function _boardActionInProgress() {
       if (_dragMove || _resize) return true; // a drag or resize is underway — don't yank the board
+      if (_mjMoveJob) return true; // tap-to-place move mode active — don't re-render mid-slot-selection
       if (_mjTipSticky) { const t = document.getElementById('mjTip'); if (t && t.style.display !== 'none') return true; } // sticky tooltip open
       return ['dashMoveOverlay', 'dashDurOverlay', 'mjCancelOverlay', 'dashConvoOverlay', 'dashPlanModalOv']
         .some(id => { const ov = document.getElementById(id); return ov && ov.style.display !== 'none' && ov.offsetParent !== null; }); // a confirm/convo modal is open
@@ -10726,9 +10727,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (['estimatesDashboard', 'dashboard', 'manageJobs'].indexOf(currentScreen) === -1) { _stopBoardAutoRefresh(); return; } // left all board surfaces — free the timer
         if (_boardActionInProgress()) return; // mid-action — skip this tick, catch the next
         try { _dispatchRefreshVisible(); } catch (e) {}
-      }, 300000); // 5 minutes
+      }, 90000); // 90s (was 5 min — too slow to reflect Vonigo label/color changes; lower later if needed)
     }
     function _stopBoardAutoRefresh() { if (_boardRefreshTimer) { clearInterval(_boardRefreshTimer); _boardRefreshTimer = null; } }
+    // Also refresh the instant the tab/app regains focus — covers "I was away a while" without waiting for the next 90s tick.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      if (['estimatesDashboard', 'dashboard', 'manageJobs'].indexOf(currentScreen) === -1) return;
+      if (_boardActionInProgress()) return;
+      try { _dispatchRefreshVisible(); } catch (e) {}
+    });
     // Job tooltip — desktop hover (quick peek) + mobile tap (sticky, dismiss via × or tap-outside).
     let _mjTipSticky = false;
     function mjTip(ev, jobID, sticky) {
