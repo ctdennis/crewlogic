@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.66 | 2026-07-13">
+  <meta name="crewlogic-version" content="v5.50.67 | 2026-07-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9138,8 +9138,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const job = wo != null ? _jobsByWo[String(wo)] : null; // woID not in today's cache → no flag
           if (job && job.startMin != null && job.durationMin != null) {
             const endMs = _localMidnightMs() + (job.startMin + job.durationMin) * 60000;
-            if (Date.now() > endMs) { over = true; note = ' · past end'; }
-            else if (Date.now() > endMs - 5 * 60000) amber = true;
+            // Only flag "past end" when the truck was on-site DURING the job (arrived at/before its scheduled
+            // end) and is now overrunning it. A fresh arrival AFTER the job already ended — a late or return
+            // visit — is NOT "past end"; otherwise a truck reaching a long-finished job's location gets a false
+            // "past end" flag (owner-reported: job ended 9:30, truck arrived an hour later → "on-site 7m · past end").
+            if (sinceMs <= endMs) {
+              if (Date.now() > endMs) { over = true; note = ' · past end'; }
+              else if (Date.now() > endMs - 5 * 60000) amber = true;
+            }
           }
         }
         const dColor = over ? '#ef4444' : (amber ? '#f59e0b' : 'var(--text-muted,#6e8194)');
