@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.61 | 2026-07-12">
+  <meta name="crewlogic-version" content="v5.50.62 | 2026-07-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10610,6 +10610,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!_jdone && j.woID) {
         h += '<div id="mjDurWrap" style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px;">' + _mjDurButtonsHTML(mjEsc(String(j.woID || j.jobID || '')), Number(j.durationMin) || 0) + '</div>'; // woID = unique per appointment (copies share jobID)
       }
+      if (!_jdone && j.woID) {
+        h += '<button onclick="mjTipReschedule()" style="margin-top:8px;width:100%;padding:10px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;">📅 Reschedule / Move</button>';
+      }
       if (!_jdone && j.jobID) {
         h += '<button onclick="mjCancelJob()" style="margin-top:8px;width:100%;padding:9px;background:transparent;color:#ff6b6b;border:1px solid #e5484d;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">✕ Cancel job</button>';
       }
@@ -10912,8 +10915,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const tp = time24.split(':'); let h = +tp[0]; const min = tp[1]; const ap = h >= 12 ? 'PM' : 'AM'; let h12 = h % 12; if (h12 === 0) h12 = 12;
       return days[dt.getDay()] + ', ' + mons[dt.getMonth()] + ' ' + (+p[2]) + ', ' + p[0] + ' at ' + h12 + ':' + min + ' ' + ap;
     }
-    function mjQuickReschedule(i) {
-      const j = _mjJobsList[i]; if (!j) return;
+    function mjQuickReschedule(i) { _mjOpenReschedule(_mjJobsList[i]); } // from the command results list
+    function mjTipReschedule() { if (_mjLastTipJob) { mjTipForceHide(); _mjOpenReschedule(_mjLastTipJob); } } // from the board job popup
+    function _mjOpenReschedule(j) {
+      if (!j) return;
       _mjRescheduleJob = j;
       let ov = document.getElementById('mjReschedOverlay');
       if (!ov) { ov = document.createElement('div'); ov.id = 'mjReschedOverlay'; document.body.appendChild(ov); }
