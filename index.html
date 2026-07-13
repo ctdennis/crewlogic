@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.59 | 2026-07-12">
+  <meta name="crewlogic-version" content="v5.50.64 | 2026-07-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9612,8 +9612,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function mjZoneColor(zoneID) { if (!zoneID) return 'transparent'; const P = ['#22c55e', '#eab308', '#ec4899', '#3b82f6', '#f97316', '#a855f7', '#06b6d4', '#ef4444', '#84cc16', '#14b8a6']; let n = 0; const s = String(zoneID); for (let i = 0; i < s.length; i++) n = (n * 31 + s.charCodeAt(i)) >>> 0; return P[n % P.length]; }
     let _mjBoardByID = {};
     let _mjBoardDayID = ''; // the day tab currently shown — passed as the voice/text command's default working day
+    let _mjMoveJob = null;       // set while in tap-to-place "move mode" on the mobile board
+    let _mjLastBoardData = null;  // last MJ board render data, so we can re-render when entering/exiting move mode
     function mjRenderBoard(data, container, axis) {
       const r = container || document.getElementById('mjResult'); const jobs = data.jobs || [];
+      if (!container) _mjLastBoardData = data; // remember for move-mode re-render (enter/exit tap-to-place)
       const dnd = !!container; // drag-to-move is a dashboard feature (two boards); single Manage Jobs board stays read/voice
       // Prefer the full route set from boardGrid (ALL routes incl. empty/closed, with open slots); fall
       // back to deriving lanes from jobs (legacy callers) with no availability layer.
@@ -9653,6 +9656,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // half-hour lines stay visible in the white open spaces (the light header grid disappears on white).
       const gridDark = 'repeating-linear-gradient(to right, transparent 0, transparent ' + (PXH - 1) + 'px, rgba(0,0,0,0.5) ' + (PXH - 1) + 'px, rgba(0,0,0,0.5) ' + PXH + 'px), repeating-linear-gradient(to right, transparent 0, transparent ' + (halfPx - 1) + 'px, rgba(0,0,0,0.26) ' + (halfPx - 1) + 'px, rgba(0,0,0,0.26) ' + halfPx + 'px)';
       let h = '<div style="margin-bottom:6px;font-weight:700;font-size:13px;color:var(--text-primary);">' + mjEsc(hdr) + '</div>';
+      if (_mjMoveJob && !container) {
+        const _mvn = mjEsc((String(_mjMoveJob.client || '').split(',')[0]) || _mjMoveJob.client || 'job');
+        h += '<div style="background:rgba(0,231,133,0.14);border:1px solid #00E785;border-radius:8px;padding:9px 11px;margin-bottom:8px;font-size:12.5px;color:var(--text-primary);display:flex;align-items:center;justify-content:space-between;gap:10px;">'
+          + '<span>Moving <b>' + _mvn + '</b> — tap a green open slot (any route; switch days with the chips above).</span>'
+          + '<button onclick="mjExitMoveMode()" style="flex:0 0 auto;padding:6px 12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">Cancel</button></div>';
+      }
       // legend: open (bookable) vs blocked/closed vs job
       h += '<div style="display:flex;gap:14px;align-items:center;margin-bottom:6px;font-size:10.5px;color:var(--text-muted);flex-wrap:wrap;">'
         + '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:rgba(255,255,255,0.92);border:1px solid var(--border);"></span>Open to book</span>'
@@ -9682,10 +9691,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // blocked-default base tint (whole lane not bookable unless an open band overrides) — light gray
         h += '<div style="position:absolute;inset:0;background:rgba(255,255,255,0.14);pointer-events:none;"></div>';
         // open availability bands (white = bookable) — 30-min slot step; consecutive slots tile together
+        const _mm = !!_mjMoveJob && !dnd; // tap-to-place move mode (mobile board): open slots become tappable green targets
         open.forEach(s => {
           if (!Number.isFinite(s.startTime)) return;
           const ol = ((s.startTime - startMin) / 60) * PXH;
-          h += '<div title="Open ' + mjEsc(s.label || '') + '" style="position:absolute;left:' + ol + 'px;width:' + halfPx + 'px;top:0;bottom:0;background:rgba(255,255,255,0.92);pointer-events:none;"></div>';
+          if (_mm) {
+            h += '<div onclick="mjSlotTap(\'' + mjEsc(String(data.dayID || '')) + '\',\'' + mjEsc(rc) + '\',' + s.startTime + ',\'' + mjEsc(String(s.label || '')) + '\')" title="Move here · ' + mjEsc(s.label || '') + '" style="position:absolute;left:' + ol + 'px;width:' + halfPx + 'px;top:0;bottom:0;background:rgba(0,231,133,0.6);box-shadow:inset 0 0 0 1px #00E785;cursor:pointer;"></div>';
+          } else {
+            h += '<div title="Open ' + mjEsc(s.label || '') + '" style="position:absolute;left:' + ol + 'px;width:' + halfPx + 'px;top:0;bottom:0;background:rgba(255,255,255,0.92);pointer-events:none;"></div>';
+          }
         });
         // dark grid lines ON TOP of the fills (hour + half-hour) so they read against white open spaces
         h += '<div style="position:absolute;inset:0;background:' + gridDark + ';pointer-events:none;"></div>';
@@ -10610,6 +10624,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!_jdone && j.woID) {
         h += '<div id="mjDurWrap" style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px;">' + _mjDurButtonsHTML(mjEsc(String(j.woID || j.jobID || '')), Number(j.durationMin) || 0) + '</div>'; // woID = unique per appointment (copies share jobID)
       }
+      if (!_jdone && j.woID) {
+        h += '<button onclick="mjTipReschedule()" style="margin-top:8px;width:100%;padding:10px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;">📅 Reschedule / Move</button>';
+      }
       if (!_jdone && j.jobID) {
         h += '<button onclick="mjCancelJob()" style="margin-top:8px;width:100%;padding:9px;background:transparent;color:#ff6b6b;border:1px solid #e5484d;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">✕ Cancel job</button>';
       }
@@ -10827,7 +10844,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         return;
       }
       if (data.intent === 'jobs') {
-        const jobs = data.jobs || [];
+        const jobs = data.jobs || []; _mjJobsList = jobs; // stash for the per-row Reschedule button (mobile move)
         const hdr = ((data.route || 'All routes')) + (data.dayLabel ? ' · ' + data.dayLabel : '') + ' — ' + jobs.length + ' job' + (jobs.length !== 1 ? 's' : '');
         let h = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">';
         h += '<div style="padding:11px 14px;font-weight:700;font-size:13px;color:var(--text-primary);border-bottom:1px solid var(--border);">' + mjEsc(hdr) + '</div>';
@@ -10844,6 +10861,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '<br>' + mjEsc((j.durationMin || '') + ' min') + (j.routeCode ? '  ·  ' + mjEsc(j.routeCode) : '') + (j.status ? '  ·  ' + mjEsc(j.status) : '')
             + '<div id="mjjobph-' + jid + '" style="margin-top:5px;">Loading phone…</div>'
             + '<div style="margin-top:4px;"><a href="https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(j.jobID || '')) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#6db3ff;font-weight:600;text-decoration:none;">🔗 Job ' + mjEsc(j.jobID || '') + ' in Vonigo</a></div>'
+            + '<div style="margin-top:9px;"><button onclick="event.stopPropagation();mjQuickReschedule(' + i + ')" style="padding:8px 14px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:var(--radius-sm);font-weight:700;font-size:13px;cursor:pointer;">📅 Reschedule</button></div>'
             + '</div>';
           h += '</div>';
         });
@@ -10869,7 +10887,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           : '<span style="color:var(--text-muted);">No phone on file</span>';
       }).catch(() => { slot.innerHTML = '<span style="color:var(--text-muted);">No phone on file</span>'; });
     }
-    function mjCancelPlan() { _mjPlan = null; document.getElementById('mjResult').innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Cancelled — nothing was changed.</div>'; }
+    function mjCancelPlan() {
+      _mjPlan = null;
+      // Return to the board/calendar view instead of a dead-end "Cancelled" message (a move/cancel confirm
+      // replaced the board in #mjResult). Fall back to the text note only if no board has been shown yet.
+      if (_mjLastBoardData) { mjRenderBoard(_mjLastBoardData); }
+      else { document.getElementById('mjResult').innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Cancelled — nothing was changed.</div>'; }
+    }
     async function mjExecute() {
       if (!_mjPlan) return;
       const plan = _mjPlan; _mjPlan = null;
@@ -10886,6 +10910,104 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const msg = (data && (data.error || (data.move && data.move.errMsg) || (data.cancel && data.cancel.errMsg) || (data.edit && data.edit.errMsg))) || 'The change could not be completed.';
         r.innerHTML = '<div style="color:#ff6b6b;font-size:13px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;">⚠ ' + mjEsc(msg) + '</div>';
       }
+    }
+
+    // --- Mobile per-job Reschedule (tap-to-move) ---------------------------------------------------
+    // The desktop dispatch board's drag-to-move is width-gated (>=1024px), so mobile had no way to
+    // move a job except a typed/spoken command. This adds a Reschedule button to each Manage Jobs
+    // row: pick a date + time, and we SYNTHESIZE the same natural-language move command the dispatcher
+    // already handles -> crewlogic-dispatch resolves the open slot + zoning -> the standard confirm
+    // card appears -> mjExecute writes to Vonigo. Reuses the fully-validated path; a human still
+    // confirms the resolved From/To before anything changes.
+    let _mjJobsList = [];
+    let _mjRescheduleJob = null;
+    function _mjParseTimeLabel(lbl) {
+      if (!lbl) return '';
+      const m = String(lbl).match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i); if (!m) return '';
+      let h = +m[1]; const min = m[2]; const ap = (m[3] || '').toUpperCase();
+      if (ap === 'PM' && h < 12) h += 12; if (ap === 'AM' && h === 12) h = 0;
+      return String(h).padStart(2, '0') + ':' + min;
+    }
+    function _mjHumanDateTime(dateISO, time24) {
+      const p = dateISO.split('-'); const dt = new Date(+p[0], +p[1] - 1, +p[2]); // local wall-clock — display only; backend resolves the franchise-day slot
+      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const mons = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      const tp = time24.split(':'); let h = +tp[0]; const min = tp[1]; const ap = h >= 12 ? 'PM' : 'AM'; let h12 = h % 12; if (h12 === 0) h12 = 12;
+      return days[dt.getDay()] + ', ' + mons[dt.getMonth()] + ' ' + (+p[2]) + ', ' + p[0] + ' at ' + h12 + ':' + min + ' ' + ap;
+    }
+    function mjQuickReschedule(i) { _mjOpenReschedule(_mjJobsList[i]); } // command results list → date-picker fallback
+    function mjTipReschedule() { if (_mjLastTipJob) { mjTipForceHide(); mjEnterMoveMode(_mjLastTipJob); } } // board popup → tap-to-place move mode
+    function mjEnterMoveMode(j) {
+      if (!j) return;
+      if (!_mjLastBoardData) { _mjOpenReschedule(j); return; } // no board visible (came via command list) → fall back to the picker
+      _mjMoveJob = j;
+      mjRenderBoard(_mjLastBoardData); // re-render so open slots become green tap targets + show the move banner
+      const el = document.getElementById('mjResult'); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    function mjExitMoveMode() { _mjMoveJob = null; if (_mjLastBoardData) mjRenderBoard(_mjLastBoardData); }
+    function mjSlotTap(dayID, rc, startTime, label) {
+      const j = _mjMoveJob; if (!j) return;
+      const st = Number(startTime);
+      const plan = { kind: 'move', woID: j.woID, dayID: String(dayID), startTime: st, durationMin: Number(j.durationMin) || 90, zip: j.zip || '', toRouteCode: rc, serviceTypeID: '11', startLabel: label || _minLabel(st),
+        jobLabel: (String(j.client || '').split(',')[0]) || j.client || ('Job ' + (j.jobID || '')), fromLabel: (j.routeCode || '') + (j.timeLabel ? ' · ' + j.timeLabel : '') };
+      _mjMoveJob = null;
+      mjRenderResult({ intent: 'move', plan: plan }); // → Confirm move card (sets _mjPlan) → Confirm → mjExecute → crewlogic-dispatch execute
+      const el = document.getElementById('mjResult'); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    function _mjOpenReschedule(j) {
+      if (!j) return;
+      _mjRescheduleJob = j;
+      let ov = document.getElementById('mjReschedOverlay');
+      if (!ov) { ov = document.createElement('div'); ov.id = 'mjReschedOverlay'; document.body.appendChild(ov); }
+      ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(3,8,14,0.62);display:flex;align-items:center;justify-content:center;';
+      let defDate = ''; if (_mjBoardDayID && /^\d{8}$/.test(_mjBoardDayID)) defDate = _mjBoardDayID.slice(0, 4) + '-' + _mjBoardDayID.slice(4, 6) + '-' + _mjBoardDayID.slice(6, 8);
+      const inCss = 'width:100%;padding:11px;margin-bottom:12px;background:var(--bg-input);border:1px solid var(--btn-surface-border,#46596d);border-radius:8px;color:var(--text-primary);font-size:15px;box-sizing:border-box;';
+      ov.innerHTML = '<div style="background:var(--bg-card,#1e2f40);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.5);padding:18px 20px;max-width:360px;width:92%;font-size:13px;color:var(--text-primary);">'
+        + '<div style="font-size:15px;font-weight:800;margin-bottom:4px;">Reschedule job</div>'
+        + '<div style="margin-bottom:12px;font-weight:700;">' + mjEsc(j.client || 'Job') + (j.jobID ? ' <span style="color:var(--text-muted);font-weight:500;">#' + mjEsc(String(j.jobID)) + '</span>' : '')
+        +   '<div style="color:var(--text-muted);font-weight:500;font-size:12px;margin-top:2px;">Currently ' + mjEsc(j.timeLabel || '—') + (j.routeCode ? ' · ' + mjEsc(j.routeCode) : '') + '</div></div>'
+        + '<label style="display:block;color:var(--text-muted);margin-bottom:4px;">Date</label>'
+        + '<input id="mjReschedDate" type="date" value="' + defDate + '" onchange="_mjReschedLoadRoutes()" style="' + inCss + '">'
+        + '<label style="display:block;color:var(--text-muted);margin-bottom:4px;">Route</label>'
+        + '<select id="mjReschedRoute" style="' + inCss + '"><option>Loading routes…</option></select>'
+        + '<label style="display:block;color:var(--text-muted);margin-bottom:4px;">Time</label>'
+        + '<input id="mjReschedTime" type="time" step="900" style="' + inCss.replace('margin-bottom:12px', 'margin-bottom:8px') + '">'
+        + '<div style="color:var(--text-muted);font-size:11px;margin-bottom:10px;">Same date + a different route moves it between routes; change the date/time to move it to another day. We confirm the open slot and zoning before anything changes.</div>'
+        + '<div id="mjReschedErr" style="color:#ff6b6b;font-size:12px;min-height:1px;margin-bottom:6px;"></div>'
+        + '<div style="display:flex;gap:10px;justify-content:flex-end;">'
+        +   '<button onclick="mjReschedClose()" style="padding:9px 16px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;font-weight:600;cursor:pointer;">Cancel</button>'
+        +   '<button onclick="mjQuickRescheduleGo()" style="padding:9px 18px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;font-weight:800;cursor:pointer;">Continue</button>'
+        + '</div></div>';
+      ov.style.display = 'flex';
+      ov.onclick = null; setTimeout(function () { ov.onclick = function (e) { if (e.target === ov) mjReschedClose(); }; }, 400); // ignore the opening tap's mobile ghost-click
+      const ti = document.getElementById('mjReschedTime'); const t24 = _mjParseTimeLabel(j.timeLabel); if (ti && t24) ti.value = t24;
+      _mjReschedLoadRoutes(); // populate routes for the default day (incl. empty ones) so route-to-route moves work
+    }
+    function mjReschedClose() { const ov = document.getElementById('mjReschedOverlay'); if (ov) ov.style.display = 'none'; _mjRescheduleJob = null; }
+    async function _mjReschedLoadRoutes() {
+      const sel = document.getElementById('mjReschedRoute'); if (!sel) return;
+      const dv = (document.getElementById('mjReschedDate') || {}).value || '';
+      const dayID = dv ? dv.replace(/-/g, '') : (_mjBoardDayID || '');
+      if (!dayID) { sel.innerHTML = '<option value="">Pick a date first</option>'; return; }
+      sel.innerHTML = '<option>Loading routes…</option>';
+      let data = null; try { data = await edgeFunctionCall('crewlogic-dispatch', { action: 'boardGrid', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, dayID }); } catch (e) {}
+      const routes = (data && data.success && data.routes) ? data.routes : [];
+      if (!routes.length) { sel.innerHTML = '<option value="">No routes for this day</option>'; return; }
+      const cur = (_mjRescheduleJob && _mjRescheduleJob.routeCode) || '';
+      sel.innerHTML = routes.map(function (rt) { const code = String(rt.code || ''); const nOpen = (rt.open || []).length; const lbl = code + (rt.name && rt.name !== code ? ' — ' + rt.name : '') + (nOpen ? '  (' + nOpen + ' open)' : ''); return '<option value="' + mjEsc(code) + '"' + (code === cur ? ' selected' : '') + '>' + mjEsc(lbl) + '</option>'; }).join('');
+    }
+    function mjQuickRescheduleGo() {
+      const j = _mjRescheduleJob; if (!j) return;
+      const dateV = (document.getElementById('mjReschedDate') || {}).value || '';
+      const timeV = (document.getElementById('mjReschedTime') || {}).value || '';
+      const routeV = (document.getElementById('mjReschedRoute') || {}).value || '';
+      const err = document.getElementById('mjReschedErr');
+      if (!dateV) { if (err) err.textContent = 'Pick a date.'; return; }
+      if (!routeV) { if (err) err.textContent = 'Pick a route.'; return; }
+      if (!timeV) { if (err) err.textContent = 'Pick a time.'; return; }
+      const cmd = 'Move Job ' + (j.jobID || '') + ' (' + (j.client || '') + ') to route ' + routeV + ' on ' + _mjHumanDateTime(dateV, timeV);
+      mjReschedClose();
+      mjSendCommand(cmd); // -> dispatcher resolves slot/zoning -> standard confirm card -> mjExecute
     }
 
     function openModule(module) {
