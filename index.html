@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.63 | 2026-07-13">
+  <meta name="crewlogic-version" content="v5.50.64 | 2026-07-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10887,7 +10887,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           : '<span style="color:var(--text-muted);">No phone on file</span>';
       }).catch(() => { slot.innerHTML = '<span style="color:var(--text-muted);">No phone on file</span>'; });
     }
-    function mjCancelPlan() { _mjPlan = null; document.getElementById('mjResult').innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Cancelled — nothing was changed.</div>'; }
+    function mjCancelPlan() {
+      _mjPlan = null;
+      // Return to the board/calendar view instead of a dead-end "Cancelled" message (a move/cancel confirm
+      // replaced the board in #mjResult). Fall back to the text note only if no board has been shown yet.
+      if (_mjLastBoardData) { mjRenderBoard(_mjLastBoardData); }
+      else { document.getElementById('mjResult').innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Cancelled — nothing was changed.</div>'; }
+    }
     async function mjExecute() {
       if (!_mjPlan) return;
       const plan = _mjPlan; _mjPlan = null;
