@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.65 | 2026-07-13">
+  <meta name="crewlogic-version" content="v5.50.66 | 2026-07-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8464,17 +8464,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const truckPts = (_truckMarkers || []).map(m => _xy(m.getLatLng())).filter(_ok);
       const otherPts = (_jobMarkers || []).concat(_lookaheadMarkers || []).map(m => _xy(m.getLatLng())).filter(_ok);
       const allPts = truckPts.concat(otherPts);
-      if (truckPts.length && allPts.length) {
-        const cLat = truckPts.reduce((s, p) => s + p.lat, 0) / truckPts.length;
-        const cLng = truckPts.reduce((s, p) => s + p.lng, 0) / truckPts.length;
-        let dLat = 0.015, dLng = 0.015;
-        allPts.forEach(p => { dLat = Math.max(dLat, Math.abs(p.lat - cLat)); dLng = Math.max(dLng, Math.abs(p.lng - cLng)); });
-        _trucksMap.fitBounds([[cLat - dLat, cLng - dLng], [cLat + dLat, cLng + dLng]], { padding: [40, 40], maxZoom: 14 });
-      } else if (allPts.length) {
-        // Jobs present but NO telematics trucks (e.g. a franchise with no telematics provider) — fit the jobs.
+      if (allPts.length > 1) {
+        // Fit the TIGHT bounding box of every marker (trucks + jobs) so the view is maximized. (Previously a
+        // symmetric box around the truck centroid, which mirrored the farthest point to the opposite/empty side
+        // and zoomed out far more than needed when a truck sat at one edge of the job spread.)
         const ll = allPts.map(p => [p.lat, p.lng]);
-        if (ll.length === 1) _trucksMap.setView(ll[0], 14);
-        else _trucksMap.fitBounds(ll, { padding: [40, 40], maxZoom: 14 });
+        _trucksMap.fitBounds(ll, { padding: [40, 40], maxZoom: 14 });
+      } else if (allPts.length === 1) {
+        _trucksMap.setView([allPts[0].lat, allPts[0].lng], 14);
       } else if (_franchiseHomeLL) {
         // Nothing to show yet — center on the franchise's OWN home, not a hardcoded default area.
         _trucksMap.setView([_franchiseHomeLL.lat, _franchiseHomeLL.lng], 12);
