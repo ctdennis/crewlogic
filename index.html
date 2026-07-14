@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.69 | 2026-07-13">
+  <meta name="crewlogic-version" content="v5.50.70 | 2026-07-14">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9143,7 +9143,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             // visit — is NOT "past end"; otherwise a truck reaching a long-finished job's location gets a false
             // "past end" flag (owner-reported: job ended 9:30, truck arrived an hour later → "on-site 7m · past end").
             if (sinceMs <= endMs) {
-              if (Date.now() > endMs) { over = true; note = ' · past end'; }
+              // Show the ACTUAL minutes past the scheduled end, not a bare "past end" flag — sitting next to
+              // the on-site dwell ("on-site 34m · past end") it read as "34m past end" when the truck was only
+              // a few minutes over (owner-reported: arrived 10:29, end 11:00, now 11:03 = 3m over, not 34).
+              if (Date.now() > endMs) { over = true; note = ' · ' + Math.max(1, Math.round((Date.now() - endMs) / 60000)) + 'm past end'; }
               else if (Date.now() > endMs - 5 * 60000) amber = true;
             }
           }
