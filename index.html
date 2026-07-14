@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.71 | 2026-07-14">
+  <meta name="crewlogic-version" content="v5.50.72 | 2026-07-14">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8842,7 +8842,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return p;
     }
 
-    async function loadJobMarkers() {
+    async function loadJobMarkers(refit = true) {
       if (typeof L === 'undefined' || !_trucksMap) return;
       try {
         const data = await edgeFunctionCall('crewlogic-todays-workorders', { franchiseID: currentUser.franchiseID, dayOffset: _trucksJobDay, includeCoords: true });
@@ -8929,8 +8929,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _trucksJobsData = jobs;
         if (_trucksData && _trucksData.length) renderTrucks(_trucksData, false);
         renderSiteMarkers(); // retry site/home geocode now that cost settings are surely loaded (guarded)
-        // Trucks centered, all jobs (+ any look-ahead dots) visible — shared helper.
-        _fitTrucksCentered();
+        // Trucks centered, all jobs (+ any look-ahead dots) visible — shared helper. Only on the initial
+        // load / explicit day change (refit=true); the periodic color-refresh + after-move pass refit=false
+        // so they update markers WITHOUT snapping the map back to the fit (owner-reported re-zoom).
+        if (refit) _fitTrucksCentered();
         // Legend: one colored chip per route, with its open-stop count.
         const legend = document.getElementById('trucksLegend');
         if (legend) legend.style.display = 'flex';
@@ -10486,7 +10488,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         else {
           if (_dashSrcDay === fromDay || _dashSrcDay === toDay) dashReloadOne('src', true);
           if (_dashDestDay === fromDay || _dashDestDay === toDay) dashReloadOne('dest', true);
-          loadJobMarkers(); // also refresh the dashboard MAP so the moved job shows its new route color / (dis)appears — was stale until a manual Refresh
+          loadJobMarkers(false); // refresh the moved job's marker WITHOUT re-zooming (keep the user's view)
         }
       } else {
         const e = document.getElementById('dashMoveErr'); if (e) e.textContent = (res && res.error) || 'Move failed — try again.';
@@ -10718,7 +10720,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Keep the dashboard MAP's job-house colors on the SAME cadence as the schedule pills, so a job that
         // goes gray on complete/payment greys its house at the same time (was: map only updated on a manual
         // refresh). loadJobMarkers no-ops if the map isn't mounted.
-        if (document.getElementById('dashMapPane') && typeof loadJobMarkers === 'function') { try { loadJobMarkers(); } catch (e) {} }
+        if (document.getElementById('dashMapPane') && typeof loadJobMarkers === 'function') { try { loadJobMarkers(false); } catch (e) {} } // re-color houses on the 90s cadence WITHOUT re-fitting the map
       }
       else if (_mjBoardDayID) { try { mjSelectDate(_mjBoardDayID); } catch (e) {} }
     }
