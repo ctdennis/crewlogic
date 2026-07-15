@@ -86,7 +86,18 @@ in the day's fetch. A Vonigo-side **move** never triggers CrewLogic, so the fenc
 - ✅ **Verified (simulated real webhooks on dev):** a job fence-exit ("… · #995483 · …") stored `event_type=job_leave, wo_id=995483, job_id=858860, duration=2520`; a facility fence ("ABC Transfer Station", no `#`) correctly stored `wo_id=null, event_type=geofence_exit`. So `wo_id IS NOT NULL` cleanly = customer visit, `NULL` = facility visit — the discriminator Phase 4 needs.
 - Motive path verified by parity/code-review (its `job_geofences`-by-`geofence_id` lookup already worked; Phase 3 only added 2 columns to the select + insert). Live Motive validation happens when real events fire post-promotion.
 
-## Phase 4 — Time-at-customer + facility report (UI is first-class)
+## Phase 4 — Time-at-customer + facility report (UI is first-class) — ✅ SHIPPED TO PROD (2026-07-15, v5.50.75)
+- ✅ Added a **Customers** view to the Alerts Report (📊) alongside the existing Facilities view.
+  One row per WO: customer, WO#, date, **on-site total** (sum of `job_leave` dwell), **span**
+  (first arrive→last leave), **#trucks**, **route**. Sortable columns + filters: date range
+  (server-side `created_at` filter), customer/WO search, route, truck. Facilities view untouched.
+- ✅ Data: migration **0044** (`job_geofences.route`, populated by the sync at create) + **0045**
+  (franchise-scoped SELECT policy on `job_geofences`, mirrors `geofence_alerts_sel`, so the client
+  can map wo_id→route). Report reads `geofence_alerts` (wo_id + job_arrive/job_leave) + `job_geofences`.
+- ✅ Aggregation verified against a seeded dataset on dev (multi-truck span vs on-site handled).
+- **Future evolution (Owner, 2026-07-15):** "this may evolve over time" — likely CSV export, cost/
+  labor overlays, per-truck breakdown. Parked as fast-follows.
+- Original spec below:
 - Extend the existing Alerts Report (`openAlertsReport`) — it currently reports only facility
   visits (`event_type=geofence_exit`, classified Disposal/Recycling/Donation). Add **total time at
   each customer/job** from `job_leave` durations, grouped by `wo_id`, handling multi-truck /
