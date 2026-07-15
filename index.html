@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.77 | 2026-07-15">
+  <meta name="crewlogic-version" content="v5.50.78 | 2026-07-15">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4437,7 +4437,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (r.geofence_name && !g.name) g.name = r.geofence_name;
         if (r.job_id && !g.jobId) g.jobId = String(r.job_id);
         if (r.vehicle_number) g.trucks[r.vehicle_number] = 1;
-        const tm = new Date(r.start_time || r.created_at).getTime(); if (isFinite(tm)) g.times.push(tm);
+        // Use created_at (when each crossing was recorded) — NOT start_time: Motive reports the SAME
+        // start_time (the entry time) on both the arrive and the leave, so start_time gives a zero span.
+        // created_at differs correctly (arrive fires on entry, leave on exit), so span = arrival→departure.
+        const tm = new Date(r.created_at || r.start_time).getTime(); if (isFinite(tm)) g.times.push(tm);
         if (r.event_type === 'job_leave') g.onSite += (parseFloat(r.duration) || 0); // sum of dwell across trucks/returns
       });
       _tacRows = Object.keys(byWo).map(wo => {
