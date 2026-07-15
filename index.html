@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.73 | 2026-07-15">
+  <meta name="crewlogic-version" content="v5.50.74 | 2026-07-15">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10712,8 +10712,28 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (res && res.success) { mjCancelClose(); if (typeof _dashToast === 'function') _dashToast('Job cancelled.'); _dispatchRefreshVisible(); }
       else { if (err) err.textContent = (res && res.error) || 'Could not cancel that job.'; if (btn) { btn.disabled = false; btn.textContent = 'Cancel job'; } }
     }
+    // Near-real-time geofence cleanup (Phase 2): on each board refresh, tell the server which jobs are on
+    // TODAY's Vonigo schedule so it can clear any lingering job-geofence for a job that moved off / was
+    // cancelled in Vonigo (Vonigo-side moves never notify us; the 30-min cron is the backstop). Vonigo
+    // franchises only, throttled to once / 30s, fire-and-forget. The server REFUSES an empty list, so a
+    // failed/empty fetch can never wipe fences; moved_off is non-terminal so any over-eager delete
+    // self-heals on the next cron pass. No-op server-side unless GEOFENCE_RECONCILE is enabled.
+    let _lastGeoReconcileAt = 0;
+    async function _reconcileTodaysGeofences() {
+      try {
+        if (!currentUser || currentUser.submissionTarget === 'none' || currentUser.pricingSource === 'native') return; // Vonigo only
+        const now = Date.now();
+        if (now - _lastGeoReconcileAt < 30000) return; // at most once / 30s even if several refreshes fire close together
+        _lastGeoReconcileAt = now;
+        const data = await edgeFunctionCall('crewlogic-todays-workorders', { franchiseID: currentUser.franchiseID, dayOffset: 0 });
+        const woIDs = ((data && data.workOrders) || []).map(w => String(w.workOrderID)).filter(Boolean);
+        if (!woIDs.length) return; // no jobs / failed fetch → skip (server also guards against an empty list)
+        edgeFunctionCall('crewlogic-job-geofence-sync', { action: 'reconcile', franchiseID: currentUser.franchiseID, woIDs }); // fire-and-forget
+      } catch (e) { /* non-blocking — geofence cleanup must never break the board refresh */ }
+    }
     // Refresh whichever dispatch surface is visible (dashboard boards or the standalone Manage Jobs board).
     function _dispatchRefreshVisible() {
+      _reconcileTodaysGeofences(); // near-real-time geofence cleanup (throttled, fire-and-forget)
       const eb = document.getElementById('estDashBoard');
       if (eb && eb.offsetParent !== null) { estDashLoadBoard(true); return; } // Estimates Desk board (quiet reload)
       const ds = document.getElementById('dashSrcBoard');
