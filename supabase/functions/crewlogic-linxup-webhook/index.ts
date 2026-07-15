@@ -151,19 +151,6 @@ Deno.serve(async (req: Request) => {
   const sb = createClient(SUPABASE_URL, SERVICE_KEY);
   const fExternal = url.searchParams.get("f");
 
-  // TEMP DEBUG (remove after diagnosing #56): capture every incoming POST so we can SEE what Linxup
-  // actually sends — which ?f=, whether an auth header arrived + its token prefix, and a body snippet.
-  // Best-effort; never blocks the webhook.
-  try {
-    const _presented = bearerOf(req.headers.get("Authentication")) || bearerOf(req.headers.get("Authorization"));
-    await sb.from("linxup_webhook_debug").insert({
-      f_param: fExternal,
-      method: req.method,
-      auth_present: !!(req.headers.get("Authentication") || req.headers.get("Authorization")),
-      presented_prefix: _presented ? _presented.slice(0, 8) : null,
-      body_snippet: rawBody.slice(0, 500),
-    });
-  } catch (_e) { /* debug is best-effort */ }
 
   // Attribution first — no franchise, no auth possible.
   const franchise = await resolveFranchise(sb, fExternal);
