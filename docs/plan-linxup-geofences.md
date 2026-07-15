@@ -36,13 +36,17 @@ Linxup UI.
 - **Still needed:** the geofence CRUD endpoints under `/ibis/rest/api/v2/` (create/delete/list +
   payload). Either Owner supplies the Linxup REST docs, or probe with the existing key on dev.
 
-## Phase 1 — Linxup create/delete + eligibility
-- Add a Linxup provider path to `crewlogic-geofence-create` (`create`/`delete`) mirroring the
-  Motive one, using the Linxup management API (from Phase 0).
-- Widen `crewlogic-job-geofence-sync` eligibility beyond Motive: currently
-  `telematics_credentials … ilike('provider','motive')` — include Linxup-credentialed franchises,
-  and dispatch each job's create/delete to the right provider.
-- Keep the existing `job_geofences` keying (`franchise_id + wo_id`, one active per WO).
+## Phase 1 — Linxup create/delete + eligibility — ✅ BUILT + DEPLOYED TO DEV (2026-07-15)
+- ✅ `crewlogic-geofence-create` now branches on the franchise's ACTIVE provider:
+  - **create** — Linxup `POST /ibis/rest/api/v2/geofences` `{name, type:"Circle", points:[{latitude,longitude}], radius(MILES = radius_in_meters/1609.34), fenceGroup:"CurrentJob", color:"00ff00", status:"ACT"}` → returns `geofenceUUID`; Motive path unchanged.
+  - **delete** — Linxup `DELETE /ibis/rest/api/v2/geofences/{geofenceUUID}` (Bearer); Motive unchanged.
+  - Token resolves per-franchise via `get_telematics_credential`, with `tokenForProvider()` global-secret fallback (`LINXUP_API_KEY` / `MOTIVE_API_KEY`) — mirrors `crewlogic-trucks`.
+  - Response now returns a **normalized top-level `geofence_id`** (Motive `geofence.id` / Linxup `geofenceUUID`) so the sync stores the right provider id for both.
+- ✅ `crewlogic-job-geofence-sync` eligibility widened: `telematics_credentials … or(provider.ilike.motive, provider.ilike.linxup)`; create-result read changed to the normalized `gc.data.geofence_id` (legacy `.motive.geofence.id` kept as fallback).
+- ✅ Keeps the existing `job_geofences` keying (`franchise_id + wo_id`, one active per WO).
+- ✅ Settings UI for the per-franchise Linxup REST token **already existed** (`linxupApiToken` → `saveTelematicsProvider('linxup')`; backend `saveTelematics` was already dual-provider, per-provider Vault). Nothing new to build there.
+- Raw Linxup geofence CRUD already proven (test fence created+deleted at 11 Wagon Trail; Owner confirmed 0.1-mi circle size).
+- **Remaining to validate end-to-end (needs Owner, non-disruptive):** in DEV Settings → *Where Are My Trucks?* → **Linxup**, paste the Linxup **REST** token → **Save & Test** (this makes Linxup the active provider for that franchise). The next sync pass (or a manual invoke) then creates a Linxup "CurrentJob" fence for today's jobs; verify it appears in the Linxup UI, then flip active back to Motive. I can't do this unilaterally because the per-franchise flow needs the plaintext REST token (only the global secret holds it, which isn't readable), and flipping #90-dev's active provider would change its trucks-map source.
 
 ## Phase 2 — Reconcile-based move cleanup (fixes Motive too)
 Today the sync is event-driven: it only deletes a geofence when it sees the WO **done/cancelled**

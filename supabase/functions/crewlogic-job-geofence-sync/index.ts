@@ -64,7 +64,7 @@ type Fr = { id: string; external_id: string; tenant_id: string | null };
 // Franchises eligible for job geofences: those with a Motive telematics credential. Non-Vonigo ones
 // simply return zero jobs from crewlogic-todays-workorders, so iterating them is harmless.
 async function eligibleFranchises(sb: SupabaseClient): Promise<Fr[]> {
-  const { data: creds } = await sb.from("telematics_credentials").select("franchise_id").ilike("provider", "motive");
+  const { data: creds } = await sb.from("telematics_credentials").select("franchise_id").or("provider.ilike.motive,provider.ilike.linxup");
   const ids = [...new Set((creds || []).map((c: any) => c.franchise_id).filter(Boolean))];
   if (!ids.length) return [];
   const { data: frs } = await sb.from("franchises").select("id, external_id, tenant_id").in("id", ids);
@@ -181,7 +181,7 @@ async function syncFranchise(
       radius_in_meters: radius, centre_lat: lat, centre_lon: lon,
       address: job.address || "", description: "CrewLogic job geofence (auto)",
     });
-    const gid = gc.data?.motive?.geofence?.id;
+    const gid = gc.data?.geofence_id ?? gc.data?.motive?.geofence?.id; // normalized (motive+linxup); legacy fallback
     if (!gc.ok || !gc.data?.success || !gid) { errors.push({ woId, error: "geofence create failed", detail: gc.data }); continue; }
 
     const { error: insErr } = await sb.from("job_geofences").insert({
