@@ -63,6 +63,16 @@ in the day's fetch. A Vonigo-side **move** never triggers CrewLogic, so the fenc
   map clears the moment a job moves off today — near-real-time. The 30-min cron stays as backstop. *(not yet wired)*
 - **Guardrail:** reconcile only against a **successful, non-empty** job fetch, so a transient Vonigo
   failure can never wipe all geofences.
+- ✅ **VALIDATED on dev (2026-07-15, real Motive + real Vonigo moves on job #997449):** create→`created`,
+  move-to-tomorrow→`deleted moved_off`, move-back-to-today→`created` (fresh id — non-terminal moved_off
+  doesn't block re-create), cancel→`deleted cancelled`. All four transitions correct. Reconcile runs on
+  the 30-min cron (flag `GEOFENCE_RECONCILE=1`, dev on / prod off).
+- **Remaining to ship Phase 2 to prod:** (a) set `GEOFENCE_RECONCILE=1` on prod (moved-off fences then
+  clear within 30 min instead of waiting for the 02:30 EOD sweep); (b) wire the reconcile trigger into the
+  90s board refresh for near-real-time clearing (still not wired — today it's cron-only).
+- **Known cross-env note:** dev + prod share one #90 Motive account, so both running the cron create
+  colliding "name already taken" fences. Harmless to per-job tracking, but worth resolving before scale
+  (e.g. env-prefix fence names, or don't run the dev cron against shared telematics).
 - Multi-appointment cancels stay in Vonigo (existing guard); reconcile cleans up once the
   appointment is actually off the schedule.
 - **Open validation (Q-2):** does flipping a job to **invoiced (no payment)** change the Vonigo
