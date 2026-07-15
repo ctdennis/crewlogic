@@ -101,7 +101,7 @@ async function deleteGeofence(
   sb: SupabaseClient,
   fr: Fr,
   row: { id: string; geofence_id: any; name?: string | null },
-  reason: string, // 'job_complete' | 'eod'
+  reason: string, // 'job_complete' | 'job_cancelled' | 'moved_off' | 'eod'
 ): Promise<string | null> {
   // Returns null on success, or an error string. Best-effort: always marks the row deleted so the
   // mapping stops matching (EOD sweep re-attempts nothing; the Motive geofence delete is best-effort).
@@ -112,7 +112,7 @@ async function deleteGeofence(
   } catch (e) {
     err = "motive delete error: " + (e as Error).message;
   }
-  await sb.from("job_geofences").update({ status: "deleted", deleted_at: new Date().toISOString() }).eq("id", row.id);
+  await sb.from("job_geofences").update({ status: "deleted", deleted_at: new Date().toISOString(), deleted_reason: reason }).eq("id", row.id);
   // 🏁/🌙 "Tracking ended" notification in the alerts list.
   await insertLifecycleAlert(sb, fr, { event_type: "geofence_deleted", geofence_id: row.geofence_id, geofence_name: row.name ?? null, raw: { reason } });
   return err;
@@ -165,9 +165,14 @@ async function syncFranchise(
     // (active OR deleted). A geofence deleted-on-done must NOT be re-created by a later same-day run.
     const cutoffISO = new Date(Date.now() - 20 * 3600 * 1000).toISOString();
     const { data: existing } = await sb.from("job_geofences")
-      .select("id, geofence_id, status").eq("franchise_id", fr.id).eq("wo_id", woId)
+      .select("id, geofence_id, status, deleted_reason").eq("franchise_id", fr.id).eq("wo_id", woId)
       .gte("created_at", cutoffISO).order("created_at", { ascending: false }).limit(1).maybeSingle();
-    if (existing) { skipped.push({ woId, reason: "already handled today (" + existing.status + ")", geofence_id: existing.geofence_id }); continue; }
+    // Block re-create only if it's still ACTIVE, or was ended for a TERMINAL reason (done/cancelled). A
+    // geofence removed because the job MOVED OFF today ('moved_off') or by the EOD sweep ('eod') SHOULD be
+    // re-created if the job is back on today's schedule.
+    if (existing && (existing.status === "active" || existing.deleted_reason === "job_complete" || existing.deleted_reason === "job_cancelled")) {
+      skipped.push({ woId, reason: "already handled today (" + existing.status + "/" + (existing.deleted_reason || "-") + ")", geofence_id: existing.geofence_id }); continue;
+    }
 
     const town = townFromAddress(job.address || "");
     const name = (job.clientName || "Job") + " · #" + woId + (town ? " · " + town : ""); // "<client> · #<woID> · <town>"
@@ -199,20 +204,33 @@ async function syncFranchise(
   // We still never delete on "missing from list" — the EOD sweep backstops no-shows / anything left.
   if (!onlyWoID) {
     const terminalByWo = new Map<string, "done" | "cancelled">();
+    const presentWo = new Set<string>(); // every WO on today's schedule (active + cancelled) — anything NOT here has moved off
     for (const job of allJobs) {
       const w = String(job.workOrderID || ""); if (!w) continue;
+      presentWo.add(w);
       if (job.isComplete) terminalByWo.set(w, "done");
       else if (job.isCancelled) terminalByWo.set(w, "cancelled");
     }
+    // RECONCILE guard: only remove "moved off today" geofences when the fetch actually returned jobs, so a
+    // transient/empty (but success:true) response can never wipe every geofence. Terminal deletes stay safe.
+    const canReconcile = allJobs.length > 0;
     const { data: activeRows } = await sb.from("job_geofences")
       .select("id, wo_id, geofence_id, name").eq("franchise_id", fr.id).eq("status", "active");
     for (const row of activeRows || []) {
       const w = String(row.wo_id);
       const st = terminalByWo.get(w);
-      if (st !== "done" && st !== "cancelled") continue; // only delete WOs seen done/cancelled in this fetch
-      const err = await deleteGeofence(sb, fr, row, st === "cancelled" ? "job_cancelled" : "job_complete");
-      if (err) errors.push({ woId: w, error: "delete-on-" + st, detail: err });
-      deleted.push({ woId: w, geofence_id: row.geofence_id, reason: st });
+      if (st === "done" || st === "cancelled") {
+        const err = await deleteGeofence(sb, fr, row, st === "cancelled" ? "job_cancelled" : "job_complete");
+        if (err) errors.push({ woId: w, error: "delete-on-" + st, detail: err });
+        deleted.push({ woId: w, geofence_id: row.geofence_id, reason: st });
+      } else if (canReconcile && !presentWo.has(w)) {
+        // Job's WO is no longer on today's schedule (moved to another day, or gone) → remove its geofence NOW
+        // instead of leaving it on the telematics map until the 02:30 EOD sweep. 'moved_off' does NOT block a
+        // re-create if the job returns to today (see the reason-aware dedup in the create pass).
+        const err = await deleteGeofence(sb, fr, row, "moved_off");
+        if (err) errors.push({ woId: w, error: "delete-on-moved_off", detail: err });
+        deleted.push({ woId: w, geofence_id: row.geofence_id, reason: "moved_off" });
+      }
     }
   }
 
