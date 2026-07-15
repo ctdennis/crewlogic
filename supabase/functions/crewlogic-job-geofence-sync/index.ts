@@ -265,6 +265,29 @@ async function sweepFranchise(sb: SupabaseClient, fr: Fr): Promise<any> {
   return { franchise: fr.external_id, counts: { deleted, errors: errors.length }, errors };
 }
 
+// RECONCILE-ONLY (near-real-time, triggered by the 90s dispatch-board refresh). Given the WO IDs the
+// board just fetched (authoritative Vonigo data already in hand), delete any active job geofence whose
+// wo_id is NOT on that list — i.e. the job moved off today / was removed in Vonigo. NO Vonigo fetch and
+// NO create pass here (creation stays on the 30-min cron): this path is a cheap "clear the map now" sweep.
+// GUARD: caller must pass a NON-EMPTY list; an empty list is refused upstream so a bad/failed board fetch
+// can never wipe every fence. moved_off is non-terminal, so a wrongly-removed fence self-heals on the next
+// full cron pass. Only runs when RECONCILE_ENABLED.
+async function reconcileFranchise(sb: SupabaseClient, fr: Fr, woIDs: string[]): Promise<any> {
+  const present = new Set(woIDs.map(String));
+  const deleted: any[] = [], errors: any[] = [];
+  const { data: activeRows } = await sb.from("job_geofences")
+    .select("id, wo_id, geofence_id, name").eq("franchise_id", fr.id).eq("status", "active");
+  for (const row of activeRows || []) {
+    const w = String(row.wo_id);
+    if (!present.has(w)) {
+      const err = await deleteGeofence(sb, fr, row, "moved_off");
+      if (err) errors.push({ woId: w, error: "reconcile delete failed", detail: err });
+      deleted.push({ woId: w, geofence_id: row.geofence_id, reason: "moved_off" });
+    }
+  }
+  return { franchise: fr.external_id, counts: { deleted: deleted.length, errors: errors.length }, deleted, errors };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return j({ success: false, error: "Method not allowed" }, 405);
@@ -278,6 +301,21 @@ Deno.serve(async (req: Request) => {
     const radius = Number.isFinite(body.radius_in_meters) ? Number(body.radius_in_meters) : 75;
 
     const sb = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    // RECONCILE-ONLY path (90s board refresh): { action:"reconcile", franchiseID, woIDs:[...] }.
+    if (action === "reconcile") {
+      if (!RECONCILE_ENABLED) return j({ success: true, action: "reconcile", skipped: "reconcile disabled" });
+      if (!franchiseExternal) return j({ success: false, error: "franchiseID required" }, 400);
+      const woIDs = Array.isArray(body.woIDs) ? body.woIDs.map((x: unknown) => String(x)).filter(Boolean) : [];
+      if (woIDs.length === 0) {
+        // Refuse to reconcile against an empty list — a failed/empty board fetch must never wipe fences.
+        return j({ success: false, error: "woIDs required (non-empty)" }, 400);
+      }
+      const fr = await resolveFranchise(sb, franchiseExternal);
+      if (!fr) return j({ success: false, error: "Franchise not found: " + franchiseExternal }, 404);
+      const result = await reconcileFranchise(sb, fr, woIDs);
+      return j({ success: true, action: "reconcile", franchises: 1, results: [result] });
+    }
 
     // Target franchise(s): one if franchiseID given, else all eligible (Motive credential).
     let targets: Fr[];
