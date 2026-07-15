@@ -56,8 +56,11 @@ in the day's fetch. A Vonigo-side **move** never triggers CrewLogic, so the fenc
 - **Reconcile, not events:** on each pass, diff the day's **actual current job list** against active
   `job_geofences`; **delete any active geofence whose `wo_id` is no longer on today's schedule**
   (moved off / gone).
+- **FLAG-GATED (2026-07-15):** the reconcile `moved_off` delete is behind `GEOFENCE_RECONCILE=1`
+  (dev = on, prod = unset/off). Prod ships Phase 1 with UNCHANGED behavior (moved-off fences wait for
+  the 02:30 EOD sweep) until reconcile is validated; flip the prod secret on to enable Phase 2.
 - **Trigger on the CrewLogic board refresh** (the 90s auto-refresh + after-action reloads) so the
-  map clears the moment a job moves off today — near-real-time. The 30-min cron stays as backstop.
+  map clears the moment a job moves off today — near-real-time. The 30-min cron stays as backstop. *(not yet wired)*
 - **Guardrail:** reconcile only against a **successful, non-empty** job fetch, so a transient Vonigo
   failure can never wipe all geofences.
 - Multi-appointment cancels stay in Vonigo (existing guard); reconcile cleans up once the
@@ -66,11 +69,12 @@ in the day's fetch. A Vonigo-side **move** never triggers CrewLogic, so the fenc
   status to Completed/Archived (164/165)? If so it would trip the geofence delete. Owner tests one
   live; result decides whether "complete" should stay payment-only or include invoiced.
 
-## Phase 3 — `wo_id` on `geofence_alerts` (report data)
-- `geofence_alerts` has **no wo_id/job_id column** today — the WO# only lives inside the
-  `geofence_name` string. Add a `wo_id` (and optional `job_id`) column via migration.
-- Populate it in **both** webhooks (`crewlogic-motive-webhook`, `crewlogic-linxup-webhook`) on
-  job_arrive/job_leave so per-job aggregation is clean (no name-string parsing).
+## Phase 3 — `wo_id` on `geofence_alerts` (report data) — ✅ BUILT + VERIFIED ON DEV (2026-07-15)
+- ✅ Migration **0043** adds `geofence_alerts.wo_id` + `job_id` (text) + a `(franchise_id, wo_id)` index. Applied to dev.
+- ✅ `crewlogic-motive-webhook`: populates `wo_id`/`job_id` from the `job_geofences` lookup it already does by `geofence_id` (extended the select). No name parsing.
+- ✅ `crewlogic-linxup-webhook`: parses `#<woID>` from the fence name (reliable regardless of which id Linxup echoes), looks up `job_id` from `job_geofences`, and relabels entry/exit → `job_arrive`/`job_leave` for provider parity.
+- ✅ **Verified (simulated real webhooks on dev):** a job fence-exit ("… · #995483 · …") stored `event_type=job_leave, wo_id=995483, job_id=858860, duration=2520`; a facility fence ("ABC Transfer Station", no `#`) correctly stored `wo_id=null, event_type=geofence_exit`. So `wo_id IS NOT NULL` cleanly = customer visit, `NULL` = facility visit — the discriminator Phase 4 needs.
+- Motive path verified by parity/code-review (its `job_geofences`-by-`geofence_id` lookup already worked; Phase 3 only added 2 columns to the select + insert). Live Motive validation happens when real events fire post-promotion.
 
 ## Phase 4 — Time-at-customer + facility report (UI is first-class)
 - Extend the existing Alerts Report (`openAlertsReport`) — it currently reports only facility

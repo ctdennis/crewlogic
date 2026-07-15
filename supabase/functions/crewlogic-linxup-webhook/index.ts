@@ -184,18 +184,37 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ success: true }), { status: 201, headers: { ...CORS, "Content-Type": "application/json" } });
   }
 
+  // Phase 3: if this is one of OUR auto-created job fences, its NAME carries "#<woID>" (we set it in
+  // crewlogic-job-geofence-sync). Parse the woID from the name — reliable regardless of which id Linxup
+  // echoes in the event (the event may carry agilisGeofenceId, not our stored geofenceUUID). Then look up
+  // the Vonigo job_id from job_geofences and relabel entry/exit as job_arrive/job_leave, matching the
+  // Motive receiver so per-job aggregation is uniform across providers. Facility fences (no "#") stay as-is.
+  let woId: string | null = null;
+  let jobId: string | null = null;
+  let eventTypeOut = ev.eventType;
+  const woMatch = ev.fenceName ? ev.fenceName.match(/#(\d+)/) : null;
+  if (woMatch) {
+    woId = woMatch[1];
+    const { data: jg } = await sb.from("job_geofences")
+      .select("job_id").eq("franchise_id", franchise.uuid).eq("wo_id", woId)
+      .order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (jg) jobId = jg.job_id ?? null;
+    eventTypeOut = ev.eventType === "geofence_exit" ? "job_leave" : "job_arrive";
+  }
+
   // Reuse the Motive receiver's geofence_alerts insert shape exactly.
   const { error } = await sb.from("geofence_alerts").insert({
     franchise_id: franchise.uuid,
     tenant_id: franchise.tenant_id,
     action: "linxup_fence_event",
-    event_type: ev.eventType,               // geofence_entry | geofence_exit (matches Motive)
+    event_type: eventTypeOut,               // job_arrive/job_leave for our job fences, else geofence_entry/exit
     vehicle_id: null,                         // Linxup identifies by tracker name, not a numeric id
     vehicle_number: ev.truckName,
     geofence_id: ev.geofenceId,               // numeric fence id when present, else null
     geofence_name: ev.fenceName,
     category: ev.fenceGroup,                  // Linxup Group → same column Motive stamps its Category into (drives the badge)
     event_id: null,
+    wo_id: woId, job_id: jobId,               // Phase 3: clean per-job aggregation (parsed from the fence name)
     start_time: ev.eventTimeIso,
     end_time: null,
     duration: ev.durationSec,                 // on-site seconds (exit events) — powers the alerts report

@@ -161,13 +161,13 @@ Deno.serve(async (req: Request) => {
   // If so we already know the name; relabel as job_arrive / job_leave. We do NOT delete on exit —
   // the geofence persists for the whole job (multi-truck arrive/leave/return). Deletion is handled
   // by the sync (Vonigo WO done/cancelled) and the EOD sweep.
-  let jobGeo: { id: any; name: string | null } | null = null;
+  let jobGeo: { id: any; name: string | null; wo_id: string | null; job_id: string | null } | null = null;
   if (ev.action === "vehicle_geofence_event" && ev.geofence_id != null) {
     const { data: jg } = await sb.from("job_geofences")
-      .select("id, name")
+      .select("id, name, wo_id, job_id")
       .eq("franchise_id", matched.uuid).eq("geofence_id", ev.geofence_id).eq("status", "active")
       .maybeSingle();
-    if (jg) jobGeo = { id: jg.id, name: jg.name ?? null };
+    if (jg) jobGeo = { id: jg.id, name: jg.name ?? null, wo_id: jg.wo_id ?? null, job_id: jg.job_id ?? null };
   }
 
   let eventType = ev.event_type;
@@ -191,6 +191,7 @@ Deno.serve(async (req: Request) => {
     action: ev.action, event_type: eventType,
     vehicle_id: ev.vehicle_id, vehicle_number: ev.vehicle_number,
     geofence_id: ev.geofence_id, geofence_name: geofenceName, category: geofenceCategory, event_id: ev.event_id,
+    wo_id: jobGeo?.wo_id ?? null, job_id: jobGeo?.job_id ?? null, // Phase 3: clean per-job aggregation (no name parsing)
     start_time: ev.start_time, end_time: ev.end_time, duration: ev.duration,
     raw: parsed,
   });

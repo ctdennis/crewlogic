@@ -38,6 +38,14 @@ import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+// Phase-2 reconcile gate. When OFF (secret unset / != "1"), the sync only deletes on EXPLICIT
+// terminal (done/cancelled) and leaves "moved off today" fences for the 02:30 EOD sweep — i.e.
+// the original prod behavior. When ON, it also removes a fence the moment its job leaves today's
+// schedule (a Vonigo-side move that never pings CrewLogic). Kept behind a flag so prod ships
+// Phase-1 (Linxup) with UNCHANGED behavior until the reconcile is validated. Set GEOFENCE_RECONCILE=1
+// on dev to validate; flip on in prod when proven.
+const RECONCILE_ENABLED = Deno.env.get("GEOFENCE_RECONCILE") === "1";
+
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -201,7 +209,8 @@ async function syncFranchise(
   // PAYMENT taken / job truly finished — OR EXPLICITLY cancelled (surfaced via includeCancelled). We do
   // NOT end tracking on the estimate "done" label: it fires at estimate-create (before work + payment)
   // and flaps, so it would wrongly end tracking while the crew is still on-site (verified 2026-07-06).
-  // We still never delete on "missing from list" — the EOD sweep backstops no-shows / anything left.
+  // "Missing from list" (moved off today) is handled by the RECONCILE pass below — but ONLY when
+  // GEOFENCE_RECONCILE=1 (Phase 2). With the flag off, missing fences are left for the EOD sweep.
   if (!onlyWoID) {
     const terminalByWo = new Map<string, "done" | "cancelled">();
     const presentWo = new Set<string>(); // every WO on today's schedule (active + cancelled) — anything NOT here has moved off
@@ -223,7 +232,7 @@ async function syncFranchise(
         const err = await deleteGeofence(sb, fr, row, st === "cancelled" ? "job_cancelled" : "job_complete");
         if (err) errors.push({ woId: w, error: "delete-on-" + st, detail: err });
         deleted.push({ woId: w, geofence_id: row.geofence_id, reason: st });
-      } else if (canReconcile && !presentWo.has(w)) {
+      } else if (RECONCILE_ENABLED && canReconcile && !presentWo.has(w)) {
         // Job's WO is no longer on today's schedule (moved to another day, or gone) → remove its geofence NOW
         // instead of leaving it on the telematics map until the 02:30 EOD sweep. 'moved_off' does NOT block a
         // re-create if the job returns to today (see the reason-aware dedup in the create pass).
