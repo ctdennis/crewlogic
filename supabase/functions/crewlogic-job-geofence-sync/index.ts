@@ -196,6 +196,7 @@ async function syncFranchise(
       franchise_id: fr.id, tenant_id: fr.tenant_id, wo_id: woId,
       job_id: job.jobID ? String(job.jobID) : null,
       vonigo_job_number: job.jobID ? String(job.jobID) : null,
+      route: job.route ? String(job.route) : null, // Phase 4: for the time-at-customer report's route filter
       geofence_id: gid, name, centre_lat: lat, centre_lon: lon, status: "active",
     });
     if (insErr) { errors.push({ woId, error: "mapping insert failed", detail: insErr.message, geofence_id: gid }); continue; }

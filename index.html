@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.74 | 2026-07-15">
+  <meta name="crewlogic-version" content="v5.50.75 | 2026-07-15">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4335,10 +4335,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (range === 'month') return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
       const d = new Date(now); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - d.getDay()); return d.getTime(); // week: since Sunday
     }
+    let _alertsView = 'facilities';                 // 'facilities' (existing) | 'customers' (Phase 4 time-at-customer)
+    let _custRaw = null, _tacRows = [], _custRouteMap = {}, _custSort = { col: 'date', dir: -1 }, _custFilt = { q: '', route: '', truck: '' };
     async function openAlertsReport() {
       const m = document.getElementById('alertsReportModal'), body = document.getElementById('alertsReportBody');
       if (!m || !body) return;
       m.style.display = 'flex';
+      _alertsView = 'facilities'; _custRaw = null; _custSort = { col: 'date', dir: -1 }; _custFilt = { q: '', route: '', truck: '' };
       body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;">Loading…</div>';
       const fid = currentUser && currentUser.franchiseInternalID;
       if (!fid) { body.innerHTML = '<div style="color:var(--text-muted);">No franchise on this session.</div>'; return; }
@@ -4350,20 +4353,26 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _alertsRows = (Array.isArray(rows) ? rows : []).filter(r => (parseFloat(r.duration) || 0) >= MIN_SEC);
       renderAlertsReport();
     }
-    function setAlertsRange(range) { _alertsRange = range; renderAlertsReport(); }
+    function setAlertsView(v) { _alertsView = v; renderAlertsReport(); }
+    function setAlertsRange(range) { _alertsRange = range; _custRaw = null; renderAlertsReport(); } // customers refetch on range change (server-side date filter)
+    // Shared header: view toggle (Facilities | Customers) + range tabs (Today / week / month).
+    function _alertsHeadHtml() {
+      const btn = (on, oc, label) => '<button onclick="' + oc + '" style="flex:1;padding:8px;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;border:1px solid ' + (on ? 'var(--accent-green)' : 'var(--border)') + ';background:' + (on ? 'var(--accent-green)' : 'var(--bg-input)') + ';color:' + (on ? 'var(--accent-text)' : 'var(--text-secondary)') + ';">' + label + '</button>';
+      let h = '<div style="display:flex;gap:6px;margin-bottom:10px;">';
+      h += btn(_alertsView === 'facilities', "setAlertsView('facilities')", '🗑️ Facilities') + btn(_alertsView === 'customers', "setAlertsView('customers')", '🏠 Customers');
+      h += '</div><div style="display:flex;gap:6px;margin-bottom:18px;">';
+      [['today', 'Today'], ['week', 'This week'], ['month', 'This month']].forEach(t => { h += btn(_alertsRange === t[0], "setAlertsRange('" + t[0] + "')", t[1]); });
+      return h + '</div>';
+    }
     function renderAlertsReport() {
       const body = document.getElementById('alertsReportBody');
       if (!body) return;
+      if (_alertsView === 'customers') { _renderCustomers(body); return; }
       const fmtDur = (sec) => { sec = Math.round(sec || 0); const h = Math.floor(sec / 3600), mn = Math.round((sec % 3600) / 60); return h ? (h + 'h ' + mn + 'm') : (mn + 'm'); };
       const typeOf = (cat, name) => { const t = (s) => { s = String(s || '').toLowerCase(); if (/transfer|disposal|landfill|dump/.test(s)) return { k: 'Disposal', e: '🗑️' }; if (/recycl/.test(s)) return { k: 'Recycling', e: '♻️' }; if (/donat/.test(s)) return { k: 'Donation', e: '🎁' }; return null; }; return t(cat) || t(name) || { k: 'Other', e: '📍' }; };
       const vlabel = (c) => c + (c === 1 ? ' visit' : ' visits');
       const metrics = (count, sec) => vlabel(count) + ' · ' + fmtDur(sec) + ' total · ' + fmtDur(sec / count) + ' avg';
-      let html = '<div style="display:flex;gap:6px;margin-bottom:18px;">';
-      [['today', 'Today'], ['week', 'This week'], ['month', 'This month']].forEach(t => {
-        const on = _alertsRange === t[0];
-        html += '<button onclick="setAlertsRange(\'' + t[0] + '\')" style="flex:1;padding:8px;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;border:1px solid ' + (on ? 'var(--accent-green)' : 'var(--border)') + ';background:' + (on ? 'var(--accent-green)' : 'var(--bg-input)') + ';color:' + (on ? 'var(--accent-text)' : 'var(--text-secondary)') + ';">' + t[1] + '</button>';
-      });
-      html += '</div>';
+      let html = _alertsHeadHtml();
       const since = _alertsRangeStart(_alertsRange);
       const kept = _alertsRows.filter(r => new Date(r.created_at).getTime() >= since);
       if (!kept.length) { body.innerHTML = html + '<div style="color:var(--text-muted);font-size:14px;line-height:1.6;padding:6px 0;">No facility visits in this range.</div>'; return; }
@@ -4387,6 +4396,101 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         html += '</div>';
       });
       body.innerHTML = html;
+    }
+    // ── Customers view (Phase 4: time at each customer/job) ──────────────────────────────────────
+    function _hEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+    async function _renderCustomers(body) {
+      const head = _alertsHeadHtml();
+      const fid = currentUser && currentUser.franchiseInternalID;
+      if (!fid) { body.innerHTML = head + '<div style="color:var(--text-muted);">No franchise on this session.</div>'; return; }
+      if (_custRaw === null) {
+        body.innerHTML = head + '<div style="color:var(--text-muted);font-size:14px;">Loading…</div>';
+        const sinceIso = new Date(_alertsRangeStart(_alertsRange)).toISOString();
+        try {
+          const [alerts, jgs] = await Promise.all([
+            supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&wo_id=not.is.null&event_type=in.(job_arrive,job_leave)&created_at=gte.' + encodeURIComponent(sinceIso) + '&select=wo_id,geofence_name,vehicle_number,event_type,duration,start_time,created_at&order=created_at.asc&limit=5000'),
+            supabaseFetch('/rest/v1/job_geofences?franchise_id=eq.' + encodeURIComponent(fid) + '&route=not.is.null&select=wo_id,route&limit=5000')
+          ]);
+          _custRaw = Array.isArray(alerts) ? alerts : [];
+          _custRouteMap = {}; (Array.isArray(jgs) ? jgs : []).forEach(g => { if (g.wo_id && g.route) _custRouteMap[String(g.wo_id)] = g.route; });
+        } catch (e) { body.innerHTML = head + '<div style="color:var(--text-muted);">Could not load the customer report.</div>'; return; }
+      }
+      _custAggregate();
+      const routes = [...new Set(_tacRows.map(r => r.route).filter(Boolean))].sort();
+      const trucks = [...new Set([].concat.apply([], _tacRows.map(r => r.trucks)))].filter(Boolean).sort();
+      const opt = (cur, val, label) => '<option value="' + _hEsc(val) + '"' + (cur === val ? ' selected' : '') + '>' + _hEsc(label) + '</option>';
+      const selStyle = 'padding:8px 10px;font-size:13px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);';
+      let ctrls = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">';
+      ctrls += '<input id="custQ" value="' + _hEsc(_custFilt.q) + '" oninput="_custFilt.q=this.value;_renderCustTable()" placeholder="Search customer / WO#" style="flex:1;min-width:150px;' + selStyle + '">';
+      ctrls += '<select onchange="_custFilt.route=this.value;_renderCustTable()" style="' + selStyle + '">' + opt(_custFilt.route, '', 'All routes') + routes.map(r => opt(_custFilt.route, r, r)).join('') + '</select>';
+      ctrls += '<select onchange="_custFilt.truck=this.value;_renderCustTable()" style="' + selStyle + '">' + opt(_custFilt.truck, '', 'All trucks') + trucks.map(t => opt(_custFilt.truck, t, t)).join('') + '</select>';
+      ctrls += '</div>';
+      body.innerHTML = head + ctrls + '<div id="custTableWrap"></div>';
+      _renderCustTable();
+    }
+    // Aggregate the raw arrive/leave events into one row per WO.
+    function _custAggregate() {
+      const byWo = {};
+      (_custRaw || []).forEach(r => {
+        const wo = String(r.wo_id || ''); if (!wo) return;
+        const g = byWo[wo] || (byWo[wo] = { wo, name: '', trucks: {}, onSite: 0, times: [] });
+        if (r.geofence_name && !g.name) g.name = r.geofence_name;
+        if (r.vehicle_number) g.trucks[r.vehicle_number] = 1;
+        const tm = new Date(r.start_time || r.created_at).getTime(); if (isFinite(tm)) g.times.push(tm);
+        if (r.event_type === 'job_leave') g.onSite += (parseFloat(r.duration) || 0); // sum of dwell across trucks/returns
+      });
+      _tacRows = Object.keys(byWo).map(wo => {
+        const g = byWo[wo];
+        const first = g.times.length ? Math.min.apply(null, g.times) : 0;
+        const last = g.times.length ? Math.max.apply(null, g.times) : 0;
+        const customer = (String(g.name || '').split('·')[0] || '').trim() || 'Unknown'; // "<client> · #<wo> · <town>"
+        return { wo, customer, date: first, span: (first && last) ? Math.round((last - first) / 1000) : 0, onSite: Math.round(g.onSite), trucks: Object.keys(g.trucks), route: _custRouteMap[wo] || '' };
+      });
+    }
+    function _setCustSort(col) {
+      if (_custSort.col === col) _custSort.dir *= -1;
+      else _custSort = { col, dir: (col === 'customer' || col === 'route' || col === 'wo') ? 1 : -1 };
+      _renderCustTable();
+    }
+    function _renderCustTable() {
+      const wrap = document.getElementById('custTableWrap'); if (!wrap) return;
+      const fmtDur = (sec) => { sec = Math.round(sec || 0); if (!sec) return '—'; const h = Math.floor(sec / 3600), mn = Math.round((sec % 3600) / 60); return h ? (h + 'h ' + mn + 'm') : (mn + 'm'); };
+      const fmtDate = (ms) => ms ? new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—';
+      const q = (_custFilt.q || '').toLowerCase();
+      let rows = _tacRows.filter(r =>
+        (!q || r.customer.toLowerCase().indexOf(q) !== -1 || String(r.wo).indexOf(q) !== -1) &&
+        (!_custFilt.route || r.route === _custFilt.route) &&
+        (!_custFilt.truck || r.trucks.indexOf(_custFilt.truck) !== -1)
+      );
+      const col = _custSort.col, dir = _custSort.dir;
+      rows.sort((a, b) => {
+        let av, bv;
+        if (col === 'customer') { av = a.customer.toLowerCase(); bv = b.customer.toLowerCase(); }
+        else if (col === 'trucks') { av = a.trucks.length; bv = b.trucks.length; }
+        else if (col === 'route') { av = (a.route || '').toLowerCase(); bv = (b.route || '').toLowerCase(); }
+        else { av = a[col]; bv = b[col]; }
+        return (av < bv ? -1 : av > bv ? 1 : 0) * dir;
+      });
+      if (!rows.length) { wrap.innerHTML = '<div style="color:var(--text-muted);font-size:14px;padding:6px 0;">No customer visits match.</div>'; return; }
+      const totSec = rows.reduce((s, r) => s + r.onSite, 0);
+      const arrow = (c) => col === c ? (dir === 1 ? ' ▲' : ' ▼') : '';
+      const th = (c, label, align) => '<th onclick="_setCustSort(\'' + c + '\')" style="text-align:' + (align || 'left') + ';padding:7px 8px;font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.4px;cursor:pointer;white-space:nowrap;border-bottom:1px solid var(--border);">' + label + arrow(c) + '</th>';
+      let h = '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">' + rows.length + ' customer' + (rows.length === 1 ? '' : 's') + ' · ' + fmtDur(totSec) + ' total on-site</div>';
+      h += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;min-width:540px;">';
+      h += '<thead><tr>' + th('customer', 'Customer') + th('wo', 'WO#') + th('date', 'Date') + th('onSite', 'On-site', 'right') + th('span', 'Span', 'right') + th('trucks', 'Trucks', 'right') + th('route', 'Route') + '</tr></thead><tbody>';
+      rows.forEach(r => {
+        h += '<tr style="border-bottom:1px solid var(--border);">'
+          + '<td style="padding:8px;font-size:13px;color:var(--text-primary);font-weight:600;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _hEsc(r.customer) + '</td>'
+          + '<td style="padding:8px;font-size:12.5px;color:var(--text-secondary);">' + _hEsc(r.wo) + '</td>'
+          + '<td style="padding:8px;font-size:12.5px;color:var(--text-secondary);white-space:nowrap;">' + fmtDate(r.date) + '</td>'
+          + '<td style="padding:8px;font-size:13px;color:var(--text-primary);font-weight:700;text-align:right;white-space:nowrap;">' + fmtDur(r.onSite) + '</td>'
+          + '<td style="padding:8px;font-size:12.5px;color:var(--text-secondary);text-align:right;white-space:nowrap;">' + fmtDur(r.span) + '</td>'
+          + '<td style="padding:8px;font-size:12.5px;color:var(--text-secondary);text-align:right;">' + (r.trucks.length || '—') + '</td>'
+          + '<td style="padding:8px;font-size:12px;color:var(--text-muted);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (r.route ? _hEsc(r.route) : '—') + '</td>'
+          + '</tr>';
+      });
+      h += '</tbody></table></div>';
+      wrap.innerHTML = h;
     }
     function closeAlertsReport() { const m = document.getElementById('alertsReportModal'); if (m) m.style.display = 'none'; }
 
