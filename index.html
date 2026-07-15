@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.75 | 2026-07-15">
+  <meta name="crewlogic-version" content="v5.50.76 | 2026-07-15">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4408,7 +4408,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const sinceIso = new Date(_alertsRangeStart(_alertsRange)).toISOString();
         try {
           const [alerts, jgs] = await Promise.all([
-            supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&wo_id=not.is.null&event_type=in.(job_arrive,job_leave)&created_at=gte.' + encodeURIComponent(sinceIso) + '&select=wo_id,geofence_name,vehicle_number,event_type,duration,start_time,created_at&order=created_at.asc&limit=5000'),
+            supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&wo_id=not.is.null&event_type=in.(job_arrive,job_leave)&created_at=gte.' + encodeURIComponent(sinceIso) + '&select=wo_id,job_id,geofence_name,vehicle_number,event_type,duration,start_time,created_at&order=created_at.asc&limit=5000'),
             supabaseFetch('/rest/v1/job_geofences?franchise_id=eq.' + encodeURIComponent(fid) + '&route=not.is.null&select=wo_id,route&limit=5000')
           ]);
           _custRaw = Array.isArray(alerts) ? alerts : [];
@@ -4433,8 +4433,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const byWo = {};
       (_custRaw || []).forEach(r => {
         const wo = String(r.wo_id || ''); if (!wo) return;
-        const g = byWo[wo] || (byWo[wo] = { wo, name: '', trucks: {}, onSite: 0, times: [] });
+        const g = byWo[wo] || (byWo[wo] = { wo, jobId: '', name: '', trucks: {}, onSite: 0, times: [] });
         if (r.geofence_name && !g.name) g.name = r.geofence_name;
+        if (r.job_id && !g.jobId) g.jobId = String(r.job_id);
         if (r.vehicle_number) g.trucks[r.vehicle_number] = 1;
         const tm = new Date(r.start_time || r.created_at).getTime(); if (isFinite(tm)) g.times.push(tm);
         if (r.event_type === 'job_leave') g.onSite += (parseFloat(r.duration) || 0); // sum of dwell across trucks/returns
@@ -4444,12 +4445,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const first = g.times.length ? Math.min.apply(null, g.times) : 0;
         const last = g.times.length ? Math.max.apply(null, g.times) : 0;
         const customer = (String(g.name || '').split('·')[0] || '').trim() || 'Unknown'; // "<client> · #<wo> · <town>"
-        return { wo, customer, date: first, span: (first && last) ? Math.round((last - first) / 1000) : 0, onSite: Math.round(g.onSite), trucks: Object.keys(g.trucks), route: _custRouteMap[wo] || '' };
+        return { wo, job: g.jobId || wo, customer, date: first, span: (first && last) ? Math.round((last - first) / 1000) : 0, onSite: Math.round(g.onSite), trucks: Object.keys(g.trucks), route: _custRouteMap[wo] || '' };
       });
     }
     function _setCustSort(col) {
       if (_custSort.col === col) _custSort.dir *= -1;
-      else _custSort = { col, dir: (col === 'customer' || col === 'route' || col === 'wo') ? 1 : -1 };
+      else _custSort = { col, dir: (col === 'customer' || col === 'route' || col === 'job') ? 1 : -1 };
       _renderCustTable();
     }
     function _renderCustTable() {
@@ -4458,7 +4459,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const fmtDate = (ms) => ms ? new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—';
       const q = (_custFilt.q || '').toLowerCase();
       let rows = _tacRows.filter(r =>
-        (!q || r.customer.toLowerCase().indexOf(q) !== -1 || String(r.wo).indexOf(q) !== -1) &&
+        (!q || r.customer.toLowerCase().indexOf(q) !== -1 || String(r.job).indexOf(q) !== -1 || String(r.wo).indexOf(q) !== -1) &&
         (!_custFilt.route || r.route === _custFilt.route) &&
         (!_custFilt.truck || r.trucks.indexOf(_custFilt.truck) !== -1)
       );
@@ -4477,11 +4478,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const th = (c, label, align) => '<th onclick="_setCustSort(\'' + c + '\')" style="text-align:' + (align || 'left') + ';padding:7px 8px;font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.4px;cursor:pointer;white-space:nowrap;border-bottom:1px solid var(--border);">' + label + arrow(c) + '</th>';
       let h = '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">' + rows.length + ' customer' + (rows.length === 1 ? '' : 's') + ' · ' + fmtDur(totSec) + ' total on-site</div>';
       h += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;min-width:540px;">';
-      h += '<thead><tr>' + th('customer', 'Customer') + th('wo', 'WO#') + th('date', 'Date') + th('onSite', 'On-site', 'right') + th('span', 'Span', 'right') + th('trucks', 'Trucks', 'right') + th('route', 'Route') + '</tr></thead><tbody>';
+      h += '<thead><tr>' + th('customer', 'Customer') + th('job', 'Job #') + th('date', 'Date') + th('onSite', 'On-site', 'right') + th('span', 'Span', 'right') + th('trucks', 'Trucks', 'right') + th('route', 'Route') + '</tr></thead><tbody>';
       rows.forEach(r => {
         h += '<tr style="border-bottom:1px solid var(--border);">'
           + '<td style="padding:8px;font-size:13px;color:var(--text-primary);font-weight:600;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _hEsc(r.customer) + '</td>'
-          + '<td style="padding:8px;font-size:12.5px;color:var(--text-secondary);">' + _hEsc(r.wo) + '</td>'
+          + '<td style="padding:8px;font-size:12.5px;color:var(--text-secondary);">' + _hEsc(r.job) + '</td>'
           + '<td style="padding:8px;font-size:12.5px;color:var(--text-secondary);white-space:nowrap;">' + fmtDate(r.date) + '</td>'
           + '<td style="padding:8px;font-size:13px;color:var(--text-primary);font-weight:700;text-align:right;white-space:nowrap;">' + fmtDur(r.onSite) + '</td>'
           + '<td style="padding:8px;font-size:12.5px;color:var(--text-secondary);text-align:right;white-space:nowrap;">' + fmtDur(r.span) + '</td>'
