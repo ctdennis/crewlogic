@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.79 | 2026-07-16">
+  <meta name="crewlogic-version" content="v5.50.80 | 2026-07-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1257,6 +1257,17 @@
     </div>
   </div>
 
+  <!-- Motive Card Reclass (super-admin / #90-internal). Body filled by openCardReclass(). -->
+  <div id="cardReclassModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)closeCardReclass()">
+    <div style="background:var(--bg-card,#1e2f40);border:1px solid var(--border,#22354a);border-radius:14px;max-width:820px;width:100%;margin-top:24px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 22px;border-bottom:1px solid var(--border,#22354a);">
+        <div style="font-weight:800;color:var(--text-primary);font-size:16px;">💳 Motive Card Reclass</div>
+        <button onclick="closeCardReclass()" style="background:none;border:none;color:var(--text-muted);font-size:22px;cursor:pointer;line-height:1;">×</button>
+      </div>
+      <div id="cardReclassBody" style="padding:18px 22px;">Loading…</div>
+    </div>
+  </div>
+
   <!-- Alerts report (📊 button next to Live Alerts) — high-level reporting on geofence facility visits. Body filled by openAlertsReport(). -->
   <div id="alertsReportModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)closeAlertsReport()">
     <div style="width:100%;max-width:640px;background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border);margin:auto;">
@@ -2261,6 +2272,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               Per-feature and per-franchise AI/Maps cost from live metering.
             </div>
             <button class="btn-surface" onclick="showUsageDashboard()" style="padding:6px 14px;font-size:12px;font-weight:700;">Open dashboard</button>
+          </div>
+
+          <!-- Card Reclass — super-admin only (#90-internal) -->
+          <div class="settings-card fade-in fade-in-delay-2" id="cardReclassCard" style="display:none;">
+            <div class="settings-card-title">💳 Motive Card Reclass</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.5;">
+              Classify Motive card spend as gas / disposal / other for monthly P&amp;L reclass. Auto-tags by
+              spend type; override any vendor.
+            </div>
+            <button class="btn-surface" onclick="openCardReclass()" style="padding:6px 14px;font-size:12px;font-weight:700;">Open reclass</button>
           </div>
 
           <!-- Billing (hidden until BILLING_ENABLED — toggled in showApp) -->
@@ -4500,6 +4521,76 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       wrap.innerHTML = h;
     }
     function closeAlertsReport() { const m = document.getElementById('alertsReportModal'); if (m) m.style.display = 'none'; }
+
+    // ── Motive Card Reclass (super-admin / #90-internal) ─────────────────────────────────────────
+    let _crY = null, _crM = null, _crData = null; // year, month(0-11), last response
+    const _CR_CAT = { gas: { label: 'Gas', color: '#22c55e' }, disposal: { label: 'Disposal', color: '#e08a1e' }, other: { label: 'Other', color: '#8aa0b4' } };
+    function openCardReclass() {
+      const m = document.getElementById('cardReclassModal'); if (!m) return;
+      m.style.display = 'flex';
+      if (_crY === null) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); _crY = d.getFullYear(); _crM = d.getMonth(); } // default: last month
+      _crLoad();
+    }
+    function closeCardReclass() { const m = document.getElementById('cardReclassModal'); if (m) m.style.display = 'none'; }
+    function _crShiftMonth(delta) { let y = _crY, mo = _crM + delta; if (mo < 0) { mo = 11; y--; } if (mo > 11) { mo = 0; y++; } _crY = y; _crM = mo; _crLoad(); }
+    function _crRange() { const pad = (n) => String(n).padStart(2, '0'); const last = new Date(_crY, _crM + 1, 0).getDate(); return { start: _crY + '-' + pad(_crM + 1) + '-01', end: _crY + '-' + pad(_crM + 1) + '-' + pad(last) }; }
+    function _crHeader() {
+      const label = new Date(_crY, _crM, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+      const btn = (d, t) => '<button onclick="_crShiftMonth(' + d + ')" style="padding:6px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text-secondary);font-size:13px;font-weight:700;cursor:pointer;">' + t + '</button>';
+      return '<div style="display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:16px;">' + btn(-1, '‹ Prev') + '<div style="font-weight:800;color:var(--text-primary);font-size:15px;min-width:150px;text-align:center;">' + label + '</div>' + btn(1, 'Next ›') + '</div>';
+    }
+    async function _crLoad() {
+      const body = document.getElementById('cardReclassBody'); if (!body) return;
+      body.innerHTML = _crHeader() + '<div style="color:var(--text-muted);padding:14px 0;">Loading…</div>';
+      const { start, end } = _crRange();
+      let data;
+      try { data = await edgeFunctionCall('crewlogic-card-transactions', { franchiseID: currentUser.franchiseID, start_date: start, end_date: end }); }
+      catch (e) { body.innerHTML = _crHeader() + '<div style="color:var(--text-muted);">Could not load card transactions.</div>'; return; }
+      if (!data || !data.success) { body.innerHTML = _crHeader() + '<div style="color:var(--text-muted);">' + _hEsc((data && data.error) || 'Load failed') + '</div>'; return; }
+      _crData = data;
+      body.innerHTML = _crHeader() + _crBodyHtml(data);
+    }
+    function _crMoney(n) { return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+    function _crBodyHtml(data) {
+      const t = data.totals || {}, c = data.counts || {};
+      // Category totals
+      let h = '<div style="display:flex;gap:10px;margin-bottom:6px;">';
+      ['gas', 'disposal', 'other'].forEach(k => {
+        const cc = _CR_CAT[k];
+        h += '<div style="flex:1;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-left:4px solid ' + cc.color + ';border-radius:8px;">'
+          + '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;font-weight:700;">' + cc.label + '</div>'
+          + '<div style="font-size:17px;font-weight:800;color:var(--text-primary);">' + _crMoney(t[k]) + '</div>'
+          + '<div style="font-size:11px;color:var(--text-muted);">' + (c[k] || 0) + ' txn</div></div>';
+      });
+      h += '</div>';
+      const reclass = Number(t.disposal || 0) + Number(t.other || 0);
+      h += '<div style="font-size:12px;color:var(--text-muted);margin:0 0 14px 2px;">Currently all posts as gas — <b style="color:var(--text-secondary);">' + _crMoney(reclass) + '</b> to reclass out (' + _crMoney(t.disposal) + ' disposal + ' + _crMoney(t.other) + ' other).</div>';
+      const news = (data.merchants || []).filter(m => m.isNew).length;
+      if (news) h += '<div style="font-size:12px;color:#e08a1e;margin:0 0 12px 2px;">⚠ ' + news + ' new/untagged vendor' + (news === 1 ? '' : 's') + ' — set below (auto-guess applied for now).</div>';
+      // Merchant table
+      h += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;min-width:560px;"><thead><tr>'
+        + '<th style="text-align:left;padding:7px 8px;font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;border-bottom:1px solid var(--border);">Vendor</th>'
+        + '<th style="text-align:right;padding:7px 8px;font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;border-bottom:1px solid var(--border);">Spend</th>'
+        + '<th style="text-align:right;padding:7px 8px;font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;border-bottom:1px solid var(--border);">#</th>'
+        + '<th style="text-align:left;padding:7px 8px;font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;border-bottom:1px solid var(--border);">Category</th></tr></thead><tbody>';
+      (data.merchants || []).forEach((m, i) => {
+        const opts = ['gas', 'disposal', 'other'].map(k => '<option value="' + k + '"' + (m.effective === k ? ' selected' : '') + '>' + _CR_CAT[k].label + '</option>').join('');
+        const dot = '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + _CR_CAT[m.effective].color + ';margin-right:6px;"></span>';
+        h += '<tr style="border-bottom:1px solid var(--border);">'
+          + '<td style="padding:7px 8px;font-size:13px;color:var(--text-primary);font-weight:600;">' + dot + _hEsc(m.name) + (m.override ? ' <span style="font-size:10px;color:#e08a1e;">(override)</span>' : '') + '</td>'
+          + '<td style="padding:7px 8px;font-size:13px;color:var(--text-primary);text-align:right;font-weight:700;white-space:nowrap;">' + _crMoney(m.total) + '</td>'
+          + '<td style="padding:7px 8px;font-size:12.5px;color:var(--text-secondary);text-align:right;">' + m.count + '</td>'
+          + '<td style="padding:7px 8px;"><select onchange="_crOverrideIdx(' + i + ', this.value)" style="padding:5px 8px;font-size:12.5px;background:var(--bg-input);border:1px solid var(--border);border-radius:7px;color:var(--text-primary);">' + opts + '</select></td>'
+          + '</tr>';
+      });
+      h += '</tbody></table></div>';
+      return h;
+    }
+    function _crOverrideIdx(i, category) {
+      const m = _crData && _crData.merchants && _crData.merchants[i]; if (!m) return;
+      edgeFunctionCall('crewlogic-card-transactions', { franchiseID: currentUser.franchiseID, action: 'saveOverride', merchant_name: m.name, category })
+        .then(() => _crLoad()).catch(() => _crLoad());
+    }
 
     // Settings → Trucks "📖 Geofence setup guide" → in-app modal (reliable; a hosted page gets shadowed by the SPA catch-all).
     function openGeofenceGuide() { const m = document.getElementById('geofenceGuideModal'); if (m) m.style.display = 'flex'; }
@@ -7459,6 +7550,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Usage & Cost card — super-admin only, regardless of role
       const ud = document.getElementById('usageDashCard');
       if (ud) ud.style.display = isSuperAdmin ? 'block' : 'none';
+
+      // Card Reclass card — super-admin only, regardless of role
+      const crc = document.getElementById('cardReclassCard');
+      if (crc) crc.style.display = isSuperAdmin ? 'block' : 'none';
 
       if (role === 'owner') {
         // Show team card
