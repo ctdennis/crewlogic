@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.84 | 2026-07-16">
+  <meta name="crewlogic-version" content="v5.50.85 | 2026-07-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4640,8 +4640,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (_crQbo === null) return '<span style="color:var(--text-muted);font-size:12px;">Checking QuickBooks…</span>';
       if (!_crQbo.connected) return '<button onclick="_crConnectQbo()" class="btn-surface" style="padding:7px 14px;font-size:12.5px;font-weight:700;">Connect QuickBooks</button>';
       const sum = _crReclassSum();
+      const preview = sum > 0 ? '<button onclick="_crPreviewJE()" class="btn-surface" style="padding:7px 14px;font-size:12.5px;font-weight:700;">Preview entry</button>' : '';
       const post = sum > 0 ? '<button onclick="_crPostJE()" style="padding:7px 16px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;">Post to QuickBooks</button>' : '';
-      return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span style="font-size:12px;color:#22c55e;font-weight:700;">✓ QuickBooks connected (' + _hEsc(_crQbo.environment || '') + ')</span>' + post + '<button onclick="_crDisconnectQbo()" style="padding:5px 10px;background:none;border:1px solid var(--border);border-radius:7px;color:var(--text-muted);font-size:11px;cursor:pointer;">Disconnect</button></div>';
+      return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span style="font-size:12px;color:#22c55e;font-weight:700;">✓ QuickBooks connected (' + _hEsc(_crQbo.environment || '') + ')</span>' + preview + post + '<button onclick="_crDisconnectQbo()" style="padding:5px 10px;background:none;border:1px solid var(--border);border-radius:7px;color:var(--text-muted);font-size:11px;cursor:pointer;">Disconnect</button></div>';
     }
     function _crQboArea() { return document.getElementById('crQboArea'); }
     function _crUpdateQbo() { const a = _crQboArea(); if (a) a.innerHTML = _crQboHtml(); }
@@ -4670,6 +4671,26 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           if (r && r.success) a2.innerHTML = '<span style="font-size:12.5px;color:#22c55e;font-weight:700;">✓ Posted — JE ' + _hEsc(String(r.docNumber || r.journalEntryId || '')) + ' · ' + _crMoney(r.total) + ' · ' + _hEsc(r.environment || '') + '</span>';
           else a2.innerHTML = '<span style="font-size:12px;color:#e0492e;">' + _hEsc((r && r.error) || 'Post failed') + '</span> · <a href="#" onclick="_crUpdateQbo();return false;" style="color:#6db3ff;font-size:12px;">back</a>';
         }).catch(() => { const a2 = _crQboArea(); if (a2) a2.innerHTML = '<span style="font-size:12px;color:#e0492e;">Post failed — try again.</span> · <a href="#" onclick="_crUpdateQbo();return false;" style="color:#6db3ff;font-size:12px;">back</a>'; });
+    }
+    function _crPreviewJE() {
+      const sum = _crReclassSum(); if (sum <= 0) return;
+      const a = _crQboArea(); if (a) a.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">Resolving your QuickBooks accounts…</span>';
+      const t = (_crData && _crData.totals) || {}, amounts = {};
+      ['disposal', 'supplies', 'maintenance', 'other'].forEach(k => amounts[k] = Number(t[k] || 0));
+      edgeFunctionCall('crewlogic-quickbooks', { action: 'postJE', dryRun: true, franchiseID: currentUser.franchiseID, month: _crMonthStr(), txnDate: _crTxnDate(), amounts })
+        .then(r => {
+          const a2 = _crQboArea(); if (!a2) return;
+          if (r && r.success && r.lines) {
+            const cell = (v, al) => '<td style="padding:4px 8px;font-size:12px;color:var(--text-primary);text-align:' + al + ';white-space:nowrap;">' + v + '</td>';
+            const rows = r.lines.map(l => '<tr style="border-bottom:1px solid var(--border);">' + cell(_hEsc(l.account), 'left') + cell(l.debit ? _crMoney(l.debit) : '', 'right') + cell(l.credit ? _crMoney(l.credit) : '', 'right') + '</tr>').join('');
+            a2.innerHTML = '<div style="font-size:11.5px;color:#22c55e;font-weight:700;margin-bottom:6px;">✓ Preview — resolved to your real QuickBooks accounts · dated ' + _hEsc(r.txnDate) + ' · nothing posted</div>'
+              + '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;min-width:360px;"><thead><tr>'
+              + '<th style="text-align:left;padding:4px 8px;font-size:10px;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border);">Account</th>'
+              + '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border);">Debit</th>'
+              + '<th style="text-align:right;padding:4px 8px;font-size:10px;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border);">Credit</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+              + '<div style="margin-top:10px;display:flex;gap:8px;"><button onclick="_crPostJE()" style="padding:7px 16px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;">Post to QuickBooks</button><button onclick="_crUpdateQbo()" style="padding:7px 12px;background:none;border:1px solid var(--border);border-radius:8px;color:var(--text-muted);font-size:12px;cursor:pointer;">Close</button></div>';
+          } else { a2.innerHTML = '<span style="font-size:12px;color:#e0492e;">' + _hEsc((r && r.error) || 'Preview failed') + '</span> · <a href="#" onclick="_crUpdateQbo();return false;" style="color:#6db3ff;font-size:12px;">back</a>'; }
+        }).catch(() => { const a2 = _crQboArea(); if (a2) a2.innerHTML = '<span style="font-size:12px;color:#e0492e;">Preview failed — try again.</span>'; });
     }
 
     // Settings → Trucks "📖 Geofence setup guide" → in-app modal (reliable; a hosted page gets shadowed by the SPA catch-all).

@@ -152,33 +152,39 @@ Deno.serve(async (req: Request) => {
 
     if (action === "postJE") {
       const amounts = body.amounts || {}; // { disposal, supplies, maintenance, other } in dollars
+      const dryRun = !!body.dryRun; // resolve + build the JE and return it WITHOUT posting
       const txnDate = String(body.txnDate || "").trim() || new Date().toISOString().slice(0, 10);
       const memo = String(body.memo || "CrewLogic Motive card reclass" + (body.month ? " — " + body.month : ""));
       const { token, realm } = await accessToken(franchiseID);
 
-      // Resolve GL account numbers → QBO account Ids.
+      // Resolve GL account numbers → QBO account {id, name}.
       const acctData = await qboQuery(token, realm, "select Id, Name, AcctNum from Account");
-      const byNum: Record<string, string> = {};
-      for (const a of (acctData.QueryResponse?.Account || [])) if (a.AcctNum) byNum[String(a.AcctNum)] = String(a.Id);
-      const idFor = (cat: string) => byNum[ACCT_NUM[cat]];
+      const byNum: Record<string, { id: string; name: string }> = {};
+      for (const a of (acctData.QueryResponse?.Account || [])) if (a.AcctNum) byNum[String(a.AcctNum)] = { id: String(a.Id), name: String(a.Name || "") };
+      const acctFor = (cat: string) => byNum[ACCT_NUM[cat]];
 
       const lines: any[] = [];
+      const preview: any[] = [];
       let creditSum = 0;
       const missing: string[] = [];
       for (const cat of ["disposal", "supplies", "maintenance", "other"]) {
         const amt = Math.round(Number(amounts[cat] || 0) * 100) / 100;
         if (amt <= 0) continue;
-        const id = idFor(cat);
-        if (!id) { missing.push(cat + " (" + ACCT_NUM[cat] + ")"); continue; }
+        const acct = acctFor(cat);
+        if (!acct) { missing.push(cat + " (" + ACCT_NUM[cat] + ")"); continue; }
         creditSum += amt;
-        lines.push({ Amount: amt, DetailType: "JournalEntryLineDetail", Description: memo, JournalEntryLineDetail: { PostingType: "Debit", AccountRef: { value: id } } });
+        lines.push({ Amount: amt, DetailType: "JournalEntryLineDetail", Description: memo, JournalEntryLineDetail: { PostingType: "Debit", AccountRef: { value: acct.id } } });
+        preview.push({ account: ACCT_NUM[cat] + " · " + acct.name, category: cat, debit: amt, credit: 0 });
       }
-      const gasId = idFor("gas");
-      if (!gasId) missing.push("gas (" + ACCT_NUM.gas + ")");
+      const gas = acctFor("gas");
+      if (!gas) missing.push("gas (" + ACCT_NUM.gas + ")");
       if (missing.length) return json({ success: false, error: "Account(s) not found in this QuickBooks company: " + missing.join(", ") }, 400);
       if (creditSum <= 0) return json({ success: false, error: "Nothing to reclass (all non-gas amounts are $0)." }, 400);
       creditSum = Math.round(creditSum * 100) / 100;
-      lines.push({ Amount: creditSum, DetailType: "JournalEntryLineDetail", Description: memo, JournalEntryLineDetail: { PostingType: "Credit", AccountRef: { value: gasId } } });
+      lines.push({ Amount: creditSum, DetailType: "JournalEntryLineDetail", Description: memo, JournalEntryLineDetail: { PostingType: "Credit", AccountRef: { value: gas.id } } });
+      preview.push({ account: ACCT_NUM.gas + " · " + gas.name, category: "gas", debit: 0, credit: creditSum });
+
+      if (dryRun) return json({ success: true, dryRun: true, txnDate, total: creditSum, environment: QBO_ENV, memo, lines: preview });
 
       const jeRes = await fetch(API_BASE + "/v3/company/" + realm + "/journalentry?minorversion=65", {
         method: "POST",
