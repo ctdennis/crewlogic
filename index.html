@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.80 | 2026-07-16">
+  <meta name="crewlogic-version" content="v5.50.81 | 2026-07-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4524,7 +4524,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     // ── Motive Card Reclass (super-admin / #90-internal) ─────────────────────────────────────────
     let _crY = null, _crM = null, _crData = null; // year, month(0-11), last response
-    const _CR_CAT = { gas: { label: 'Gas', color: '#22c55e' }, disposal: { label: 'Disposal', color: '#e08a1e' }, other: { label: 'Other', color: '#8aa0b4' } };
+    const _CR_CATS = ['gas', 'disposal', 'supplies', 'maintenance', 'other'];
+    const _CR_CAT = { gas: { label: 'Gas', color: '#22c55e' }, disposal: { label: 'Disposal', color: '#e08a1e' }, supplies: { label: 'Supplies', color: '#3b82f6' }, maintenance: { label: 'Maintenance', color: '#a855f7' }, other: { label: 'Other', color: '#8aa0b4' } };
     function openCardReclass() {
       const m = document.getElementById('cardReclassModal'); if (!m) return;
       m.style.display = 'flex';
@@ -4554,17 +4555,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _crBodyHtml(data) {
       const t = data.totals || {}, c = data.counts || {};
       // Category totals
-      let h = '<div style="display:flex;gap:10px;margin-bottom:6px;">';
-      ['gas', 'disposal', 'other'].forEach(k => {
+      let h = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;">';
+      _CR_CATS.forEach(k => {
         const cc = _CR_CAT[k];
-        h += '<div style="flex:1;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-left:4px solid ' + cc.color + ';border-radius:8px;">'
+        h += '<div style="flex:1 1 128px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-left:4px solid ' + cc.color + ';border-radius:8px;">'
           + '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;font-weight:700;">' + cc.label + '</div>'
-          + '<div style="font-size:17px;font-weight:800;color:var(--text-primary);">' + _crMoney(t[k]) + '</div>'
+          + '<div style="font-size:16px;font-weight:800;color:var(--text-primary);">' + _crMoney(t[k]) + '</div>'
           + '<div style="font-size:11px;color:var(--text-muted);">' + (c[k] || 0) + ' txn</div></div>';
       });
       h += '</div>';
-      const reclass = Number(t.disposal || 0) + Number(t.other || 0);
-      h += '<div style="font-size:12px;color:var(--text-muted);margin:0 0 14px 2px;">Currently all posts as gas — <b style="color:var(--text-secondary);">' + _crMoney(reclass) + '</b> to reclass out (' + _crMoney(t.disposal) + ' disposal + ' + _crMoney(t.other) + ' other).</div>';
+      const nonGas = _CR_CATS.filter(k => k !== 'gas');
+      const reclass = nonGas.reduce((s, k) => s + Number(t[k] || 0), 0);
+      const parts = nonGas.filter(k => Number(t[k] || 0) > 0).map(k => _crMoney(t[k]) + ' ' + _CR_CAT[k].label.toLowerCase()).join(' + ');
+      h += '<div style="font-size:12px;color:var(--text-muted);margin:0 0 14px 2px;">Currently all posts as gas — <b style="color:var(--text-secondary);">' + _crMoney(reclass) + '</b> to reclass out' + (parts ? ' (' + parts + ')' : '') + '.</div>';
       const news = (data.merchants || []).filter(m => m.isNew).length;
       if (news) h += '<div style="font-size:12px;color:#e08a1e;margin:0 0 12px 2px;">⚠ ' + news + ' new/untagged vendor' + (news === 1 ? '' : 's') + ' — set below (auto-guess applied for now).</div>';
       // Merchant table
@@ -4574,7 +4577,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + '<th style="text-align:right;padding:7px 8px;font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;border-bottom:1px solid var(--border);">#</th>'
         + '<th style="text-align:left;padding:7px 8px;font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;border-bottom:1px solid var(--border);">Category</th></tr></thead><tbody>';
       (data.merchants || []).forEach((m, i) => {
-        const opts = ['gas', 'disposal', 'other'].map(k => '<option value="' + k + '"' + (m.effective === k ? ' selected' : '') + '>' + _CR_CAT[k].label + '</option>').join('');
+        const opts = _CR_CATS.map(k => '<option value="' + k + '"' + (m.effective === k ? ' selected' : '') + '>' + _CR_CAT[k].label + '</option>').join('');
         const dot = '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + _CR_CAT[m.effective].color + ';margin-right:6px;"></span>';
         h += '<tr style="border-bottom:1px solid var(--border);">'
           + '<td style="padding:7px 8px;font-size:13px;color:var(--text-primary);font-weight:600;">' + dot + _hEsc(m.name) + (m.override ? ' <span style="font-size:10px;color:#e08a1e;">(override)</span>' : '') + '</td>'

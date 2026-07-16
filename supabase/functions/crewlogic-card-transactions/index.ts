@@ -21,20 +21,28 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const CARD_URL = "https://api.gomotive.com/motive_card/v1/transactions";
 
-type Cat = "gas" | "disposal" | "other";
-// product_type → default category. Fuel = gas; disposal sites code as these generic service types (verified
-// against #90's merchants: TOWN OF BOURNE / JRV Shun Pike = "Business & professional services", WM transfer =
-// "Utilities"). Everything else defaults to "other". Any vendor can be OVERRIDDEN in card_merchant_overrides.
+type Cat = "gas" | "disposal" | "supplies" | "maintenance" | "other";
+const CATS: Cat[] = ["gas", "disposal", "supplies", "maintenance", "other"];
+// product_type → default category (verified against #90's merchants):
+//   fuel                                    → gas
+//   Business & professional services / Utilities (TOWN OF BOURNE, JRV, WM transfer) → disposal
+//   Hardware stores (HOME DEPOT)            → supplies
+//   Maintenance / Tires (AUTOZONE, USED TIRE WAREHOUSE, ADVANCE AUTO) → maintenance
+//   everything else                         → other
+// Any vendor can be OVERRIDDEN in card_merchant_overrides.
 const GAS_TYPES = new Set([
   "Gasoline", "Diesel", "Miscellaneous Fuel", "DEF", "Reefer Fuel", "Fuel station purchases", "Gasohol",
 ]);
 const DISPOSAL_TYPES = new Set(["Business & professional services", "Utilities"]);
-// Auto-category for a MERCHANT from the product_types seen across its transactions: gas if any fuel, else
-// disposal if any disposal-type, else other. A merchant is consistently ONE category (so its no-product_type
-// charges inherit it too).
+const SUPPLY_TYPES = new Set(["Hardware stores"]);
+const MAINT_TYPES = new Set(["Maintenance", "Tires"]);
+// Auto-category for a MERCHANT from its product_types (fuel wins for gas stations that also show Maintenance).
+// A merchant is consistently ONE category, so its no-product_type charges inherit it too.
 function autoCategory(productTypes: Set<string>): Cat {
   for (const t of productTypes) if (GAS_TYPES.has(t)) return "gas";
   for (const t of productTypes) if (DISPOSAL_TYPES.has(t)) return "disposal";
+  for (const t of productTypes) if (SUPPLY_TYPES.has(t)) return "supplies";
+  for (const t of productTypes) if (MAINT_TYPES.has(t)) return "maintenance";
   return "other";
 }
 
@@ -89,8 +97,8 @@ Deno.serve(async (req: Request) => {
     if (action === "saveOverride") {
       const merchant_name = String(body.merchant_name || "").trim();
       const category = String(body.category || "").trim();
-      if (!merchant_name || !["gas", "disposal", "other"].includes(category)) {
-        return jsonResponse({ success: false, error: "merchant_name + valid category (gas|disposal|other) required" }, 400);
+      if (!merchant_name || !CATS.includes(category as Cat)) {
+        return jsonResponse({ success: false, error: "merchant_name + valid category (" + CATS.join("|") + ") required" }, 400);
       }
       const up = await fetch(SUPABASE_URL + "/rest/v1/card_merchant_overrides?on_conflict=franchise_id,merchant_name", {
         method: "POST",
@@ -140,8 +148,8 @@ Deno.serve(async (req: Request) => {
       return { name, total: r2(m.total), count: m.count, productTypes: [...m.types], auto, override, effective: (override || auto) as Cat, isNew: !(name in overrides) };
     }).sort((a, b) => b.total - a.total);
 
-    const totals: Record<Cat, number> = { gas: 0, disposal: 0, other: 0 };
-    const counts: Record<Cat, number> = { gas: 0, disposal: 0, other: 0 };
+    const totals = Object.fromEntries(CATS.map((k) => [k, 0])) as Record<Cat, number>;
+    const counts = Object.fromEntries(CATS.map((k) => [k, 0])) as Record<Cat, number>;
     const catByMerchant: Record<string, Cat> = {};
     for (const mm of merchants) { totals[mm.effective] += mm.total; counts[mm.effective] += mm.count; catByMerchant[mm.name] = mm.effective; }
     for (const k of Object.keys(totals) as Cat[]) totals[k] = r2(totals[k]);
