@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.82 | 2026-07-16">
+  <meta name="crewlogic-version" content="v5.50.83 | 2026-07-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4526,6 +4526,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _crY = null, _crM = null, _crData = null; // year, month(0-11), last response
     const _CR_CATS = ['gas', 'disposal', 'supplies', 'maintenance', 'other'];
     const _CR_CAT = { gas: { label: 'Gas', color: '#22c55e' }, disposal: { label: 'Disposal', color: '#e08a1e' }, supplies: { label: 'Supplies', color: '#3b82f6' }, maintenance: { label: 'Maintenance', color: '#a855f7' }, other: { label: 'Other', color: '#8aa0b4' } };
+    // Reclass category → QuickBooks GL account (Luggers Northeast COA, validated 2026-07-16). Credit gas, debit the rest.
+    const _CR_ACCT = {
+      gas: { num: '5101-00', name: 'Vehicle Expenses:Gas' },
+      disposal: { num: '5051-00', name: 'Disposal Costs Net:Dump Fees' },
+      supplies: { num: '5151-00', name: 'Direct Operating Expenses:Supplies & Equipment' },
+      maintenance: { num: '5102-00', name: 'Vehicle Expenses:Repairs & Maintenance' },
+      other: { num: '8100-00', name: 'Miscellaneous Expense' },
+    };
     function openCardReclass() {
       const m = document.getElementById('cardReclassModal'); if (!m) return;
       m.style.display = 'flex';
@@ -4568,6 +4576,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const reclass = nonGas.reduce((s, k) => s + Number(t[k] || 0), 0);
       const parts = nonGas.filter(k => Number(t[k] || 0) > 0).map(k => _crMoney(t[k]) + ' ' + _CR_CAT[k].label.toLowerCase()).join(' + ');
       h += '<div style="font-size:12px;color:var(--text-muted);margin:0 0 14px 2px;">Currently all posts as gas — <b style="color:var(--text-secondary);">' + _crMoney(reclass) + '</b> to reclass out' + (parts ? ' (' + parts + ')' : '') + '.</div>';
+      // Reclass journal entry: debit each non-gas category (>0), credit gas the sum (balanced).
+      const jeLabel = new Date(_crY, _crM, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+      const jeRow = (acct, dr, cr) => '<tr style="border-bottom:1px solid var(--border);"><td style="padding:5px 8px;font-size:12px;color:var(--text-primary);">' + acct.num + ' · ' + _hEsc(acct.name) + '</td><td style="padding:5px 8px;font-size:12px;text-align:right;color:var(--text-primary);white-space:nowrap;">' + dr + '</td><td style="padding:5px 8px;font-size:12px;text-align:right;color:var(--text-primary);white-space:nowrap;">' + cr + '</td></tr>';
+      let jeBody = '', jeSum = 0;
+      nonGas.forEach(k => { const amt = Number(t[k] || 0); if (amt > 0) { jeSum += amt; jeBody += jeRow(_CR_ACCT[k], _crMoney(amt), ''); } });
+      if (jeSum > 0) {
+        jeBody += jeRow(_CR_ACCT.gas, '', _crMoney(jeSum));
+        h += '<details style="margin:0 0 14px 0;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);"><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--text-secondary);padding:10px 12px;">📋 Reclass journal entry — ' + jeLabel + ' (post in QuickBooks)</summary>'
+          + '<div style="padding:0 12px 12px;overflow-x:auto;"><table style="width:100%;border-collapse:collapse;min-width:420px;"><thead><tr>'
+          + '<th style="text-align:left;padding:5px 8px;font-size:10.5px;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border);">Account</th>'
+          + '<th style="text-align:right;padding:5px 8px;font-size:10.5px;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border);">Debit</th>'
+          + '<th style="text-align:right;padding:5px 8px;font-size:10.5px;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border);">Credit</th></tr></thead><tbody>'
+          + jeBody + '</tbody></table></div></details>';
+      }
       const news = (data.merchants || []).filter(m => m.isNew).length;
       if (news) h += '<div style="font-size:12px;color:#e08a1e;margin:0 0 12px 2px;">⚠ ' + news + ' new/untagged vendor' + (news === 1 ? '' : 's') + ' — set below (auto-guess applied for now).</div>';
       // Merchant table
