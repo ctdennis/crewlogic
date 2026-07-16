@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.81 | 2026-07-16">
+  <meta name="crewlogic-version" content="v5.50.82 | 2026-07-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4589,10 +4589,24 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       h += '</tbody></table></div>';
       return h;
     }
+    // Recompute category totals CLIENT-SIDE from the merchants' effective categories (no Motive re-pull).
+    function _crRecompute() {
+      const t = {}, c = {};
+      _CR_CATS.forEach(k => { t[k] = 0; c[k] = 0; });
+      (_crData.merchants || []).forEach(m => { t[m.effective] = (t[m.effective] || 0) + Number(m.total || 0); c[m.effective] = (c[m.effective] || 0) + m.count; });
+      _CR_CATS.forEach(k => { t[k] = Math.round(t[k] * 100) / 100; });
+      _crData.totals = t; _crData.counts = c;
+    }
     function _crOverrideIdx(i, category) {
       const m = _crData && _crData.merchants && _crData.merchants[i]; if (!m) return;
-      edgeFunctionCall('crewlogic-card-transactions', { franchiseID: currentUser.franchiseID, action: 'saveOverride', merchant_name: m.name, category })
-        .then(() => _crLoad()).catch(() => _crLoad());
+      if (m.override === category) return; // no change
+      // Update locally + re-render instantly (the transaction data is unchanged — only this vendor's bucket).
+      m.override = category; m.effective = category; m.isNew = false;
+      _crRecompute();
+      const body = document.getElementById('cardReclassBody');
+      if (body) body.innerHTML = _crHeader() + _crBodyHtml(_crData);
+      // Persist the override in the background (fire-and-forget) — the UI doesn't wait on it.
+      edgeFunctionCall('crewlogic-card-transactions', { franchiseID: currentUser.franchiseID, action: 'saveOverride', merchant_name: m.name, category }).catch(() => {});
     }
 
     // Settings → Trucks "📖 Geofence setup guide" → in-app modal (reliable; a hosted page gets shadowed by the SPA catch-all).
