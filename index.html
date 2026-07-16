@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.83 | 2026-07-16">
+  <meta name="crewlogic-version" content="v5.50.84 | 2026-07-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4523,7 +4523,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function closeAlertsReport() { const m = document.getElementById('alertsReportModal'); if (m) m.style.display = 'none'; }
 
     // ── Motive Card Reclass (super-admin / #90-internal) ─────────────────────────────────────────
-    let _crY = null, _crM = null, _crData = null; // year, month(0-11), last response
+    let _crY = null, _crM = null, _crData = null, _crQbo = null; // year, month(0-11), last response, QBO status
     const _CR_CATS = ['gas', 'disposal', 'supplies', 'maintenance', 'other'];
     const _CR_CAT = { gas: { label: 'Gas', color: '#22c55e' }, disposal: { label: 'Disposal', color: '#e08a1e' }, supplies: { label: 'Supplies', color: '#3b82f6' }, maintenance: { label: 'Maintenance', color: '#a855f7' }, other: { label: 'Other', color: '#8aa0b4' } };
     // Reclass category → QuickBooks GL account (Luggers Northeast COA, validated 2026-07-16). Credit gas, debit the rest.
@@ -4539,6 +4539,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       m.style.display = 'flex';
       if (_crY === null) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); _crY = d.getFullYear(); _crM = d.getMonth(); } // default: last month
       _crLoad();
+      _crCheckQbo();
     }
     function closeCardReclass() { const m = document.getElementById('cardReclassModal'); if (m) m.style.display = 'none'; }
     function _crShiftMonth(delta) { let y = _crY, mo = _crM + delta; if (mo < 0) { mo = 11; y--; } if (mo > 11) { mo = 0; y++; } _crY = y; _crM = mo; _crLoad(); }
@@ -4588,7 +4589,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + '<th style="text-align:left;padding:5px 8px;font-size:10.5px;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border);">Account</th>'
           + '<th style="text-align:right;padding:5px 8px;font-size:10.5px;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border);">Debit</th>'
           + '<th style="text-align:right;padding:5px 8px;font-size:10.5px;color:var(--text-muted);text-transform:uppercase;border-bottom:1px solid var(--border);">Credit</th></tr></thead><tbody>'
-          + jeBody + '</tbody></table></div></details>';
+          + jeBody + '</tbody></table></div>'
+          + '<div id="crQboArea" style="padding:10px 12px;border-top:1px solid var(--border);">' + _crQboHtml() + '</div></details>';
       }
       const news = (data.merchants || []).filter(m => m.isNew).length;
       if (news) h += '<div style="font-size:12px;color:#e08a1e;margin:0 0 12px 2px;">⚠ ' + news + ' new/untagged vendor' + (news === 1 ? '' : 's') + ' — set below (auto-guess applied for now).</div>';
@@ -4629,6 +4631,45 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (body) body.innerHTML = _crHeader() + _crBodyHtml(_crData);
       // Persist the override in the background (fire-and-forget) — the UI doesn't wait on it.
       edgeFunctionCall('crewlogic-card-transactions', { franchiseID: currentUser.franchiseID, action: 'saveOverride', merchant_name: m.name, category }).catch(() => {});
+    }
+    // ── QuickBooks connect + post (reclass JE) ──
+    function _crReclassSum() { const t = (_crData && _crData.totals) || {}; return ['disposal', 'supplies', 'maintenance', 'other'].reduce((s, k) => s + Number(t[k] || 0), 0); }
+    function _crMonthStr() { return _crY + '-' + String(_crM + 1).padStart(2, '0'); }
+    function _crTxnDate() { const last = new Date(_crY, _crM + 1, 0).getDate(); return _crMonthStr() + '-' + String(last).padStart(2, '0'); }
+    function _crQboHtml() {
+      if (_crQbo === null) return '<span style="color:var(--text-muted);font-size:12px;">Checking QuickBooks…</span>';
+      if (!_crQbo.connected) return '<button onclick="_crConnectQbo()" class="btn-surface" style="padding:7px 14px;font-size:12.5px;font-weight:700;">Connect QuickBooks</button>';
+      const sum = _crReclassSum();
+      const post = sum > 0 ? '<button onclick="_crPostJE()" style="padding:7px 16px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;">Post to QuickBooks</button>' : '';
+      return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span style="font-size:12px;color:#22c55e;font-weight:700;">✓ QuickBooks connected (' + _hEsc(_crQbo.environment || '') + ')</span>' + post + '<button onclick="_crDisconnectQbo()" style="padding:5px 10px;background:none;border:1px solid var(--border);border-radius:7px;color:var(--text-muted);font-size:11px;cursor:pointer;">Disconnect</button></div>';
+    }
+    function _crQboArea() { return document.getElementById('crQboArea'); }
+    function _crUpdateQbo() { const a = _crQboArea(); if (a) a.innerHTML = _crQboHtml(); }
+    function _crCheckQbo() {
+      edgeFunctionCall('crewlogic-quickbooks', { action: 'status', franchiseID: currentUser.franchiseID })
+        .then(s => { _crQbo = (s && s.success) ? s : { connected: false }; _crUpdateQbo(); })
+        .catch(() => { _crQbo = { connected: false }; _crUpdateQbo(); });
+    }
+    function _crConnectQbo() {
+      edgeFunctionCall('crewlogic-quickbooks', { action: 'authUrl', franchiseID: currentUser.franchiseID })
+        .then(r => {
+          if (r && r.url) { window.open(r.url, '_blank'); const a = _crQboArea(); if (a) a.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">Authorize in the QuickBooks tab, then <a href="#" onclick="_crCheckQbo();return false;" style="color:#6db3ff;">refresh status</a>.</span>'; }
+          else { alert((r && r.error) || 'Could not start the QuickBooks connect.'); }
+        }).catch(() => alert('Could not start the QuickBooks connect.'));
+    }
+    function _crDisconnectQbo() { edgeFunctionCall('crewlogic-quickbooks', { action: 'disconnect', franchiseID: currentUser.franchiseID }).then(() => { _crQbo = { connected: false }; _crUpdateQbo(); }).catch(() => {}); }
+    function _crPostJE() {
+      const sum = _crReclassSum(); if (sum <= 0) return;
+      if (!confirm('Post the ' + new Date(_crY, _crM, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) + ' reclass journal entry to QuickBooks (' + (_crQbo && _crQbo.environment) + ')?')) return;
+      const a = _crQboArea(); if (a) a.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">Posting to QuickBooks…</span>';
+      const t = (_crData && _crData.totals) || {}, amounts = {};
+      ['disposal', 'supplies', 'maintenance', 'other'].forEach(k => amounts[k] = Number(t[k] || 0));
+      edgeFunctionCall('crewlogic-quickbooks', { action: 'postJE', franchiseID: currentUser.franchiseID, month: _crMonthStr(), txnDate: _crTxnDate(), amounts })
+        .then(r => {
+          const a2 = _crQboArea(); if (!a2) return;
+          if (r && r.success) a2.innerHTML = '<span style="font-size:12.5px;color:#22c55e;font-weight:700;">✓ Posted — JE ' + _hEsc(String(r.docNumber || r.journalEntryId || '')) + ' · ' + _crMoney(r.total) + ' · ' + _hEsc(r.environment || '') + '</span>';
+          else a2.innerHTML = '<span style="font-size:12px;color:#e0492e;">' + _hEsc((r && r.error) || 'Post failed') + '</span> · <a href="#" onclick="_crUpdateQbo();return false;" style="color:#6db3ff;font-size:12px;">back</a>';
+        }).catch(() => { const a2 = _crQboArea(); if (a2) a2.innerHTML = '<span style="font-size:12px;color:#e0492e;">Post failed — try again.</span> · <a href="#" onclick="_crUpdateQbo();return false;" style="color:#6db3ff;font-size:12px;">back</a>'; });
     }
 
     // Settings → Trucks "📖 Geofence setup guide" → in-app modal (reliable; a hosted page gets shadowed by the SPA catch-all).
