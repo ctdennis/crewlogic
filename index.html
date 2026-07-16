@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.78 | 2026-07-15">
+  <meta name="crewlogic-version" content="v5.50.79 | 2026-07-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8913,7 +8913,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // from Vonigo (via crewlogic-todays-workorders, includeCoords) already geocoded;
     // completed/archived jobs are excluded server-side, so they never appear here.
     // Distinct colors assigned to routes in first-seen (earliest-stop) order.
-    const _ROUTE_COLORS = ['#3b82f6', '#a855f7', '#ef4444', '#14b8a6', '#ec4899', '#8b5cf6', '#22c55e']; // orange (#f59e0b) dropped — it clashed with the estimate-taken amber (#ffab00) on the map pins
+    const _ROUTE_COLORS = ['#3b82f6', '#a855f7', '#ef4444', '#14b8a6', '#ec4899', '#8b5cf6']; // orange (#f59e0b) dropped — clashed with estimate-taken amber (#ffab00); green (#22c55e) dropped — reserved for DO_WORK_NOW (label 9975)
     // Vonigo returns addresses ALL CAPS — title-case for display, keeping the 2-letter state upper.
     function _truckProperAddr(s) {
       let t = String(s || '').toLowerCase().replace(/\b([a-z])/g, c => c.toUpperCase());
@@ -8991,8 +8991,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const done = !!j.isComplete || j.labelOpt === 9993; // paid or Lost → gray + faded marker
           const notStarted = (!j.labelOpt || j.labelOpt === 9984);
           const natlAcct = (j.labelOpt === 9981); // National Account → its own dark blue, not amber
-          const estTaken = (!done && !notStarted && !natlAcct);
-          const color = done ? '#5b6b7a' : (natlAcct ? NATL_ACCT_COLOR : (estTaken ? EST_TAKEN_COLOR : baseColor));
+          const doWorkNow = (j.labelOpt === 9975); // Est Converted → Do Work Now hit → reserved green
+          const estTaken = (!done && !notStarted && !natlAcct && !doWorkNow);
+          const color = done ? '#5b6b7a' : (natlAcct ? NATL_ACCT_COLOR : (doWorkNow ? DO_WORK_NOW_COLOR : (estTaken ? EST_TAKEN_COLOR : baseColor)));
           const icon = L.divIcon({
             className: 'job-stop-marker',
             html: '<svg width="22" height="22" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.5));">' +
@@ -9721,11 +9722,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // eyeballed 2026-06-22; "done" labels (245/9996/9993) render gray anyway. None/unknown → New Appointment
     // blue (active default). Route is conveyed by the lane, not the body color.
     function mjLabelColor(opt) { const M = { 245: '#6cc070', 9996: '#7fae8a', 9993: '#e0492e', 9984: '#45b6e6', 9981: '#1f4e79', 9975: '#2f9e78', 9973: '#9b59b6', 9971: '#e85fa0', 9970: '#9a8fa6', 247: '#c79fd6', 249: '#aab3bd' }; return M[opt] || '#45b6e6'; }
-    // RESERVED status color — "Estimate taken" (Vonigo label 245: estimate created/priced but NOT yet paid).
-    // Deliberately OUTSIDE _ROUTE_COLORS, mjZoneColor, and mjLabelColor so it never collides with a route,
-    // zone, or other label. Do NOT add this hex to any of those palettes. Gray (#5b6b7a) stays reserved for
-    // truly-PAID (status 164/165) + Lost(9993)/Est-Only(9996).
+    // RESERVED status colors — deliberately OUTSIDE _ROUTE_COLORS, mjZoneColor, and mjLabelColor so they never
+    // collide with a route, zone, or other label. Do NOT add these hexes to any of those palettes.
+    //   EST_TAKEN (amber)    — label 245 "Est Completed Job": estimate priced, Do Work Now NOT yet hit.
+    //   DO_WORK_NOW (green)  — label 9975 "Est Converted": Do Work Now hit / customer agreed / job authorized.
+    //   NATL_ACCT (dark blue)— label 9981 National Account.
+    //   Gray (#5b6b7a)       — truly done: PAID/status 164/165 + Lost(9993).
+    // (The route green #22c55e was pulled from _ROUTE_COLORS so routes can't clash with DO_WORK_NOW.)
     const EST_TAKEN_COLOR = '#ffab00';
+    const DO_WORK_NOW_COLOR = '#22c55e'; // label 9975 "Est Converted" — Do Work Now hit; RESERVED, kept out of the route palette
     const NATL_ACCT_COLOR = '#1f4e79'; // National Account (label 9981) — dark blue like Vonigo; its OWN status color, NOT the amber "estimate taken"
     // Left-stripe color by PRICING ZONE. Vonigo's per-franchise zone colors are NOT API-readable, so this is a
     // stable CrewLogic palette keyed deterministically to the zone id (consistent per franchise; flags a job
@@ -9838,8 +9843,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const done = (!!j.completed || j.labelOpt === 9993);
           const notStarted = (!j.labelOpt || j.labelOpt === 9984);
           const natlAcct = (j.labelOpt === 9981); // National Account → its own dark blue, not amber
-          const estTaken = (!done && !notStarted && !natlAcct);
-          const bg = done ? '#5b6b7a' : (natlAcct ? NATL_ACCT_COLOR : (estTaken ? EST_TAKEN_COLOR : mjLabelColor(j.labelOpt))), zoneStripe = mjZoneColor(j.zoneID);
+          const doWorkNow = (j.labelOpt === 9975); // Est Converted → Do Work Now hit → reserved green
+          const estTaken = (!done && !notStarted && !natlAcct && !doWorkNow);
+          const bg = done ? '#5b6b7a' : (natlAcct ? NATL_ACCT_COLOR : (doWorkNow ? DO_WORK_NOW_COLOR : (estTaken ? EST_TAKEN_COLOR : mjLabelColor(j.labelOpt)))), zoneStripe = mjZoneColor(j.zoneID);
           const canDrag = dnd && !done;
           const dragAttrs = canDrag ? ' draggable="true" ondragstart="dashDragStart(event)" ondragend="dashClearDragGhost()" data-wo="' + mjEsc(String(j.woID || '')) + '" data-dur="' + (j.durationMin || 90) + '" data-zip="' + mjEsc(String(j.zip || '')) + '" data-client="' + mjEsc(String(j.client || '')) + '" data-day="' + mjEsc(String(data.dayID || '')) + '" data-route="' + mjEsc(rc) + '" data-tlabel="' + mjEsc(String(j.timeLabel || '')) + '" data-tmin="' + (j.timeMin != null ? j.timeMin : '') + '"' : '';
           h += '<div' + dragAttrs + ' onclick="mjTip(event,\'' + wkey + '\',true)" data-jid="' + wkey + '" title="' + (canDrag ? 'Drag to move' : (done ? 'Completed — adjust in Vonigo' : '')) + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:3px;bottom:3px;background:' + bg + ';opacity:' + (done ? '0.72' : '1') + ';border-radius:5px;padding:2px 5px 2px 9px;overflow:hidden;cursor:' + (canDrag ? 'grab' : 'pointer') + ';box-shadow:inset 5px 0 0 0 ' + zoneStripe + ',0 1px 2px rgba(0,0,0,.3);">';
