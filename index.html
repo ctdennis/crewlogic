@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.87 | 2026-07-17">
+  <meta name="crewlogic-version" content="v5.50.88 | 2026-07-17">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4280,6 +4280,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
     }
 
+    // Authenticated caller for the super-admin-only Motive card reclass / QuickBooks functions. Sends the
+    // owner's Supabase JWT (not just the public anon key) so the edge function can verify super-admin before
+    // returning card spend or posting a journal entry. The anon key alone cannot identify the caller.
+    async function _crEdge(name, body) {
+      const token = (await _supabaseUserToken()) || EDGE_ANON_KEY;
+      const res = await fetch(EDGE_BASE + '/' + name, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, 'apikey': EDGE_ANON_KEY },
+        body: JSON.stringify(body)
+      });
+      const text = await res.text();
+      try { return JSON.parse(text); } catch (_e) { return { success: false, error: 'The server returned an unexpected response (HTTP ' + res.status + ').' }; }
+    }
+
     // Billing (Stripe) Edge Function calls. Sends the logged-in user's Supabase JWT so the billing
     // fn can resolve the caller -> their franchise (the anon key alone won't identify the user).
     async function billingCall(action, payload) {
@@ -4554,7 +4568,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       body.innerHTML = _crHeader() + '<div style="color:var(--text-muted);padding:14px 0;">Loading…</div>';
       const { start, end } = _crRange();
       let data;
-      try { data = await edgeFunctionCall('crewlogic-card-transactions', { franchiseID: currentUser.franchiseID, start_date: start, end_date: end }); }
+      try { data = await _crEdge('crewlogic-card-transactions', { franchiseID: currentUser.franchiseID, start_date: start, end_date: end }); }
       catch (e) { body.innerHTML = _crHeader() + '<div style="color:var(--text-muted);">Could not load card transactions.</div>'; return; }
       if (!data || !data.success) { body.innerHTML = _crHeader() + '<div style="color:var(--text-muted);">' + _hEsc((data && data.error) || 'Load failed') + '</div>'; return; }
       _crData = data;
@@ -4663,7 +4677,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const body = document.getElementById('cardReclassBody');
       if (body) body.innerHTML = _crHeader() + _crBodyHtml(_crData);
       // Persist the override in the background (fire-and-forget) — the UI doesn't wait on it.
-      edgeFunctionCall('crewlogic-card-transactions', { franchiseID: currentUser.franchiseID, action: 'saveOverride', merchant_name: m.name, category }).catch(() => {});
+      _crEdge('crewlogic-card-transactions', { franchiseID: currentUser.franchiseID, action: 'saveOverride', merchant_name: m.name, category }).catch(() => {});
     }
     // ── QuickBooks connect + post (reclass JE) ──
     function _crReclassSum() { const t = (_crData && _crData.totals) || {}; return ['disposal', 'supplies', 'maintenance', 'other'].reduce((s, k) => s + Number(t[k] || 0), 0); }
@@ -4680,25 +4694,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _crQboArea() { return document.getElementById('crQboArea'); }
     function _crUpdateQbo() { const a = _crQboArea(); if (a) a.innerHTML = _crQboHtml(); }
     function _crCheckQbo() {
-      edgeFunctionCall('crewlogic-quickbooks', { action: 'status', franchiseID: currentUser.franchiseID })
+      _crEdge('crewlogic-quickbooks', { action: 'status', franchiseID: currentUser.franchiseID })
         .then(s => { _crQbo = (s && s.success) ? s : { connected: false }; _crUpdateQbo(); })
         .catch(() => { _crQbo = { connected: false }; _crUpdateQbo(); });
     }
     function _crConnectQbo() {
-      edgeFunctionCall('crewlogic-quickbooks', { action: 'authUrl', franchiseID: currentUser.franchiseID })
+      _crEdge('crewlogic-quickbooks', { action: 'authUrl', franchiseID: currentUser.franchiseID })
         .then(r => {
           if (r && r.url) { window.open(r.url, '_blank'); const a = _crQboArea(); if (a) a.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">Authorize in the QuickBooks tab, then <a href="#" onclick="_crCheckQbo();return false;" style="color:#6db3ff;">refresh status</a>.</span>'; }
           else { alert((r && r.error) || 'Could not start the QuickBooks connect.'); }
         }).catch(() => alert('Could not start the QuickBooks connect.'));
     }
-    function _crDisconnectQbo() { edgeFunctionCall('crewlogic-quickbooks', { action: 'disconnect', franchiseID: currentUser.franchiseID }).then(() => { _crQbo = { connected: false }; _crUpdateQbo(); }).catch(() => {}); }
+    function _crDisconnectQbo() { _crEdge('crewlogic-quickbooks', { action: 'disconnect', franchiseID: currentUser.franchiseID }).then(() => { _crQbo = { connected: false }; _crUpdateQbo(); }).catch(() => {}); }
     function _crPostJE() {
       const sum = _crReclassSum(); if (sum <= 0) return;
       if (!confirm('Post the ' + new Date(_crY, _crM, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) + ' reclass journal entry to QuickBooks (' + (_crQbo && _crQbo.environment) + ')?')) return;
       const a = _crQboArea(); if (a) a.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">Posting to QuickBooks…</span>';
       const t = (_crData && _crData.totals) || {}, amounts = {};
       ['disposal', 'supplies', 'maintenance', 'other'].forEach(k => amounts[k] = Number(t[k] || 0));
-      edgeFunctionCall('crewlogic-quickbooks', { action: 'postJE', franchiseID: currentUser.franchiseID, month: _crMonthStr(), txnDate: _crTxnDate(), amounts })
+      _crEdge('crewlogic-quickbooks', { action: 'postJE', franchiseID: currentUser.franchiseID, month: _crMonthStr(), txnDate: _crTxnDate(), amounts })
         .then(r => {
           const a2 = _crQboArea(); if (!a2) return;
           if (r && r.success) a2.innerHTML = '<span style="font-size:12.5px;color:#22c55e;font-weight:700;">✓ Posted — JE ' + _hEsc(String(r.docNumber || r.journalEntryId || '')) + ' · ' + _crMoney(r.total) + ' · ' + _hEsc(r.environment || '') + '</span>';
@@ -4710,7 +4724,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const a = _crQboArea(); if (a) a.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">Resolving your QuickBooks accounts…</span>';
       const t = (_crData && _crData.totals) || {}, amounts = {};
       ['disposal', 'supplies', 'maintenance', 'other'].forEach(k => amounts[k] = Number(t[k] || 0));
-      edgeFunctionCall('crewlogic-quickbooks', { action: 'postJE', dryRun: true, franchiseID: currentUser.franchiseID, month: _crMonthStr(), txnDate: _crTxnDate(), amounts })
+      _crEdge('crewlogic-quickbooks', { action: 'postJE', dryRun: true, franchiseID: currentUser.franchiseID, month: _crMonthStr(), txnDate: _crTxnDate(), amounts })
         .then(r => {
           const a2 = _crQboArea(); if (!a2) return;
           if (r && r.success && r.lines) {
