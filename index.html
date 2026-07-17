@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.86 | 2026-07-17">
+  <meta name="crewlogic-version" content="v5.50.87 | 2026-07-17">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4604,14 +4604,47 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const opts = _CR_CATS.map(k => '<option value="' + k + '"' + (m.effective === k ? ' selected' : '') + '>' + _CR_CAT[k].label + '</option>').join('');
         const dot = '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + _CR_CAT[m.effective].color + ';margin-right:6px;"></span>';
         h += '<tr style="border-bottom:1px solid var(--border);">'
-          + '<td style="padding:7px 8px;font-size:13px;color:var(--text-primary);font-weight:600;">' + dot + _hEsc(m.name) + (m.override ? ' <span style="font-size:10px;color:#e08a1e;">(override)</span>' : '') + '</td>'
-          + '<td style="padding:7px 8px;font-size:13px;color:var(--text-primary);text-align:right;font-weight:700;white-space:nowrap;">' + _crMoney(m.total) + '</td>'
-          + '<td style="padding:7px 8px;font-size:12.5px;color:var(--text-secondary);text-align:right;">' + m.count + '</td>'
+          + '<td onclick="_crToggleDet(' + i + ')" title="Show transactions" style="padding:7px 8px;font-size:13px;color:var(--text-primary);font-weight:600;cursor:pointer;"><span id="crcar-' + i + '" style="display:inline-block;width:11px;color:var(--text-muted);font-size:10px;">▸</span>' + dot + _hEsc(m.name) + (m.override ? ' <span style="font-size:10px;color:#e08a1e;">(override)</span>' : '') + '</td>'
+          + '<td onclick="_crToggleDet(' + i + ')" style="padding:7px 8px;font-size:13px;color:var(--text-primary);text-align:right;font-weight:700;white-space:nowrap;cursor:pointer;">' + _crMoney(m.total) + '</td>'
+          + '<td onclick="_crToggleDet(' + i + ')" style="padding:7px 8px;font-size:12.5px;color:var(--text-secondary);text-align:right;cursor:pointer;">' + m.count + '</td>'
           + '<td style="padding:7px 8px;"><select onchange="_crOverrideIdx(' + i + ', this.value)" style="padding:5px 8px;font-size:12.5px;background:var(--bg-input);border:1px solid var(--border);border-radius:7px;color:var(--text-primary);">' + opts + '</select></td>'
           + '</tr>';
+        h += _crDetRow(data, m, i);
       });
       h += '</tbody></table></div>';
       return h;
+    }
+    // Drill-down: a hidden row per vendor listing its underlying transactions (date, amount, invoice #, type).
+    function _crDetRow(data, m, i) {
+      const txns = (data.transactions || []).filter(x => x.merchant === m.name)
+        .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')));
+      if (!txns.length) return '';
+      let rows = '';
+      txns.forEach(x => {
+        const d = String(x.time || '').slice(0, 10);
+        const pt = (x.productTypes || []).join(', ');
+        rows += '<tr>'
+          + '<td style="padding:3px 8px;font-size:11.5px;color:var(--text-secondary);white-space:nowrap;">' + (d || '—') + '</td>'
+          + '<td style="padding:3px 8px;font-size:11.5px;color:var(--text-primary);text-align:right;white-space:nowrap;">' + _crMoney(x.amount) + '</td>'
+          + '<td style="padding:3px 8px;font-size:11.5px;color:var(--text-muted);white-space:nowrap;">' + _hEsc(x.invoice || '—') + '</td>'
+          + '<td style="padding:3px 8px;font-size:11.5px;color:var(--text-muted);">' + _hEsc(pt || '—') + '</td>'
+          + '</tr>';
+      });
+      return '<tr id="crdet-' + i + '" style="display:none;background:var(--bg-card);"><td colspan="4" style="padding:2px 8px 10px 26px;"><div style="overflow-x:auto;">'
+        + '<table style="width:100%;border-collapse:collapse;min-width:360px;"><thead><tr>'
+        + '<th style="text-align:left;padding:3px 8px;font-size:10px;color:var(--text-muted);text-transform:uppercase;">Date</th>'
+        + '<th style="text-align:right;padding:3px 8px;font-size:10px;color:var(--text-muted);text-transform:uppercase;">Amount</th>'
+        + '<th style="text-align:left;padding:3px 8px;font-size:10px;color:var(--text-muted);text-transform:uppercase;">Invoice #</th>'
+        + '<th style="text-align:left;padding:3px 8px;font-size:10px;color:var(--text-muted);text-transform:uppercase;">Type</th></tr></thead><tbody>'
+        + rows + '</tbody></table></div></td></tr>';
+    }
+    function _crToggleDet(i) {
+      const row = document.getElementById('crdet-' + i);
+      const car = document.getElementById('crcar-' + i);
+      if (!row) return;
+      const open = row.style.display !== 'none';
+      row.style.display = open ? 'none' : '';
+      if (car) car.textContent = open ? '▾' : '▸';
     }
     // Recompute category totals CLIENT-SIDE from the merchants' effective categories (no Motive re-pull).
     function _crRecompute() {

@@ -158,7 +158,9 @@ Deno.serve(async (req: Request) => {
       const { token, realm } = await accessToken(franchiseID);
 
       // Resolve GL account numbers → QBO account {id, name}.
-      const acctData = await qboQuery(token, realm, "select Id, Name, AcctNum from Account");
+      // maxresults 1000 — QBO's default page is 100; a real COA (this company has ~197 accounts) overflows it,
+      // so accounts past row 100 (incl. 5101-00 Gas) came back "not found" without it.
+      const acctData = await qboQuery(token, realm, "select Id, Name, AcctNum from Account maxresults 1000");
       const byNum: Record<string, { id: string; name: string }> = {};
       for (const a of (acctData.QueryResponse?.Account || [])) if (a.AcctNum) byNum[String(a.AcctNum)] = { id: String(a.Id), name: String(a.Name || "") };
       const acctFor = (cat: string) => byNum[ACCT_NUM[cat]];
@@ -195,6 +197,18 @@ Deno.serve(async (req: Request) => {
       if (!jeRes.ok) { console.error("[qbo] postJE", jeRes.status, JSON.stringify(jeData).slice(0, 300)); return json({ success: false, error: "QuickBooks rejected the entry.", detail: jeData?.Fault || jeData }, 502); }
       const je = jeData.JournalEntry || {};
       return json({ success: true, journalEntryId: je.Id, docNumber: je.DocNumber, total: creditSum, txnDate, environment: QBO_ENV });
+    }
+
+    if (action === "listAccounts") {
+      // Diagnostic (super-admin): dump the connected company's chart of accounts so the
+      // reclass category → GL-number map can be reconciled against the real books.
+      const { token, realm } = await accessToken(franchiseID);
+      const acctData = await qboQuery(token, realm, "select Id, Name, AcctNum, AccountType, AccountSubType from Account maxresults 1000");
+      const accounts = (acctData.QueryResponse?.Account || []).map((a: any) => ({
+        id: String(a.Id), name: String(a.Name || ""), acctNum: a.AcctNum != null ? String(a.AcctNum) : "",
+        type: String(a.AccountType || ""), subType: String(a.AccountSubType || ""),
+      }));
+      return json({ success: true, count: accounts.length, realm, accounts });
     }
 
     return json({ success: false, error: "Unknown action" }, 400);

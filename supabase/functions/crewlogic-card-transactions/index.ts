@@ -114,11 +114,24 @@ Deno.serve(async (req: Request) => {
     const token = await motiveToken(franchiseID);
     if (!token) return jsonResponse({ success: false, error: "No Motive credential for this franchise." }, 404);
 
-    // Page through all transactions in the range (per_page 1000).
+    // CASH BASIS: the panel asks for a calendar month, but the Motive card posts to QuickBooks as WEEKLY
+    // statement payments (~2-3 days after the statement's last swipe). So we reclass by the month a statement
+    // was PAID, not by swipe date. Fetch a padded window, keep only SETTLED transactions, group them into
+    // statements by invoice_number, date each statement paid = last-swipe + PAY_LAG_DAYS, and include only the
+    // statements paid inside [start_date, end_date]. Dropping non-settled also removes the volatile declined
+    // $999 pre-auth holds that made totals jump load-to-load.
+    const addDaysISO = (iso: string, n: number): string => {
+      const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10);
+    };
+    const PAY_LAG_DAYS = 3;
+    const fetchStart = start_date ? addDaysISO(start_date, -14) : "";
+    const fetchEnd = end_date ? addDaysISO(end_date, 6) : "";
+
+    // Page through the padded window (per_page 1000).
     const all: any[] = [];
     for (let page = 1; page <= 20; page++) {
       const qs = new URLSearchParams({ sort_direction: "desc", page_no: String(page), per_page: "1000" });
-      if (start_date && end_date) { qs.set("date_range_filter_type", "transaction_time"); qs.set("start_date", start_date); qs.set("end_date", end_date); }
+      if (fetchStart && fetchEnd) { qs.set("date_range_filter_type", "transaction_time"); qs.set("start_date", fetchStart); qs.set("end_date", fetchEnd); }
       const res = await fetch(CARD_URL + "?" + qs.toString(), { headers: { accept: "application/json", "x-api-key": token } });
       if (!res.ok) { const t = await res.text(); return jsonResponse({ success: false, error: `Motive card API ${res.status}`, detail: t.slice(0, 300) }, 502); }
       const data = await res.json();
@@ -127,18 +140,32 @@ Deno.serve(async (req: Request) => {
       if (batch.length < 1000) break;
     }
 
-    // Aggregate by MERCHANT (a vendor is one category); collect its product_types + build line items.
+    // Unwrap + keep only SETTLED transactions (drop declined/reversed/pending $999 pre-auth holds).
+    const SETTLED = new Set(["posted", "completed"]);
+    const settled = all.map((raw: any) => (raw && raw.transaction) ? raw.transaction : raw)
+      .filter((t: any) => SETTLED.has(String(t.transaction_status || "")));
+
+    // Group into weekly statements by invoice; a statement's PAY date = its last swipe + PAY_LAG_DAYS.
+    const stmtLast: Record<string, string> = {};
+    for (const t of settled) { const k = String(t.invoice_number || "(none)"); const d = String(t.transaction_time || "").slice(0, 10); if (d && d > (stmtLast[k] || "")) stmtLast[k] = d; }
+    const paidInMonth = (invoiceKey: string): boolean => {
+      const last = stmtLast[invoiceKey]; if (!last) return false;
+      const pay = addDaysISO(last, PAY_LAG_DAYS);
+      return (!start_date || pay >= start_date) && (!end_date || pay <= end_date);
+    };
+
+    // Aggregate by MERCHANT (a vendor is one category), from transactions whose statement was PAID this month.
     const overrides = await loadOverrides(franchiseID);
     const M: Record<string, { total: number; count: number; types: Set<string> }> = {};
     const lineItems: any[] = [];
-    for (const raw of all) {
-      const t = (raw && raw.transaction) ? raw.transaction : raw; // Motive wraps each item in {transaction:{...}}
+    for (const t of settled) {
+      if (!paidInMonth(String(t.invoice_number || "(none)"))) continue;
       const amount = Number(t.total_amount_after_rebate_in_micros || 0) / 1e6; // micros → dollars
       const name = String(t.merchant_info?.name || "(unknown)");
       const ptypes = (t.order_items || []).map((o: any) => String(o.product_type || "")).filter(Boolean);
       const m = M[name] || (M[name] = { total: 0, count: 0, types: new Set<string>() });
       m.total += amount; m.count += 1; for (const p of ptypes) m.types.add(p);
-      lineItems.push({ id: t.id, time: t.transaction_time, merchant: name, city: t.merchant_info?.city || "", state: String(t.merchant_info?.state || "").trim(), amount: r2(amount), productTypes: [...new Set(ptypes)], invoice: t.invoice_number || "", lastFour: t.last_four_digits || "" });
+      lineItems.push({ id: t.id, time: t.transaction_time, merchant: name, city: t.merchant_info?.city || "", state: String(t.merchant_info?.state || "").trim(), amount: r2(amount), productTypes: [...new Set(ptypes)], invoice: String(t.invoice_number || ""), lastFour: t.last_four_digits || "" });
     }
 
     // Per-merchant: auto category from product_types, override, effective (override || auto), isNew (untagged).
@@ -155,7 +182,7 @@ Deno.serve(async (req: Request) => {
     for (const k of Object.keys(totals) as Cat[]) totals[k] = r2(totals[k]);
     for (const li of lineItems) li.category = catByMerchant[li.merchant] || "other";
 
-    return jsonResponse({ success: true, range: { start_date, end_date }, count: all.length, totals, counts, merchants, transactions: lineItems });
+    return jsonResponse({ success: true, basis: "payment", range: { start_date, end_date }, fetched: { start_date: fetchStart, end_date: fetchEnd }, count: lineItems.length, totals, counts, merchants, transactions: lineItems });
   } catch (e) {
     console.error("[card-transactions] error:", (e as Error)?.stack || String(e));
     return jsonResponse({ success: false, error: "Card transaction fetch failed." }, 500);
