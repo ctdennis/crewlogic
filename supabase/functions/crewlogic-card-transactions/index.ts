@@ -50,6 +50,21 @@ function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 }
 
+// Super-admin gate: this is a #90-internal reclass tool, not a customer feature. The frontend sends the
+// owner's Supabase JWT (via _crEdge); we resolve it to a user and require the super-admin email. The public
+// anon key resolves to role=anon with no email, so it (and any unauthenticated caller) is rejected.
+const SUPER_ADMIN_EMAIL = "charles.dennis@junkluggers.com";
+async function isSuperAdmin(req: Request): Promise<boolean> {
+  try {
+    const tokenHdr = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+    if (!tokenHdr) return false;
+    const r = await fetch(SUPABASE_URL + "/auth/v1/user", { headers: { Authorization: "Bearer " + tokenHdr, apikey: SERVICE_KEY } });
+    if (!r.ok) return false;
+    const u = await r.json();
+    return String(u?.email || "").toLowerCase() === SUPER_ADMIN_EMAIL;
+  } catch (_e) { return false; }
+}
+
 // Resolve the Motive Card API key. The card API is ACCOUNT-level and (per the sample key) uses its OWN
 // key distinct from the fleet/geofence key — so prefer a dedicated MOTIVE_CARD_API_KEY secret. Fall back
 // to the per-franchise Motive token, then the global MOTIVE_API_KEY, in case the account shares one key.
@@ -88,6 +103,7 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return jsonResponse({ success: false, error: "Method not allowed" }, 405);
 
   try {
+    if (!(await isSuperAdmin(req))) return jsonResponse({ success: false, error: "Not authorized" }, 403);
     const body = await req.json();
     const franchiseID = String(body.franchiseID || "").trim();
     const action = String(body.action || "").trim();

@@ -42,6 +42,21 @@ function html(body: string): Response {
   return new Response("<!doctype html><meta charset=utf-8><body style='font-family:system-ui;background:#0f1a26;color:#eef4fa;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;'>" + body + "</body>", { headers: { "Content-Type": "text/html" } });
 }
 
+// Super-admin gate for the POST actions (status/authUrl/disconnect/postJE/listAccounts). The frontend sends
+// the owner's Supabase JWT (via _crEdge); we resolve it and require the super-admin email. NOT applied to the
+// GET OAuth callback — Intuit's browser redirect carries no session and is protected by the OAuth code/state.
+const SUPER_ADMIN_EMAIL = "charles.dennis@junkluggers.com";
+async function isSuperAdmin(req: Request): Promise<boolean> {
+  try {
+    const tokenHdr = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+    if (!tokenHdr) return false;
+    const r = await fetch(SUPABASE_URL + "/auth/v1/user", { headers: { Authorization: "Bearer " + tokenHdr, apikey: SERVICE_KEY } });
+    if (!r.ok) return false;
+    const u = await r.json();
+    return String(u?.email || "").toLowerCase() === SUPER_ADMIN_EMAIL;
+  } catch (_e) { return false; }
+}
+
 async function sbFetch(path: string, opts: RequestInit = {}): Promise<Response> {
   return await fetch(SUPABASE_URL + "/rest/v1/" + path, {
     ...opts,
@@ -124,6 +139,7 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ success: false, error: "Method not allowed" }, 405);
 
   try {
+    if (!(await isSuperAdmin(req))) return json({ success: false, error: "Not authorized" }, 403);
     const body = await req.json();
     const action = String(body.action || "");
     const franchiseID = String(body.franchiseID || "").trim();
