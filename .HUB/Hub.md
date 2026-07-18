@@ -57,7 +57,7 @@ use by a prod tenant"; keep those distinct.
 | FW-29 | Open | Hide unused home cards (reorder is live) |
 | FW-30 | Open | index.html size / architecture review |
 | FW-31 | Done | Payments + pricing model (BUILD shipped dormant; activation = FW-32) |
-| FW-32 | Open | Billing activation (flip BILLING_ENABLED + LIVE Stripe + apply 0025 to prod) |
+| FW-32 | Done | Billing activation — Epic E GO-LIVE (`BILLING_ENABLED = true`, index.html:4222; merged to main `7b23804`, v5.50.58). Re-verified against code 2026-07-18 (register row had gone stale at `Open`) |
 | FW-33 | Done | Subscription field-model finishers (superseded by gate-logic + null-tier fix) |
 | FW-34 | Partial | Trial-expiry UX — banner done; end-of-trial lockout/re-enable decisions remain |
 | FW-35 | Open | Truly-dead session "Reconnecting…" banner |
