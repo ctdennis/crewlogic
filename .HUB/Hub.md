@@ -13,6 +13,22 @@ edge functions unless an entry is stale (see freshness rule) or you are doing a 
 3. **Recheck (after the change):** verify the change landed as described and stamp **Last verified** with
    today's date. If you couldn't verify a field (e.g. prod data), say so in Notes rather than guessing.
 
+**BOTH surfaces, same commit (binding).** This Hub carries status in **two** places: the `SHIPPED (vX.Y.Z…)`
+prose blocks below, and the **Future-Work Register table** above. A ship MUST update **both in the same
+commit** — write the prose block *and* flip the matching **FW-NN row** to `Done` / `Partial` (with a code
+anchor: `file:line`, symbol, or commit SHA). Updating only the prose is the drift mode that actually
+happened: on 2026-07-18 the register still read `Open` for FW-32 (billing, live since v5.50.58), FW-01/FW-02
+(Linxup, shipped), and FW-34 (trial lockout, shipped) — every one of them had an accurate prose block three
+screens down. If a ship has no FW row, either add one (next free ID) or write `no FW row` in the commit
+body so the omission is deliberate rather than forgotten.
+
+**Status claims cite code, not this file.** When answering "is X done?", verify against the **code** — grep
+the flag/symbol/table, or find the merge commit. Do **not** answer from a register row or a prose block
+alone; those are what drift. Same discipline applies to scope: before calling something broken, trace which
+function actually backs the surface in question — on 2026-07-18 FW-39 was flagged a live #56 bug because two
+Eastern-hardcoded functions were found without checking that a *third* (`crewlogic-dispatch`) already
+resolved the franchise timezone for the boards in question.
+
 **Freshness rule:** trust an entry whose *Last verified* is recent. If it's old or the code in that area
 changed since, re-verify before relying on it. Never overstate prod rollout — "code deployed" ≠ "in active
 use by a prod tenant"; keep those distinct.
@@ -26,8 +42,8 @@ use by a prod tenant"; keep those distinct.
 
 | ID | Status | Item |
 |----|--------|------|
-| FW-01 | Open | Linxup live end-to-end validation (blocked on a Linxup device online) |
-| FW-02 | Open | Linxup job-level arrive/leave matching (needs Linxup geofence-create) |
+| FW-01 | Done | Linxup live end-to-end validation — confirmed working on #56; temp debug capture stripped (`b5019cd`, merged `f408400`). Re-verified 2026-07-18 |
+| FW-02 | Done | Linxup job-level arrive/leave matching — Linxup geofence create/delete live (`crewlogic-geofence-create/index.ts:108-173`), per-job sync w/ `wo_id`+`job_id` (`crewlogic-job-geofence-sync/index.ts:196`), migrations 0043/0046. Re-verified 2026-07-18 |
 | FW-03 | Done | #90 Motive already live in prod — pull token connected (3 trucks) + webhook secret configured; migration 0033 preserved it, re-entry never needed (verified 2026-07-05) |
 | FW-04 | Open | Refine dashcam/fault-code event labels |
 | FW-05 | Open | Optional "N trucks on site" count |
@@ -48,28 +64,28 @@ use by a prod tenant"; keep those distinct.
 | FW-20 | Partial | Vonigo submit server-side null-price guard (frontend guard live; server guard deferred) |
 | FW-21 | Done | Deploy native CPL fix to prod |
 | FW-22 | Done | Shed estimator undercount fixed (walls+floor+pitched-roof + framing/shingle inputs + breakdown) — prod v5.50.2 (2026-07-05); factors calibratable |
-| FW-23 | Open | Route-Optimizer/Storage 16 cy quick-buttons |
+| FW-23 | Dropped | Route-Optimizer/Storage 16 cy quick-buttons — KILLED 2026-07-18. 4/8/12/**16 cy** buttons already exist in both estimator variants (index.html:3645, :3795); Owner has no recollection of a remaining surface. Stale row, no known work left |
 | FW-24 | Dropped | Onboarding serviceStates — KILLED 2026-07-05 (native users already enter ZIPs in pricing; redundant) |
 | FW-25 | Open | New-estimate onboarding prompt |
 | FW-26 | Partial | Native price-book onboarding — "no price book" notice done; home tile remains |
 | FW-27 | Open | Phase 2 onboarding wizard |
 | FW-28 | Open | Streamline the Settings environment |
-| FW-29 | Open | Hide unused home cards (reorder is live) |
+| FW-29 | Done | Hide unused home cards — shipped as Epic C per-user tile toggles (migration 0037; `tileToggles` index.html:6035, `_applyTileMap` index.html:7804). Owner confirmed 2026-07-18 that self-serve hiding was never the intent, so the owner-assigned toggles close this |
 | FW-30 | Open | index.html size / architecture review |
 | FW-31 | Done | Payments + pricing model (BUILD shipped dormant; activation = FW-32) |
-| FW-32 | Open | Billing activation (flip BILLING_ENABLED + LIVE Stripe + apply 0025 to prod) |
+| FW-32 | Done | Billing activation — Epic E GO-LIVE (`BILLING_ENABLED = true`, index.html:4222; merged to main `7b23804`, v5.50.58). Re-verified against code 2026-07-18 (register row had gone stale at `Open`) |
 | FW-33 | Done | Subscription field-model finishers (superseded by gate-logic + null-tier fix) |
-| FW-34 | Partial | Trial-expiry UX — banner done; end-of-trial lockout/re-enable decisions remain |
+| FW-34 | Done | Trial-expiry UX — the deferred lockout decision shipped as soft-grace-then-hard paywall (`ENFORCE_TRIAL = true` index.html:4215; `_trialExpired → hasAccess = false` index.html:7883; `a62e8d8`). Re-verified 2026-07-18 |
 | FW-35 | Open | Truly-dead session "Reconnecting…" banner |
 | FW-36 | Open | Harden crewlogic-trucks caller verification |
 | FW-37 | Done | "Name your workspace" mis-route check (guarded) |
 | FW-38 | Done | Native toolbar-fix prod promote (on main v5.50.0) |
-| FW-39 | Open | Generalize Eastern-hardcoded date logic (todays-workorders + job-plan) |
+| FW-39 | Open (low — 2 straggler fns; **dispatch boards already fixed**) | Generalize Eastern-hardcoded date logic. **Scoped 2026-07-18.** The **dispatch schedule boards are NOT affected** — `crewlogic-dispatch` carries its own `STATE_TZ` + `resolveTimezone` (officeTimezone → state map → Eastern default) at `index.ts:64-85`, so #56 (CA) gets correct day+times; Owner confirmed source/dest calendars render correctly. Remaining: `crewlogic-todays-workorders/index.ts:93` (`getEasternMidnightEpoch`) and `crewlogic-job-plan/index.ts:276` (`nowET`) still derive the calendar day from *now in Eastern*. The naive encoding is correct and intentional (Vonigo clock-face convention, TZ-agnostic) — only the **day selection** is wrong. Affected surfaces = **truck map job pins** (index.html:8857, :9204) + **Job Plan** (:11857, :11987), and only in the **9 PM–midnight Pacific** window when Eastern has already rolled over. Invisible during business hours; no report to date. Fix = lift `resolveTimezone`/`STATE_TZ` to `_shared/` (three copies now exist: dispatch, route-disposal, + needed here) and derive date components in the franchise zone; keep the naive encoding |
 | FW-40 | Open | Onboarding: capture location + confirm timezone |
-| FW-41 | Open | Reconnect crewlogic-marketing Pages Git |
+| FW-41 | Done | Reconnect crewlogic-marketing Pages Git — Owner confirmed 2026-07-18 the marketing site is publishing fine; marketing now lives in-repo (`marketing/privacy.html`, `marketing/terms.html`, `82b97a9`). The 2026-07-04 Cloudflare Git-disconnect is resolved |
 | FW-42 | Open | Retire the last n8n dependency (route engine) |
 | FW-43 | Partial | Estimate-charges normalization — dual-write done; reads + prod-apply + retire-blob remain |
-| FW-44 | Open | Storage headroom / STORAGE_INCLUDED_GB (set to 100 on Pro) |
+| FW-44 | Open — confirmed unset | Storage headroom / `STORAGE_INCLUDED_GB`. **Verified 2026-07-18: the secret is NOT set on prod** (`supabase secrets list --project-ref ozfk…`, read-only), so `crewlogic-admin/index.ts:431` falls back to `\|\| 1` → the super-admin storage gauge divides usage by **1 GB**. Display-only (no cap enforced, nothing blocked), but `pctUsed` reads ~100× high if the Supabase plan actually includes 100 GB. Fix = confirm the prod Supabase plan's storage allowance, then `supabase secrets set --project-ref ozfk… STORAGE_INCLUDED_GB=<n>` (gated, prod write) |
 | FW-45 | Open | estimate-photos per-franchise path scoping |
 | FW-46 | Done | Keys export redacted to MY_* placeholders + backup deleted; verified not in repo/index; file never synced/shared → keys never left the machine, no rotation needed (owner 2026-07-05) |
 | FW-47 | Open | Google Cloud credentials cleanup + Street View proxy |
