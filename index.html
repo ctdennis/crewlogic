@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.89 | 2026-07-17">
+  <meta name="crewlogic-version" content="v5.50.91 | 2026-07-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1839,6 +1839,11 @@
                 <label class="settings-input-label">Zip</label>
                 <input type="text" class="form-input" id="settingsOfficeZip" placeholder="00000" maxlength="5" inputmode="numeric" autocomplete="off" style="text-align:center;">
               </div>
+            </div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Time zone <span style="color:var(--text-muted);font-weight:400;">— drives your schedule board, job alerts and "today's jobs". Suggested from your state; change it if your office is in a different zone.</span></label>
+              <select class="form-input" id="settingsOfficeTimezone" onchange="_tzMarkChosen()"></select>
+              <div id="settingsTimezoneHint" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
             </div>
             <div class="settings-input-group">
               <label class="settings-input-label">States served <span style="color:var(--text-muted);font-weight:400;">— for town price lookup; comma-separated (e.g. MA, RI). Defaults to your office state.</span></label>
@@ -13469,6 +13474,93 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       window.scrollTo(0, 0);
     }
 
+    // ===== FRANCHISE TIME ZONE =====
+    // The franchise's IANA zone drives the schedule board, job alerts and "today's jobs".
+    // Historically it was DERIVED at read time (officeState → zone → Eastern default), which
+    // fails silently: #56 (Orange County, CA) ran on the Eastern default for weeks because
+    // officeState was blank. Capturing it here makes the zone explicit DATA the owner has
+    // seen and confirmed. Migrations 0050/0051 backfilled every existing franchise.
+    // Mirrors STATE_TZ in crewlogic-dispatch / crewlogic-route-disposal — keep in sync.
+    const CL_STATE_TZ = { AL:'America/Chicago', AK:'America/Anchorage', AZ:'America/Phoenix', AR:'America/Chicago', CA:'America/Los_Angeles', CO:'America/Denver', CT:'America/New_York', DE:'America/New_York', DC:'America/New_York', FL:'America/New_York', GA:'America/New_York', HI:'Pacific/Honolulu', ID:'America/Boise', IL:'America/Chicago', IN:'America/Indiana/Indianapolis', IA:'America/Chicago', KS:'America/Chicago', KY:'America/New_York', LA:'America/Chicago', ME:'America/New_York', MD:'America/New_York', MA:'America/New_York', MI:'America/Detroit', MN:'America/Chicago', MS:'America/Chicago', MO:'America/Chicago', MT:'America/Denver', NE:'America/Chicago', NV:'America/Los_Angeles', NH:'America/New_York', NJ:'America/New_York', NM:'America/Denver', NY:'America/New_York', NC:'America/New_York', ND:'America/Chicago', OH:'America/New_York', OK:'America/Chicago', OR:'America/Los_Angeles', PA:'America/New_York', RI:'America/New_York', SC:'America/New_York', SD:'America/Chicago', TN:'America/Chicago', TX:'America/Chicago', UT:'America/Denver', VT:'America/New_York', VA:'America/New_York', WA:'America/Los_Angeles', WV:'America/New_York', WI:'America/Chicago', WY:'America/Denver' };
+    // Selectable zones. Detroit / Indianapolis / Boise are kept distinct from their
+    // equivalents because the state map emits them and round-tripping must not rewrite a
+    // franchise's stored value.
+    const CL_TZ_CHOICES = [
+      ['America/New_York',               'Eastern — New York'],
+      ['America/Detroit',                'Eastern — Michigan (Detroit)'],
+      ['America/Indiana/Indianapolis',   'Eastern — Indiana (Indianapolis)'],
+      ['America/Chicago',                'Central — Chicago'],
+      ['America/Denver',                 'Mountain — Denver'],
+      ['America/Boise',                  'Mountain — Idaho (Boise)'],
+      ['America/Phoenix',                'Mountain — Arizona (no daylight saving)'],
+      ['America/Los_Angeles',            'Pacific — Los Angeles'],
+      ['America/Anchorage',              'Alaska — Anchorage'],
+      ['Pacific/Honolulu',               'Hawaii — Honolulu (no daylight saving)'],
+    ];
+    // Two separate guards. "A value is stored" does NOT mean "the owner chose it" — migrations
+    // 0050/0051 backfilled every franchise, so nearly all stored zones were DERIVED, never seen.
+    //   _tzUserChosen — the owner picked a zone in this session. Always wins.
+    //   _tzDeliberate — the stored zone DIVERGES from its own state's map value, i.e. someone
+    //                   overrode the map on purpose. #54 El Paso is America/Denver while TX maps
+    //                   to America/Chicago (the map holds a state's PREDOMINANT zone, which is
+    //                   wrong for El Paso). Never auto-change those.
+    // A zone that merely equals its state's map value is derived, so a state edit re-suggests.
+    let _tzUserChosen = false;
+    let _tzDeliberate = false;
+    function _tzMarkChosen() { _tzUserChosen = true; _tzRenderHint('chosen'); }
+
+    function _tzBuildOptions(selected) {
+      const sel = String(selected || '');
+      const known = CL_TZ_CHOICES.some(c => c[0] === sel);
+      let html = '<option value="">— Select your time zone —</option>';
+      html += CL_TZ_CHOICES.map(c =>
+        '<option value="' + c[0] + '"' + (c[0] === sel ? ' selected' : '') + '>' + c[1] + '</option>'
+      ).join('');
+      // Preserve an unrecognised stored value rather than silently dropping it on save.
+      if (sel && !known) html += '<option value="' + sel + '" selected>' + sel + '</option>';
+      return html;
+    }
+
+    // Show the zone's CURRENT local time — the fastest way for an owner to spot a wrong pick.
+    function _tzRenderHint(mode) {
+      const hintEl = document.getElementById('settingsTimezoneHint');
+      const selEl  = document.getElementById('settingsOfficeTimezone');
+      if (!hintEl || !selEl) return;
+      const tz = String(selEl.value || '').trim();
+      if (!tz) { hintEl.textContent = 'Not set — your schedule would fall back to Eastern.'; hintEl.style.color = '#f59e0b'; return; }
+      let now = '';
+      try { now = new Date().toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' }); } catch (e) { now = ''; }
+      const prefix = mode === 'suggested' ? 'Suggested from your state — ' : '';
+      hintEl.textContent = prefix + (now ? 'current time there: ' + now : tz);
+      hintEl.style.color = mode === 'suggested' ? '#f59e0b' : 'var(--text-muted)';
+    }
+
+    // Suggest a zone when the state changes, but never clobber an explicit or deliberate one.
+    function _tzSuggestFromState() {
+      const selEl = document.getElementById('settingsOfficeTimezone');
+      const stEl  = document.getElementById('settingsOfficeState');
+      if (!selEl || !stEl) return;
+      const st = String(stEl.value || '').trim().toUpperCase();
+      const guess = CL_STATE_TZ[st];
+      if (!guess) { _tzRenderHint(); return; }
+      if (selEl.value === guess) { _tzRenderHint(); return; }
+      // Protected: an in-session pick, or a stored zone that deliberately diverges from its
+      // state's map value. Don't silently change it — but don't stay silent either, since the
+      // state now implies a different zone. Flag it and let the owner decide.
+      if ((_tzUserChosen || _tzDeliberate) && selEl.value) {
+        const hintEl = document.getElementById('settingsTimezoneHint');
+        if (hintEl) {
+          let now = '';
+          try { now = new Date().toLocaleTimeString('en-US', { timeZone: selEl.value, hour: 'numeric', minute: '2-digit' }); } catch (e) { now = ''; }
+          hintEl.textContent = 'Kept your zone' + (now ? ' (current time there: ' + now + ')' : '') + ' — ' + st + ' normally uses a different one. Change it above if that is wrong.';
+          hintEl.style.color = '#f59e0b';
+        }
+        return;
+      }
+      selEl.value = guess;
+      _tzRenderHint('suggested');
+    }
+
     // ===== FRANCHISE INFO SETTINGS =====
     async function saveFranchiseInfo() {
       const btn = document.getElementById('franchiseSaveBtn');
@@ -13483,6 +13575,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const officeStateVal   = document.getElementById('settingsOfficeState').value.trim();
       const officeZipVal     = document.getElementById('settingsOfficeZip').value.trim();
       const websiteVal       = document.getElementById('settingsWebsite').value.trim();
+      // Time zone: prefer the explicit pick; if still unset, fall back to the state map so we
+      // never PERSIST a blank (a blank is what makes the read-time Eastern default silent).
+      const _tzEl = document.getElementById('settingsOfficeTimezone');
+      const officeTimezoneVal = String((_tzEl && _tzEl.value) || '').trim()
+        || CL_STATE_TZ[officeStateVal.toUpperCase()] || '';
       // Served states (town lookup) → normalized array of 2-letter codes, deduped.
       const serviceStatesArr = [...new Set(
         (document.getElementById('settingsServiceStates').value || '')
@@ -13497,6 +13594,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       currentUser.costSettings.officeZip     = officeZipVal;
       currentUser.costSettings.website       = websiteVal;
       currentUser.costSettings.serviceStates = serviceStatesArr;
+      // Only write a non-empty zone — never overwrite a stored value with a blank.
+      if (officeTimezoneVal) currentUser.costSettings.officeTimezone = officeTimezoneVal;
       try {
         const data = await edgeFunctionCall('crewlogic-settings', {
           action: 'saveFranchiseInfo',
@@ -13520,6 +13619,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           currentUser.officeState   = officeStateVal;
           currentUser.officeZip     = officeZipVal;
           currentUser.website       = websiteVal;
+          if (officeTimezoneVal) { currentUser.officeTimezone = officeTimezoneVal; _tzUserChosen = true; _tzRenderHint(); }
           storage.set(SESSION_KEY, JSON.stringify(currentUser));
           feedbackEl.textContent = '✓ Company info saved';
           feedbackEl.className = 'settings-feedback ok';
@@ -13542,6 +13642,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (currentUser.officeCity) document.getElementById('settingsOfficeCity').value = currentUser.officeCity;
       if (currentUser.officeState) document.getElementById('settingsOfficeState').value = currentUser.officeState;
       if (currentUser.officeZip) document.getElementById('settingsOfficeZip').value = currentUser.officeZip;
+      // Time zone: render the stored value; if none, suggest from state (visible, not silent).
+      const _tzSel = document.getElementById('settingsOfficeTimezone');
+      if (_tzSel) {
+        const _cs0 = currentUser.costSettings || {};
+        const _storedTz = String(currentUser.officeTimezone || _cs0.officeTimezone || '').trim();
+        const _storedSt = String(currentUser.officeState || _cs0.officeState || '').trim().toUpperCase();
+        _tzSel.innerHTML = _tzBuildOptions(_storedTz);
+        // Fresh session state: nothing picked yet. The stored zone counts as DELIBERATE only if
+        // it diverges from its own state's map value (see the guard notes above).
+        _tzUserChosen = false;
+        _tzDeliberate = !!_storedTz && !!_storedSt && CL_STATE_TZ[_storedSt] !== _storedTz;
+        if (_storedTz) _tzRenderHint();
+        else _tzSuggestFromState();
+        const _stEl = document.getElementById('settingsOfficeState');
+        if (_stEl && !_stEl._tzWired) { _stEl._tzWired = true; _stEl.addEventListener('change', _tzSuggestFromState); _stEl.addEventListener('blur', _tzSuggestFromState); }
+      }
       const _ss = (currentUser.costSettings && currentUser.costSettings.serviceStates) || [];
       if (Array.isArray(_ss) && _ss.length) document.getElementById('settingsServiceStates').value = _ss.join(', ');
       if (currentUser.website) document.getElementById('settingsWebsite').value = currentUser.website;

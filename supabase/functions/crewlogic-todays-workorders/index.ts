@@ -31,6 +31,7 @@
 //     contains "URGENTCB") are filtered out before returning.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { resolveTimezoneLogged, franchiseDayEpoch } from '../_shared/tz.ts';
 
 // CORS headers — allow calls from the PWA.
 const CORS = {
@@ -87,26 +88,11 @@ interface VonigoWorkOrder {
   Relations: VonigoRelation[];
 }
 
-// Returns naive-Eastern epoch for midnight of (today + dayOffset days) in
-// America/New_York. The integer represents Eastern clock-face midnight
-// treated as if it were UTC — Vonigo's convention.
-function getEasternMidnightEpoch(dayOffset: number): number {
-  // Get current Eastern date components
-  const now = new Date();
-  const easternStr = now.toLocaleString('en-US', {
-    timeZone: 'America/New_York',
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-  });
-  // easternStr looks like "05/13/2026, 10:30:00"
-  const match = easternStr.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-  if (!match) throw new Error('Failed to parse Eastern date: ' + easternStr);
-  const month = parseInt(match[1], 10) - 1; // 0-indexed
-  const day = parseInt(match[2], 10) + dayOffset;
-  const year = parseInt(match[3], 10);
-  // Encode "Eastern midnight" as if it were UTC (naive-Eastern convention)
-  return Math.floor(Date.UTC(year, month, day, 0, 0, 0) / 1000);
-}
+// NOTE: getEasternMidnightEpoch was removed here — it hardcoded America/New_York for the
+// calendar-day lookup, which is wrong for non-Eastern franchises (a Pacific franchise's day
+// rolled over at 9 PM local). Replaced by franchiseDayEpoch() in _shared/tz.ts, which takes
+// the day in the franchise's own zone while preserving the same naive clock-face encoding
+// Vonigo's date fields expect.
 
 // Format minutes-from-midnight into "h:mm AM/PM"
 function formatTimeLabel(minutes: number): string {
@@ -230,7 +216,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: franchiseRow, error: franchiseErr } = await supabase
       .from('franchises')
-      .select('id')
+      .select('id, cost_settings')
       .eq('external_id', franchiseID)
       .eq('tenant_id', TENANT_ID)
       .single();
@@ -313,8 +299,11 @@ Deno.serve(async (req: Request) => {
 
     const securityToken = authData.securityToken;
 
-    // 3) Compute date bracket (naive-Eastern epoch)
-    const dateStart = getEasternMidnightEpoch(dayOffset);
+    // 3) Compute date bracket in the FRANCHISE's zone (naive clock-face epoch — Vonigo's
+    //    convention). Previously this read the calendar day from 'now in Eastern', so a
+    //    Pacific franchise's day rolled over at 9 PM local and this asked for tomorrow.
+    const franchiseTz = resolveTimezoneLogged(franchiseRow.cost_settings, `todays-workorders f=${franchiseID}`);
+    const dateStart = franchiseDayEpoch(franchiseTz, dayOffset);
     const dateEnd = dateStart + 86400; // +1 day
 
     // 4) Query WorkOrders with server-side franchise filter

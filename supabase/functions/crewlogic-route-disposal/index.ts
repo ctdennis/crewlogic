@@ -28,6 +28,7 @@
 //   { success:false, error }   (safe message only; full detail is console.error'd)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { resolveTimezone } from "../_shared/tz.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -72,32 +73,10 @@ function round1(n: number): number { return Math.round(n * 10) / 10; }
 // Multi-zone states resolved to their DOMINANT zone (the n8n hardcoded ET — the
 // exact multi-tenant trap this function exists to avoid).
 // ─────────────────────────────────────────────────────────────────────────────
-const STATE_TZ: Record<string, string> = {
-  AL: "America/Chicago", AK: "America/Anchorage", AZ: "America/Phoenix",
-  AR: "America/Chicago", CA: "America/Los_Angeles", CO: "America/Denver",
-  CT: "America/New_York", DE: "America/New_York", DC: "America/New_York",
-  FL: "America/New_York", GA: "America/New_York", HI: "Pacific/Honolulu",
-  ID: "America/Boise", IL: "America/Chicago", IN: "America/Indiana/Indianapolis",
-  IA: "America/Chicago", KS: "America/Chicago", KY: "America/New_York",
-  LA: "America/Chicago", ME: "America/New_York", MD: "America/New_York",
-  MA: "America/New_York", MI: "America/Detroit", MN: "America/Chicago",
-  MS: "America/Chicago", MO: "America/Chicago", MT: "America/Denver",
-  NE: "America/Chicago", NV: "America/Los_Angeles", NH: "America/New_York",
-  NJ: "America/New_York", NM: "America/Denver", NY: "America/New_York",
-  NC: "America/New_York", ND: "America/Chicago", OH: "America/New_York",
-  OK: "America/Chicago", OR: "America/Los_Angeles", PA: "America/New_York",
-  RI: "America/New_York", SC: "America/New_York", SD: "America/Chicago",
-  TN: "America/Chicago", TX: "America/Chicago", UT: "America/Denver",
-  VT: "America/New_York", VA: "America/New_York", WA: "America/Los_Angeles",
-  WV: "America/New_York", WI: "America/Chicago", WY: "America/Denver",
-};
-
-function resolveTimezone(cs: Record<string, unknown>): string {
-  const explicit = String(cs.officeTimezone || "").trim();
-  if (explicit) return explicit;
-  const state = String(cs.officeState || "").trim().toUpperCase();
-  return STATE_TZ[state] || "America/New_York";
-}
+// STATE_TZ + resolveTimezone now live in ../_shared/tz.ts (imported at the top of this file).
+// This function used to declare its own copy, as did crewlogic-dispatch — one copy now.
+// NOTE: the localParts() below is a DIFFERENT helper from _shared's todayPartsInTz(): this one
+// takes an arbitrary instant and returns dow/minutesOfDay/label for facility-hours math.
 
 // Local-time parts of a UTC instant in the given IANA tz.
 interface LocalParts {
