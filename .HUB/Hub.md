@@ -26,8 +26,8 @@ use by a prod tenant"; keep those distinct.
 
 | ID | Status | Item |
 |----|--------|------|
-| FW-01 | Open | Linxup live end-to-end validation (blocked on a Linxup device online) |
-| FW-02 | Open | Linxup job-level arrive/leave matching (needs Linxup geofence-create) |
+| FW-01 | Done | Linxup live end-to-end validation — confirmed working on #56; temp debug capture stripped (`b5019cd`, merged `f408400`). Re-verified 2026-07-18 |
+| FW-02 | Done | Linxup job-level arrive/leave matching — Linxup geofence create/delete live (`crewlogic-geofence-create/index.ts:108-173`), per-job sync w/ `wo_id`+`job_id` (`crewlogic-job-geofence-sync/index.ts:196`), migrations 0043/0046. Re-verified 2026-07-18 |
 | FW-03 | Done | #90 Motive already live in prod — pull token connected (3 trucks) + webhook secret configured; migration 0033 preserved it, re-entry never needed (verified 2026-07-05) |
 | FW-04 | Open | Refine dashcam/fault-code event labels |
 | FW-05 | Open | Optional "N trucks on site" count |
@@ -59,12 +59,12 @@ use by a prod tenant"; keep those distinct.
 | FW-31 | Done | Payments + pricing model (BUILD shipped dormant; activation = FW-32) |
 | FW-32 | Done | Billing activation — Epic E GO-LIVE (`BILLING_ENABLED = true`, index.html:4222; merged to main `7b23804`, v5.50.58). Re-verified against code 2026-07-18 (register row had gone stale at `Open`) |
 | FW-33 | Done | Subscription field-model finishers (superseded by gate-logic + null-tier fix) |
-| FW-34 | Partial | Trial-expiry UX — banner done; end-of-trial lockout/re-enable decisions remain |
+| FW-34 | Done | Trial-expiry UX — the deferred lockout decision shipped as soft-grace-then-hard paywall (`ENFORCE_TRIAL = true` index.html:4215; `_trialExpired → hasAccess = false` index.html:7883; `a62e8d8`). Re-verified 2026-07-18 |
 | FW-35 | Open | Truly-dead session "Reconnecting…" banner |
 | FW-36 | Open | Harden crewlogic-trucks caller verification |
 | FW-37 | Done | "Name your workspace" mis-route check (guarded) |
 | FW-38 | Done | Native toolbar-fix prod promote (on main v5.50.0) |
-| FW-39 | Open | Generalize Eastern-hardcoded date logic (todays-workorders + job-plan) |
+| FW-39 | Open — **LIVE BUG for #56 (Pacific)** | Generalize Eastern-hardcoded date logic (todays-workorders + job-plan). **Confirmed 2026-07-18: not theoretical.** `getEasternMidnightEpoch` (`crewlogic-todays-workorders/index.ts:93-108`) derives y/m/d from *now in Eastern* then naive-encodes. The naive encoding is fine (clock-face, TZ-agnostic — the intentional Vonigo convention); the **day selection** is the bug. From **9:00 PM Pacific** onward Eastern is already tomorrow, so #56's board serves **tomorrow's** jobs for the last ~3h of their evening. Same defect in `crewlogic-job-plan/index.ts:276` (`nowET`). Fix = resolve the franchise TZ (`resolveTimezone`/`STATE_TZ` already exist in `crewlogic-route-disposal`; lift to `_shared/`) and derive the date components in it — keep the naive encoding |
 | FW-40 | Open | Onboarding: capture location + confirm timezone |
 | FW-41 | Open | Reconnect crewlogic-marketing Pages Git |
 | FW-42 | Open | Retire the last n8n dependency (route engine) |
