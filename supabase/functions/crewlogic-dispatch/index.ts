@@ -17,6 +17,7 @@
 // (fields 974 category / 975 reason / 973 comments). Field-edit of appt fields is a no-op (see memory).
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { resolveTimezoneLogged, dayIDInTz, DEFAULT_TZ } from '../_shared/tz.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const TENANT_ID = '946a4535-aa61-45b6-a6fb-9190ff546d41';
@@ -61,28 +62,18 @@ function timeLabel(min: number): string {
 function zipOf(address: string): string { const m = String(address || '').match(/\b(\d{5})\b/); return m ? m[1] : ''; }
 // minutes → friendly length ("1 hr", "90 min", "1 hr 30 min") for user-facing error/confirm copy.
 function durLabel(min: unknown): string { const m = parseInt(String(min), 10); if (!Number.isFinite(m) || m <= 0) return String(min) + ' min'; const h = Math.floor(m / 60), r = m % 60; if (h && r) return `${h} hr ${r} min`; if (h) return `${h} hr`; return `${r} min`; }
-// US state → IANA tz (mirror of crewlogic-route-disposal STATE_TZ). Split states (e.g. TX — El Paso is
-// Mountain while the rest is Central) MUST carry an explicit cost_settings.officeTimezone; the map only
-// gives the state's predominant zone.
-const STATE_TZ: Record<string, string> = { AL: 'America/Chicago', AK: 'America/Anchorage', AZ: 'America/Phoenix', AR: 'America/Chicago', CA: 'America/Los_Angeles', CO: 'America/Denver', CT: 'America/New_York', DE: 'America/New_York', DC: 'America/New_York', FL: 'America/New_York', GA: 'America/New_York', HI: 'Pacific/Honolulu', ID: 'America/Boise', IL: 'America/Chicago', IN: 'America/Indiana/Indianapolis', IA: 'America/Chicago', KS: 'America/Chicago', KY: 'America/New_York', LA: 'America/Chicago', ME: 'America/New_York', MD: 'America/New_York', MA: 'America/New_York', MI: 'America/Detroit', MN: 'America/Chicago', MS: 'America/Chicago', MO: 'America/Chicago', MT: 'America/Denver', NE: 'America/Chicago', NV: 'America/Los_Angeles', NH: 'America/New_York', NJ: 'America/New_York', NM: 'America/Denver', NY: 'America/New_York', NC: 'America/New_York', ND: 'America/Chicago', OH: 'America/New_York', OK: 'America/Chicago', OR: 'America/Los_Angeles', PA: 'America/New_York', RI: 'America/New_York', SC: 'America/New_York', SD: 'America/Chicago', TN: 'America/Chicago', TX: 'America/Chicago', UT: 'America/Denver', VT: 'America/New_York', VA: 'America/New_York', WA: 'America/Los_Angeles', WV: 'America/New_York', WI: 'America/Chicago', WY: 'America/Denver' };
-// "today + offset" as YYYYMMDD in a given IANA tz (DST-safe via Intl). Replaces the old hardcoded-Eastern
-// easternDayID so "today"/the day table are correct for non-ET franchises (e.g. #54 MT, #109 PT).
-function dayIDInTz(tz: string, offset = 0): string {
-  const s = new Date().toLocaleString('en-US', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
-  const m = s.match(/(\d{2})\/(\d{2})\/(\d{4})/); if (!m) return '';
-  const dt = new Date(Date.UTC(+m[3], +m[1] - 1, +m[2] + offset));
-  return `${dt.getUTCFullYear()}${String(dt.getUTCMonth() + 1).padStart(2, '0')}${String(dt.getUTCDate()).padStart(2, '0')}`;
-}
-// Resolve a franchise's IANA tz from cost_settings: explicit officeTimezone → state map → Eastern default.
+// STATE_TZ / resolveTimezone / dayIDInTz now live in ../_shared/tz.ts — see the imports at the
+// top of this file. They used to be declared here AND in crewlogic-route-disposal, while
+// crewlogic-todays-workorders and crewlogic-job-plan hardcoded Eastern; that divergence is
+// exactly why "is the timezone thing fixed?" had no single answer. One copy now.
+
+// Resolve a franchise's IANA tz from its cost_settings (explicit → state map → Eastern).
 async function franchiseTz(franchiseID: string): Promise<string> {
   try {
     const sb = supa();
     const { data: fr } = await sb.from('franchises').select('cost_settings').eq('external_id', franchiseID).eq('tenant_id', TENANT_ID).single();
-    const cs: any = (fr && fr.cost_settings) || {};
-    const ex = String(cs.officeTimezone || '').trim(); if (ex) return ex;
-    const st = String(cs.officeState || '').trim().toUpperCase();
-    return STATE_TZ[st] || 'America/New_York';
-  } catch { return 'America/New_York'; }
+    return resolveTimezoneLogged((fr && fr.cost_settings) || {}, `dispatch f=${franchiseID}`);
+  } catch { return DEFAULT_TZ; }
 }
 function shortRoute(name: string): string { const m = String(name || '').match(/\(([^)]+)\)/); return m ? m[1] : String(name || '').trim(); }
 

@@ -35,6 +35,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { logUsage } from '../_shared/usage.ts';
+import { resolveTimezoneLogged, todayPartsInTz } from '../_shared/tz.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -268,16 +269,18 @@ function parseRouteBlocks(aiText: string, knownRouteNames: string[]): Array<{ ro
 }
 
 // ---------------------------------------------------------------------------
-// Date helpers (Eastern time)
+// Date helpers (franchise-local)
 // ---------------------------------------------------------------------------
 
-function getEasternDate(dayOffset: number): string {
-  // Build a YYYY-MM-DD string for the Eastern day that is now + dayOffset days.
-  const nowET = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  nowET.setDate(nowET.getDate() + dayOffset);
-  const y = nowET.getFullYear();
-  const m = String(nowET.getMonth() + 1).padStart(2, '0');
-  const d = String(nowET.getDate()).padStart(2, '0');
+// YYYY-MM-DD for (today + dayOffset) in the FRANCHISE's zone. Was getEasternDate(), which
+// hardcoded America/New_York — for a Pacific franchise the day rolled over at 9 PM local, so
+// an evening plan was generated for the wrong day. Zone comes from _shared/tz.ts.
+function getFranchiseDate(tz: string, dayOffset: number): string {
+  const p = todayPartsInTz(tz, dayOffset);
+  const dt = new Date(Date.UTC(p.year, p.month - 1, p.day));
+  const y = dt.getUTCFullYear();
+  const m = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(dt.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
 
@@ -334,7 +337,7 @@ Deno.serve(async (req: Request) => {
     // 1) Fetch the franchise's internal UUID for tools lookup
     const { data: franchiseRow, error: franchiseErr } = await supabase
       .from('franchises')
-      .select('id')
+      .select('id, cost_settings')
       .eq('external_id', franchiseID)
       .eq('tenant_id', TENANT_ID)
       .single();
@@ -343,6 +346,7 @@ Deno.serve(async (req: Request) => {
         status: 404, headers: { ...CORS, 'Content-Type': 'application/json' },
       });
     }
+    const franchiseTz = resolveTimezoneLogged(franchiseRow.cost_settings, `job-plan f=${franchiseID}`);
 
     // 2) Concurrently fetch workorders (with plan data) AND tools list.
     //    For the workorders call we use a raw fetch with the legacy anon JWT —
@@ -413,7 +417,7 @@ Deno.serve(async (req: Request) => {
     if (workOrders.length === 0) {
       return new Response(JSON.stringify({
         success: true,
-        date: getEasternDate(dayOffset),
+        date: getFranchiseDate(franchiseTz, dayOffset),
         totalJobs: 0,
         routes: [],
         meta: { model: ANTHROPIC_MODEL, note: 'No jobs scheduled for this day' },
@@ -433,7 +437,7 @@ Deno.serve(async (req: Request) => {
     const toolsSpecialty = tools.filter((t) => !t.is_on_truck);
 
     // 5) Build prompt and call Anthropic
-    const date = getEasternDate(dayOffset);
+    const date = getFranchiseDate(franchiseTz, dayOffset);
     const prompt = buildPrompt(date, routesGrouped, toolsOnTruck, toolsSpecialty);
     const { text: aiText, usage } = await callAnthropic(anthropicKey, prompt);
 
