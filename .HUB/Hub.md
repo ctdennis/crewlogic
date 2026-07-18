@@ -48,13 +48,13 @@ use by a prod tenant"; keep those distinct.
 | FW-20 | Partial | Vonigo submit server-side null-price guard (frontend guard live; server guard deferred) |
 | FW-21 | Done | Deploy native CPL fix to prod |
 | FW-22 | Done | Shed estimator undercount fixed (walls+floor+pitched-roof + framing/shingle inputs + breakdown) — prod v5.50.2 (2026-07-05); factors calibratable |
-| FW-23 | Open | Route-Optimizer/Storage 16 cy quick-buttons |
+| FW-23 | Dropped | Route-Optimizer/Storage 16 cy quick-buttons — KILLED 2026-07-18. 4/8/12/**16 cy** buttons already exist in both estimator variants (index.html:3645, :3795); Owner has no recollection of a remaining surface. Stale row, no known work left |
 | FW-24 | Dropped | Onboarding serviceStates — KILLED 2026-07-05 (native users already enter ZIPs in pricing; redundant) |
 | FW-25 | Open | New-estimate onboarding prompt |
 | FW-26 | Partial | Native price-book onboarding — "no price book" notice done; home tile remains |
 | FW-27 | Open | Phase 2 onboarding wizard |
 | FW-28 | Open | Streamline the Settings environment |
-| FW-29 | Open | Hide unused home cards (reorder is live) |
+| FW-29 | Done | Hide unused home cards — shipped as Epic C per-user tile toggles (migration 0037; `tileToggles` index.html:6035, `_applyTileMap` index.html:7804). Owner confirmed 2026-07-18 that self-serve hiding was never the intent, so the owner-assigned toggles close this |
 | FW-30 | Open | index.html size / architecture review |
 | FW-31 | Done | Payments + pricing model (BUILD shipped dormant; activation = FW-32) |
 | FW-32 | Done | Billing activation — Epic E GO-LIVE (`BILLING_ENABLED = true`, index.html:4222; merged to main `7b23804`, v5.50.58). Re-verified against code 2026-07-18 (register row had gone stale at `Open`) |
@@ -66,10 +66,10 @@ use by a prod tenant"; keep those distinct.
 | FW-38 | Done | Native toolbar-fix prod promote (on main v5.50.0) |
 | FW-39 | Open — **LIVE BUG for #56 (Pacific)** | Generalize Eastern-hardcoded date logic (todays-workorders + job-plan). **Confirmed 2026-07-18: not theoretical.** `getEasternMidnightEpoch` (`crewlogic-todays-workorders/index.ts:93-108`) derives y/m/d from *now in Eastern* then naive-encodes. The naive encoding is fine (clock-face, TZ-agnostic — the intentional Vonigo convention); the **day selection** is the bug. From **9:00 PM Pacific** onward Eastern is already tomorrow, so #56's board serves **tomorrow's** jobs for the last ~3h of their evening. Same defect in `crewlogic-job-plan/index.ts:276` (`nowET`). Fix = resolve the franchise TZ (`resolveTimezone`/`STATE_TZ` already exist in `crewlogic-route-disposal`; lift to `_shared/`) and derive the date components in it — keep the naive encoding |
 | FW-40 | Open | Onboarding: capture location + confirm timezone |
-| FW-41 | Open | Reconnect crewlogic-marketing Pages Git |
+| FW-41 | Done | Reconnect crewlogic-marketing Pages Git — Owner confirmed 2026-07-18 the marketing site is publishing fine; marketing now lives in-repo (`marketing/privacy.html`, `marketing/terms.html`, `82b97a9`). The 2026-07-04 Cloudflare Git-disconnect is resolved |
 | FW-42 | Open | Retire the last n8n dependency (route engine) |
 | FW-43 | Partial | Estimate-charges normalization — dual-write done; reads + prod-apply + retire-blob remain |
-| FW-44 | Open | Storage headroom / STORAGE_INCLUDED_GB (set to 100 on Pro) |
+| FW-44 | Open — confirmed unset | Storage headroom / `STORAGE_INCLUDED_GB`. **Verified 2026-07-18: the secret is NOT set on prod** (`supabase secrets list --project-ref ozfk…`, read-only), so `crewlogic-admin/index.ts:431` falls back to `\|\| 1` → the super-admin storage gauge divides usage by **1 GB**. Display-only (no cap enforced, nothing blocked), but `pctUsed` reads ~100× high if the Supabase plan actually includes 100 GB. Fix = confirm the prod Supabase plan's storage allowance, then `supabase secrets set --project-ref ozfk… STORAGE_INCLUDED_GB=<n>` (gated, prod write) |
 | FW-45 | Open | estimate-photos per-franchise path scoping |
 | FW-46 | Done | Keys export redacted to MY_* placeholders + backup deleted; verified not in repo/index; file never synced/shared → keys never left the machine, no rotation needed (owner 2026-07-05) |
 | FW-47 | Open | Google Cloud credentials cleanup + Street View proxy |
