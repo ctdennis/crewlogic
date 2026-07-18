@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.90 | 2026-07-18">
+  <meta name="crewlogic-version" content="v5.50.91 | 2026-07-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -13497,10 +13497,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       ['America/Anchorage',              'Alaska — Anchorage'],
       ['Pacific/Honolulu',               'Hawaii — Honolulu (no daylight saving)'],
     ];
-    // True once the owner has explicitly picked a zone, so a later state edit never silently
-    // overwrites a deliberate choice (e.g. #54 El Paso is America/Denver while TX maps to
-    // America/Chicago — the state map is the state's PREDOMINANT zone, not always correct).
+    // Two separate guards. "A value is stored" does NOT mean "the owner chose it" — migrations
+    // 0050/0051 backfilled every franchise, so nearly all stored zones were DERIVED, never seen.
+    //   _tzUserChosen — the owner picked a zone in this session. Always wins.
+    //   _tzDeliberate — the stored zone DIVERGES from its own state's map value, i.e. someone
+    //                   overrode the map on purpose. #54 El Paso is America/Denver while TX maps
+    //                   to America/Chicago (the map holds a state's PREDOMINANT zone, which is
+    //                   wrong for El Paso). Never auto-change those.
+    // A zone that merely equals its state's map value is derived, so a state edit re-suggests.
     let _tzUserChosen = false;
+    let _tzDeliberate = false;
     function _tzMarkChosen() { _tzUserChosen = true; _tzRenderHint('chosen'); }
 
     function _tzBuildOptions(selected) {
@@ -13529,15 +13535,28 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       hintEl.style.color = mode === 'suggested' ? '#f59e0b' : 'var(--text-muted)';
     }
 
-    // Suggest a zone when the state changes, but never clobber an explicit choice.
+    // Suggest a zone when the state changes, but never clobber an explicit or deliberate one.
     function _tzSuggestFromState() {
       const selEl = document.getElementById('settingsOfficeTimezone');
       const stEl  = document.getElementById('settingsOfficeState');
       if (!selEl || !stEl) return;
-      if (_tzUserChosen && selEl.value) return;
       const st = String(stEl.value || '').trim().toUpperCase();
       const guess = CL_STATE_TZ[st];
       if (!guess) { _tzRenderHint(); return; }
+      if (selEl.value === guess) { _tzRenderHint(); return; }
+      // Protected: an in-session pick, or a stored zone that deliberately diverges from its
+      // state's map value. Don't silently change it — but don't stay silent either, since the
+      // state now implies a different zone. Flag it and let the owner decide.
+      if ((_tzUserChosen || _tzDeliberate) && selEl.value) {
+        const hintEl = document.getElementById('settingsTimezoneHint');
+        if (hintEl) {
+          let now = '';
+          try { now = new Date().toLocaleTimeString('en-US', { timeZone: selEl.value, hour: 'numeric', minute: '2-digit' }); } catch (e) { now = ''; }
+          hintEl.textContent = 'Kept your zone' + (now ? ' (current time there: ' + now + ')' : '') + ' — ' + st + ' normally uses a different one. Change it above if that is wrong.';
+          hintEl.style.color = '#f59e0b';
+        }
+        return;
+      }
       selEl.value = guess;
       _tzRenderHint('suggested');
     }
@@ -13628,8 +13647,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (_tzSel) {
         const _cs0 = currentUser.costSettings || {};
         const _storedTz = String(currentUser.officeTimezone || _cs0.officeTimezone || '').trim();
+        const _storedSt = String(currentUser.officeState || _cs0.officeState || '').trim().toUpperCase();
         _tzSel.innerHTML = _tzBuildOptions(_storedTz);
-        _tzUserChosen = !!_storedTz;
+        // Fresh session state: nothing picked yet. The stored zone counts as DELIBERATE only if
+        // it diverges from its own state's map value (see the guard notes above).
+        _tzUserChosen = false;
+        _tzDeliberate = !!_storedTz && !!_storedSt && CL_STATE_TZ[_storedSt] !== _storedTz;
         if (_storedTz) _tzRenderHint();
         else _tzSuggestFromState();
         const _stEl = document.getElementById('settingsOfficeState');
