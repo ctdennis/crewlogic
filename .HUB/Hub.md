@@ -13,6 +13,22 @@ edge functions unless an entry is stale (see freshness rule) or you are doing a 
 3. **Recheck (after the change):** verify the change landed as described and stamp **Last verified** with
    today's date. If you couldn't verify a field (e.g. prod data), say so in Notes rather than guessing.
 
+**BOTH surfaces, same commit (binding).** This Hub carries status in **two** places: the `SHIPPED (vX.Y.Z…)`
+prose blocks below, and the **Future-Work Register table** above. A ship MUST update **both in the same
+commit** — write the prose block *and* flip the matching **FW-NN row** to `Done` / `Partial` (with a code
+anchor: `file:line`, symbol, or commit SHA). Updating only the prose is the drift mode that actually
+happened: on 2026-07-18 the register still read `Open` for FW-32 (billing, live since v5.50.58), FW-01/FW-02
+(Linxup, shipped), and FW-34 (trial lockout, shipped) — every one of them had an accurate prose block three
+screens down. If a ship has no FW row, either add one (next free ID) or write `no FW row` in the commit
+body so the omission is deliberate rather than forgotten.
+
+**Status claims cite code, not this file.** When answering "is X done?", verify against the **code** — grep
+the flag/symbol/table, or find the merge commit. Do **not** answer from a register row or a prose block
+alone; those are what drift. Same discipline applies to scope: before calling something broken, trace which
+function actually backs the surface in question — on 2026-07-18 FW-39 was flagged a live #56 bug because two
+Eastern-hardcoded functions were found without checking that a *third* (`crewlogic-dispatch`) already
+resolved the franchise timezone for the boards in question.
+
 **Freshness rule:** trust an entry whose *Last verified* is recent. If it's old or the code in that area
 changed since, re-verify before relying on it. Never overstate prod rollout — "code deployed" ≠ "in active
 use by a prod tenant"; keep those distinct.
