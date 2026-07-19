@@ -105,7 +105,7 @@ No `vonigo_job_id` / `servicetitan_job_id` columns. Adding a CRM adds **rows, no
 | `dwelling_type_id` | uuid | yes | FK `job_pick_options(id)` |
 | `parking_type_id` | uuid | yes | FK `job_pick_options(id)` |
 | `marketing_source_id` | uuid | yes | FK `marketing_sources(id)` |
-| `estimate_id` | bigint | yes | FK `estimates(id)` — the estimate performed *against* this job |
+| `estimate_id` | **uuid** | yes | FK `estimates(id)` — the estimate performed *against* this job. ⚠️ **Corrected 2026-07-19 after schema check:** `estimates.id` is uuid; `estimates.estimate_id` is a separate nullable **bigint** (the app-facing number, e.g. `1781003688449`). The FK targets the uuid PK. Note also that `estimates.job_id` already exists as **text** holding the *Vonigo* job id — do not confuse it with this canonical job; if a reverse pointer is ever needed on `estimates`, name it `native_job_id` |
 | `estimate_mode` | text | yes | `full \| quick` (Q-F: reporting on who estimated how) |
 | `lost_reason_id` | uuid | yes | FK `job_pick_options(id)`, required when `status='lost'` |
 | `cancel_reason_id` | uuid | yes | FK `job_pick_options(id)`, required when `status='cancelled'` |
