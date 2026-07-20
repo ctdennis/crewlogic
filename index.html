@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.99 | 2026-07-20">
+  <meta name="crewlogic-version" content="v5.51.0 | 2026-07-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -22571,7 +22571,14 @@ RECYCLING & DONATION
         _geofenceOptions = [];        // fail quiet: the picker degrades to a note, never blocks Settings
       }
       _geofenceLoading = false;
-      if (rerenderType) renderFacilityList(rerenderType);
+      // Re-render ALL three lists, not just the one that happened to trigger the load.
+      //
+      // The Cost tab renders disposal, recycling and donation in sequence. The FIRST list starts
+      // the fetch and sets _geofenceLoading; the other two then hit the guard at the top of this
+      // function and return immediately — so they never registered a callback. Re-rendering only
+      // `rerenderType` left the other two showing "Loading…" permanently.
+      if (typeof renderAllFacilityLists === 'function') renderAllFacilityLists();
+      else if (rerenderType) renderFacilityList(rerenderType);
     }
 
     // Manual re-pull from Motive. Clears the page-lifetime cache and re-renders all three
