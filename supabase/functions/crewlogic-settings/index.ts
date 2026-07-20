@@ -20,6 +20,8 @@
 //   getFacilities          - read disposal/recycling/donation sites + hours + holidays from the
 //                            relational tables (migration 0023), returned in the UI's in-memory shape
 //   saveFacilities         - replace-set the franchise's facilities/facility_hours/franchise_holidays
+//   listGeofences          - the franchise's own cached telematics geofences, for the facility
+//                            picker that links a facility to a stable geofence id
 //                            (moved out of the cost_settings JSONB blob)
 //
 // SECRETS REQUIRED (auto-populated by Supabase):
@@ -968,9 +970,13 @@ async function handleGetFacilities(
 ): Promise<Response> {
   const { id: franchiseUUID } = await resolveFranchiseForCaller(body, token);
 
+  // provider/provider_geofence_id MUST be selected here and echoed back by saveFacilities.
+  // saveFacilities is a replace-set (delete-all + insert), so anything absent from this
+  // round-trip is destroyed on the next save — which would silently unlink every facility
+  // from its telematics geofence the first time an owner edited an unrelated field.
   const facs = (await supabaseGet(
     `/rest/v1/facilities?franchise_id=eq.${franchiseUUID}` +
-      `&select=id,type,name,address,per_ton_rate,minimum_type,minimum_value,is_default,sort_order` +
+      `&select=id,type,name,address,per_ton_rate,minimum_type,minimum_value,is_default,sort_order,provider,provider_geofence_id` +
       `&order=type.asc,sort_order.asc`,
   )) as Array<Record<string, unknown>>;
 
@@ -1004,6 +1010,9 @@ async function handleGetFacilities(
       minimumType: (f.minimum_type as string) || "none",
       minimumValue: toNum(f.minimum_value),
       hours: hoursByFac[f.id as string] || {},
+      // Telematics link — the stable facility identity (see contract-recycling-revenue D1).
+      provider: (f.provider as string) || "",
+      geofenceId: f.provider_geofence_id != null ? String(f.provider_geofence_id) : "",
     };
     if (f.type === "disposal") site.cost = toNum(f.per_ton_rate);
     else if (f.type === "recycling") site.revenue = toNum(f.per_ton_rate);
@@ -1038,6 +1047,37 @@ async function handleGetFacilities(
   });
 }
 
+// HANDLER: listGeofences — the franchise's own telematics geofences, for the facility picker.
+//
+// Reads the per-franchise cache the webhook already maintains (motive_geofences, populated by
+// crewlogic-motive-webhook's resolveGeofenceName from GET /v1/geofences). No Motive call here:
+// the picker must work instantly and offline-ish, and a franchise that has received any webhook
+// already has its geofences cached.
+//
+// Generic by design (contract D7): every franchise picks from ITS OWN geofences. No franchise's
+// ids are hardcoded anywhere — #90 is simply the first user of this mechanism.
+async function handleListGeofences(
+  body: Record<string, unknown>,
+  token: string | null,
+): Promise<Response> {
+  const { id: franchiseUUID } = await resolveFranchiseForCaller(body, token);
+
+  const rows = (await supabaseGet(
+    `/rest/v1/motive_geofences?franchise_id=eq.${franchiseUUID}` +
+      `&select=geofence_id,name,category&order=name.asc`,
+  )) as Array<Record<string, unknown>>;
+
+  return jsonResponse({
+    success: true,
+    provider: "motive",
+    geofences: rows.map((g) => ({
+      id: String(g.geofence_id),
+      name: (g.name as string) || `Geofence ${g.geofence_id}`,
+      category: (g.category as string) || "",
+    })),
+  });
+}
+
 // HANDLER: saveFacilities — replace-set the franchise's facilities/hours/holidays.
 // Accepts the same shape getFacilities returns.
 async function handleSaveFacilities(
@@ -1064,6 +1104,11 @@ async function handleSaveFacilities(
   const hoursSrc: Array<Record<string, unknown> | null> = [];
   for (const [type, sites] of types) {
     sites.forEach((s: Record<string, unknown>, idx: number) => {
+      // Round-trip the telematics link. A blank geofenceId stores NULL (unlinked), never 0 —
+      // 0 would collide in the unique index and read as a real geofence.
+      const gidRaw = String((s && (s as Record<string, unknown>).geofenceId) ?? "").trim();
+      const gid = /^\d+$/.test(gidRaw) ? Number(gidRaw) : null;
+      const prov = String((s && (s as Record<string, unknown>).provider) ?? "").trim().toLowerCase();
       facRows.push({
         franchise_id: franchiseUUID,
         type,
@@ -1074,6 +1119,8 @@ async function handleSaveFacilities(
         minimum_value: toNum(s && s.minimumValue),
         is_default: !!(s && s.isDefault),
         sort_order: idx,
+        provider: gid != null ? (prov === "linxup" ? "linxup" : "motive") : null,
+        provider_geofence_id: gid,
       });
       hoursSrc.push((s && s.hours && typeof s.hours === "object") ? (s.hours as Record<string, unknown>) : null);
     });
@@ -1218,7 +1265,7 @@ serve(async (req) => {
 
   // Token-aware actions (caller-verified via the Authorization Bearer token) are
   // routed here rather than through the body-only ACTION_HANDLERS map.
-  if (action === "saveHomeCardOrder" || action === "saveSmsTemplate" || action === "getFacilities" || action === "saveFacilities") {
+  if (action === "saveHomeCardOrder" || action === "saveSmsTemplate" || action === "getFacilities" || action === "saveFacilities" || action === "listGeofences") {
     const authHeader = req.headers.get("Authorization") || "";
     const token = authHeader.toLowerCase().startsWith("bearer ")
       ? authHeader.slice(7).trim()
@@ -1227,6 +1274,7 @@ serve(async (req) => {
       if (action === "saveHomeCardOrder") return await handleSaveHomeCardOrder(body, token);
       if (action === "saveSmsTemplate") return await handleSaveSmsTemplate(body, token);
       if (action === "getFacilities") return await handleGetFacilities(body, token);
+      if (action === "listGeofences") return await handleListGeofences(body, token);
       return await handleSaveFacilities(body, token);
     } catch (e) {
       const err = e as Error;
