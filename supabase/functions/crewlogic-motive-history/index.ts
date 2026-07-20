@@ -21,8 +21,10 @@
 // Deploy (DEV):
 //   supabase functions deploy --project-ref bagkimfwmpwjfhfhmsrb crewlogic-motive-history --use-api --no-verify-jwt
 //
-// NOTE ON AUTH: deployed --no-verify-jwt for the dev probe. It exposes historical telematics for
-// a franchise, so it MUST be JWT-guarded (and ideally super-admin gated) before any prod deploy.
+// AUTH: SUPER-ADMIN ONLY. Deployed --no-verify-jwt (gateway open) with the check performed in
+// the handler, matching crewlogic-quickbooks / crewlogic-card-transactions. Every request must
+// carry the super-admin's Supabase JWT; anything else — including the publishable anon key —
+// gets 403 before the body is read or any credential is touched.
 //
 // POST body (probe):
 //   { franchiseID: "<franchise UUID>",   // franchises.id, NOT external_id
@@ -70,6 +72,34 @@ const CORS = {
 };
 
 const MOTIVE_BASE = "https://api.gomotive.com";
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
+const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+
+// ── SUPER-ADMIN GATE ─────────────────────────────────────────────────────────────────────
+// This function reads a franchise's full telematics history and WRITES to geofence_alerts.
+// It is an operational backfill tool, not a customer-facing feature, so it is restricted to
+// the super-admin rather than merely franchise-scoped.
+//
+// Deployed --no-verify-jwt (the gateway lets the request through) with the check done here,
+// matching crewlogic-quickbooks and crewlogic-card-transactions. Same pattern, same email, so
+// there is one super-admin mechanism in the codebase rather than two.
+//
+// Before this existed the function was reachable by anyone holding the publishable anon key —
+// which is embedded in the frontend and therefore public. Given a franchise UUID, that exposed
+// nine months of vehicle movement, and the import action could write rows.
+const SUPER_ADMIN_EMAIL = "charles.dennis@junkluggers.com";
+async function isSuperAdmin(req: Request): Promise<boolean> {
+  try {
+    const tokenHdr = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+    if (!tokenHdr) return false;
+    const r = await fetch(SUPABASE_URL + "/auth/v1/user", {
+      headers: { Authorization: "Bearer " + tokenHdr, apikey: SERVICE_KEY },
+    });
+    if (!r.ok) return false;                       // anon/publishable key resolves to no user → denied
+    const u = await r.json();
+    return String(u?.email || "").toLowerCase() === SUPER_ADMIN_EMAIL;
+  } catch (_e) { return false; }
+}
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -103,6 +133,11 @@ async function fetchAllEvents(token: string, startDate: string, endDate: string)
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+
+  // Gate BEFORE reading the body or touching credentials — nothing happens for a non-admin.
+  if (!(await isSuperAdmin(req))) {
+    return json({ success: false, error: "forbidden" }, 403);
+  }
 
   try {
     const body = await req.json().catch(() => ({}));

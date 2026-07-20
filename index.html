@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.96 | 2026-07-20">
+  <meta name="crewlogic-version" content="v5.50.97 | 2026-07-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8313,6 +8313,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           promptSaveBeforeLeaving();
           return;
         }
+      }
+      // Settings: warn before discarding unsaved cost/facility edits. Back used to drop them
+      // silently — an owner linked a screenful of facilities to geofences, hit Back, and lost
+      // the lot. The geofence picker now auto-saves, but names, addresses, rates, minimums and
+      // hours are still batched behind "Save cost settings", so the guard covers those.
+      const _setScreen = document.getElementById('settingsScreen');
+      if (_settingsDirty && _setScreen && _setScreen.classList.contains('active')) {
+        if (!confirm('You have unsaved changes in Settings.\n\nLeave without saving?')) return;
+        _settingsDirty = false;
       }
       hideAll();
       document.getElementById('homeScreen').style.display = 'block';
@@ -22592,21 +22601,61 @@ RECYCLING & DONATION
                 'provider list)</option>';
       }
 
+      // Saved-state indicator: the pick persists on change, so say so plainly. Without it the
+      // control looks identical whether or not the link reached the server.
+      const st = _geofenceSaveMsg[type + ':' + i];
+      const statusHtml = st === 'saving' ? '<span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">saving…</span>'
+        : st === 'saved'  ? '<span style="font-size:11px;color:var(--accent-green);flex-shrink:0;font-weight:700;">✓ saved</span>'
+        : st === 'failed' ? '<span style="font-size:11px;color:#ef4444;flex-shrink:0;font-weight:700;">✕ not saved</span>'
+        : (cur ? '<span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">#' + esc(cur) + '</span>' : '');
+
       return '<div style="display:flex;gap:6px;align-items:center;margin-top:4px;" title="' + tip + '">' + label +
         '<select class="form-input" style="flex:1;min-width:0;font-size:12px;padding:6px 8px;" ' +
           'onchange="_setFacilityGeofence(\'' + type + '\',' + i + ',this.value)">' + opts + '</select>' +
-        (cur ? '<span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">#' + esc(cur) + '</span>' : '') +
+        statusHtml +
       '</div>';
     }
 
-    // Set the geofence link AND the provider together. Storing provider explicitly rather than
-    // letting the server infer it keeps the row self-describing, and is what makes a Linxup
-    // franchise work through the same code path.
-    function _setFacilityGeofence(type, i, value) {
+    // Set the geofence link AND the provider together, then PERSIST IMMEDIATELY.
+    //
+    // Auto-save is deliberate. Every other field on this screen is free text you are still
+    // typing, so batching them behind "Save cost settings" is right. A geofence pick is not —
+    // it is one discrete committed choice from a dropdown, and it reads as saved the moment you
+    // make it. Owner linked a screenful of facilities, hit Back, and lost all of it, because
+    // updateFacility only writes to the in-memory costSettings cache.
+    //
+    // Saves ONLY facilities (saveFacilities), never the scalar cost fields, so a half-typed
+    // number elsewhere on the tab cannot be committed as a side effect of picking a geofence.
+    let _geofenceSaveMsg = {};    // "type:index" -> transient status shown beside the picker
+    async function _setFacilityGeofence(type, i, value) {
       const v = String(value || '').trim();
       updateFacility(type, i, 'geofenceId', v);
       updateFacility(type, i, 'provider', v ? 'motive' : '');
-      renderFacilityList(type);   // refresh the "#id" hint beside the picker
+      const key = type + ':' + i;
+      _geofenceSaveMsg[key] = 'saving';
+      renderFacilityList(type);
+      try {
+        const res = await facilitiesEdgeCall({
+          action: 'saveFacilities',
+          email: currentUser.email,
+          franchiseID: currentUser.franchiseID,
+          disposalSites:  getFacilities('disposal'),
+          recyclingSites: getFacilities('recycling'),
+          donationSites:  getFacilities('donation'),
+          disposalHolidays: getDisposalHolidays()
+        });
+        _geofenceSaveMsg[key] = (res && res.success) ? 'saved' : 'failed';
+        if (res && res.success) {
+          storage.set(SESSION_KEY, JSON.stringify(currentUser));
+          _settingsDirty = false;   // facilities are now persisted; nothing left to lose on Back
+        }
+      } catch (e) {
+        _geofenceSaveMsg[key] = 'failed';
+      }
+      renderFacilityList(type);
+      if (_geofenceSaveMsg[key] === 'saved') {
+        setTimeout(() => { delete _geofenceSaveMsg[key]; renderFacilityList(type); }, 2500);
+      }
     }
 
     // ── Settings screen: render facility rows ──
@@ -22893,7 +22942,12 @@ RECYCLING & DONATION
 
     // Supports flat fields ('name') and dotted nested paths ('hours.mon.open').
     // Flat-field callers are unchanged.
+    // Set by any facility edit, cleared on a successful save. Drives the Back-button guard in
+    // goHome() so unsaved work cannot be silently discarded.
+    let _settingsDirty = false;
+
     function updateFacility(type, idx, field, value) {
+      _settingsDirty = true;
       const facilities = getFacilities(type);
       if (facilities[idx]) {
         if (field.indexOf('.') === -1) {
@@ -24547,6 +24601,7 @@ Please review the estimate below. If you have any questions or would like to adj
             disposalHolidays: facilitiesPayload.disposalHolidays
           });
           storage.set(SESSION_KEY, JSON.stringify(currentUser));
+          _settingsDirty = false;   // clears the Back-button guard
           feedbackEl.textContent = '✓ Cost settings saved';
           feedbackEl.className = 'settings-feedback ok';
           // Refresh estimate dropdowns so new facilities appear immediately
