@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.94 | 2026-07-20">
+  <meta name="crewlogic-version" content="v5.50.95 | 2026-07-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -22520,6 +22520,7 @@ RECYCLING & DONATION
     // franchise links its own facilities. No franchise's ids are hardcoded anywhere.
     let _geofenceOptions = null;      // null = not loaded yet, [] = loaded and empty
     let _geofenceLoading = false;
+    let _geofenceUnavailable = false; // backend does not offer listGeofences (older deploy)
 
     async function loadGeofenceOptions(rerenderType) {
       if (_geofenceLoading || _geofenceOptions !== null) return;
@@ -22528,8 +22529,17 @@ RECYCLING & DONATION
         const data = await edgeFunctionCall('crewlogic-settings', {
           action: 'listGeofences', franchiseID: currentUser.franchiseID
         });
-        _geofenceOptions = (data && Array.isArray(data.geofences)) ? data.geofences : [];
+        if (data && Array.isArray(data.geofences)) {
+          _geofenceOptions = data.geofences;
+        } else {
+          // The action is absent on this deploy (returns 400 "Unknown action"). Distinguish that
+          // from "you have no geofences" — telling an owner WITH a connected provider to go
+          // connect one would be a plainly wrong instruction.
+          _geofenceUnavailable = true;
+          _geofenceOptions = [];
+        }
       } catch (e) {
+        _geofenceUnavailable = true;
         _geofenceOptions = [];        // fail quiet: the picker degrades to a note, never blocks Settings
       }
       _geofenceLoading = false;
@@ -22548,8 +22558,11 @@ RECYCLING & DONATION
           '<span style="font-size:11px;color:var(--text-muted);">Loading…</span></div>';
       }
       if (!_geofenceOptions.length) {
+        const msg = _geofenceUnavailable
+          ? 'Geofence linking isn\'t available yet on this environment.'
+          : 'No telematics geofences found — connect a provider in Settings → Trucks.';
         return '<div style="display:flex;gap:6px;align-items:center;margin-top:4px;" title="' + tip + '">' + label +
-          '<span style="font-size:11px;color:var(--text-muted);">No telematics geofences found — connect a provider in Settings → Trucks.</span></div>';
+          '<span style="font-size:11px;color:var(--text-muted);">' + msg + '</span></div>';
       }
 
       const esc = s => String(s == null ? '' : s).replace(/"/g, '&quot;').replace(/</g, '&lt;');
