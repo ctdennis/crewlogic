@@ -80,23 +80,27 @@ The spreadsheet's **only** irreplaceable contribution is the **money**: 120 `Amo
 
 Correcting an earlier mis-statement: `Amount` is on 120 of **2,002** rows (6%) — but the right denominator is **recycling visits**, of which there are 145. So **120/145 = 83%**, and `Amount` appears on **zero** non-recycling rows. `Pounds` is 45/145 (31%). The tracking is disciplined, not sparse.
 
-### D6 — Outstanding age is meaningless without payment terms
+### D6 — Two payment terms, and they need opposite report behaviour
 
-Owner, 2026-07-20: *"some recyclers pay the day of the job, while others I pick up and enter once a month."*
+Owner, 2026-07-20: *"Zions Middleboro Recycling, I pick up whenever I want. All others are paid in
+cash at the time we do the recycling."*
 
-That breaks a naive "days outstanding" report. A **same-day** recycler with a visit unpaid for three
-days is something to chase. A **monthly** recycler with three weeks of unpaid visits is completely
-normal. A report that treats them alike either cries wolf on the monthly ones or hides a genuinely
-missed same-day collection in the noise.
+So it is not a schedule — it is **one accruing account plus everything else settled on the spot**:
 
-So `facilities.payment_terms` (`same_day` \| `monthly` \| `unknown`) drives the report:
+| Terms | Who | Meaning of an unpaid visit |
+|---|---|---|
+| `same_day` | every recycler except Zions | **An exception.** Cash should have changed hands at the visit. Unpaid = crew didn't hand it over, or it never got entered. **This is an error-catcher.** |
+| `on_demand` | **Zions Middleboro** | **Normal and expected.** A balance accrues until Owner chooses to collect. Never an alert. |
+| `unknown` | unconfigured | list, never flag |
 
-- **same_day** → flag once the visit is older than ~1 business day
-- **monthly** → flag only once the *previous* month is closed and still unpaid
-- **unknown** → list, never flag (no false alarms from unconfigured facilities)
+This inverts the report for each. For `same_day`, *any* aged unpaid visit is worth surfacing —
+that is real money that should already be in the till, and it is precisely what the green-row
+eyeball check catches today. For `on_demand`, flagging would be pure noise; what is actually
+useful is the **accrued balance and how long it has been building**, so Owner can see when the pot
+justifies a trip.
 
-This is one column and it is what makes the outstanding list trustworthy enough to replace the
-green-row eyeball check. Without it the feature is noisier than the spreadsheet it replaces.
+Without this split the feature is noisier than the spreadsheet it replaces: Zions alone would
+generate a permanent wall of false alarms while a genuinely missed same-day collection hid inside it.
 
 ---
 
@@ -108,7 +112,7 @@ green-row eyeball check. Without it the feature is noisier than the spreadsheet 
 |---|---|---|
 | `provider` | text | `motive` \| `linxup` |
 | `provider_geofence_id` | bigint | the stable key |
-| `payment_terms` | text | `same_day` \| `monthly` \| `unknown` (default) — see D6 |
+| `payment_terms` | text | `same_day` \| `on_demand` \| `unknown` (default) — see D6 |
 
 `unique (franchise_id, provider, provider_geofence_id) where provider_geofence_id is not null`
 
@@ -183,9 +187,15 @@ Trigger, in Owner's words: *"Once a truck enters a recycler and exits, I know I 
 
 ### 5.2 Outstanding report
 
-- **Headline:** count outstanding, and how many are **actually overdue** per D6 terms — not merely unpaid
-- **By facility:** visits awaiting an amount, grouped, so Owner knows who to call. **Sorted by overdue
-  first**, with monthly payers shown as a normal running balance rather than an alert
+Two sections, because D6's terms want opposite treatment:
+
+- **⚠ Needs collecting** — `same_day` facilities with any unpaid visit older than ~1 business day.
+  Should normally be **empty**; a non-empty list means cash was missed or never entered. This is the
+  automated replacement for scanning green rows.
+- **Accruing balances** — `on_demand` facilities (today: Zions Middleboro) showing **accrued visit
+  count, oldest visit date, and estimated value where known**. Never flagged; the point is to show
+  Owner when the pot is worth a pickup trip.
+- **Settled history** — amount and weight by facility by month, with $/lb derived where both exist.
 - **Settled history:** amount and weight by facility by month, with a $/lb derived where both exist
 - Deliberately *not* an AR ledger — no invoices, no aging buckets, no statements
 
@@ -217,11 +227,18 @@ Steps 1–6 can proceed while MailParser keeps running — no gap, no cutover ri
 - **Q-R1.** Backfill from **2025-11-01** (matching the sheet) or further? Motive showed no retention wall; earlier data may exist. *Lean: probe 2025-01-01; import whatever comes back — it's free.*
 - **Q-R2.** Do the **47 missing sheet days** matter? Motive fills them, so the import will contain visits the sheet never had. *Lean: import everything; more history is strictly better.*
 - **Q-R3. ANSWERED 2026-07-20 — no.** *"I only enter the amount when I have cash in hand."* `amount IS NOT NULL` ⇔ money received. No second field.
-- **Q-R7. OPEN — the one that could still change the table.** For **monthly** recyclers, does their statement **itemise per load**, or is it a **single lump sum** covering many visits? If itemised, per-visit `amount` is correct as designed. If it's one cheque with no breakdown, Owner would be forced to invent an allocation across visits — and that needs a small `settlements` table (one payment → many visits) instead. The 83% per-visit fill rate, including 62 amounts at Zions, suggests **itemised** — but this should be confirmed, not inferred.
+- **Q-R7. ANSWERED 2026-07-20 — per-visit `amount` stands; no `settlements` table.** Only **one** facility accrues (Zions Middleboro, `on_demand`); everything else is cash at the visit. Zions already carries **62 per-visit amounts** in the history, so loads are valued individually and Owner records them individually — the lump-sum-with-no-breakdown case that would have forced a settlements table does not arise. Should a second accruing facility ever pay one undifferentiated cheque, revisit then.
 - **Q-R4.** Can one facility have **two geofences**? *Lean: no for v1; link table later if it appears.*
 - **Q-R5.** Should **non-recycling** visits (transfer stations — a cost, not revenue) also accept amounts? The sheet shows amounts only on recycling, but disposal fees are real money. *Lean: allow it; the schema is identical and the report filters by facility type.*
 - **Q-R6.** Weight is only 31% filled. Keep it optional, or prompt for it? *Lean: optional — never block a settlement on a number Owner may not have.*
 
 ## 9. Approval
 
-On approval: migrations `0056`–`0058`, the `import` action, then UI. Dev-first with a right-sized test script at promote (**MEDIUM+** — data writes, money, multi-touch-point). **No code until this is approved.**
+**All blocking questions are answered** (Q-R3, Q-R7). Remaining open items — Q-R1 how far back to
+probe, Q-R2 the 47 extra days, Q-R4 two-geofence facilities, Q-R5 transfer-station costs, Q-R6
+optional weight — are all **reversible defaults** that do not change the schema; the leans stated
+above will be applied unless vetoed.
+
+On approval: migrations `0056`–`0058`, the `import` action on `crewlogic-motive-history`, then UI.
+Dev-first with a right-sized test script at promote (**MEDIUM+** — data writes, real money,
+multi-touch-point). **No code until this is approved.**
