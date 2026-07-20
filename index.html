@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.95 | 2026-07-20">
+  <meta name="crewlogic-version" content="v5.50.96 | 2026-07-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4366,6 +4366,27 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         });
       } catch (_e) { /* keep fallback amounts */ }
     }
+    // Fetch every row of a PostgREST query, not just the first page.
+    //
+    // PostgREST caps a response at 1000 rows REGARDLESS of &limit= — so `&limit=5000` silently
+    // returns 1000 and the caller has no idea it was truncated. That is invisible in a report:
+    // no error, just quieter, smaller totals. It was harmless while these tables held a few
+    // hundred live rows and became wrong the moment the Motive backfill added ~1800 historic
+    // ones. The same cap also caused 835 duplicate inserts in the backfill's dedupe check.
+    //
+    // Pass a path WITHOUT limit/offset; ordering should already be in the path so paging is stable.
+    async function _pagedFetch(basePath, maxRows) {
+      const PAGE = 1000, cap = maxRows || 50000;
+      let out = [];
+      for (let off = 0; off < cap; off += PAGE) {
+        const page = await supabaseFetch(basePath + '&limit=' + PAGE + '&offset=' + off);
+        const arr = Array.isArray(page) ? page : [];
+        out = out.concat(arr);
+        if (arr.length < PAGE) break;
+      }
+      return out;
+    }
+
     // 📊 Alerts report (button next to Live Alerts) — high-level reporting on completed facility visits (geofence exits).
     let _alertsRows = [];        // fetched exit rows (already >=8min filtered), cached so the range tabs don't re-query
     let _alertsRange = 'week';   // today | week | month | 90d | ytd | all
@@ -4398,23 +4419,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;">Loading…</div>';
       const fid = currentUser && currentUser.franchiseInternalID;
       if (!fid) { body.innerHTML = '<div style="color:var(--text-muted);">No franchise on this session.</div>'; return; }
-      // PAGINATE. PostgREST caps a response at 1000 rows regardless of &limit=, so the old
-      // single &limit=5000 call silently returned only the first 1000 — fine when the table held
-      // a few hundred live rows, wrong the moment the Motive backfill added ~1800 historic ones.
-      // A truncated fetch here is invisible: the report just shows smaller totals. Page until a
-      // short page comes back.
-      let rows = [];
+      let rows;
       try {
-        const PAGE = 1000;
-        for (let off = 0; off < 50000; off += PAGE) {
-          const page = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) +
-            '&event_type=eq.geofence_exit&duration=not.is.null' +
-            '&select=geofence_name,category,duration,created_at' +
-            '&order=created_at.desc&limit=' + PAGE + '&offset=' + off);
-          const arr = Array.isArray(page) ? page : [];
-          rows = rows.concat(arr);
-          if (arr.length < PAGE) break;
-        }
+        rows = await _pagedFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) +
+          '&event_type=eq.geofence_exit&duration=not.is.null' +
+          '&select=geofence_name,category,duration,created_at' +
+          '&order=created_at.desc');
       } catch (e) { body.innerHTML = '<div style="color:var(--text-muted);">Could not load the report.</div>'; return; }
       const MIN_SEC = 480; // a stop under 8 min at a fence = drive-through / false positive — excluded everywhere
       _alertsRows = (Array.isArray(rows) ? rows : []).filter(r => (parseFloat(r.duration) || 0) >= MIN_SEC);
@@ -4477,9 +4487,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         body.innerHTML = head + '<div style="color:var(--text-muted);font-size:14px;">Loading…</div>';
         const sinceIso = new Date(_alertsRangeStart(_alertsRange)).toISOString();
         try {
+          // Both paged: PostgREST's 1000-row cap applies here too, and "All time" now makes it
+          // reachable on both tables. A truncated fetch would silently drop customer visits.
           const [alerts, jgs] = await Promise.all([
-            supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&wo_id=not.is.null&event_type=in.(job_arrive,job_leave)&created_at=gte.' + encodeURIComponent(sinceIso) + '&select=wo_id,job_id,geofence_name,vehicle_number,event_type,duration,start_time,created_at&order=created_at.asc&limit=5000'),
-            supabaseFetch('/rest/v1/job_geofences?franchise_id=eq.' + encodeURIComponent(fid) + '&route=not.is.null&select=wo_id,route&limit=5000')
+            _pagedFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&wo_id=not.is.null&event_type=in.(job_arrive,job_leave)&created_at=gte.' + encodeURIComponent(sinceIso) + '&select=wo_id,job_id,geofence_name,vehicle_number,event_type,duration,start_time,created_at&order=created_at.asc'),
+            _pagedFetch('/rest/v1/job_geofences?franchise_id=eq.' + encodeURIComponent(fid) + '&route=not.is.null&select=wo_id,route&order=wo_id.asc')
           ]);
           _custRaw = Array.isArray(alerts) ? alerts : [];
           _custRouteMap = {}; (Array.isArray(jgs) ? jgs : []).forEach(g => { if (g.wo_id && g.route) _custRouteMap[String(g.wo_id)] = g.route; });
