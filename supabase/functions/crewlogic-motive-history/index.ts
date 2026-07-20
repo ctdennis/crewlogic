@@ -24,12 +24,42 @@
 // NOTE ON AUTH: deployed --no-verify-jwt for the dev probe. It exposes historical telematics for
 // a franchise, so it MUST be JWT-guarded (and ideally super-admin gated) before any prod deploy.
 //
-// POST body:
+// POST body (probe):
 //   { franchiseID: "<franchise UUID>",   // franchises.id, NOT external_id
 //     startDate:  "2025-11-01",
 //     endDate:    "2025-11-30",
 //     geofenceIds?: [2892241],           // optional filter
 //     pageNo?: 1, perPage?: 25 }
+//
+// POST body (import — writes to geofence_alerts):
+//   { action: "import", franchiseID, startDate, endDate, dryRun?: true }
+//
+// ── IMPORT DESIGN NOTES ──────────────────────────────────────────────────────────────────
+// Rows are written into the EXISTING geofence_alerts table so the Alerts Report picks them up
+// with no schema change. Three details are load-bearing:
+//
+//   action = 'motive_backfill'
+//     Existing rows use 'vehicle_geofence_event' (Motive live), 'linxup_fence_event' or
+//     'lifecycle'. A distinct value makes the whole backfill exactly identifiable, so backing
+//     it out is one statement:
+//         delete from geofence_alerts where action = 'motive_backfill';
+//     The report does NOT filter on action, so these still appear.
+//
+//   event_type = 'geofence_exit'
+//     The Alerts Report queries event_type=eq.geofence_exit AND duration not null. Anything
+//     else is invisible to it. Motive's history records ARE completed dwells, so exit is the
+//     honest mapping.
+//
+//   created_at = the event's start_time, NOT now()
+//     This one matters most. created_at is what Live Alerts orders by and what the report's
+//     range filter uses (index.html:4417). Inserting 1800+ historic rows stamped "now" would
+//     flood the live alert feed with months-old events presented as current, and dump every
+//     one of them into "Today" on the report. Stamping the visit time keeps both correct.
+//
+// Idempotent by event_id: Motive's numeric event id is stored in geofence_alerts.event_id, and
+// any id already present for this franchise is skipped. Re-running the same range inserts
+// nothing. (There is no unique constraint on event_id — Linxup rows legitimately have none —
+// so dedupe is done in code rather than relying on ON CONFLICT.)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -46,6 +76,29 @@ function json(data: unknown, status = 200): Response {
     status,
     headers: { ...CORS, "Content-Type": "application/json" },
   });
+}
+
+// Pull every page of /v1/geofences/events for a range. Returns raw event objects.
+async function fetchAllEvents(token: string, startDate: string, endDate: string): Promise<any[]> {
+  const out: any[] = [];
+  const perPage = 100;
+  for (let page = 1; page <= 100; page++) {   // hard stop: 10k events, far above any real range
+    const qs = new URLSearchParams();
+    qs.set("start_date", startDate);
+    if (endDate) qs.set("end_date", endDate);
+    qs.set("page_no", String(page));
+    qs.set("per_page", String(perPage));
+    const res = await fetch(`${MOTIVE_BASE}/v1/geofences/events?${qs.toString()}`, {
+      headers: { accept: "application/json", "x-api-key": token },
+    });
+    if (!res.ok) throw new Error(`motive ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    const data = await res.json();
+    const listRaw: any[] = Array.isArray(data) ? data : (data.geofence_events || data.events || []);
+    const events = listRaw.map((it) => (it && (it.geofence_event || it.event)) || it).filter(Boolean);
+    out.push(...events);
+    if (events.length < perPage) break;
+  }
+  return out;
 }
 
 Deno.serve(async (req: Request) => {
@@ -76,6 +129,101 @@ Deno.serve(async (req: Request) => {
     const token = String(row?.token || "");
     if (provider !== "motive" || !token) {
       return json({ success: false, error: `no motive credential for this franchise (provider=${provider || "none"})` }, 400);
+    }
+
+    // ── IMPORT: write completed dwells into geofence_alerts ──────────────────────────────
+    if (String(body.action || "") === "import") {
+      const dryRun = body.dryRun === true;
+
+      // Franchise context (tenant_id matches how the live webhook writes its rows).
+      const { data: fr } = await sb.from("franchises").select("tenant_id").eq("id", franchiseID).maybeSingle();
+      const tenantId = fr?.tenant_id ?? null;
+
+      // Geofence id → { name, category }, from the cache the webhook already maintains.
+      const { data: gfRows } = await sb
+        .from("motive_geofences").select("geofence_id, name, category").eq("franchise_id", franchiseID);
+      const gfMap = new Map<string, { name: string | null; category: string | null }>();
+      for (const g of (gfRows || [])) {
+        gfMap.set(String(g.geofence_id), { name: g.name ?? null, category: g.category ?? null });
+      }
+
+      const events = await fetchAllEvents(token, startDate, endDate);
+
+      // Skip anything already stored for this franchise.
+      //
+      // ⚠ Query ONLY the ids we are about to insert, in chunks. The obvious version —
+      // "select event_id where franchise_id = X" — silently truncates at PostgREST's default
+      // 1000-row cap, so on a re-run it saw ~1000 of 1835 stored ids and re-inserted the other
+      // 835 as duplicates. Bounding the query by the incoming ids makes it exact regardless of
+      // how much history is already stored.
+      const incomingIds = events.map((e) => e?.id).filter((v) => v != null).map((v) => String(v));
+      const seen = new Set<string>();
+      for (let i = 0; i < incomingIds.length; i += 300) {
+        const chunk = incomingIds.slice(i, i + 300);
+        const { data: hit, error } = await sb
+          .from("geofence_alerts").select("event_id")
+          .eq("franchise_id", franchiseID).in("event_id", chunk);
+        if (error) return json({ success: false, error: `dedupe lookup failed: ${error.message}` }, 500);
+        for (const r of (hit || [])) seen.add(String((r as any).event_id));
+      }
+
+      const rows: Record<string, unknown>[] = [];
+      let skipped = 0, noId = 0;
+      for (const e of events) {
+        const eid = e?.id;
+        if (eid == null) { noId++; continue; }
+        if (seen.has(String(eid))) { skipped++; continue; }
+        seen.add(String(eid));                       // guard against dupes within the same pull
+        const gf = gfMap.get(String(e.geofence_id)) || { name: null, category: null };
+        rows.push({
+          franchise_id: franchiseID,
+          tenant_id: tenantId,
+          action: "motive_backfill",                 // the backout handle — see header
+          event_type: "geofence_exit",               // what the Alerts Report filters on
+          vehicle_id: e?.vehicle?.id ?? null,
+          vehicle_number: e?.vehicle?.number ?? null,
+          geofence_id: e?.geofence_id ?? null,
+          geofence_name: gf.name,
+          category: gf.category,
+          event_id: eid,
+          start_time: e?.start_time ?? null,
+          end_time: e?.end_time ?? null,
+          duration: e?.duration ?? null,
+          // The visit time, NOT now(). Stamping now() would flood Live Alerts with months-old
+          // events shown as current and dump them all into "Today" on the report.
+          created_at: e?.start_time ?? null,
+          raw: e,
+        });
+      }
+
+      if (dryRun) {
+        return json({
+          success: true, dryRun: true,
+          fetched: events.length, wouldInsert: rows.length, alreadyPresent: skipped, missingEventId: noId,
+          unresolvedGeofenceNames: rows.filter((r) => r.geofence_name == null).length,
+          earliest: rows.length ? rows.map((r) => r.start_time).sort()[0] : null,
+          latest: rows.length ? rows.map((r) => r.start_time).sort().slice(-1)[0] : null,
+          sample: rows[0] ?? null,
+        });
+      }
+
+      let inserted = 0;
+      for (let i = 0; i < rows.length; i += 400) {
+        const chunk = rows.slice(i, i + 400);
+        const { error } = await sb.from("geofence_alerts").insert(chunk);
+        if (error) {
+          console.error("[motive-history] insert failed at offset", i, error.message);
+          return json({ success: false, inserted, error: `insert failed at ${i}: ${error.message}` }, 500);
+        }
+        inserted += chunk.length;
+      }
+
+      return json({
+        success: true,
+        fetched: events.length, inserted, alreadyPresent: skipped, missingEventId: noId,
+        unresolvedGeofenceNames: rows.filter((r) => r.geofence_name == null).length,
+        backoutSql: "delete from geofence_alerts where franchise_id = '" + franchiseID + "' and action = 'motive_backfill';",
+      });
     }
 
     const qs = new URLSearchParams();
