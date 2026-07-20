@@ -1102,6 +1102,10 @@ async function handleListGeofences(
               geofence_id: Number(g.id),
               name: g.name ?? null,
               category: g.category ?? null,
+              // Motive returns DEACTIVATED geofences alongside active ones, and its own UI hides
+              // them. Capture the status so the picker can too — a deactivated geofence can never
+              // fire another event, so linking a facility to one yields silence, not an error.
+              status: String(g.status || "active").toLowerCase(),
               updated_at: new Date().toISOString(),
             });
           }
@@ -1109,8 +1113,8 @@ async function handleListGeofences(
         if (list.length < 100) break;
       }
       if (fresh.length) {
-        // Upsert so renames and category changes land on the SAME geofence_id row — the whole
-        // point of keying on the id rather than the name.
+        // Upsert so renames, category changes and status changes land on the SAME geofence_id
+        // row — the whole point of keying on the id rather than the name.
         const up = await supabasePost(
           "/rest/v1/motive_geofences?on_conflict=franchise_id,geofence_id",
           fresh,
@@ -1118,6 +1122,20 @@ async function handleListGeofences(
         );
         if (up.ok) refreshed = true;
         else { refreshError = `upsert ${up.status}`; console.error("[listGeofences] upsert failed:", up.status, (await up.text().catch(() => "")).slice(0, 200)); }
+
+        // PRUNE geofences Motive no longer returns at all — genuinely deleted, not merely
+        // deactivated. Without this the cache only ever grows: an upsert-only refresh left dead
+        // per-job circles (e.g. "Foley, Kara · #990716") in the picker forever. Deleting only
+        // ids ABSENT from a SUCCESSFUL full pull; if the pull errored we skip pruning entirely
+        // rather than mistake a failed page for "these no longer exist".
+        if (refreshed && !refreshError) {
+          const keep = fresh.map((f) => f.geofence_id as number);
+          const del = await supabaseDelete(
+            `/rest/v1/motive_geofences?franchise_id=eq.${franchiseUUID}` +
+              `&geofence_id=not.in.(${keep.join(",")})`,
+          );
+          if (!del.ok) console.error("[listGeofences] prune failed:", del.status);
+        }
       }
     }
   } catch (e) {
@@ -1125,9 +1143,12 @@ async function handleListGeofences(
     console.error("[listGeofences] refresh failed:", refreshError);
   }
 
+  // ACTIVE only. A deactivated geofence is invisible in Motive's own UI and can never fire
+  // another event, so offering it in a picker can only produce a facility that silently
+  // records nothing. The row stays in the table so historic alerts keep their name.
   const rows = (await supabaseGet(
     `/rest/v1/motive_geofences?franchise_id=eq.${franchiseUUID}` +
-      `&select=geofence_id,name,category&order=name.asc`,
+      `&status=eq.active&select=geofence_id,name,category&order=name.asc`,
   )) as Array<Record<string, unknown>>;
 
   return jsonResponse({
