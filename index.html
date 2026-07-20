@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.93 | 2026-07-20">
+  <meta name="crewlogic-version" content="v5.50.94 | 2026-07-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4368,12 +4368,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // 📊 Alerts report (button next to Live Alerts) — high-level reporting on completed facility visits (geofence exits).
     let _alertsRows = [];        // fetched exit rows (already >=8min filtered), cached so the range tabs don't re-query
-    let _alertsRange = 'week';   // today | week | month
+    let _alertsRange = 'week';   // today | week | month | 90d | ytd | all
+    // Historic ranges exist because geofence history now goes back further than the live feed:
+    // the Motive backfill (action='motive_backfill') carries completed dwells from Nov 2025,
+    // which the original today/week/month tabs could never reach.
     function _alertsRangeStart(range) {
       const now = new Date();
       if (range === 'today') { const d = new Date(now); d.setHours(0, 0, 0, 0); return d.getTime(); }
       if (range === 'month') return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+      if (range === '90d')   { const d = new Date(now); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 90); return d.getTime(); }
+      if (range === 'ytd')   return new Date(now.getFullYear(), 0, 1).getTime();
+      if (range === 'all')   return 0;   // epoch — everything ever recorded
       const d = new Date(now); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - d.getDay()); return d.getTime(); // week: since Sunday
+    }
+    // Human label for the active range, so a total is never ambiguous about what it covers.
+    function _alertsRangeLabel(range) {
+      const now = new Date();
+      const f = (t) => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      if (range === 'all') return 'all recorded history';
+      return f(_alertsRangeStart(range)) + ' – ' + f(now.getTime());
     }
     let _alertsView = 'facilities';                 // 'facilities' (existing) | 'customers' (Phase 4 time-at-customer)
     let _custRaw = null, _tacRows = [], _custRouteMap = {}, _custSort = { col: 'date', dir: -1 }, _custFilt = { q: '', route: '', truck: '' };
@@ -4385,9 +4398,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;">Loading…</div>';
       const fid = currentUser && currentUser.franchiseInternalID;
       if (!fid) { body.innerHTML = '<div style="color:var(--text-muted);">No franchise on this session.</div>'; return; }
-      let rows;
+      // PAGINATE. PostgREST caps a response at 1000 rows regardless of &limit=, so the old
+      // single &limit=5000 call silently returned only the first 1000 — fine when the table held
+      // a few hundred live rows, wrong the moment the Motive backfill added ~1800 historic ones.
+      // A truncated fetch here is invisible: the report just shows smaller totals. Page until a
+      // short page comes back.
+      let rows = [];
       try {
-        rows = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&event_type=eq.geofence_exit&duration=not.is.null&select=geofence_name,category,duration,created_at&limit=5000');
+        const PAGE = 1000;
+        for (let off = 0; off < 50000; off += PAGE) {
+          const page = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) +
+            '&event_type=eq.geofence_exit&duration=not.is.null' +
+            '&select=geofence_name,category,duration,created_at' +
+            '&order=created_at.desc&limit=' + PAGE + '&offset=' + off);
+          const arr = Array.isArray(page) ? page : [];
+          rows = rows.concat(arr);
+          if (arr.length < PAGE) break;
+        }
       } catch (e) { body.innerHTML = '<div style="color:var(--text-muted);">Could not load the report.</div>'; return; }
       const MIN_SEC = 480; // a stop under 8 min at a fence = drive-through / false positive — excluded everywhere
       _alertsRows = (Array.isArray(rows) ? rows : []).filter(r => (parseFloat(r.duration) || 0) >= MIN_SEC);
@@ -4400,9 +4427,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const btn = (on, oc, label) => '<button onclick="' + oc + '" style="flex:1;padding:8px;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;border:1px solid ' + (on ? 'var(--accent-green)' : 'var(--border)') + ';background:' + (on ? 'var(--accent-green)' : 'var(--bg-input)') + ';color:' + (on ? 'var(--accent-text)' : 'var(--text-secondary)') + ';">' + label + '</button>';
       let h = '<div style="display:flex;gap:6px;margin-bottom:10px;">';
       h += btn(_alertsView === 'facilities', "setAlertsView('facilities')", '🗑️ Facilities') + btn(_alertsView === 'customers', "setAlertsView('customers')", '🏠 Customers');
-      h += '</div><div style="display:flex;gap:6px;margin-bottom:18px;">';
+      h += '</div><div style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap;">';
       [['today', 'Today'], ['week', 'This week'], ['month', 'This month']].forEach(t => { h += btn(_alertsRange === t[0], "setAlertsRange('" + t[0] + "')", t[1]); });
-      return h + '</div>';
+      h += '</div><div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">';
+      [['90d', 'Last 90 days'], ['ytd', 'This year'], ['all', 'All time']].forEach(t => { h += btn(_alertsRange === t[0], "setAlertsRange('" + t[0] + "')", t[1]); });
+      h += '</div><div style="font-size:11px;color:var(--text-muted);margin-bottom:14px;">' + _alertsRangeLabel(_alertsRange) + '</div>';
+      return h;
     }
     function renderAlertsReport() {
       const body = document.getElementById('alertsReportBody');
