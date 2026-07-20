@@ -66,17 +66,18 @@ async function supabasePatch(path: string, body: unknown): Promise<Response> {
   });
 }
 
-async function supabasePost(path: string, body: unknown): Promise<Response> {
-  return fetch(SUPABASE_URL + path, {
-    method: "POST",
-    headers: {
-      apikey: SERVICE_KEY,
-      Authorization: "Bearer " + SERVICE_KEY,
-      "Content-Type": "application/json",
-      Prefer: "return=representation",
-    },
-    body: JSON.stringify(body),
-  });
+// extraHeaders is optional and additive — existing callers keep the plain insert behaviour.
+// It exists so an upsert can send Prefer: resolution=merge-duplicates, which PostgREST needs
+// in ADDITION to ?on_conflict=... ; without it a conflicting row 409s instead of merging.
+async function supabasePost(path: string, body: unknown, extraHeaders?: Record<string, string>): Promise<Response> {
+  const headers: Record<string, string> = {
+    apikey: SERVICE_KEY,
+    Authorization: "Bearer " + SERVICE_KEY,
+    "Content-Type": "application/json",
+    Prefer: "return=representation",
+    ...(extraHeaders || {}),
+  };
+  return fetch(SUPABASE_URL + path, { method: "POST", headers, body: JSON.stringify(body) });
 }
 
 async function supabaseDelete(path: string): Promise<Response> {
@@ -1049,18 +1050,80 @@ async function handleGetFacilities(
 
 // HANDLER: listGeofences — the franchise's own telematics geofences, for the facility picker.
 //
-// Reads the per-franchise cache the webhook already maintains (motive_geofences, populated by
-// crewlogic-motive-webhook's resolveGeofenceName from GET /v1/geofences). No Motive call here:
-// the picker must work instantly and offline-ish, and a franchise that has received any webhook
-// already has its geofences cached.
+// REFRESHES FROM MOTIVE FIRST, then returns the cache.
 //
-// Generic by design (contract D7): every franchise picks from ITS OWN geofences. No franchise's
-// ids are hardcoded anywhere — #90 is simply the first user of this mechanism.
+// Why the refresh is not optional: motive_geofences is otherwise written ONLY on a cache MISS
+// inside crewlogic-motive-webhook's resolveGeofenceName — i.e. when a webhook arrives for a
+// geofence CrewLogic has never seen. That makes the cache one-way and one-time:
+//   • a geofence created in Motive does not appear until a truck physically enters or exits it
+//   • a geofence RENAMED in Motive keeps its old name here forever
+//   • a CATEGORY set or corrected in Motive is never picked up
+// The last two matter because Motive owns the name, and category drives both the facility type
+// and this picker's filtering. Owner hit the first one directly: created "HandUp" in Motive and
+// asked when it would show up — the honest answer was "possibly never".
+//
+// Cost is one Motive call per Settings→Cost open, against a 600-per-10s limit. Cheap.
+// Degrades safely: if Motive errors, we return whatever is cached rather than an empty picker,
+// and report refreshed:false so the caller can tell the difference.
+//
+// Generic by design (contract D7): every franchise refreshes and picks from ITS OWN geofences.
+// No franchise's ids are hardcoded anywhere — #90 is simply the first user of this mechanism.
 async function handleListGeofences(
   body: Record<string, unknown>,
   token: string | null,
 ): Promise<Response> {
   const { id: franchiseUUID } = await resolveFranchiseForCaller(body, token);
+
+  let refreshed = false;
+  let refreshError: string | null = null;
+  try {
+    const credRes = await supabaseRpc("get_telematics_credential", { p_franchise_id: franchiseUUID });
+    const credJson = credRes.ok ? await credRes.json() : null;
+    const cred = Array.isArray(credJson) ? credJson[0] : credJson;
+    const provider = String(cred?.provider || "").toLowerCase();
+    const apiToken = String(cred?.token || "");
+
+    if (provider === "motive" && apiToken) {
+      // Paginate: a franchise with >100 geofences would otherwise silently lose the tail.
+      const fresh: Array<Record<string, unknown>> = [];
+      for (let page = 1; page <= 20; page++) {
+        const r = await fetch(
+          `https://api.gomotive.com/v1/geofences?per_page=100&page_no=${page}`,
+          { headers: { accept: "application/json", "x-api-key": apiToken } },
+        );
+        if (!r.ok) { refreshError = `motive ${r.status}`; break; }
+        const data = await r.json().catch(() => ({}));
+        const list: any[] = Array.isArray(data) ? data : (data.geofences || []);
+        for (const item of list) {
+          const g = item?.geofence || item;
+          if (g && g.id != null) {
+            fresh.push({
+              franchise_id: franchiseUUID,
+              geofence_id: Number(g.id),
+              name: g.name ?? null,
+              category: g.category ?? null,
+              updated_at: new Date().toISOString(),
+            });
+          }
+        }
+        if (list.length < 100) break;
+      }
+      if (fresh.length) {
+        // Upsert so renames and category changes land on the SAME geofence_id row — the whole
+        // point of keying on the id rather than the name.
+        const up = await supabasePost(
+          "/rest/v1/motive_geofences?on_conflict=franchise_id,geofence_id",
+          fresh,
+          { Prefer: "return=minimal,resolution=merge-duplicates" },
+        );
+        if (up.ok) refreshed = true;
+        else { refreshError = `upsert ${up.status}`; console.error("[listGeofences] upsert failed:", up.status, (await up.text().catch(() => "")).slice(0, 200)); }
+      }
+    }
+  } catch (e) {
+    refreshError = (e as Error).message;
+    console.error("[listGeofences] refresh failed:", refreshError);
+  }
 
   const rows = (await supabaseGet(
     `/rest/v1/motive_geofences?franchise_id=eq.${franchiseUUID}` +
@@ -1070,6 +1133,8 @@ async function handleListGeofences(
   return jsonResponse({
     success: true,
     provider: "motive",
+    refreshed,
+    refreshError,
     geofences: rows.map((g) => ({
       id: String(g.geofence_id),
       name: (g.name as string) || `Geofence ${g.geofence_id}`,
