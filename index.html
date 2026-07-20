@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.98 | 2026-07-20">
+  <meta name="crewlogic-version" content="v5.50.99 | 2026-07-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1988,7 +1988,14 @@
               </div>
             </div>
 
-            <div class="form-section-label" style="margin-top:12px;">Facilities</div>
+            <div class="form-section-label" style="margin-top:12px;display:flex;align-items:baseline;justify-content:space-between;gap:10px;">
+              <span>Facilities</span>
+              <!-- Deterministic way to re-pull the geofence list. The list also refreshes when this
+                   tab is opened, but a manual control removes any doubt after adding a geofence in
+                   Motive — without it the only reliable trigger was a full browser reload. -->
+              <button type="button" onclick="refreshGeofenceOptions()" id="geofenceRefreshBtn"
+                style="background:none;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:11px;font-weight:600;padding:4px 9px;cursor:pointer;text-transform:none;letter-spacing:0;">↻ Refresh geofences</button>
+            </div>
 
             <!-- Disposal Sites -->
             <div style="margin-bottom:10px;">
@@ -22567,6 +22574,27 @@ RECYCLING & DONATION
       if (rerenderType) renderFacilityList(rerenderType);
     }
 
+    // Manual re-pull from Motive. Clears the page-lifetime cache and re-renders all three
+    // facility lists, so a geofence just created in Motive shows up without a browser reload.
+    async function refreshGeofenceOptions() {
+      const btn = document.getElementById('geofenceRefreshBtn');
+      if (btn) { btn.disabled = true; btn.textContent = '↻ Refreshing…'; }
+      const before = (_geofenceOptions || []).length;
+      _geofenceOptions = null;
+      _geofenceUnavailable = false;
+      await loadGeofenceOptions();
+      renderAllFacilityLists();
+      if (btn) {
+        const after = (_geofenceOptions || []).length;
+        const delta = after - before;
+        btn.disabled = false;
+        // Report the delta — "nothing changed" is a real, useful answer here, and silence
+        // would leave you unsure whether the refresh even ran.
+        btn.textContent = delta > 0 ? ('↻ ' + delta + ' new') : (after ? '↻ ' + after + ' found' : '↻ none found');
+        setTimeout(() => { if (btn) btn.textContent = '↻ Refresh geofences'; }, 3000);
+      }
+    }
+
     function _geofencePickerHtml(type, i, f) {
       const cur = (f && f.geofenceId != null) ? String(f.geofenceId) : '';
       const label = '<span style="width:62px;font-size:11px;color:var(--text-muted);flex-shrink:0;">Geofence</span>';
@@ -23088,7 +23116,12 @@ RECYCLING & DONATION
       });
       // Render facility lists when switching to cost tab. Render immediately from the
       // in-memory cache (no flash), then refresh from the relational tables (0023).
-      if (tab === 'cost') { renderAllFacilityLists(); loadFacilitiesFromTables(); }
+      //
+      // Also drop the cached geofence list so it re-pulls from Motive. _geofenceOptions is a
+      // page-lifetime cache, so without this the ONLY way to see a geofence created in Motive
+      // was a full browser reload — leaving Settings and coming back did nothing, which is
+      // exactly what an owner would try first.
+      if (tab === 'cost') { _geofenceOptions = null; _geofenceUnavailable = false; renderAllFacilityLists(); loadFacilitiesFromTables(); }
       // Load customer pricing list when switching to pricing tab
       if (tab === 'pricing') loadCustomerPricingList();
       // Render the native price book when switching to the pricebook tab
