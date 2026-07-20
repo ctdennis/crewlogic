@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.97 | 2026-07-20">
+  <meta name="crewlogic-version" content="v5.50.98 | 2026-07-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -22587,11 +22587,27 @@ RECYCLING & DONATION
       }
 
       const esc = s => String(s == null ? '' : s).replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
+      // Filter by the geofence's telematics CATEGORY, per the Geofence Setup Guide
+      // (Settings → Trucks): Transfer/Disposal → 🗑️, Recycling → ♻️, Donations → 🎁.
+      // Without this a recycling facility was offered all 60-odd geofences — regions, fuel
+      // stops, four Chick-Fil-As, per-job circles — which is how a wrong link gets made.
+      // Uncategorised geofences are shown in ALL lists rather than hidden: a franchise that has
+      // not labelled anything in Motive yet must still be able to link something.
+      const CAT_RE = { disposal: /transfer|disposal|landfill|dump/i, recycling: /recycl/i, donation: /donat/i };
+      const re = CAT_RE[type];
+      const uncategorised = g => !g.category || /^uncategori[sz]ed$/i.test(g.category);
+      const inScope = g => !re || uncategorised(g) || re.test(g.category);
+
       let opts = '<option value="">— not linked —</option>';
       let matched = false;
+      let hidden = 0;
       _geofenceOptions.forEach(g => {
         const sel = (String(g.id) === cur);
         if (sel) matched = true;
+        // A geofence already linked here always renders, even if its category later changes —
+        // dropping it would silently unlink the facility on the next save.
+        if (!sel && !inScope(g)) { hidden++; return; }
         opts += '<option value="' + esc(g.id) + '"' + (sel ? ' selected' : '') + '>' + esc(g.name) + '</option>';
       });
       // A stored id that is no longer in the provider's list (geofence deleted upstream) must
@@ -22609,11 +22625,19 @@ RECYCLING & DONATION
         : st === 'failed' ? '<span style="font-size:11px;color:#ef4444;flex-shrink:0;font-weight:700;">✕ not saved</span>'
         : (cur ? '<span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">#' + esc(cur) + '</span>' : '');
 
+      // Say what was filtered out, so a "missing" geofence reads as mislabelled-in-Motive
+      // rather than broken here.
+      const hint = hidden
+        ? '<div style="font-size:10.5px;color:var(--text-muted);margin:2px 0 0 68px;">' + hidden +
+          ' other geofence' + (hidden === 1 ? '' : 's') + ' hidden — only ' + type +
+          ' categories shown. Set the Category in Motive to change this.</div>'
+        : '';
+
       return '<div style="display:flex;gap:6px;align-items:center;margin-top:4px;" title="' + tip + '">' + label +
         '<select class="form-input" style="flex:1;min-width:0;font-size:12px;padding:6px 8px;" ' +
           'onchange="_setFacilityGeofence(\'' + type + '\',' + i + ',this.value)">' + opts + '</select>' +
         statusHtml +
-      '</div>';
+      '</div>' + hint;
     }
 
     // Set the geofence link AND the provider together, then PERSIST IMMEDIATELY.
