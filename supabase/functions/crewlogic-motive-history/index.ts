@@ -1,0 +1,132 @@
+// Supabase Edge Function: crewlogic-motive-history
+//
+// READ-ONLY probe against Motive's historical geofence-events endpoint.
+//
+// WHY THIS EXISTS
+// CrewLogic's own `geofence_alerts` starts 2026-07-02 (the prod webhook cutover). The owner has
+// hand-maintained history back to 2025-11-07 in a spreadsheet fed by MailParser. Before deciding
+// whether to import that spreadsheet or backfill from source, we need to know ONE thing that
+// Motive's docs do not state in either direction: how far back `/v1/geofences/events` will
+// actually return data. Motive documents `start_date`/`end_date` params but NO retention limit
+// and no earliest-available date, so this can only be settled empirically.
+//
+// It also answers two things the docs leave undocumented and that a real import depends on:
+//   - the TIMESTAMP FORMAT / timezone convention on start_time & end_time
+//   - the `event_type` enum values
+//
+// SCOPE: this function ONLY READS. It performs no inserts, updates or deletes, and writes
+// nothing to the database. It is deliberately a probe, not the importer — the importer is a
+// separate build gated on what this returns.
+//
+// Deploy (DEV):
+//   supabase functions deploy --project-ref bagkimfwmpwjfhfhmsrb crewlogic-motive-history --use-api --no-verify-jwt
+//
+// NOTE ON AUTH: deployed --no-verify-jwt for the dev probe. It exposes historical telematics for
+// a franchise, so it MUST be JWT-guarded (and ideally super-admin gated) before any prod deploy.
+//
+// POST body:
+//   { franchiseID: "<franchise UUID>",   // franchises.id, NOT external_id
+//     startDate:  "2025-11-01",
+//     endDate:    "2025-11-30",
+//     geofenceIds?: [2892241],           // optional filter
+//     pageNo?: 1, perPage?: 25 }
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+const MOTIVE_BASE = "https://api.gomotive.com";
+
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...CORS, "Content-Type": "application/json" },
+  });
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+
+  try {
+    const body = await req.json().catch(() => ({}));
+    const franchiseID = String(body.franchiseID || "");
+    const startDate = String(body.startDate || "");
+    const endDate = String(body.endDate || "");
+    const pageNo = Number(body.pageNo) || 1;
+    const perPage = Number(body.perPage) || 25;
+    const geofenceIds: unknown[] = Array.isArray(body.geofenceIds) ? body.geofenceIds : [];
+
+    if (!franchiseID) return json({ success: false, error: "franchiseID (uuid) required" }, 400);
+    if (!startDate) return json({ success: false, error: "startDate (YYYY-MM-DD) required" }, 400);
+
+    const sb = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+
+    // Per-franchise Motive token, same path the webhook uses to resolve geofence names.
+    const { data: cred, error: credErr } = await sb.rpc("get_telematics_credential", { p_franchise_id: franchiseID });
+    if (credErr) return json({ success: false, error: "credential lookup failed: " + credErr.message }, 500);
+    const row = Array.isArray(cred) ? cred[0] : cred;
+    const provider = String(row?.provider || "").toLowerCase();
+    const token = String(row?.token || "");
+    if (provider !== "motive" || !token) {
+      return json({ success: false, error: `no motive credential for this franchise (provider=${provider || "none"})` }, 400);
+    }
+
+    const qs = new URLSearchParams();
+    qs.set("start_date", startDate);
+    if (endDate) qs.set("end_date", endDate);
+    qs.set("page_no", String(pageNo));
+    qs.set("per_page", String(perPage));
+    for (const g of geofenceIds) qs.append("geofence_ids[]", String(g));
+
+    const url = `${MOTIVE_BASE}/v1/geofences/events?${qs.toString()}`;
+    const res = await fetch(url, { headers: { accept: "application/json", "x-api-key": token } });
+    const text = await res.text();
+
+    if (!res.ok) {
+      console.error("[motive-history] upstream", res.status, text.slice(0, 500));
+      return json({ success: false, upstreamStatus: res.status, error: text.slice(0, 500), requestedUrl: url.replace(/x-api-key=[^&]*/, "") }, 502);
+    }
+
+    let data: any = {};
+    try { data = JSON.parse(text); } catch { return json({ success: false, error: "non-JSON upstream response", sample: text.slice(0, 300) }, 502); }
+
+    // Motive wraps list items; tolerate either a bare array or {geofence_events:[{geofence_event:{...}}]}.
+    const listRaw: any[] = Array.isArray(data) ? data : (data.geofence_events || data.events || []);
+    const events = listRaw.map((it) => (it && (it.geofence_event || it.event)) || it).filter(Boolean);
+
+    // Summarize rather than dump: we want shape + range, not the payload.
+    const times = events.map((e) => e?.start_time).filter(Boolean).sort();
+    const fieldNames = events.length ? Object.keys(events[0]) : [];
+    const eventTypes = Array.from(new Set(events.map((e) => e?.event_type).filter(Boolean)));
+    const withDuration = events.filter((e) => e?.duration != null).length;
+    const withGeofenceId = events.filter((e) => e?.geofence_id != null).length;
+
+    return json({
+      success: true,
+      requested: { startDate, endDate, pageNo, perPage },
+      pagination: data.pagination ?? null,
+      returned: events.length,
+      earliestStartTime: times[0] ?? null,
+      latestStartTime: times[times.length - 1] ?? null,
+      // The two things the docs do not state:
+      timestampSample: events[0]?.start_time ?? null,
+      eventTypeValues: eventTypes,
+      // Shape confirmation for the importer
+      topLevelFields: fieldNames,
+      vehicleFields: events[0]?.vehicle ? Object.keys(events[0].vehicle) : [],
+      withDuration,
+      withGeofenceId,
+      firstEvent: events[0] ?? null,
+    });
+  } catch (e) {
+    console.error("[motive-history] error:", (e as Error).message);
+    return json({ success: false, error: "probe failed" }, 500);
+  }
+});

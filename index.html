@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.50.91 | 2026-07-18">
+  <meta name="crewlogic-version" content="v5.50.92 | 2026-07-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8936,12 +8936,32 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const ch = document.getElementById('truckChevron-' + i);
       if (ch) ch.style.transform = 'rotate(' + (open ? '90' : '0') + 'deg)';
     }
-    // Active = reporting within the last hour and not explicitly offline. Drives marker/dot color.
-    function _truckActive(t) {
-      if (/offline|unplug/i.test(t.status || '')) return false;
-      if (t.lastUpdate && (Date.now() - t.lastUpdate > 60 * 60000)) return false;
-      return true;
+    // Truck display state — drives the map marker + list dot color.
+    //
+    // WHY FOUR STATES, NOT TWO. This used to be a boolean `_truckActive`: green if the device
+    // reported within the last hour, gray otherwise. That conflates "the TRACKER is online"
+    // with "the TRUCK is working", so a truck parked in the yard all weekend still showed
+    // green while Motive listed it inactive (owner-reported 2026-07-19: #90 Truck 1 green,
+    // status 'breadcrumb', speed null, last ping 41 min earlier — device alive, truck idle).
+    // Green now means MOVING; a reporting-but-parked truck gets its own color.
+    //
+    // FAIL CLOSED on a missing timestamp. The old staleness test was guarded by
+    // `t.lastUpdate &&`, so if the provider ever stopped sending the field the check was
+    // skipped entirely and the truck stayed GREEN FOREVER. A missing lastUpdate is now
+    // treated as stale — an unknown position is never reported as a live one.
+    const TRUCK_STATE_COLOR = {
+      moving:  '#00E785',  // accent green — actually driving
+      parked:  '#38bdf8',  // sky blue — device reporting, sitting still. Deliberately distinct
+                           // from the route/measure line (#1e6fff) and National Account (#1f4e79).
+      stale:   '#6e8194',  // text-muted gray — no report in over an hour, or no timestamp at all
+      offline: '#46596d',  // btn-surface-border — provider explicitly says offline/unplugged
+    };
+    function _truckState(t) {
+      if (/offline|unplug/i.test(t.status || '')) return 'offline';
+      if (!t.lastUpdate || (Date.now() - t.lastUpdate > 60 * 60000)) return 'stale';
+      return (t.speed != null && t.speed > 0) ? 'moving' : 'parked';
     }
+    function _truckStateColor(t) { return TRUCK_STATE_COLOR[_truckState(t)] || TRUCK_STATE_COLOR.stale; }
     // Human-friendly movement/status label from the raw provider status + speed.
     function _truckStatusLabel(t) {
       const s = (t.status || '').toLowerCase();
@@ -8952,15 +8972,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!s) return '';
       return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     }
+    // Label that leads with staleness, so a gray dot always has words explaining it. A truck
+    // whose last report is old (or absent) must not be described by its last-known movement —
+    // that reads as current fact when it isn't.
+    function _truckStateLabel(t) {
+      const st = _truckState(t);
+      if (st === 'offline') return 'Offline';
+      if (st === 'stale')   return t.lastUpdate ? 'No recent report' : 'No position reported';
+      return _truckStatusLabel(t);
+    }
     function renderTrucks(trucks, fit) {
       _trucksData = trucks || []; // keep latest truck positions/names for nearest-truck popups
       const listEl = document.getElementById('trucksList');
       if (listEl) {
         listEl.innerHTML = trucks.map((t, i) => {
           const veh = [t.year, t.make, t.model].filter(Boolean).join(' ');
-          const active = _truckActive(t);
-          const label = _truckStatusLabel(t);
-          const badge = active ? '#00E785' : '#6e8194';
+          const label = _truckStateLabel(t);
+          const badge = _truckStateColor(t);
           const subline = [veh, label].filter(Boolean).join(' · ') + (t.desc ? ' · ' + t.desc : '');
           const isOpen = _expandedTrucks.has(i);
           // These six fields ALWAYS show (with a — placeholder when not reported, e.g. parked).
@@ -9101,8 +9129,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const pts = [];
       trucks.forEach((t, i) => {
         if (t.lat == null || t.lon == null) return;
-        const active = _truckActive(t);
-        const color = active ? '#00E785' : '#6e8194';
+        const color = _truckStateColor(t);
         // Motive/Linxup-style directional pointer: a colored disc (green active / gray stale) with the
         // truck's map-order number, and a prominent NOSE that sticks out toward the heading while moving —
         // the icon itself points the way the truck is going. Parked trucks show a plain disc (heading is
@@ -9136,7 +9163,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + '<b>' + (i + 1) + '. ' + _truckEsc(t.name) + '</b>'
           + (veh ? '<br>' + _truckEsc(veh) : '')
           + (t.desc ? '<br>' + _addrLink(t.desc, t.desc, _truckEsc, '#6db3ff') : '')
-          + '<br>' + _truckEsc([_truckStatusLabel(t), move].filter(Boolean).join(' · '))
+          + '<br>' + _truckEsc([_truckStateLabel(t), move].filter(Boolean).join(' · '))
           + (t.lastUpdate ? '<br><span style="color:#6e8194;">' + _truckEsc(_truckTimeAgo(t.lastUpdate)) + '</span>' : '')
           + (t.vin ? '<br><span style="color:#6e8194;font-size:11px;">VIN ' + _truckEsc(t.vin) + '</span>' : '')
           + (nearJobs.length ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;color:#F59E0B;font-weight:700;font-size:12px;">🏠 At ' + nearJobs.length + ' job' + (nearJobs.length > 1 ? 's' : '') + ' here</div>' + nearJobs.map(j => '<div style="font-size:12px;color:#cdd6df;">' + _truckEsc(j.clientName || 'Job') + (j._routeShort ? ' · ' + _truckEsc(j._routeShort) : '') + '</div>').join('') : '')
