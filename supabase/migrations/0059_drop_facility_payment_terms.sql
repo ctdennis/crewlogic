@@ -1,0 +1,31 @@
+-- 0059_drop_facility_payment_terms.sql
+--
+-- Removes facilities.payment_terms, added one migration earlier in 0056.
+--
+-- WHY IT IS GOING AWAY
+-- 0056 added payment_terms (same_day | on_demand | unknown) to drive an "overdue vs merely
+-- unpaid" distinction in the outstanding report. Owner rejected the premise 2026-07-20:
+--
+--   "I don't really care what is on demand or not... keep it simple, collect money, enter
+--    revenue & pounds and that closes it out. timing doesn't matter, I'm not looking for DSO
+--    or anything like an aging report."
+--
+-- The column only existed to support aging logic that is not wanted. With no aging, a visit is
+-- in exactly one of two states -- amount entered (closed) or not (still to collect) -- and
+-- `amount IS NULL` already expresses that completely. payment_terms carried no other meaning,
+-- so keeping it would be an unused column that future readers would have to reason about.
+--
+-- ALSO: it was modelled from ONE franchise's arrangements (#90: Zions accrues, everyone else
+-- pays cash at the visit). Owner is extending this to other franchisees, so per-franchise
+-- payment-timing configuration is exactly the kind of single-tenant assumption that should not
+-- be baked into a shared schema.
+--
+-- 0056 is left intact as history rather than rewritten: it was already applied to dev and
+-- committed, and silently editing an applied migration is how environments drift apart.
+-- Prod has never had either migration applied, so it will add the column and drop it again --
+-- wasteful by two statements, honest about the decision.
+--
+-- Idempotent.
+
+alter table public.facilities drop constraint if exists facilities_payment_terms_chk;
+alter table public.facilities drop column if exists payment_terms;

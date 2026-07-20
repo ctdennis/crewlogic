@@ -80,27 +80,45 @@ The spreadsheet's **only** irreplaceable contribution is the **money**: 120 `Amo
 
 Correcting an earlier mis-statement: `Amount` is on 120 of **2,002** rows (6%) — but the right denominator is **recycling visits**, of which there are 145. So **120/145 = 83%**, and `Amount` appears on **zero** non-recycling rows. `Pounds` is 45/145 (31%). The tracking is disciplined, not sparse.
 
-### D6 — Two payment terms, and they need opposite report behaviour
+### D6 — No payment terms, no aging. Two states only. **[REVISED 2026-07-20]**
 
-Owner, 2026-07-20: *"Zions Middleboro Recycling, I pick up whenever I want. All others are paid in
-cash at the time we do the recycling."*
+An earlier draft added `facilities.payment_terms` to distinguish "overdue" from "merely unpaid".
+**Owner rejected the premise:**
 
-So it is not a schedule — it is **one accruing account plus everything else settled on the spot**:
+> *"I don't really care what is on demand or not… keep it simple, collect money, enter revenue &
+> pounds and that closes it out. timing doesn't matter, I'm not looking for DSO or anything like
+> an aging report."*
 
-| Terms | Who | Meaning of an unpaid visit |
-|---|---|---|
-| `same_day` | every recycler except Zions | **An exception.** Cash should have changed hands at the visit. Unpaid = crew didn't hand it over, or it never got entered. **This is an error-catcher.** |
-| `on_demand` | **Zions Middleboro** | **Normal and expected.** A balance accrues until Owner chooses to collect. Never an alert. |
-| `unknown` | unconfigured | list, never flag |
+So a visit is in exactly **two** states, and `amount IS NULL` already expresses both:
 
-This inverts the report for each. For `same_day`, *any* aged unpaid visit is worth surfacing —
-that is real money that should already be in the till, and it is precisely what the green-row
-eyeball check catches today. For `on_demand`, flagging would be pure noise; what is actually
-useful is the **accrued balance and how long it has been building**, so Owner can see when the pot
-justifies a trip.
+| State | Meaning |
+|---|---|
+| `amount IS NULL` | still to collect |
+| `amount IS NOT NULL` | collected — **closed** |
 
-Without this split the feature is noisier than the spreadsheet it replaces: Zions alone would
-generate a permanent wall of false alarms while a genuinely missed same-day collection hid inside it.
+No terms, no thresholds, no overdue flag, no aging buckets. `payment_terms` is removed in
+**migration 0059**.
+
+Two reasons this is the better call. It was modelled on **one franchise's** arrangements (#90:
+Zions accrues, everyone else pays at the visit) — precisely the single-tenant assumption that must
+not be baked into a shared schema. And the timing logic bought nothing: without an aging report,
+knowing *why* a visit is unpaid changes no behaviour. Owner collects, enters, done.
+
+### D7 — Built for every franchise, not #90
+
+Owner, 2026-07-20: *"we will need to extend this to our other franchisees so need to build one
+solution for all recyclers."*
+
+Consequences that shape the build:
+
+- **No franchise's geofence IDs are hardcoded.** #90's eight recycling geofences are *data*, not a
+  migration. Linking a facility to its telematics geofence is a **Settings action any franchise
+  can perform** (§5.0) — that is the generic mechanism; #90 is just its first user.
+- Everything is franchise-scoped and RLS-enforced already.
+- No assumption that a franchise uses Motive — `provider` is on both `facilities` and
+  `telematics_visits` so Linxup franchises work the same way.
+- No assumption that recycling *pays*: a franchise whose facilities all cost money uses the same
+  screen, with negative amounts. `amount` is signed (#90's history already contains a `−80`).
 
 ---
 
@@ -112,7 +130,8 @@ generate a permanent wall of false alarms while a genuinely missed same-day coll
 |---|---|---|
 | `provider` | text | `motive` \| `linxup` |
 | `provider_geofence_id` | bigint | the stable key |
-| `payment_terms` | text | `same_day` \| `on_demand` \| `unknown` (default) — see D6 |
+
+*(`payment_terms` was added in 0056 and removed again in 0059 — see D6.)*
 
 `unique (franchise_id, provider, provider_geofence_id) where provider_geofence_id is not null`
 
@@ -175,6 +194,18 @@ The 120 `Amount` + 45 `Pounds` values, matched to imported visits on **`vehicle_
 
 ## 5. UI
 
+### 5.0 Linking a facility to its geofence (Settings) — the generic mechanism
+
+Per D7 this is **the** way any franchise adopts the feature; no franchise's IDs are hardcoded.
+
+- In Settings → facilities, each facility gains a **telematics geofence** picker, populated from
+  that franchise's own geofences (`motive_geofences`, already cached per franchise by the webhook).
+- Picking one writes `facilities.provider` + `provider_geofence_id`.
+- Unlinked facilities simply produce no visits — the feature is inert until linked, never broken.
+- Show the geofence's **current name** next to the picker so a rename is visible, and make clear the
+  link is by ID: renaming or reclassifying in Motive does **not** break it (D1, and the reason
+  Bob's Tire survived Transfer → Recycling).
+
 ### 5.1 Recycling revenue entry
 
 Trigger, in Owner's words: *"Once a truck enters a recycler and exits, I know I have something to collect."* That is exactly a completed visit whose facility type is recycling — a query, not new plumbing.
@@ -187,15 +218,15 @@ Trigger, in Owner's words: *"Once a truck enters a recycler and exits, I know I 
 
 ### 5.2 Outstanding report
 
-Two sections, because D6's terms want opposite treatment:
+Two numbers, per Owner: what came in, and what is still out there.
 
-- **⚠ Needs collecting** — `same_day` facilities with any unpaid visit older than ~1 business day.
-  Should normally be **empty**; a non-empty list means cash was missed or never entered. This is the
-  automated replacement for scanning green rows.
-- **Accruing balances** — `on_demand` facilities (today: Zions Middleboro) showing **accrued visit
-  count, oldest visit date, and estimated value where known**. Never flagged; the point is to show
-  Owner when the pot is worth a pickup trip.
-- **Settled history** — amount and weight by facility by month, with $/lb derived where both exist.
+- **Collected** — `SUM(amount)` and `SUM(weight_lbs)` over a period, selectable **day / week /
+  month / year**, with a per-facility breakdown. Derive $/lb where both exist.
+- **Still to collect** — every visit at a recycling facility with `amount IS NULL`, grouped by
+  facility, with a count. No dates-outstanding, no overdue styling, no buckets (D6).
+
+Both are plain aggregates over `telematics_visits` — the partial index
+`where amount is null` serves the second directly.
 - **Settled history:** amount and weight by facility by month, with a $/lb derived where both exist
 - Deliberately *not* an AR ledger — no invoices, no aging buckets, no statements
 
