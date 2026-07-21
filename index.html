@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.54.0 | 2026-07-21">
+  <meta name="crewlogic-version" content="v5.55.0 | 2026-07-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4609,8 +4609,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // scanned by eye for any row missing an amount. Two states only — a settlement exists
     // (collected) or it does not (still to collect). No aging, no overdue, no DSO; Owner:
     // "timing doesn't matter, I'm not looking for DSO or anything like an aging report."
-    let _recyRows = [], _recyTotals = {}, _recySummary = null;
+    let _recyRows = [], _recyTotals = {}, _recySummary = null, _recyShortHidden = 0;
     let _recyFilter = 'outstanding';       // outstanding | collected | closed | all
+    // Sub-8-minute stops are hidden by default (drive-throughs / boundary noise), but revealable:
+    // owner needs them for payment validation, since a short stop by a DIFFERENT truck on the same
+    // day is a genuine second visit that may still be owed revenue.
+    let _recyIncludeShort = false;
     let _recyGeofence = '';                // '' = every linked recycling facility
     let _recyGrain = 'month';
     let _recyBusy = {};                    // alertId -> true while its row is saving
@@ -4619,7 +4623,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const m = document.getElementById('recyclingModal');
       if (!m) return;
       m.style.display = 'flex';
-      _recyFilter = 'outstanding'; _recyGeofence = ''; _recyGrain = 'month';
+      _recyFilter = 'outstanding'; _recyGeofence = ''; _recyGrain = 'month'; _recyIncludeShort = false;
       await loadRecycling();
     }
     function closeRecycling() { const m = document.getElementById('recyclingModal'); if (m) m.style.display = 'none'; }
@@ -4630,8 +4634,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;">Loading…</div>';
       try {
         const [list, sum] = await Promise.all([
-          edgeFunctionCall('crewlogic-recycling', { action: 'listVisits', franchiseID: currentUser.franchiseID, status: 'all' }),
-          edgeFunctionCall('crewlogic-recycling', { action: 'summary', franchiseID: currentUser.franchiseID, grain: _recyGrain })
+          edgeFunctionCall('crewlogic-recycling', { action: 'listVisits', franchiseID: currentUser.franchiseID, status: 'all', includeShort: _recyIncludeShort }),
+          edgeFunctionCall('crewlogic-recycling', { action: 'summary', franchiseID: currentUser.franchiseID, grain: _recyGrain, includeShort: _recyIncludeShort })
         ]);
         // No linked recycling facility is a SETUP state, not an empty result — say which, or the
         // owner goes hunting for missing visits that were never going to be there.
@@ -4644,6 +4648,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         }
         _recyRows = (list && list.visits) || [];
         _recyTotals = (list && list.totals) || {};
+        // Top-level on the response, NOT inside totals — reading it off _recyTotals silently
+        // yields 0 and the reveal button never appears.
+        _recyShortHidden = (list && list.shortHidden) || 0;
         _recySummary = sum && sum.success ? sum : null;
       } catch (e) {
         body.innerHTML = '<div style="color:var(--text-muted);">Could not load recycling revenue.</div>';
@@ -4682,6 +4689,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return outT ? (inT + ' → ' + outT + ' · ' + dur) : (inT + ' · ' + dur);
     }
 
+    // Badges under the header line: why this row is unusual.
+    //
+    // The split-visit badge exists because the halves LIE. Owner: a tight geofence border makes one
+    // visit register as two, "the first is a valid in, and the second entry is a valid out" — so
+    // neither half's duration is real. Worse, both halves can land under 8 minutes while the true
+    // visit is well over, which hides a genuine collectable stop completely. Showing the true span
+    // is what makes the row usable for payment validation.
+    function _recyFlags(r) {
+      const out = [];
+      if (r.likelyFlap && r.flapSpanSec != null) {
+        out.push('<span title="A tight geofence border split one visit into ' + r.flapParts + ' events for the same truck. Neither part\'s duration is real — the true visit runs from the first entry to the last exit." '
+          + 'style="font-size:10.5px;font-weight:700;color:#93c5fd;background:#1e3a5f;border:1px solid #2f5b8f;border-radius:5px;padding:2px 6px;">'
+          + '⚯ split visit · really ' + _recyDur(r.flapSpanSec) + '</span>');
+      }
+      if (r.isShort) {
+        out.push('<span title="Under the 8-minute threshold. Usually a drive-through, but a short stop by a different truck can be a real visit." '
+          + 'style="font-size:10.5px;font-weight:700;color:#fcd34d;background:#3f2d0a;border:1px solid #6b4f10;border-radius:5px;padding:2px 6px;">'
+          + 'short stop</span>');
+      }
+      return out.length ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">' + out.join('') + '</div>' : '';
+    }
+
+    async function toggleRecyShort() { _recyIncludeShort = !_recyIncludeShort; await loadRecycling(); }
     function setRecyFilter(f) { _recyFilter = f; renderRecycling(); }
     function setRecyGeofence(g) { _recyGeofence = g; renderRecycling(); }
     async function setRecyGrain(g) {
@@ -4734,6 +4764,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + btn(_recyFilter === 'all', "setRecyFilter('all')", 'All')
         + '</div>';
 
+      // ── Short-stop toggle ──
+      // Stated by COUNT, not as a vague hint, so it is obvious whether anything is being withheld.
+      const nHidden = _recyShortHidden || 0;
+      if (_recyIncludeShort || nHidden) {
+        html += '<div style="margin-bottom:10px;">'
+          + '<button onclick="toggleRecyShort()" style="padding:6px 11px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid ' + (_recyIncludeShort ? 'var(--accent-green)' : 'var(--border)') + ';background:' + (_recyIncludeShort ? 'var(--accent-green)' : 'var(--bg-input)') + ';color:' + (_recyIncludeShort ? 'var(--accent-text)' : 'var(--text-secondary)') + ';">'
+          +   (_recyIncludeShort ? '✓ Showing short stops (under 8m)' : 'Show ' + nHidden + ' short stop' + (nHidden === 1 ? '' : 's') + ' (under 8m)')
+          + '</button>'
+          + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:4px;">Stops under 8 minutes are usually drive-throughs, but a short stop by a different truck can be a real visit.</div>'
+          + '</div>';
+      }
+
       const facs = [...new Set(_recyRows.map(r => r.facilityName))].sort();
       if (facs.length > 1) {
         html += '<select onchange="setRecyGeofence(this.value)" style="width:100%;margin-bottom:12px;padding:8px 10px;font-size:13px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);">'
@@ -4768,6 +4810,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             +   '<div style="font-size:13.5px;font-weight:700;color:var(--text-primary);">' + _hEsc(r.facilityName) + '</div>'
             +   '<div style="font-size:11.5px;color:var(--text-muted);white-space:nowrap;">' + _recyDate(r.startedAt) + ' · ' + _hEsc(r.truck || '') + ' · ' + _recyWindow(r) + '</div>'
             + '</div>'
+            + _recyFlags(r)
             + '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">'
             +   '<span style="font-size:11.5px;color:var(--text-muted);">$</span>'
             +   '<input id="recyAmt-' + r.alertId + '" type="number" step="0.01" inputmode="decimal" placeholder="amount" value="' + (r.amount != null ? r.amount : '') + '" '
@@ -4777,7 +4820,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             +   '<button onclick="saveRecycling(' + r.alertId + ')"' + (busy ? ' disabled' : '') + ' style="padding:7px 14px;border-radius:7px;border:none;background:var(--accent-green);color:var(--accent-text);font-size:12.5px;font-weight:700;cursor:pointer;">' + (busy ? 'Saving…' : (r.settled ? 'Update' : 'Save')) + '</button>'
             // Close out — clears the visit without claiming an amount. Only offered while the
             // visit is outstanding; once settled, Undo is the way back.
-            +   (!r.settled ? '<button onclick="closeRecycling(' + r.alertId + ')"' + (busy ? ' disabled' : '') + ' title="Clear this visit without recording an amount — nothing collected, or payment taken but never written down" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:none;color:var(--text-muted);font-size:12px;cursor:pointer;">Close out</button>' : '')
+            +   (!r.settled ? '<button onclick="closeOutRecycling(' + r.alertId + ')"' + (busy ? ' disabled' : '') + ' title="Clear this visit without recording an amount — nothing collected, or payment taken but never written down" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:none;color:var(--text-muted);font-size:12px;cursor:pointer;">Close out</button>' : '')
             +   (r.settled ? '<button onclick="undoRecycling(' + r.alertId + ')" title="Return this visit to \'still to collect\'" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:none;color:var(--text-muted);font-size:12px;cursor:pointer;">Undo</button>' : '')
             +   (closed
                   ? '<span style="font-size:11.5px;color:var(--text-muted);font-weight:700;">— closed ' + _recyDate(r.settledAt) + (r.note ? ' · ' + _hEsc(r.note) : '') + '</span>'
@@ -4842,7 +4885,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // reported separately, never inside the collected total.
     //
     // The reason is captured as a note so a closed row can still be read months later.
-    async function closeRecycling(alertId) {
+    // NOTE: named closeOutRecycling, NOT closeRecycling — closeRecycling() already exists and
+    // closes the MODAL. Reusing that name silently overrides it and breaks the ✕ button.
+    async function closeOutRecycling(alertId) {
       const why = prompt('Close this visit without recording an amount.\n\nOptional note (e.g. "paid, never recorded" or "nothing collected"):', '');
       if (why === null) return;   // cancelled — distinct from an empty note, which is allowed
       _recyBusy[alertId] = true; renderRecycling();

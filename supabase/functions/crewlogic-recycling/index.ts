@@ -130,13 +130,18 @@ Deno.serve(async (req: Request) => {
     const fromIso = body.from ? new Date(String(body.from)).toISOString() : null;
     const toIso = body.to ? new Date(String(body.to)).toISOString() : null;
 
+    // Short stops are FETCHED ALWAYS, then filtered below. Two reasons they cannot be excluded in
+    // SQL: flap detection needs to see them (a real visit split by a tight boundary shows up as
+    // two short stops, and dropping them here would hide both halves), and the caller can ask to
+    // see them for payment validation.
+    const includeShort = body.includeShort === true;
+
     const visits = await pageAll((from, to) => {
       let q = db.from("geofence_alerts")
         .select("id,geofence_id,geofence_name,vehicle_number,duration,start_time,end_time,created_at,event_id,action")
         .eq("franchise_id", fr.id)
         .eq("event_type", "geofence_exit")
         .not("duration", "is", null)
-        .gte("duration", MIN_VISIT_SEC)
         .in("geofence_id", geofenceIds)
         .order("created_at", { ascending: false })
         .range(from, to);
@@ -154,10 +159,67 @@ Deno.serve(async (req: Request) => {
     const settByAlert = new Map<string, any>();
     for (const s of settlements) if (s.alert_id != null) settByAlert.set(String(s.alert_id), s);
 
-    const rows = visits.map((v) => {
+    // ── Boundary flap detection ───────────────────────────────────────────────────────────
+    // Owner: "a truck goes in/out of a geofence when the border is too tight so you'll see two
+    // in/out events for the same truck, on the same day at nearly the same time. The reality is
+    // that the first is a valid in, and the second entry is a valid out."
+    //
+    // So: SAME truck + SAME geofence, with a small gap between one exit and the next entry, is ONE
+    // real visit that got split. Neither half's duration is meaningful on its own.
+    //
+    // This is NOT the same as two trucks at one facility on one day — that is two genuine visits,
+    // each potentially owed revenue. Keying on vehicle_number is what separates them, and it is
+    // exactly the case that made a 6-minute 5/29 stop worth surfacing rather than hiding.
+    // The TRUE duration of a split visit is first-entry → last-exit, which is what owner described:
+    // "the first is a valid in, and the second entry is a valid out". Neither half is right, and
+    // crucially the halves can BOTH fall under the 8-minute threshold while the real visit is well
+    // over it — so a genuine, collectable visit disappears entirely. That is why the span is
+    // computed and returned rather than just flagging the rows.
+    const FLAP_GAP_SEC = 1800;   // 30 min between one exit and the next entry at the same fence
+    const flapInfo = new Map<string, { spanSec: number; parts: number }>();
+    const byTruckFence = new Map<string, any[]>();
+    for (const v of visits) {
+      const k = String(v.vehicle_number || "") + "|" + String(v.geofence_id);
+      let arr = byTruckFence.get(k);
+      if (!arr) { arr = []; byTruckFence.set(k, arr); }
+      arr.push(v);
+    }
+    const tsOf = (v: any, which: "start" | "end") =>
+      new Date(which === "start" ? (v.start_time || v.created_at) : (v.end_time || v.start_time || v.created_at)).getTime();
+
+    for (const group of byTruckFence.values()) {
+      // Ascending by start so "the next visit" is the one that follows in time.
+      group.sort((a, b) => tsOf(a, "start") - tsOf(b, "start"));
+      let chain: any[] = [];
+      const flush = () => {
+        if (chain.length > 1) {
+          const spanSec = Math.round((tsOf(chain[chain.length - 1], "end") - tsOf(chain[0], "start")) / 1000);
+          for (const m of chain) flapInfo.set(String(m.id), { spanSec, parts: chain.length });
+        }
+        chain = [];
+      };
+      for (const v of group) {
+        if (!chain.length) { chain = [v]; continue; }
+        const gap = (tsOf(v, "start") - tsOf(chain[chain.length - 1], "end")) / 1000;
+        // Chains, not just pairs — a very tight boundary can split one visit three or more ways.
+        if (gap >= 0 && gap <= FLAP_GAP_SEC) chain.push(v);
+        else { flush(); chain = [v]; }
+      }
+      flush();
+    }
+
+    const allRows = visits.map((v) => {
       const s = settByAlert.get(String(v.id)) || null;
       const fac = facByGeofence.get(String(v.geofence_id));
       return {
+        // Under the drive-through threshold. Hidden by default, but the row still exists so it can
+        // be revealed for payment validation rather than silently dropped.
+        isShort: Number(v.duration) < MIN_VISIT_SEC,
+        // Part of a same-truck chain at one fence seconds apart — one real visit split by a tight
+        // boundary. Its own duration is not trustworthy; flapSpanSec is the real first-in→last-out.
+        likelyFlap: flapInfo.has(String(v.id)),
+        flapSpanSec: flapInfo.get(String(v.id))?.spanSec ?? null,
+        flapParts: flapInfo.get(String(v.id))?.parts ?? null,
         alertId: v.id,
         eventId: v.event_id != null ? String(v.event_id) : null,
         geofenceId: String(v.geofence_id),
@@ -181,6 +243,12 @@ Deno.serve(async (req: Request) => {
       };
     });
 
+    // Short stops drop out unless asked for — EXCEPT one that has already been settled or closed,
+    // which must always remain visible. Hiding a row that carries a real recorded amount would
+    // make that money vanish from every total with no way to find it again.
+    const rows = allRows.filter((r) => includeShort || !r.isShort || r.settled);
+    const shortHidden = allRows.filter((r) => r.isShort && !r.settled).length;
+
     if (action === "listVisits") {
       const status = String(body.status || "all");     // all | outstanding | collected | closed
       const facilityGeofenceId = String(body.geofenceId || "");
@@ -201,6 +269,10 @@ Deno.serve(async (req: Request) => {
           collected: rows.filter((r) => r.settled && !isClosed(r)).length,
           closed: rows.filter(isClosed).length,
         },
+        // How many unsettled short stops are being withheld right now — so the UI can offer to
+        // reveal them by count instead of hinting that something might be missing.
+        shortHidden,
+        includeShort,
       });
     }
 
@@ -249,6 +321,8 @@ Deno.serve(async (req: Request) => {
         outstandingVisits: rows.length - collected.length - closed.length,
         byPeriod: Object.values(byPeriod).sort((a, b) => a.key < b.key ? 1 : -1),
         byFacility: Object.values(byFacility).sort((a, b) => b.amount - a.amount),
+        shortHidden,
+        includeShort,
       });
     }
 
