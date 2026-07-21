@@ -23,8 +23,11 @@
 // while v1/v2 emit a later heartbeat for a stationary vehicle. More honest, but a parked truck
 // would display a much older "time ago" than it does today. Confirm that before flipping.
 //
-// Switching means rewriting fromMotive() for v3's shape and re-testing the map, the at-site
-// badges and disposal routing. Not done yet — owner decision.
+// SWITCHED 2026-07-21 (owner approved): v3 is now the POSITION source. v2 is still fetched, for
+// two reasons — it carries the telemetry v3 omits (odometer / engine hours / fuel / battery /
+// driver, all shown on the truck detail card), and it is the fallback when v3 fails or returns
+// nothing. Both fire in parallel.
+export const MOTIVE_URL_V3 = "https://api.gomotive.com/v3/vehicle_locations?per_page=100&page_no=1";
 export const MOTIVE_URL = "https://api.gomotive.com/v2/vehicle_locations?per_page=100&page_no=1";
 export const LINXUP_URL = "https://app02.linxup.com/ibis/rest/api/v2/locations";
 
@@ -104,6 +107,114 @@ interface MotiveVehicleEntry {
   };
   current_driver?: MotiveDriver | null;
 }
+// ---- Motive v3 ----
+// Different feed, different shape. Position fields only — v3 carries NO odometer, engine hours,
+// fuel, battery or driver, which the truck detail card displays. Those are merged in from v2.
+interface MotiveV3Location {
+  lat?: number;
+  lon?: number;
+  bearing?: number;
+  located_at?: string;
+  kph?: number;                 // v3 reports KPH; v2 reported MPH
+  vehicle_state?: string;       // "moving" | "off" | ...  (v2 used type: "breadcrumb"/"engine_stop")
+  current_location?: string;    // street address, e.g. "27 Schofield St, Providence, RI 02906"
+  city?: string;
+  state?: string;
+}
+interface MotiveV3Entry {
+  vehicle?: {
+    number?: string | number;
+    make?: string;
+    model?: string;
+    year?: string | number;
+    vin?: string;
+    current_location?: MotiveV3Location | null;
+  };
+}
+
+// Map v3's vehicle_state into the vocabulary the FRONTEND already understands
+// (_truckStatusLabel maps engine_stop / engine_idle / ignition_on / breadcrumb). Translating here
+// means index.html needs no change and existing truck colours and labels keep working — a raw
+// "off" would have fallen through to a bare "Off" label and lost "Parked (engine off)".
+function v3StateToStatus(s?: string): string | null {
+  const v = String(s || "").toLowerCase();
+  if (!v) return null;
+  // "mov" not "move" — v3 sends "moving", which does NOT contain the substring "move".
+  if (v.includes("mov") || v.includes("driv")) return "breadcrumb";
+  if (v.includes("idle")) return "engine_idle";
+  if (v === "on" || v.includes("ignition_on")) return "ignition_on";
+  if (v === "off" || v.includes("stop") || v.includes("park")) return "engine_stop";
+  return v;
+}
+
+const KPH_TO_MPH = 0.621371;
+
+function fromMotiveV3(data: { vehicles?: MotiveV3Entry[] }): Truck[] {
+  return (data.vehicles || [])
+    .map((v): Truck => {
+      const veh = v.vehicle || {};
+      const loc = veh.current_location || null;
+      const located = loc?.located_at ? Date.parse(loc.located_at) : NaN;
+      // v3's street address beats v2's "7.4 mi S of Lakeville" — it is also what the popup turns
+      // into a maps link. Fall back to city/state when the address is absent.
+      const desc = loc?.current_location
+        || [loc?.city, loc?.state].filter(Boolean).join(", ")
+        || "";
+      return {
+        number: veh.number ?? null,
+        name: String(veh.number ?? ""),
+        lat: loc?.lat ?? null,
+        lon: loc?.lon ?? null,
+        speed: loc?.kph != null ? Math.round(loc.kph * KPH_TO_MPH) : null,
+        heading: bearingToCompass(loc?.bearing),
+        bearingDeg: loc?.bearing ?? null,
+        status: v3StateToStatus(loc?.vehicle_state),
+        lastUpdate: isNaN(located) ? null : located,
+        make: veh.make ?? null,
+        model: veh.model ?? null,
+        year: veh.year != null ? String(veh.year) : null,
+        vin: veh.vin ?? null,
+        desc,
+        // Not reported by v3 — filled from v2 by mergeMotiveTelemetry().
+        odometer: null,
+        engineHours: null,
+        fuelType: null,
+        fuelPercent: null,
+        batteryVoltage: null,
+        driver: null,
+      };
+    })
+    .filter((t) => t.number != null);
+}
+
+// v3 gives the freshest POSITION; v2 gives the vehicle TELEMETRY the truck detail card shows
+// (driver, odometer, engine hours, fuel, battery). Switching to v3 alone would silently blank that
+// whole panel, so the two are merged: v3 wins on everything positional, v2 fills the rest.
+// Matched on VIN first (survives a rename in the Motive portal), falling back to the number.
+function mergeMotiveTelemetry(primary: Truck[], secondary: Truck[]): Truck[] {
+  const byVin = new Map<string, Truck>();
+  const byNum = new Map<string, Truck>();
+  for (const s of secondary) {
+    if (s.vin) byVin.set(String(s.vin).toUpperCase(), s);
+    if (s.number != null) byNum.set(String(s.number).toLowerCase(), s);
+  }
+  return primary.map((p) => {
+    const m = (p.vin && byVin.get(String(p.vin).toUpperCase()))
+      || (p.number != null && byNum.get(String(p.number).toLowerCase()))
+      || null;
+    if (!m) return p;
+    return {
+      ...p,
+      odometer: p.odometer ?? m.odometer,
+      engineHours: p.engineHours ?? m.engineHours,
+      fuelType: p.fuelType ?? m.fuelType,
+      fuelPercent: p.fuelPercent ?? m.fuelPercent,
+      batteryVoltage: p.batteryVoltage ?? m.batteryVoltage,
+      driver: p.driver ?? m.driver,
+    };
+  });
+}
+
 function fromMotive(data: { vehicles?: MotiveVehicleEntry[] }): Truck[] {
   return (data.vehicles || [])
     .map((v): Truck => {
@@ -202,15 +313,35 @@ export async function fetchTrucks(provider: string, token: string): Promise<Fetc
     }
 
     if (p === "motive") {
-      const res = await fetch(MOTIVE_URL, {
-        headers: { accept: "application/json", "x-api-key": token },
-      });
-      if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        console.error(`[telematics] Motive ${res.status}: ${body.slice(0, 200)}`);
-        return { success: false, provider: p, trucks: [], error: `Motive request failed (${res.status})`, status: res.status };
+      // v3 for POSITION (near-live), v2 for TELEMETRY (odometer/hours/fuel/battery/driver, which
+      // v3 does not return). Fired in parallel — one round trip's worth of latency, not two.
+      const hdrs = { accept: "application/json", "x-api-key": token };
+      const [v3Res, v2Res] = await Promise.all([
+        fetch(MOTIVE_URL_V3, { headers: hdrs }).catch(() => null),
+        fetch(MOTIVE_URL, { headers: hdrs }).catch(() => null),
+      ]);
+
+      // v2 is also the FALLBACK. If v3 fails or returns nothing usable, serve v2 alone rather than
+      // showing an empty map — a stale position beats no position.
+      const v2Trucks = (v2Res && v2Res.ok) ? fromMotive(await v2Res.json().catch(() => ({}))) : [];
+
+      if (v3Res && v3Res.ok) {
+        const v3Trucks = fromMotiveV3(await v3Res.json().catch(() => ({})));
+        if (v3Trucks.length) {
+          return { success: true, provider: p, trucks: mergeMotiveTelemetry(v3Trucks, v2Trucks) };
+        }
+        console.error("[telematics] Motive v3 returned no vehicles — falling back to v2");
+      } else if (v3Res) {
+        const body = await v3Res.text().catch(() => "");
+        console.error(`[telematics] Motive v3 ${v3Res.status}: ${body.slice(0, 200)} — falling back to v2`);
       }
-      return { success: true, provider: p, trucks: fromMotive(await res.json()) };
+
+      if (v2Res && v2Res.ok) return { success: true, provider: p, trucks: v2Trucks };
+
+      const status = (v2Res && v2Res.status) || (v3Res && v3Res.status) || 0;
+      const body = v2Res ? await v2Res.text().catch(() => "") : "";
+      console.error(`[telematics] Motive ${status}: ${body.slice(0, 200)}`);
+      return { success: false, provider: p, trucks: [], error: `Motive request failed (${status})`, status };
     }
 
     return { success: false, provider: p, trucks: [], error: `Unknown provider: ${provider}` };
