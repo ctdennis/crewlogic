@@ -133,6 +133,8 @@ Risk tiers (when in doubt, tier up):
 - **MEDIUM** — a data write, a new screen, a multi-step flow, anything with 2+ touch points: **walk the full flow** end to end with an explicit **Expected** at each step, plus the **read-back** that proves it persisted.
 - **HIGH** — payment processing, auth/login, the access gate, provisioning/dedup, anything **hard to back out** or spanning many touch points: **full critical-path coverage** — the money/critical paths **and** the failure/edge cases (declined card, downgrade, cap boundary, wrong-tenant), each with a read-back (DB row, Stripe object, webhook credit).
 
+**Any change that renders or saves gets a mid-interaction step.** Whenever a change adds or moves a `render*()` call or an auto-save (see "UI state preservation" under Editing notes), the test plan MUST include at least one step that acts on a row/control **while scrolled down or with another control open**, and asserts the screen stays put — not just that the value saved. Every one of these bugs passed a "does it save?" test and still threw the owner to the top of the list. Example step: *"Scroll ~40 rows down, Close out a visit → Expected: the list stays exactly where it is, no blank flash, and the row leaves the To-collect filter."*
+
 Write the steps per the "Writing test plans / QA scripts" section below (executable cold: exact clicks, values, Expected). For any change that touches an **edge function or its contract**, also run the edge-function **API smoke checks** — a small set of `curl` checks against the deployed dev function URLs asserting the endpoint is alive and returns the expected status/shape. These test *contracts* (which drift far less than the UI), so they don't rot like browser E2E; deliberately a handful of stable checks, not an automation platform.
 
 ## Writing test plans / QA scripts
@@ -179,3 +181,24 @@ The rebrand from "CrewLogic" to "CrewLogicAI" happened recently. The brand name 
 - UI is inline-style heavy and uses the CSS variables above — match existing variables rather than hardcoding colors.
 - **Button color standard (locked 2026-06-15):** secondary/utility buttons on dark surfaces use `.btn-surface` or `var(--btn-surface)` (#34485d) / `var(--btn-surface-border)` (#46596d) — NOT `--bg-input` (#253545), which is nearly identical to `--bg-card` (#1e2f40) and renders buttons near-invisible. Primary/accent buttons keep `--accent-green`/`--accent-yellow`.
 - The app is mobile-first / PWA-style (`apple-mobile-web-app-capable`, fixed viewport, no user scaling).
+
+### UI state preservation — check this on EVERY change that renders or saves (added 2026-07-21)
+
+Every `render*()` in this app rebuilds a section with `innerHTML`, which **destroys everything inside it** — open dropdowns, focus, scroll position, half-typed input. That's harmless on first paint. It is a **bug** whenever the rebuild can fire *while the owner is mid-interaction*, i.e. any re-render triggered by something asynchronous finishing: a save landing, a fetch returning, a poll tick, a timer.
+
+This has bitten repeatedly and always looks like a different bug each time. Before shipping any change that adds, moves, or newly triggers a `render*()` call, ask:
+
+1. **Can this fire while the user is doing something else?** (auto-save completing, network fetch resolving, 30s poll, debounce). If yes, it must not rebuild the section.
+2. **Does it preserve scroll, focus, and open controls?** Prefer updating ONE element in place by stable id over re-rendering the parent.
+3. **Does leaving the screen lose unsaved work?** Back button, tab switch, modal close — a screen whose only save is a button the owner didn't press will lose their work.
+4. **Is it a discrete committed choice?** A dropdown pick reads as saved the moment it's made. Free text you're still typing does not. Auto-save the former; batch the latter behind Save.
+5. **Can two saves be in flight at once?** Replace-set writes (`saveFacilities`) built from in-memory state can land out of order and silently revert the earlier change. Serialise them.
+
+**Known-good patterns already in `index.html` — reuse these rather than inventing another:**
+- In-place status update by stable element id: `_paintFacSave()`, `_facMoneyNote()`, `facRate-<i>`
+- Scroll capture/restore *inside* the renderer, clamped to the NEW `scrollHeight`: `renderRecycling()`
+- Surgical repaint of just the affected sub-control, not the whole list: `_repaintGeofencePickers()`
+- Auto-save on pick + `_settingsDirty` Back guard: `_setFacilityGeofence()` / `_persistFacilities()`
+- Serialised saves via a promise chain: `_facSaveChain`
+
+**Incidents this rule came from (all 2026-07):** owner lost a screenful of geofence links to a Back button that never saved; the auto-save fix then re-rendered the list twice per pick and dropped whatever dropdown was open; the Motive geofence lookup rebuilt all three facility lists seconds after the Cost tab opened, mid-typing; Close out blanked the Recycling modal and jumped back to the top of a 138-row list on every entry. Owner: *"We've had a few of these UI snafus where we land in the wrong place or next tasks are interrupted by a save update."*
