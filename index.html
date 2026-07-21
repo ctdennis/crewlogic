@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.56.0 | 2026-07-21">
+  <meta name="crewlogic-version" content="v5.57.0 | 2026-07-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -23155,6 +23155,18 @@ RECYCLING & DONATION
       updateFacility('recycling', i, 'settlementMode', v);
       const note = document.getElementById('facMoney-' + i);
       if (note) note.innerHTML = _facMoneyNote(v);
+      // The per-truck rate means the opposite thing on a cost facility, so its label has to move
+      // with the setting. Updated in place — re-rendering the list here is what used to drop an
+      // open dropdown mid-selection.
+      const rate = document.getElementById('facRate-' + i);
+      if (rate) {
+        const isCost = v === 'cost';
+        rate.style.color = isCost ? '#fca5a5' : '';
+        rate.placeholder = isCost ? '-$/truck' : '$/truck';
+        rate.title = isCost
+          ? 'What you PAY this recycler, $/truck (overrides default)'
+          : (v === 'none' ? 'Per-truck rate $/truck — this facility is set to no money either way, so it is not used in revenue' : 'Recycling revenue $/truck (overrides default)');
+      }
       await _persistFacilities('recycling', i);
     }
 
@@ -23197,8 +23209,19 @@ RECYCLING & DONATION
             'title="Disposal cost $/ton (overrides default)" ' +
             'oninput="updateFacility(\'' + type + '\',' + i + ',\'cost\',this.value ? parseFloat(this.value) : null)">';
         } else if (type === 'recycling') {
-          costField = '<input type="number" class="form-input" style="width:72px;flex-shrink:0;font-size:12px;padding:7px 8px;text-align:center;" placeholder="$/truck" min="0" value="' + (f.revenue != null ? f.revenue : '') + '" ' +
-            'title="Recycling revenue $/truck (overrides default)" ' +
+          // The per-truck rate is stored in ONE column but means opposite things depending on the
+          // money direction: at a metal recycler it is revenue in, at HandUp / electronics / tires
+          // it is what you PAY. Labelling it "revenue" on a cost facility reads as income you are
+          // owed — HandUp showed "350" as revenue when 350 is the charge. The field label and
+          // tooltip follow settlement_mode; the stored value is unchanged either way.
+          const _mode = (f.settlementMode || 'revenue');
+          const _isCost = _mode === 'cost';
+          const _ph = _isCost ? '-$/truck' : (_mode === 'none' ? '$/truck' : '$/truck');
+          const _tip = _isCost
+            ? 'What you PAY this recycler, $/truck (overrides default)'
+            : (_mode === 'none' ? 'Per-truck rate $/truck — this facility is set to no money either way, so it is not used in revenue' : 'Recycling revenue $/truck (overrides default)');
+          costField = '<input id="facRate-' + i + '" type="number" class="form-input" style="width:72px;flex-shrink:0;font-size:12px;padding:7px 8px;text-align:center;' + (_isCost ? 'color:#fca5a5;' : '') + '" placeholder="' + _ph + '" min="0" value="' + (f.revenue != null ? f.revenue : '') + '" ' +
+            'title="' + _tip + '" ' +
             'oninput="updateFacility(\'' + type + '\',' + i + ',\'revenue\',this.value ? parseFloat(this.value) : null)">';
         }
         return '<div style="margin-bottom:10px;">' +
