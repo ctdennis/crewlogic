@@ -148,7 +148,7 @@ Deno.serve(async (req: Request) => {
     // ── Settlements for those visits ──────────────────────────────────────────────────────
     const settlements = await pageAll((from, to) =>
       db.from("visit_settlements")
-        .select("id,alert_id,amount,weight_lbs,settled_at,note")
+        .select("id,alert_id,amount,weight_lbs,settled_at,note,resolution")
         .eq("franchise_id", fr.id)
         .range(from, to));
     const settByAlert = new Map<string, any>();
@@ -171,6 +171,9 @@ Deno.serve(async (req: Request) => {
         endedAt: v.end_time || null,
         durationSec: v.duration,
         settled: !!s,
+        // 'collected' = a real amount came in. 'closed' = cleared with NO known amount, so the
+        // stored amount is meaningless and must never be summed as revenue (migration 0064).
+        resolution: s ? (s.resolution || "collected") : null,
         amount: s ? Number(s.amount) : null,
         weightLbs: s && s.weight_lbs != null ? Number(s.weight_lbs) : null,
         settledAt: s ? s.settled_at : null,
@@ -179,11 +182,15 @@ Deno.serve(async (req: Request) => {
     });
 
     if (action === "listVisits") {
-      const status = String(body.status || "all");     // all | outstanding | collected
+      const status = String(body.status || "all");     // all | outstanding | collected | closed
       const facilityGeofenceId = String(body.geofenceId || "");
+      const isClosed = (r: typeof rows[number]) => r.settled && r.resolution === "closed";
       let out = rows;
+      // "collected" excludes closed — a visit cleared without an amount is not a collection, and
+      // listing it there would put a $0 row next to real money.
       if (status === "outstanding") out = out.filter((r) => !r.settled);
-      else if (status === "collected") out = out.filter((r) => r.settled);
+      else if (status === "collected") out = out.filter((r) => r.settled && !isClosed(r));
+      else if (status === "closed") out = out.filter(isClosed);
       if (facilityGeofenceId) out = out.filter((r) => r.geofenceId === facilityGeofenceId);
       return json({
         success: true,
@@ -191,7 +198,8 @@ Deno.serve(async (req: Request) => {
         totals: {
           all: rows.length,
           outstanding: rows.filter((r) => !r.settled).length,
-          collected: rows.filter((r) => r.settled).length,
+          collected: rows.filter((r) => r.settled && !isClosed(r)).length,
+          closed: rows.filter(isClosed).length,
         },
       });
     }
@@ -199,7 +207,12 @@ Deno.serve(async (req: Request) => {
     if (action === "summary") {
       // Collected totals per period + what is still to collect. No aging, no overdue — Owner:
       // "timing doesn't matter, I'm not looking for DSO or anything like an aging report."
-      const collected = rows.filter((r) => r.settled);
+      // THREE states, not two. A closed visit has left the outstanding list but carries no known
+      // amount, so it must not enter any revenue figure — including the visit COUNT, which would
+      // otherwise drag $/visit toward zero. It gets its own count so written-off money stays
+      // visible instead of reading as $0 collected.
+      const collected = rows.filter((r) => r.settled && r.resolution !== "closed");
+      const closed = rows.filter((r) => r.settled && r.resolution === "closed");
       const byPeriod: Record<string, { key: string; amount: number; weight: number; visits: number }> = {};
       const grain = String(body.grain || "month");   // day | week | month | year
       const keyOf = (iso: string) => {
@@ -219,11 +232,12 @@ Deno.serve(async (req: Request) => {
         b.weight += r.weightLbs || 0;
         b.visits += 1;
       }
-      const byFacility: Record<string, { name: string; amount: number; weight: number; collected: number; outstanding: number }> = {};
+      const byFacility: Record<string, { name: string; amount: number; weight: number; collected: number; closed: number; outstanding: number }> = {};
       for (const r of rows) {
-        const b = byFacility[r.facilityName] || (byFacility[r.facilityName] = { name: r.facilityName, amount: 0, weight: 0, collected: 0, outstanding: 0 });
-        if (r.settled) { b.amount += r.amount || 0; b.weight += r.weightLbs || 0; b.collected += 1; }
-        else b.outstanding += 1;
+        const b = byFacility[r.facilityName] || (byFacility[r.facilityName] = { name: r.facilityName, amount: 0, weight: 0, collected: 0, closed: 0, outstanding: 0 });
+        if (!r.settled) b.outstanding += 1;
+        else if (r.resolution === "closed") b.closed += 1;
+        else { b.amount += r.amount || 0; b.weight += r.weightLbs || 0; b.collected += 1; }
       }
       return json({
         success: true,
@@ -231,7 +245,8 @@ Deno.serve(async (req: Request) => {
         totalCollected: collected.reduce((a, r) => a + (r.amount || 0), 0),
         totalWeightLbs: collected.reduce((a, r) => a + (r.weightLbs || 0), 0),
         collectedVisits: collected.length,
-        outstandingVisits: rows.length - collected.length,
+        closedVisits: closed.length,
+        outstandingVisits: rows.length - collected.length - closed.length,
         byPeriod: Object.values(byPeriod).sort((a, b) => a.key < b.key ? 1 : -1),
         byFacility: Object.values(byFacility).sort((a, b) => b.amount - a.amount),
       });
@@ -265,6 +280,9 @@ Deno.serve(async (req: Request) => {
         settled_at: new Date().toISOString(),
         settled_by: body.profileId || null,
         note: body.note ? String(body.note) : null,
+        // Entering an amount always means collected — including re-entering one on a visit that
+        // had been closed, which is the natural "I found the figure after all" correction.
+        resolution: "collected",
       };
       const { error } = await db.from("visit_settlements")
         .upsert(row, { onConflict: "franchise_id,alert_id" });
@@ -273,6 +291,42 @@ Deno.serve(async (req: Request) => {
         return json({ success: false, error: "could not save" }, 500);
       }
       return json({ success: true, alertId: visit.id, amount, weightLbs: weight });
+    }
+
+    // Clear a visit off the outstanding list WITHOUT claiming an amount.
+    //
+    // Two real cases, both of which will never receive a figure: nothing was collected and nothing
+    // is coming, or payment was taken but never written down. Recording either as 0 would be a
+    // false statement about revenue — see 0064 for why 0 cannot be overloaded.
+    if (action === "closeVisit") {
+      const alertId = body.alertId;
+      if (alertId == null) return json({ success: false, error: "alertId required" }, 400);
+      const visit = visits.find((v) => String(v.id) === String(alertId));
+      if (!visit) return json({ success: false, error: "visit not found for this franchise" }, 404);
+
+      const row = {
+        franchise_id: fr.id,
+        alert_id: visit.id,
+        provider: "motive",
+        provider_event_id: visit.event_id != null ? String(visit.event_id) : null,
+        provider_geofence_id: visit.geofence_id,
+        visit_started_at: visit.start_time || visit.created_at,
+        // NOT NULL on the column, and meaningless for a closed row — every reporting path filters
+        // on resolution before summing, so this 0 never reaches a total.
+        amount: 0,
+        weight_lbs: null,
+        settled_at: new Date().toISOString(),
+        settled_by: body.profileId || null,
+        note: body.note ? String(body.note) : null,
+        resolution: "closed",
+      };
+      const { error } = await db.from("visit_settlements")
+        .upsert(row, { onConflict: "franchise_id,alert_id" });
+      if (error) {
+        console.error("[recycling] closeVisit failed:", error.message);
+        return json({ success: false, error: "could not close" }, 500);
+      }
+      return json({ success: true, alertId: visit.id, resolution: "closed" });
     }
 
     if (action === "deleteSettlement") {

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.53.0 | 2026-07-21">
+  <meta name="crewlogic-version" content="v5.54.0 | 2026-07-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4610,7 +4610,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // (collected) or it does not (still to collect). No aging, no overdue, no DSO; Owner:
     // "timing doesn't matter, I'm not looking for DSO or anything like an aging report."
     let _recyRows = [], _recyTotals = {}, _recySummary = null;
-    let _recyFilter = 'outstanding';       // outstanding | collected | all
+    let _recyFilter = 'outstanding';       // outstanding | collected | closed | all
     let _recyGeofence = '';                // '' = every linked recycling facility
     let _recyGrain = 'month';
     let _recyBusy = {};                    // alertId -> true while its row is saving
@@ -4715,6 +4715,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           +   '<div style="font-size:22px;font-weight:800;color:' + (s.outstandingVisits ? '#f59e0b' : 'var(--text-primary)') + ';margin-top:2px;">' + s.outstandingVisits + '</div>'
           +   '<div style="font-size:11.5px;color:var(--text-muted);">visit' + (s.outstandingVisits === 1 ? '' : 's') + ' with no amount entered</div>'
           + '</div>'
+          // Closed money stays ON SCREEN rather than just vanishing from outstanding. These are
+          // visits written off or paid-but-never-recorded — real money in the second case — so
+          // burying them would quietly shrink the picture with no trace.
+          + (s.closedVisits ? '<div style="flex:1;min-width:150px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:12px 14px;">'
+              + '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">Closed</div>'
+              + '<div style="font-size:22px;font-weight:800;color:var(--text-secondary);margin-top:2px;">' + s.closedVisits + '</div>'
+              + '<div style="font-size:11.5px;color:var(--text-muted);">cleared with no amount</div>'
+            + '</div>' : '')
         + '</div>';
       }
 
@@ -4722,6 +4730,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">'
         + btn(_recyFilter === 'outstanding', "setRecyFilter('outstanding')", 'To collect' + (_recyTotals.outstanding != null ? ' (' + _recyTotals.outstanding + ')' : ''))
         + btn(_recyFilter === 'collected', "setRecyFilter('collected')", 'Collected' + (_recyTotals.collected != null ? ' (' + _recyTotals.collected + ')' : ''))
+        + (_recyTotals.closed ? btn(_recyFilter === 'closed', "setRecyFilter('closed')", 'Closed (' + _recyTotals.closed + ')') : '')
         + btn(_recyFilter === 'all', "setRecyFilter('all')", 'All')
         + '</div>';
 
@@ -4738,8 +4747,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       // ── Visit rows ──
       let rows = _recyRows;
+      // Closed is its own bucket, never folded into Collected — a visit cleared with no amount is
+      // not a collection, and showing it as a $0 row beside real money would misread.
       if (_recyFilter === 'outstanding') rows = rows.filter(r => !r.settled);
-      else if (_recyFilter === 'collected') rows = rows.filter(r => r.settled);
+      else if (_recyFilter === 'collected') rows = rows.filter(r => r.settled && r.resolution !== 'closed');
+      else if (_recyFilter === 'closed') rows = rows.filter(r => r.settled && r.resolution === 'closed');
       if (_recyGeofence) rows = rows.filter(r => r.geofenceId === _recyGeofence);
 
       if (!rows.length) {
@@ -4750,7 +4762,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         html += '<div style="display:flex;flex-direction:column;gap:8px;">';
         rows.slice(0, 300).forEach(r => {
           const busy = !!_recyBusy[r.alertId];
-          html += '<div style="background:var(--bg-input);border:1px solid ' + (r.settled ? 'var(--border)' : '#f59e0b55') + ';border-radius:10px;padding:10px 12px;">'
+          const closed = r.settled && r.resolution === 'closed';
+          html += '<div style="background:var(--bg-input);border:1px solid ' + (r.settled ? 'var(--border)' : '#f59e0b55') + ';border-radius:10px;padding:10px 12px;' + (closed ? 'opacity:0.72;' : '') + '">'
             + '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap;">'
             +   '<div style="font-size:13.5px;font-weight:700;color:var(--text-primary);">' + _hEsc(r.facilityName) + '</div>'
             +   '<div style="font-size:11.5px;color:var(--text-muted);white-space:nowrap;">' + _recyDate(r.startedAt) + ' · ' + _hEsc(r.truck || '') + ' · ' + _recyWindow(r) + '</div>'
@@ -4762,8 +4775,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             +   '<input id="recyLbs-' + r.alertId + '" type="number" step="1" inputmode="numeric" placeholder="lbs (optional)" value="' + (r.weightLbs != null ? r.weightLbs : '') + '" '
             +     'style="width:120px;padding:7px 9px;font-size:13px;background:var(--bg-card);border:1px solid var(--border);border-radius:7px;color:var(--text-primary);">'
             +   '<button onclick="saveRecycling(' + r.alertId + ')"' + (busy ? ' disabled' : '') + ' style="padding:7px 14px;border-radius:7px;border:none;background:var(--accent-green);color:var(--accent-text);font-size:12.5px;font-weight:700;cursor:pointer;">' + (busy ? 'Saving…' : (r.settled ? 'Update' : 'Save')) + '</button>'
+            // Close out — clears the visit without claiming an amount. Only offered while the
+            // visit is outstanding; once settled, Undo is the way back.
+            +   (!r.settled ? '<button onclick="closeRecycling(' + r.alertId + ')"' + (busy ? ' disabled' : '') + ' title="Clear this visit without recording an amount — nothing collected, or payment taken but never written down" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:none;color:var(--text-muted);font-size:12px;cursor:pointer;">Close out</button>' : '')
             +   (r.settled ? '<button onclick="undoRecycling(' + r.alertId + ')" title="Return this visit to \'still to collect\'" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:none;color:var(--text-muted);font-size:12px;cursor:pointer;">Undo</button>' : '')
-            +   (r.settled ? '<span style="font-size:11.5px;color:var(--accent-green);font-weight:700;">✓ collected ' + _recyDate(r.settledAt) + '</span>' : '')
+            +   (closed
+                  ? '<span style="font-size:11.5px;color:var(--text-muted);font-weight:700;">— closed ' + _recyDate(r.settledAt) + (r.note ? ' · ' + _hEsc(r.note) : '') + '</span>'
+                  : (r.settled ? '<span style="font-size:11.5px;color:var(--accent-green);font-weight:700;">✓ collected ' + _recyDate(r.settledAt) + '</span>' : ''))
             + '</div>'
           + '</div>';
         });
@@ -4811,6 +4829,31 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (!res || !res.success) throw new Error((res && res.error) || 'save failed');
       } catch (e) {
         alert('Could not save: ' + (e && e.message ? e.message : 'unknown error'));
+      }
+      delete _recyBusy[alertId];
+      await loadRecycling();
+    }
+
+    // Clear a visit off "still to collect" WITHOUT recording an amount.
+    //
+    // Two real cases: nothing was collected and nothing is coming, or payment was taken but never
+    // written into the sheet. Entering 0 would be wrong for both — 0 means "collected nothing",
+    // and in the paid-but-unrecorded case it would understate real revenue. Closed visits are
+    // reported separately, never inside the collected total.
+    //
+    // The reason is captured as a note so a closed row can still be read months later.
+    async function closeRecycling(alertId) {
+      const why = prompt('Close this visit without recording an amount.\n\nOptional note (e.g. "paid, never recorded" or "nothing collected"):', '');
+      if (why === null) return;   // cancelled — distinct from an empty note, which is allowed
+      _recyBusy[alertId] = true; renderRecycling();
+      try {
+        const res = await edgeFunctionCall('crewlogic-recycling', {
+          action: 'closeVisit', franchiseID: currentUser.franchiseID,
+          alertId, note: String(why || '').trim() || null
+        });
+        if (!res || !res.success) throw new Error((res && res.error) || 'close failed');
+      } catch (e) {
+        alert('Could not close: ' + (e && e.message ? e.message : 'unknown error'));
       }
       delete _recyBusy[alertId];
       await loadRecycling();
