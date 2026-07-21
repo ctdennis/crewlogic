@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.62.0 | 2026-07-21">
+  <meta name="crewlogic-version" content="v5.63.0 | 2026-07-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1556,7 +1556,7 @@
           <div class="module-card fade-in fade-in-delay-4" id="signsModuleCard" data-card="signs" style="display:none;" onclick="openModule('signs')">
             <div class="module-icon">🪧</div>
             <div class="module-name">Yard Signs</div>
-            <div class="module-desc">Track sign placements & crew rewards</div>
+            <div class="module-desc">Track sign placements & crew activity</div>
           </div>
 
           <div class="module-card fade-in fade-in-delay-4" id="jobPlanCard" data-card="jobPlan" onclick="openModule('jobPlan')">
@@ -4184,7 +4184,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">
             <button onclick="openMgmtTab('crew')" id="mgmtTabCrew" class="signs-mgmt-tab signs-mgmt-tab-active">👥 Crew</button>
             <button onclick="openMgmtTab('campaigns')" id="mgmtTabCampaigns" class="signs-mgmt-tab">📋 Campaigns</button>
-            <button onclick="openMgmtTab('history')" id="mgmtTabHistory" class="signs-mgmt-tab">📜 History</button>
           </div>
           <div id="mgmtTabContent"></div>
         </div>
@@ -26805,19 +26804,18 @@ Please review the estimate below. If you have any questions or would like to adj
       try {
         const franchiseUUID = await getFranchiseUUID();
         // Pull all credits and group client-side (keeps logic simple)
-        const credits = await supabaseFetch('/rest/v1/sign_credits?franchise_id=eq.' + franchiseUUID + '&select=crew_member_id,credits_earned,awarded_at,consumed_by_reward');
+        const credits = await supabaseFetch('/rest/v1/sign_credits?franchise_id=eq.' + franchiseUUID + '&select=crew_member_id,credits_earned,awarded_at');
         const crewById = {};
         _signsCrewRoster.forEach(c => { crewById[c.id] = c; });
-        const totals = {}; // crew_member_id -> { total, unconsumed }
+        const totals = {}; // crew_member_id -> { total, week, month }
         const now = Date.now();
         const weekAgo = now - 7 * 86400000;
         const monthAgo = now - 30 * 86400000;
         (credits || []).forEach(c => {
           const id = c.crew_member_id;
-          if (!totals[id]) totals[id] = { total: 0, unconsumed: 0, week: 0, month: 0 };
+          if (!totals[id]) totals[id] = { total: 0, week: 0, month: 0 };
           const earned = c.credits_earned || 1;
           totals[id].total += earned;
-          if (!c.consumed_by_reward) totals[id].unconsumed += earned;
           const t = new Date(c.awarded_at).getTime();
           if (t >= weekAgo) totals[id].week += earned;
           if (t >= monthAgo) totals[id].month += earned;
@@ -26830,22 +26828,18 @@ Please review the estimate below. If you have any questions or would like to adj
           container.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px;">No credits earned yet.</div>';
           return;
         }
-        const rewardThreshold = (currentUser?.costSettings?.signs?.creditsPerReward) || 25;
+        // Credits are still earned per sign placed and are worth showing. The progress bar and
+        // "N to next reward" line were removed with the rewards feature (2026-07-21) — there is
+        // nothing to progress TOWARD, and a bar filling to no outcome is worse than no bar.
         container.innerHTML =
-          '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Total Credits · Progress to Next Reward</div>' +
+          '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Total Credits</div>' +
           ranked.map((r, i) => {
-            const progress = r.unconsumed % rewardThreshold;
-            const pct = Math.min(100, (progress / rewardThreshold) * 100);
             return '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:6px;">' +
               '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">' +
                 '<span style="font-size:13px;font-weight:600;">' + (i+1) + '. ' + escapeHtml(r.name) + '</span>' +
                 '<span style="font-family:\'Space Mono\',monospace;font-size:14px;color:var(--accent-green);">' + r.total + '</span>' +
               '</div>' +
-              '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Week: ' + r.week + ' · Month: ' + r.month + ' · Available: ' + r.unconsumed + '</div>' +
-              '<div style="background:var(--bg-input);border-radius:99px;height:6px;overflow:hidden;">' +
-                '<div style="background:var(--accent-green);height:100%;width:' + pct + '%;transition:width 0.3s;"></div>' +
-              '</div>' +
-              '<div style="font-size:10px;color:var(--text-muted);margin-top:3px;">' + progress + ' / ' + rewardThreshold + ' to next reward</div>' +
+              '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Week: ' + r.week + ' · Month: ' + r.month + '</div>' +
             '</div>';
           }).join('');
       } catch(e) {
@@ -27766,7 +27760,6 @@ Please review the estimate below. If you have any questions or would like to adj
       const container = document.getElementById('mgmtTabContent');
       if (tab === 'crew') renderCrewMgmt(container);
       else if (tab === 'campaigns') renderCampaignsMgmt(container);
-      else if (tab === 'history') renderHistoryMgmt(container);
     }
 
     async function renderCrewMgmt(container) {
@@ -28264,39 +28257,9 @@ Please review the estimate below. If you have any questions or would like to adj
       }
     }
 
-    async function renderHistoryMgmt(container) {
-      container.innerHTML = '<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:12px;">Loading reward history...</div>';
-      try {
-        const franchiseUUID = await getFranchiseUUID();
-        const rewards = await supabaseFetch('/rest/v1/sign_rewards?franchise_id=eq.' + franchiseUUID + '&order=created_at.desc&limit=50');
-        const list = Array.isArray(rewards) ? rewards : [];
-        if (list.length === 0) {
-          container.innerHTML = '<div style="font-size:13px;color:var(--text-muted);text-align:center;padding:24px;">No rewards issued yet.</div>';
-          return;
-        }
-        const crewById = {};
-        _signsCrewRoster.forEach(c => { crewById[c.id] = c.first_name + ' ' + c.last_name; });
-        container.innerHTML = list.map(r => {
-          const statusColor = r.status === 'issued' ? 'var(--accent-green)' :
-                              r.status === 'test' ? '#fbbf24' :
-                              r.status === 'failed' ? '#ef4444' : 'var(--text-muted)';
-          const date = new Date(r.created_at).toLocaleDateString();
-          return '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:6px;">' +
-            '<div style="display:flex;justify-content:space-between;align-items:baseline;">' +
-              '<div style="font-size:13px;font-weight:600;">' + escapeHtml(crewById[r.crew_member_id] || '?') + '</div>' +
-              '<div style="font-family:\'Space Mono\',monospace;font-size:13px;color:var(--accent-green);">$' + parseFloat(r.reward_amount_dollars).toFixed(2) + '</div>' +
-            '</div>' +
-            '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-top:2px;">' +
-              '<span>' + date + ' · ' + r.credits_consumed + ' credits</span>' +
-              '<span style="color:' + statusColor + ';text-transform:uppercase;">' + r.status + (r.test_mode ? ' (TEST)' : '') + '</span>' +
-            '</div>' +
-            (r.error_message ? '<div style="font-size:11px;color:#ef4444;margin-top:4px;">' + escapeHtml(r.error_message) + '</div>' : '') +
-          '</div>';
-        }).join('');
-      } catch(e) {
-        container.innerHTML = '<div style="color:#ef4444;font-size:13px;">Error loading history.</div>';
-      }
-    }
+    // renderHistoryMgmt() (reward history) REMOVED 2026-07-21 with the rewards feature — it
+    // rendered sign_rewards rows including error_message, so a broken integration showed up
+    // as a list of errors in the Signs Management modal. See docs/design-signs-crew-rewards.md
 
     // ── CREW VIEW (when role === 'crew') ───────────────────────────────────
     async function renderCrewSignsView() {
@@ -28306,20 +28269,15 @@ Please review the estimate below. If you have any questions or would like to adj
       let myStats = '';
       if (crewMember) {
         try {
-          const credits = await supabaseFetch('/rest/v1/sign_credits?crew_member_id=eq.' + crewMember.id + '&select=credits_earned,consumed_by_reward');
+          // Credits still count every sign this crew member placed. The "N to next reward" line
+          // and its progress bar went with the rewards feature (2026-07-21) — a bar filling toward
+          // nothing is worse than no bar. See docs/design-signs-crew-rewards.md.
+          const credits = await supabaseFetch('/rest/v1/sign_credits?crew_member_id=eq.' + crewMember.id + '&select=credits_earned');
           const list = Array.isArray(credits) ? credits : [];
           const total = list.reduce((s, c) => s + (c.credits_earned || 1), 0);
-          const unconsumed = list.filter(c => !c.consumed_by_reward).reduce((s, c) => s + (c.credits_earned || 1), 0);
-          const threshold = (currentUser?.costSettings?.signs?.creditsPerReward) || 25;
-          const progress = unconsumed % threshold;
-          const pct = Math.min(100, (progress / threshold) * 100);
           myStats = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;margin-bottom:16px;">' +
             '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Your Credits</div>' +
-            '<div style="font-family:\'Space Mono\',monospace;font-size:28px;font-weight:700;color:var(--accent-green);margin-bottom:4px;">' + total + '</div>' +
-            '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">' + progress + ' / ' + threshold + ' to next reward</div>' +
-            '<div style="background:var(--bg-input);border-radius:99px;height:6px;overflow:hidden;">' +
-              '<div style="background:var(--accent-green);height:100%;width:' + pct + '%;"></div>' +
-            '</div>' +
+            '<div style="font-family:\'Space Mono\',monospace;font-size:28px;font-weight:700;color:var(--accent-green);">' + total + '</div>' +
           '</div>';
         } catch(e) {}
       }
