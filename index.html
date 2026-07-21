@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.51.1 | 2026-07-20">
+  <meta name="crewlogic-version" content="v5.52.0 | 2026-07-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -22909,6 +22909,13 @@ RECYCLING & DONATION
       const v = String(value || '').trim();
       updateFacility(type, i, 'geofenceId', v);
       updateFacility(type, i, 'provider', v ? 'motive' : '');
+      await _persistFacilities(type, i);
+    }
+
+    // Shared persist path for the two auto-saving facility controls (geofence + money direction).
+    // Both are single committed picks from a dropdown, so both save on change for the same reason
+    // — and both report status through _geofenceSaveMsg so the row can only ever show one state.
+    async function _persistFacilities(type, i) {
       const key = type + ':' + i;
       _geofenceSaveMsg[key] = 'saving';
       renderFacilityList(type);
@@ -22934,6 +22941,40 @@ RECYCLING & DONATION
       if (_geofenceSaveMsg[key] === 'saved') {
         setTimeout(() => { delete _geofenceSaveMsg[key]; renderFacilityList(type); }, 2500);
       }
+    }
+
+    // Money direction picker — RECYCLING ONLY.
+    //
+    // Disposal always costs and donation is always free, so offering the control there is noise.
+    // Recycling is the one type where it genuinely varies: metal recyclers pay us, mattress /
+    // electronics / tire recyclers charge us, cardboard and pallets are free. Motive can't tell
+    // us which — its category is plain "Recycling" for all of them — so it is set here.
+    //
+    // This drives what the Recycling Revenue screen counts. A facility left on "They pay us" that
+    // actually charges you shows up forever as money owed that will never arrive.
+    function _settlementPickerHtml(type, i, f) {
+      if (type !== 'recycling') return '';
+      const cur = (f && f.settlementMode) ? String(f.settlementMode) : 'revenue';
+      const tip = 'Which way money moves at this facility. Only "They pay us" sites appear in ' +
+                  'Recycling Revenue — the others would sit there as uncollectable forever.';
+      const opt = (v, label) => '<option value="' + v + '"' + (cur === v ? ' selected' : '') + '>' + label + '</option>';
+      const note = cur === 'revenue'
+        ? '<span style="font-size:11px;color:var(--accent-green);flex-shrink:0;">in Revenue</span>'
+        : '<span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">not tracked</span>';
+      return '<div style="display:flex;gap:6px;align-items:center;margin-top:4px;" title="' + tip + '">' +
+        '<span style="width:62px;font-size:11px;color:var(--text-muted);flex-shrink:0;">Money</span>' +
+        '<select class="form-input" style="flex:1;min-width:0;font-size:12px;padding:6px 8px;" ' +
+          'onchange="_setFacilitySettlement(' + i + ',this.value)">' +
+          opt('revenue', 'They pay us — metal') +
+          opt('cost',    'We pay them — mattress, electronics, tires') +
+          opt('none',    'No money either way — cardboard, pallets') +
+        '</select>' + note +
+      '</div>';
+    }
+
+    async function _setFacilitySettlement(i, value) {
+      updateFacility('recycling', i, 'settlementMode', String(value || 'revenue'));
+      await _persistFacilities('recycling', i);
     }
 
     // ── Settings screen: render facility rows ──
@@ -22992,6 +23033,7 @@ RECYCLING & DONATION
             '<button onclick="removeFacility(\'' + type + '\',' + i + ')" style="flex-shrink:0;padding:7px 9px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;">✕</button>' +
           '</div>' +
           _geofencePickerHtml(type, i, f) +
+          _settlementPickerHtml(type, i, f) +
         '</div>';
       }).join('');
     }

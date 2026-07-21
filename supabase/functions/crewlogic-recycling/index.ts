@@ -88,12 +88,17 @@ Deno.serve(async (req: Request) => {
     const fr = await resolveFranchise(db, String(body.franchiseID || ""));
     if (!fr) return json({ success: false, error: "franchise not found" }, 404);
 
-    // ── Recycling facilities for this franchise, keyed by geofence id ──────────────────────
+    // ── Revenue-earning recycling facilities for this franchise, keyed by geofence id ──────
+    // settlement_mode is the gate, NOT type alone (migration 0063). Only metal recyclers pay
+    // us; mattress / electronics / tire recyclers cost money and cardboard is free. Including
+    // those here would list visits that can never be collected, permanently overstating the
+    // "still to collect" figure — the one number this screen exists to get right.
     const { data: facRows, error: facErr } = await db
       .from("facilities")
       .select("id,name,type,provider,provider_geofence_id")
       .eq("franchise_id", fr.id)
       .eq("type", "recycling")
+      .eq("settlement_mode", "revenue")
       .not("provider_geofence_id", "is", null);
     if (facErr) return json({ success: false, error: "facilities lookup failed" }, 500);
 
@@ -117,7 +122,7 @@ Deno.serve(async (req: Request) => {
     if (!geofenceIds.length) {
       return json({
         success: true, visits: [], summary: null, unlinked: true,
-        message: "No recycling facilities are linked to a telematics geofence yet. Link them in Settings → Cost → Facilities.",
+        message: "No revenue-earning recycling facility is set up yet. In Settings → Cost → Facilities, link the facility to its telematics geofence and set 'Money' to \"They pay us\".",
       });
     }
 
