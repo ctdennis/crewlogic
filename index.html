@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.52.0 | 2026-07-20">
+  <meta name="crewlogic-version" content="v5.52.1 | 2026-07-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -22790,14 +22790,16 @@ RECYCLING & DONATION
         _geofenceOptions = [];        // fail quiet: the picker degrades to a note, never blocks Settings
       }
       _geofenceLoading = false;
-      // Re-render ALL three lists, not just the one that happened to trigger the load.
+      // Repaint ALL three lists' pickers, not just the one that happened to trigger the load.
       //
       // The Cost tab renders disposal, recycling and donation in sequence. The FIRST list starts
       // the fetch and sets _geofenceLoading; the other two then hit the guard at the top of this
-      // function and return immediately — so they never registered a callback. Re-rendering only
+      // function and return immediately — so they never registered a callback. Repainting only
       // `rerenderType` left the other two showing "Loading…" permanently.
-      if (typeof renderAllFacilityLists === 'function') renderAllFacilityLists();
-      else if (rerenderType) renderFacilityList(rerenderType);
+      //
+      // Pickers only — NOT renderAllFacilityLists(). This fires mid-interaction by nature, and a
+      // full rebuild here is what dropped an open dropdown and forced a re-pick.
+      _repaintGeofencePickers();
     }
 
     // Manual re-pull from Motive. Clears the page-lifetime cache and re-renders all three
@@ -22809,7 +22811,7 @@ RECYCLING & DONATION
       _geofenceOptions = null;
       _geofenceUnavailable = false;
       await loadGeofenceOptions();
-      renderAllFacilityLists();
+      _repaintGeofencePickers();   // pickers only — see loadGeofenceOptions
       if (btn) {
         const after = (_geofenceOptions || []).length;
         const delta = after - before;
@@ -22821,7 +22823,25 @@ RECYCLING & DONATION
       }
     }
 
+    // Wrapper carries a stable id so the picker can be repainted ALONE when the Motive lookup
+    // returns. That lookup is a network round trip and lands seconds after the Cost tab opens —
+    // long enough that the owner is already typing a name or choosing a Money setting. Repainting
+    // the whole list at that moment destroyed whatever they were doing.
     function _geofencePickerHtml(type, i, f) {
+      return '<div id="facGeo-' + type + '-' + i + '">' + _geofencePickerInner(type, i, f) + '</div>';
+    }
+
+    // Repaint ONLY the geofence pickers, leaving names, addresses, costs and Money selects alone.
+    function _repaintGeofencePickers() {
+      ['disposal', 'recycling', 'donation'].forEach(type => {
+        (getFacilities(type) || []).forEach((f, i) => {
+          const el = document.getElementById('facGeo-' + type + '-' + i);
+          if (el) el.innerHTML = _geofencePickerInner(type, i, f);
+        });
+      });
+    }
+
+    function _geofencePickerInner(type, i, f) {
       const cur = (f && f.geofenceId != null) ? String(f.geofenceId) : '';
       const label = '<span style="width:62px;font-size:11px;color:var(--text-muted);flex-shrink:0;">Geofence</span>';
       const tip = 'Links this facility to its telematics geofence. Matching is by ID, so renaming or ' +
@@ -22873,11 +22893,12 @@ RECYCLING & DONATION
 
       // Saved-state indicator: the pick persists on change, so say so plainly. Without it the
       // control looks identical whether or not the link reached the server.
-      const st = _geofenceSaveMsg[type + ':' + i];
-      const statusHtml = st === 'saving' ? '<span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">saving…</span>'
-        : st === 'saved'  ? '<span style="font-size:11px;color:var(--accent-green);flex-shrink:0;font-weight:700;">✓ saved</span>'
-        : st === 'failed' ? '<span style="font-size:11px;color:#ef4444;flex-shrink:0;font-weight:700;">✕ not saved</span>'
-        : (cur ? '<span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">#' + esc(cur) + '</span>' : '');
+      //
+      // Rendered as a STABLE, ALWAYS-PRESENT element so the save can update it in place. It used
+      // to be repainted by re-rendering the whole list, which tore out the DOM under whatever the
+      // owner had moved on to — open a dropdown, and it vanished mid-selection.
+      const statusHtml = '<span id="' + _facSaveId(type, i) + '" ' + _FAC_SAVE_BASE_STYLE + '>' +
+        _facSaveText(type, i, cur) + '</span>';
 
       // Say what was filtered out, so a "missing" geofence reads as mislabelled-in-Motive
       // rather than broken here.
@@ -22905,6 +22926,37 @@ RECYCLING & DONATION
     // Saves ONLY facilities (saveFacilities), never the scalar cost fields, so a half-typed
     // number elsewhere on the tab cannot be committed as a side effect of picking a geofence.
     let _geofenceSaveMsg = {};    // "type:index" -> transient status shown beside the picker
+
+    // ── SILENT SAVE ──────────────────────────────────────────────────────────────────────────
+    // These auto-saving controls must NEVER re-render the facility list. renderFacilityList()
+    // rebuilds the section's innerHTML, which destroys every element in it — including whatever
+    // control the owner moved to while the request was in flight. Picking a geofence and then
+    // reaching for the Money dropdown dropped the open list and forced a re-pick, once when the
+    // save started and again when it landed.
+    //
+    // So the status is a single stable <span> per row, updated in place by id. Same feedback,
+    // zero DOM churn, nothing to interrupt.
+    const _FAC_SAVE_BASE_STYLE = 'style="font-size:11px;flex-shrink:0;"';
+    function _facSaveId(type, i) { return 'facSave-' + type + '-' + i; }
+
+    function _facSaveText(type, i, cur) {
+      const st = _geofenceSaveMsg[type + ':' + i];
+      if (st === 'saving') return '<span style="color:var(--text-muted);">saving…</span>';
+      if (st === 'saved')  return '<span style="color:var(--accent-green);font-weight:700;">✓ saved</span>';
+      if (st === 'failed') return '<span style="color:#ef4444;font-weight:700;">✕ not saved</span>';
+      return cur ? '<span style="color:var(--text-muted);">#' + String(cur).replace(/</g, '&lt;') + '</span>' : '';
+    }
+
+    // Repaint just this row's status. Reads the current geofence out of memory so the idle
+    // "#<id>" state stays right after a change without consulting the DOM.
+    function _paintFacSave(type, i) {
+      const el = document.getElementById(_facSaveId(type, i));
+      if (!el) return;   // list was re-rendered for another reason; next paint picks it up
+      const list = getFacilities(type) || [];
+      const f = list[i] || {};
+      el.innerHTML = _facSaveText(type, i, f.geofenceId != null ? String(f.geofenceId) : '');
+    }
+
     async function _setFacilityGeofence(type, i, value) {
       const v = String(value || '').trim();
       updateFacility(type, i, 'geofenceId', v);
@@ -22912,13 +22964,20 @@ RECYCLING & DONATION
       await _persistFacilities(type, i);
     }
 
-    // Shared persist path for the two auto-saving facility controls (geofence + money direction).
-    // Both are single committed picks from a dropdown, so both save on change for the same reason
-    // — and both report status through _geofenceSaveMsg so the row can only ever show one state.
-    async function _persistFacilities(type, i) {
+    // Saves are SERIALISED. saveFacilities is a replace-set built from in-memory state, so two
+    // in flight at once can land out of order and the older payload wins — changing a geofence
+    // and then the Money setting a second later would silently revert the geofence. Chaining
+    // means each payload is built only after the previous save has landed.
+    let _facSaveChain = Promise.resolve();
+    function _persistFacilities(type, i) {
+      _facSaveChain = _facSaveChain.then(() => _doPersistFacilities(type, i), () => _doPersistFacilities(type, i));
+      return _facSaveChain;
+    }
+
+    async function _doPersistFacilities(type, i) {
       const key = type + ':' + i;
       _geofenceSaveMsg[key] = 'saving';
-      renderFacilityList(type);
+      _paintFacSave(type, i);
       try {
         const res = await facilitiesEdgeCall({
           action: 'saveFacilities',
@@ -22937,9 +22996,9 @@ RECYCLING & DONATION
       } catch (e) {
         _geofenceSaveMsg[key] = 'failed';
       }
-      renderFacilityList(type);
+      _paintFacSave(type, i);
       if (_geofenceSaveMsg[key] === 'saved') {
-        setTimeout(() => { delete _geofenceSaveMsg[key]; renderFacilityList(type); }, 2500);
+        setTimeout(() => { delete _geofenceSaveMsg[key]; _paintFacSave(type, i); }, 2500);
       }
     }
 
@@ -22958,9 +23017,7 @@ RECYCLING & DONATION
       const tip = 'Which way money moves at this facility. Only "They pay us" sites appear in ' +
                   'Recycling Revenue — the others would sit there as uncollectable forever.';
       const opt = (v, label) => '<option value="' + v + '"' + (cur === v ? ' selected' : '') + '>' + label + '</option>';
-      const note = cur === 'revenue'
-        ? '<span style="font-size:11px;color:var(--accent-green);flex-shrink:0;">in Revenue</span>'
-        : '<span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">not tracked</span>';
+      // Stable id, updated in place — same no-re-render rule as the save indicator above.
       return '<div style="display:flex;gap:6px;align-items:center;margin-top:4px;" title="' + tip + '">' +
         '<span style="width:62px;font-size:11px;color:var(--text-muted);flex-shrink:0;">Money</span>' +
         '<select class="form-input" style="flex:1;min-width:0;font-size:12px;padding:6px 8px;" ' +
@@ -22968,12 +23025,22 @@ RECYCLING & DONATION
           opt('revenue', 'They pay us — metal') +
           opt('cost',    'We pay them — mattress, electronics, tires') +
           opt('none',    'No money either way — cardboard, pallets') +
-        '</select>' + note +
+        '</select>' +
+        '<span id="facMoney-' + i + '" style="font-size:11px;flex-shrink:0;">' + _facMoneyNote(cur) + '</span>' +
       '</div>';
     }
 
+    function _facMoneyNote(mode) {
+      return mode === 'revenue'
+        ? '<span style="color:var(--accent-green);">in Revenue</span>'
+        : '<span style="color:var(--text-muted);">not tracked</span>';
+    }
+
     async function _setFacilitySettlement(i, value) {
-      updateFacility('recycling', i, 'settlementMode', String(value || 'revenue'));
+      const v = String(value || 'revenue');
+      updateFacility('recycling', i, 'settlementMode', v);
+      const note = document.getElementById('facMoney-' + i);
+      if (note) note.innerHTML = _facMoneyNote(v);
       await _persistFacilities('recycling', i);
     }
 
