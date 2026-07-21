@@ -68,6 +68,20 @@ create index if not exists visit_settlements_geofence_idx
 create index if not exists visit_settlements_event_idx
   on public.visit_settlements (franchise_id, provider_event_id);
 
+-- Defined here rather than assumed. This helper was introduced by 0053_jobs.sql, which is NOT
+-- applied to prod — so on dev the trigger below found it and on prod it would have failed
+-- mid-migration, after the table was already created. `create or replace` is idempotent and
+-- matches 0053 exactly, so applying either migration in either order is safe.
+create or replace function public.touch_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
 drop trigger if exists visit_settlements_touch_updated_at on public.visit_settlements;
 create trigger visit_settlements_touch_updated_at
   before update on public.visit_settlements
