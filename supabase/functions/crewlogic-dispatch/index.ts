@@ -420,6 +420,38 @@ Deno.serve(async (req: Request) => {
     }
 
 
+    // action=rawObjects — READ ONLY (list + method '-1' reads, no writes). RETAINED, not temporary.
+    //
+    // Dumps the raw Vonigo WorkOrder + Job for one job so a field-by-field before/after diff is
+    // possible. Our normalised view hides ~50 of the WorkOrder's fields and the writable ones are
+    // exactly the ones it drops, so without this the "mark complete" contract is unknowable.
+    //
+    // Kept because the FW-54 write test still needs it: completion is IRREVERSIBLE in Vonigo, so
+    // the test has to run against a FRESH estimate appointment before anyone completes it by hand,
+    // and this is what captures the baseline. See docs/vonigo-mark-complete-findings.md.
+    //
+    // dayID scopes the WorkOrder lookup by date — necessary because one Job can have several
+    // appointments (Bentley 868145 had an estimate WO and a job WO), and jobID alone is ambiguous.
+    if (action === 'rawObjects') {
+      const jobID = String(body.jobID || '');
+      const dayID = String(body.dayID || '');
+      if (!jobID) return json({ success: false, error: 'jobID required' }, 400);
+      const ds = dayEpoch(dayID), de = ds + 86400;
+      const [woRes, jobRes] = await Promise.all([
+        vpost(token, '/data/WorkOrders/', { franchiseID, pageNo: '1', pageSize: '200', isCompleteObject: 'true', dateMode: '3', dateStart: String(ds), dateEnd: String(de) }),
+        vpost(token, '/data/Jobs/', { method: '-1', objectID: jobID, isCompleteObject: 'true' }),
+      ]);
+      const wo = (woRes.WorkOrders || []).find((w: any) =>
+        (w.Relations || []).some((x: any) => x.relationType === 'job' && String(x.objectID) === jobID));
+      return json({
+        success: true,
+        capturedAt: new Date().toISOString(),
+        jobID,
+        workOrder: wo || null,
+        job: (jobRes.Jobs && jobRes.Jobs[0]) || jobRes.Jobs || null,
+      });
+    }
+
     if (action === 'resolveJob') {
       const dayID = String(body.dayID);
       const jobs = await listRouteJobs(token, franchiseID, dayID, body.route ? String(body.route) : undefined, false);
