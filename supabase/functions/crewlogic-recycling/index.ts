@@ -292,8 +292,15 @@ Deno.serve(async (req: Request) => {
       // amount, so it must not enter any revenue figure — including the visit COUNT, which would
       // otherwise drag $/visit toward zero. It gets its own count so written-off money stays
       // visible instead of reading as $0 collected.
-      const collected = rows.filter((r) => r.settled && r.resolution !== "closed");
-      const closed = rows.filter((r) => r.settled && r.resolution === "closed");
+      // Honour the facility filter, same as listVisits. Without this the headline cards and the
+      // over-time chart keep reporting EVERY facility while the list below shows one — so
+      // filtering to Middleboro left "Collected $12,068" sitting above 85 Middleboro rows, which
+      // reads as a total for what you are looking at and is not.
+      const summaryGeofenceId = String(body.geofenceId || "");
+      const scoped = summaryGeofenceId ? rows.filter((r) => r.geofenceId === summaryGeofenceId) : rows;
+
+      const collected = scoped.filter((r) => r.settled && r.resolution !== "closed");
+      const closed = scoped.filter((r) => r.settled && r.resolution === "closed");
       const byPeriod: Record<string, { key: string; amount: number; weight: number; visits: number }> = {};
       const grain = String(body.grain || "month");   // day | week | month | year
       const keyOf = (iso: string) => {
@@ -314,7 +321,7 @@ Deno.serve(async (req: Request) => {
         b.visits += 1;
       }
       const byFacility: Record<string, { name: string; amount: number; weight: number; collected: number; closed: number; outstanding: number }> = {};
-      for (const r of rows) {
+      for (const r of scoped) {
         const b = byFacility[r.facilityName] || (byFacility[r.facilityName] = { name: r.facilityName, amount: 0, weight: 0, collected: 0, closed: 0, outstanding: 0 });
         if (!r.settled) b.outstanding += 1;
         else if (r.resolution === "closed") b.closed += 1;
@@ -327,7 +334,7 @@ Deno.serve(async (req: Request) => {
         totalWeightLbs: collected.reduce((a, r) => a + (r.weightLbs || 0), 0),
         collectedVisits: collected.length,
         closedVisits: closed.length,
-        outstandingVisits: rows.length - collected.length - closed.length,
+        outstandingVisits: scoped.length - collected.length - closed.length,
         byPeriod: Object.values(byPeriod).sort((a, b) => a.key < b.key ? 1 : -1),
         byFacility: Object.values(byFacility).sort((a, b) => b.amount - a.amount),
         shortHidden,

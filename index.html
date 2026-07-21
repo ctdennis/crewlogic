@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.58.1 | 2026-07-21">
+  <meta name="crewlogic-version" content="v5.59.0 | 2026-07-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4667,7 +4667,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       try {
         const [list, sum] = await Promise.all([
           edgeFunctionCall('crewlogic-recycling', { action: 'listVisits', franchiseID: currentUser.franchiseID, status: 'all', includeShort: _recyIncludeShort }),
-          edgeFunctionCall('crewlogic-recycling', { action: 'summary', franchiseID: currentUser.franchiseID, grain: _recyGrain, includeShort: _recyIncludeShort })
+          // geofenceId scopes the headline cards + over-time chart to the selected facility.
+          // listVisits stays UNSCOPED: the facility <select> is built from _recyRows, so scoping
+          // the fetch would leave the dropdown holding only the facility already chosen and there
+          // would be no way to pick a different one, or get back to All.
+          edgeFunctionCall('crewlogic-recycling', { action: 'summary', franchiseID: currentUser.franchiseID, grain: _recyGrain, includeShort: _recyIncludeShort, geofenceId: _recyGeofence || '' })
         ]);
         // No linked recycling facility is a SETUP state, not an empty result — say which, or the
         // owner goes hunting for missing visits that were never going to be there.
@@ -4750,11 +4754,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     async function toggleRecyShort() { _recyIncludeShort = !_recyIncludeShort; await loadRecycling(); }
     function setRecyFilter(f) { _recyFilter = f; renderRecycling(); }
-    function setRecyGeofence(g) { _recyGeofence = g; renderRecycling(); }
+    // Refetches rather than just re-filtering the rows: the headline cards and the over-time chart
+    // are computed server-side, so they have to be re-asked for with the facility scope or they
+    // keep reporting every facility while the list below shows one. Silent — no "Loading…" blank
+    // and scroll is preserved (see the UI state-preservation rule in CLAUDE.md).
+    async function setRecyGeofence(g) { _recyGeofence = g; await loadRecycling(true); }
     async function setRecyGrain(g) {
       _recyGrain = g;
       try {
-        const sum = await edgeFunctionCall('crewlogic-recycling', { action: 'summary', franchiseID: currentUser.franchiseID, grain: g });
+        // MUST carry includeShort AND geofenceId. This call was passing neither, so switching
+        // day/week/month/year silently re-fetched an UNFILTERED summary — the headline cards would
+        // jump back to every facility, and to the 8-minute-filtered set, without the owner
+        // changing either control.
+        const sum = await edgeFunctionCall('crewlogic-recycling', {
+          action: 'summary', franchiseID: currentUser.franchiseID, grain: g,
+          includeShort: _recyIncludeShort, geofenceId: _recyGeofence || ''
+        });
         if (sum && sum.success) _recySummary = sum;
       } catch (e) { /* keep the previous summary rather than blanking the panel */ }
       renderRecycling();
