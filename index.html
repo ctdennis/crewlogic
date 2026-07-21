@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.61.0 | 2026-07-21">
+  <meta name="crewlogic-version" content="v5.62.0 | 2026-07-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -2446,7 +2446,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         <div id="stab-content-signs" style="display:none;">
           <div class="settings-card fade-in fade-in-delay-2">
             <div class="settings-card-title">Yard Sign Settings</div>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">Configure sign lifecycle, credit thresholds, and PromoVault integration.</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">Configure how long signs stay active before they age out and are hidden.</div>
             <div id="signsSettingsContent">Loading...</div>
           </div>
         </div><!-- end signs tab -->
@@ -27471,8 +27471,9 @@ Please review the estimate below. If you have any questions or would like to adj
         // Recent thumbs
         appendSessionThumb(signRow);
 
-        // Check reward thresholds (background, don't block UI)
-        checkAndIssueRewards(_signsCurrentSession.crew_member_ids).catch(e => console.warn('Reward check error:', e));
+        // Crew reward issuance removed 2026-07-21 — the third-party rewards integration did not
+        // work and testers were running into it. Sign CREDITS still accrue; nothing is issued
+        // against them. Design + verbatim recovery: docs/design-signs-crew-rewards.md
       } catch(e) {
         console.error('[Signs] handleSignPhoto error:', e);
         alert('Photo upload failed: ' + (e.message || e) + '\n\nCheck the browser console for details.');
@@ -27743,89 +27744,10 @@ Please review the estimate below. If you have any questions or would like to adj
       ]);
     }
 
-    // ── REWARD CHECK ────────────────────────────────────────────────────────
-    async function checkAndIssueRewards(crewIds) {
-      const cfg = currentUser?.costSettings?.signs || {};
-      const threshold = parseInt(cfg.creditsPerReward) || 25;
-      const rewardAmount = parseFloat(cfg.rewardAmountDollars) || 10;
-      const testMode = cfg.signsTestMode !== false; // default true
-      const franchiseUUID = await getFranchiseUUID();
-
-      for (const crewId of crewIds) {
-        try {
-          // Count unconsumed credits
-          const credits = await supabaseFetch('/rest/v1/sign_credits?crew_member_id=eq.' + crewId + '&consumed_by_reward=is.null&select=id,credits_earned');
-          const creditList = Array.isArray(credits) ? credits : [];
-          const total = creditList.reduce((s, c) => s + (c.credits_earned || 1), 0);
-          if (total < threshold) continue;
-
-          // Threshold crossed — create reward record, then ask Edge Function to deliver it
-          // Take the oldest `threshold` credits
-          const toConsume = creditList.slice(0, threshold);
-          const consumeIds = toConsume.map(c => c.id);
-
-          // Create reward record (status=pending; Edge Function will flip to delivered/failed)
-          const created = await supabaseFetch('/rest/v1/sign_rewards', {
-            method: 'POST',
-            headers: { 'Prefer': 'return=representation' },
-            body: JSON.stringify({
-              franchise_id: franchiseUUID,
-              crew_member_id: crewId,
-              credits_consumed: threshold,
-              reward_amount_dollars: rewardAmount,
-              status: 'pending',
-              test_mode: testMode
-            })
-          });
-          const reward = Array.isArray(created) ? created[0] : created;
-
-          // Mark credits consumed
-          for (const id of consumeIds) {
-            await supabaseFetch('/rest/v1/sign_credits?id=eq.' + id, {
-              method: 'PATCH',
-              body: JSON.stringify({ consumed_by_reward: reward.id })
-            });
-          }
-
-          // Trigger delivery via Edge Function (handles both test and live mode)
-          // Fire-and-forget — don't block the placement flow on PromoVault latency
-          deliverRewardViaEdge(reward.id).catch(e => console.warn('Reward delivery error:', e));
-        } catch(e) {
-          console.warn('Reward issuance error for crew ' + crewId + ':', e);
-        }
-      }
-    }
-
-    // Calls crewlogic-ai Edge Function action 'issueReward' to deliver a pending reward via PromoVault.
-    // Edge Function reads the reward + crew + franchise config, calls PromoVault Quick Send,
-    // and updates the sign_rewards row with status/promovault_reward_id/reward_link/issued_at.
-    async function deliverRewardViaEdge(rewardId) {
-      const url = EDGE_BASE + '/crewlogic-ai';
-      const SUPABASE_ANON_KEY = EDGE_ANON_KEY;
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 30000);
-      try {
-        const res = await fetch(url, {
-          method: 'POST',
-          signal: ctrl.signal,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
-            'apikey': SUPABASE_ANON_KEY
-          },
-          body: JSON.stringify({ action: 'issueReward', rewardId })
-        });
-        clearTimeout(timer);
-        const data = await res.json().catch(() => ({}));
-        console.log('[Signs] Reward delivery result:', data);
-        return data;
-      } catch(e) {
-        clearTimeout(timer);
-        console.warn('[Signs] Reward delivery fetch failed:', e);
-        return null;
-      }
-    }
-    window.deliverRewardViaEdge = deliverRewardViaEdge;  // expose for manual retry from console
+    // Crew reward issuance (checkAndIssueRewards / deliverRewardViaEdge) REMOVED 2026-07-21.
+    // The third-party rewards integration did not work and testers were running into it. Sign
+    // credits still accrue in sign_credits; nothing is issued against them, and no external call
+    // is made. Full design + verbatim recovery: docs/design-signs-crew-rewards.md
 
     // ── MANAGEMENT PANEL ────────────────────────────────────────────────────
     function openSignsManagement() {
@@ -28286,10 +28208,10 @@ Please review the estimate below. If you have any questions or would like to adj
     function renderSignsSettingsTab() {
       const container = document.getElementById('signsSettingsContent');
       if (!container) return;
-      renderRewardsMgmt(container);
+      renderSignsLifecycleSettings(container);
     }
 
-    function renderRewardsMgmt(container) {
+    function renderSignsLifecycleSettings(container) {
       const cfg = (currentUser?.costSettings?.signs) || {};
       container.innerHTML =
         '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Sign Lifecycle</div>' +
@@ -28303,118 +28225,9 @@ Please review the estimate below. If you have any questions or would like to adj
             '<input type="number" class="form-input" id="signsCfgHiddenDays" value="' + (cfg.hiddenSignDays || 60) + '" min="1" inputmode="numeric">' +
           '</div>' +
         '</div>' +
-        '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Credits & Rewards</div>' +
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">' +
-          '<div class="settings-input-group">' +
-            '<label class="settings-input-label">Credits per reward</label>' +
-            '<input type="number" class="form-input" id="signsCfgCreditsPerReward" value="' + (cfg.creditsPerReward || 25) + '" min="1" inputmode="numeric">' +
-          '</div>' +
-          '<div class="settings-input-group">' +
-            '<label class="settings-input-label">Reward amount ($)</label>' +
-            '<input type="number" class="form-input" id="signsCfgRewardAmount" value="' + (cfg.rewardAmountDollars || 10) + '" min="1" step="0.01" inputmode="decimal">' +
-          '</div>' +
-        '</div>' +
-        '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">PromoVault</div>' +
-        '<div class="settings-input-group" style="margin-bottom:8px;">' +
-          '<label class="settings-input-label">API Key</label>' +
-          '<input type="text" class="form-input" id="signsCfgPVKey" value="' + escapeHtml(cfg.promoVaultApiKey || '') + '" placeholder="API key">' +
-        '</div>' +
-        '<div class="settings-input-group" style="margin-bottom:8px;">' +
-          '<label class="settings-input-label">Team ID</label>' +
-          '<input type="text" class="form-input" id="signsCfgPVTeam" value="' + escapeHtml(cfg.promoVaultTeamId || '') + '" placeholder="Team ID">' +
-        '</div>' +
-        '<label style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:14px;cursor:pointer;">' +
-          '<input type="checkbox" id="signsCfgTestMode"' + (cfg.signsTestMode !== false ? ' checked' : '') + ' style="margin:0;">' +
-          '<div style="flex:1;">' +
-            '<div style="font-size:13px;font-weight:600;color:var(--text-primary);">Test Mode</div>' +
-            '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Reward records are written but PromoVault is not actually called. Turn off when ready to issue real rewards.</div>' +
-          '</div>' +
-        '</label>' +
         '<button onclick="saveSignsConfig()" style="width:100%;padding:12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;color:var(--accent-text);cursor:pointer;">Save Settings</button>' +
-        '<div id="signsCfgFeedback" style="font-size:12px;margin-top:6px;min-height:16px;text-align:center;"></div>' +
-        '<div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);">' +
-          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
-            '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">Recent Rewards</div>' +
-            '<button onclick="loadRecentRewards()" style="padding:4px 10px;background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px;color:var(--text-muted);cursor:pointer;">Refresh</button>' +
-          '</div>' +
-          '<div id="signsRecentRewards" style="font-size:12px;color:var(--text-muted);">Loading...</div>' +
-        '</div>';
-      // Lazy-load recent rewards (don't block render)
-      loadRecentRewards();
+        '<div id="signsCfgFeedback" style="font-size:12px;margin-top:6px;min-height:16px;text-align:center;"></div>';
     }
-
-    async function loadRecentRewards() {
-      const container = document.getElementById('signsRecentRewards');
-      if (!container) return;
-      container.innerHTML = '<div style="text-align:center;padding:8px;">Loading...</div>';
-      try {
-        const franchiseUUID = await getFranchiseUUID();
-        const rewards = await supabaseFetch(
-          '/rest/v1/sign_rewards?franchise_id=eq.' + franchiseUUID +
-          '&select=id,crew_member_id,reward_amount_dollars,status,test_mode,promovault_reward_id,reward_link,error_message,created_at,issued_at' +
-          '&order=created_at.desc&limit=20'
-        );
-        if (!rewards || !rewards.length) {
-          container.innerHTML = '<div style="text-align:center;padding:8px;font-size:12px;color:var(--text-muted);">No rewards issued yet.</div>';
-          return;
-        }
-        // Build crew name lookup
-        const crewIds = [...new Set(rewards.map(r => r.crew_member_id))];
-        const crewRows = await supabaseFetch(
-          '/rest/v1/crew_members?id=in.(' + crewIds.join(',') + ')&select=id,first_name,last_name'
-        );
-        const crewById = {};
-        (crewRows || []).forEach(c => { crewById[c.id] = c.first_name + ' ' + c.last_name.charAt(0) + '.'; });
-
-        const statusBadge = {
-          issued:    '<span style="background:rgba(0,238,118,0.15);color:var(--accent-green);padding:2px 7px;border-radius:99px;font-size:10px;">ISSUED</span>',
-          pending:   '<span style="background:rgba(168,85,247,0.15);color:#c084fc;padding:2px 7px;border-radius:99px;font-size:10px;">PENDING</span>',
-          failed:    '<span style="background:rgba(239,68,68,0.15);color:#ef4444;padding:2px 7px;border-radius:99px;font-size:10px;">FAILED</span>',
-          test:      '<span style="background:rgba(168,85,247,0.15);color:#c084fc;padding:2px 7px;border-radius:99px;font-size:10px;">TEST</span>',
-        };
-        container.innerHTML = rewards.map(r => {
-          const name = crewById[r.crew_member_id] || '?';
-          const date = new Date(r.issued_at || r.created_at).toLocaleDateString();
-          const badge = statusBadge[r.status] || ('<span style="font-size:10px;color:var(--text-muted);">' + r.status + '</span>');
-          const testFlag = r.test_mode ? '<span style="font-size:10px;color:var(--text-muted);margin-left:4px;">·  TEST</span>' : '';
-          const linkBtn = r.reward_link && r.reward_link !== 'TEST_MODE_NO_LINK'
-            ? '<a href="' + escapeHtml(r.reward_link) + '" target="_blank" style="font-size:11px;color:var(--accent-green);text-decoration:none;margin-left:8px;">view link →</a>'
-            : '';
-          const retryBtn = r.status === 'failed'
-            ? '<button onclick="retryReward(\'' + r.id + '\')" style="margin-left:8px;padding:2px 8px;background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:10px;color:var(--text-muted);cursor:pointer;">retry</button>'
-            : '';
-          const errorMsg = r.error_message
-            ? '<div style="font-size:10px;color:#ef4444;margin-top:2px;">' + escapeHtml(r.error_message) + '</div>'
-            : '';
-          return '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;margin-bottom:6px;">' +
-            '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
-              '<div style="font-size:13px;font-weight:600;flex:1;">' + escapeHtml(name) + ' · $' + (r.reward_amount_dollars || 0) + testFlag + '</div>' +
-              badge +
-            '</div>' +
-            '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">' + date + linkBtn + retryBtn + '</div>' +
-            errorMsg +
-          '</div>';
-        }).join('');
-      } catch(e) {
-        console.warn('Failed to load recent rewards:', e);
-        container.innerHTML = '<div style="font-size:12px;color:#ef4444;">Failed to load rewards.</div>';
-      }
-    }
-
-    async function retryReward(rewardId) {
-      // Reset status back to pending and re-trigger delivery
-      try {
-        await supabaseFetch('/rest/v1/sign_rewards?id=eq.' + rewardId, {
-          method: 'PATCH',
-          body: JSON.stringify({ status: 'pending', error_message: null })
-        });
-        await deliverRewardViaEdge(rewardId);
-        loadRecentRewards();
-      } catch(e) {
-        alert('Retry failed: ' + (e.message || e));
-      }
-    }
-    window.retryReward = retryReward;
 
     async function saveSignsConfig() {
       const fb = document.getElementById('signsCfgFeedback');
@@ -28424,11 +28237,9 @@ Please review the estimate below. If you have any questions or would like to adj
         const s = currentUser.costSettings.signs;
         s.graySignDays = parseInt(document.getElementById('signsCfgGrayDays').value) || 15;
         s.hiddenSignDays = parseInt(document.getElementById('signsCfgHiddenDays').value) || 60;
-        s.creditsPerReward = parseInt(document.getElementById('signsCfgCreditsPerReward').value) || 25;
-        s.rewardAmountDollars = parseFloat(document.getElementById('signsCfgRewardAmount').value) || 10;
-        s.promoVaultApiKey = document.getElementById('signsCfgPVKey').value.trim();
-        s.promoVaultTeamId = document.getElementById('signsCfgPVTeam').value.trim();
-        s.signsTestMode = document.getElementById('signsCfgTestMode').checked;
+        // Reward + rewards-provider keys are no longer read or written (removed 2026-07-21). Any
+        // values already stored in cost_settings.signs are left alone rather than cleared, so a
+        // future rebuild can pick them up — see docs/design-signs-crew-rewards.md.
         s.maxCrewPerSession = s.maxCrewPerSession || 2;
         fb.textContent = 'Saving...';
         fb.style.color = 'var(--text-muted)';
