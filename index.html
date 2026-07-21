@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.63.0 | 2026-07-21">
+  <meta name="crewlogic-version" content="v5.64.0 | 2026-07-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1553,6 +1553,14 @@
             <div class="module-desc">Look up pricing by ZIP code</div>
           </div>
 
+          <!-- Vonigo-only: promos live in Vonigo, so a native-pricing franchise has none. Hidden
+               for them by the same capability check the estimating surfaces use. -->
+          <div class="module-card fade-in fade-in-delay-3" id="promosCard" data-card="promos" onclick="openModule('promos')">
+            <div class="module-icon">🎟️</div>
+            <div class="module-name">Coupon Lookup</div>
+            <div class="module-desc">Check what a promo code is worth &amp; if you can honour it</div>
+          </div>
+
           <div class="module-card fade-in fade-in-delay-4" id="signsModuleCard" data-card="signs" style="display:none;" onclick="openModule('signs')">
             <div class="module-icon">🪧</div>
             <div class="module-name">Yard Signs</div>
@@ -1642,6 +1650,32 @@
           <button id="plNoPriceBookCta" onclick="_pendingSettingsTab='pricebook';openModule('settings');" style="padding:8px 14px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;cursor:pointer;">Set up Price Book →</button>
         </div>
         <div id="priceLookupResults"></div>
+      </div>
+
+      <!-- COUPON LOOKUP -->
+      <div class="price-lookup-section" id="promosScreen">
+        <div class="section-title fade-in">Coupon Lookup</div>
+        <div class="section-desc fade-in fade-in-delay-1">Check what a promo code is actually worth, whether it is still valid, and whether your franchise can honour it.</div>
+
+        <div class="fade-in fade-in-delay-2" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+          <input type="text" id="promoCodeInput" placeholder="Type a code, e.g. 25SENDJL" autocapitalize="characters" autocomplete="off"
+            onkeydown="if(event.key==='Enter')doPromoLookup()"
+            style="flex:1;min-width:180px;padding:11px 13px;font-size:14px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);">
+          <button onclick="doPromoLookup()" id="promoLookupBtn" style="flex:0 0 auto;padding:11px 20px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;color:var(--accent-text);cursor:pointer;">Look up</button>
+        </div>
+
+        <div class="fade-in fade-in-delay-2" style="margin-bottom:6px;">
+          <select id="promoPicker" onchange="onPromoPicked(this.value)"
+            style="width:100%;padding:11px 13px;font-size:14px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);">
+            <option value="">Loading codes…</option>
+          </select>
+          <label style="display:flex;align-items:center;gap:7px;margin-top:7px;font-size:12px;color:var(--text-muted);cursor:pointer;">
+            <input type="checkbox" id="promoLiveOnly" checked onchange="renderPromoPicker()" style="margin:0;">
+            Hide expired and disabled codes
+          </label>
+        </div>
+
+        <div id="promoResult" style="margin-top:14px;"></div>
       </div>
 
       <!-- DISPATCH DASHBOARD (desktop) — multi-pane layout injected by renderDashboard() -->
@@ -5835,6 +5869,161 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     //
     // payload should include franchiseID and one of: zoneID (preferred when
     // known — instant + precise) or zipCode (fallback for manual entry).
+    // ===== COUPON (PROMO) LOOKUP =====
+    // Answers "what is this code worth, is it still good, and can I honour it?" without opening
+    // Vonigo. Read-only: crewlogic-promos hardcodes Vonigo's Retrieval methods.
+    let _promoList = null;        // cached for the session — 226 rows, and they change rarely
+    let _promoListLoading = false;
+
+    async function initPromosScreen() {
+      const res = document.getElementById('promoResult');
+      if (res) res.innerHTML = '';
+      const inp = document.getElementById('promoCodeInput');
+      if (inp) inp.value = '';
+      if (_promoList || _promoListLoading) { renderPromoPicker(); return; }
+      _promoListLoading = true;
+      try {
+        const r = await edgeFunctionCall('crewlogic-promos', { action: 'list', franchiseID: currentUser.franchiseID });
+        _promoList = (r && r.success) ? (r.promos || []) : [];
+        if (!r || !r.success) console.warn('[promos] list failed:', r && r.error);
+      } catch (e) {
+        console.warn('[promos] list error:', e);
+        _promoList = [];
+      }
+      _promoListLoading = false;
+      renderPromoPicker();
+    }
+
+    function _promoStateLabel(p) {
+      if (p.state === 'expired') return 'expired';
+      if (p.state === 'disabled') return 'disabled';
+      if (p.state === 'not-started') return 'not started';
+      return '';
+    }
+
+    // "$25 off" / "10% off" — reads the measure rather than assuming, because both appear.
+    function _promoValue(p) {
+      const n = Number(p.discount || 0);
+      if (!n) return null;                                  // real: some rows carry discount 0
+      return p.measure === 'percent' ? n + '% off' : _recyMoney(n).replace('.00', '') + ' off';
+    }
+
+    function renderPromoPicker() {
+      const sel = document.getElementById('promoPicker');
+      if (!sel) return;
+      const liveOnly = !!(document.getElementById('promoLiveOnly') || {}).checked;
+      const all = _promoList || [];
+      if (!all.length) {
+        sel.innerHTML = '<option value="">' + (_promoListLoading ? 'Loading codes…' : 'No codes available') + '</option>';
+        return;
+      }
+      const rows = liveOnly ? all.filter(p => p.usable) : all;
+      sel.innerHTML = '<option value="">Or pick from ' + rows.length + ' code' + (rows.length === 1 ? '' : 's') + '…</option>'
+        + rows.map(p => {
+            const v = _promoValue(p);
+            const st = _promoStateLabel(p);
+            const bits = [v, st].filter(Boolean).join(' · ');
+            return '<option value="' + _hEsc(p.code) + '">' + _hEsc(p.code) + (bits ? '  —  ' + _hEsc(bits) : '') + '</option>';
+          }).join('');
+    }
+
+    function onPromoPicked(code) {
+      if (!code) return;
+      const inp = document.getElementById('promoCodeInput');
+      if (inp) inp.value = code;
+      doPromoLookup();
+    }
+
+    async function doPromoLookup() {
+      const inp = document.getElementById('promoCodeInput');
+      const out = document.getElementById('promoResult');
+      const btn = document.getElementById('promoLookupBtn');
+      if (!inp || !out) return;
+      const code = String(inp.value || '').trim();
+      if (!code) { inp.focus(); return; }
+      out.innerHTML = '<div style="color:var(--text-muted);font-size:13.5px;padding:8px 0;">Looking up ' + _hEsc(code) + '…</div>';
+      if (btn) btn.disabled = true;
+      try {
+        const r = await edgeFunctionCall('crewlogic-promos', { action: 'lookup', franchiseID: currentUser.franchiseID, promo: code });
+        if (!r || !r.success) throw new Error((r && r.error) || 'lookup failed');
+        out.innerHTML = r.found ? _promoCardHtml(r) : _promoNotFoundHtml(r.message || ('No promo code "' + code + '" exists.'));
+      } catch (e) {
+        out.innerHTML = '<div style="color:#ef4444;font-size:13.5px;padding:8px 0;">Could not look that up: ' + _hEsc(e && e.message ? e.message : 'unknown error') + '</div>';
+      }
+      if (btn) btn.disabled = false;
+    }
+
+    function _promoNotFoundHtml(msg) {
+      return '<div style="background:var(--bg-input);border:1px solid #f59e0b55;border-radius:10px;padding:14px;">'
+        + '<div style="font-size:14px;font-weight:700;color:#fbbf24;margin-bottom:4px;">Not found</div>'
+        + '<div style="font-size:13px;color:var(--text-secondary);">' + _hEsc(msg) + '</div>'
+        + '</div>';
+    }
+
+    function _promoDate(ms) {
+      if (!ms) return null;
+      try { return new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
+      catch (e) { return null; }
+    }
+
+    // True when a promo has a real minimum spend that its own description never mentions. Worth
+    // surfacing because the two disagree in live data: 25SENDJL reads "1/4 truck or more" while
+    // the enforced rule is a $300 minimum, so a quarter-truck job under $300 is declined at the
+    // counter after the customer was told it qualified.
+    function _promoCopyDisagrees(p) {
+      if (!p.minSpend || !p.description) return false;
+      const amount = String(p.minSpend).replace(/\.00$/, '');   // "300.00" -> "300"
+      return p.description.indexOf(amount) === -1;
+    }
+
+    function _promoCardHtml(r) {
+      const p = r.promo;
+      const val = _promoValue(p);
+      // The headline is DERIVED (usable + availableToYou), not Vonigo's isActive. Vonigo reports
+      // isActive:true on codes that expired years ago, so echoing it would tell someone on the
+      // phone to honour a dead coupon.
+      const ok = p.usable && r.availableToYou === true;
+      const headline = !p.usable
+        ? (p.state === 'expired' ? 'Expired — do not honour' : p.state === 'disabled' ? 'Disabled in Vonigo' : 'Not started yet')
+        : (r.availableToYou === false ? 'Not available to your franchise'
+          : r.availableToYou === null ? 'Live — but your franchise is not listed'
+          : 'Live — you can honour this');
+      const color = ok ? 'var(--accent-green)' : (p.usable ? '#fbbf24' : '#ef4444');
+
+      const row = (k, v) => v == null || v === '' ? '' :
+        '<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-top:1px solid var(--border);">'
+        + '<span style="font-size:12px;color:var(--text-muted);">' + k + '</span>'
+        + '<span style="font-size:13px;color:var(--text-primary);text-align:right;">' + v + '</span></div>';
+
+      const start = _promoDate(p.startMs), end = _promoDate(p.endMs);
+      // A blank promoEnd means no expiry — say so explicitly rather than leaving the row out, or
+      // "no end date" reads as missing data instead of a deliberate open-ended coupon.
+      const period = (start ? start : '—') + ' → ' + (end ? end : 'no end date');
+
+      return '<div style="background:var(--bg-input);border:1px solid ' + color + '55;border-radius:10px;padding:14px;">'
+        + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;">'
+        +   '<div style="font-size:18px;font-weight:800;color:var(--text-primary);font-family:\'Space Mono\',monospace;">' + _hEsc(p.code) + '</div>'
+        +   (val ? '<div style="font-size:20px;font-weight:800;color:' + (p.usable ? 'var(--accent-green)' : 'var(--text-muted)') + ';">' + _hEsc(val) + '</div>' : '')
+        + '</div>'
+        + '<div style="font-size:13px;font-weight:700;color:' + color + ';margin-top:6px;">' + _hEsc(headline) + '</div>'
+        + (p.description ? '<div style="font-size:13px;color:var(--text-secondary);margin-top:6px;line-height:1.45;">' + _hEsc(p.description) + '</div>' : '')
+        + '<div style="margin-top:10px;">'
+        +   row('Minimum spend', p.minSpend ? '$' + _hEsc(p.minSpend) : 'None')
+        +   row('Valid', _hEsc(period))
+        +   row('Campaign', p.campaign ? _hEsc(p.campaign) : null)
+        +   row('Customer types', (r.clientTypes && r.clientTypes.length) ? _hEsc(r.clientTypes.join(', ')) : null)
+        +   row('Franchises opted in', r.optedInCount != null ? (r.optedInCount + ' of ' + r.franchiseCount) : null)
+        +   row('Promo ID', String(p.promoID))
+        + '</div>'
+        // Surfaced because the two disagree often enough to matter: 25SENDJL reads "1/4 truck or
+        // more" while the system actually gates on a $300 minimum. Whoever is on the phone needs
+        // to quote the rule that will really apply, not the marketing copy.
+        + (_promoCopyDisagrees(p)
+            ? '<div style="font-size:11.5px;color:var(--text-muted);margin-top:10px;line-height:1.45;">The wording above is the marketing copy. The rule the system enforces is the <b style="color:var(--text-secondary);">$' + _hEsc(p.minSpend) + ' minimum</b> — quote that if they differ.</div>'
+            : '')
+        + '</div>';
+    }
+
     async function priceLookup(payload) {
       // Per-capability provider seam: native price book vs Vonigo. Defaults to Vonigo
       // (crewlogic-price-lookup) when pricingSource is unset, so existing tenants are unaffected.
@@ -7601,6 +7790,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       { key: 'estimates', label: 'Estimates', icon: '📝' },
       { key: 'volumeCheck', label: 'Volume Check', icon: '📐' },
       { key: 'priceLookup', label: 'Price Lookup', icon: '💲' },
+      { key: 'promos', label: 'Coupon Lookup', icon: '🎟️' },
       { key: 'manageJobs', label: 'Manage Jobs', icon: '🎤' },
       { key: 'jobPlan', label: 'Job Plan', icon: '📋' },
       { key: 'signs', label: 'Yard Signs', icon: '🪧' },
@@ -8320,7 +8510,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // The owner assigns which tiles each OTHER user sees (Settings → Team Members). A user with NO
     // saved toggles gets the new-user default set. This filter only HIDES a tile (display:none); it
     // never reveals one the capability gating (CRM/telematics/desktop) already hid.
-    const TILE_DEFAULT_ON = ['volumeCheck', 'priceLookup', 'manageJobs'];
+    const TILE_DEFAULT_ON = ['volumeCheck', 'priceLookup', 'promos', 'manageJobs'];
     function _applyTileMap(map) {
       const hasRows = map && Object.keys(map).length > 0;
       document.querySelectorAll('.module-card[data-card]').forEach(function (card) {
@@ -8497,6 +8687,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const _vonigoMJ = (currentUser.submissionTarget !== 'none' && currentUser.pricingSource !== 'native');
         manageJobsCard.style.display = _vonigoMJ ? '' : 'none';
       }
+      // Coupon Lookup — promos live in Vonigo, so a native-pricing franchise has none to look up.
+      // Same capability test as Manage Jobs; available to every role on a Vonigo franchise, since
+      // whoever answers the phone is exactly who needs it.
+      const promosCard = document.getElementById('promosCard');
+      if (promosCard) {
+        const _vonigoPromos = (currentUser.submissionTarget !== 'none' && currentUser.pricingSource !== 'native');
+        promosCard.style.display = _vonigoPromos ? '' : 'none';
+      }
       // Dispatch dashboard + Estimates Desk — Vonigo franchise + desktop width only (multi-pane needs the room).
       const _vonigoDash = (currentUser.submissionTarget !== 'none' && currentUser.pricingSource !== 'native');
       const _deskOK = (_vonigoDash && window.innerWidth >= 1024) ? '' : 'none';
@@ -8576,7 +8774,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       'disposalRouterScreen',
       'storageScreen', 'storageResultsScreen',
       'mattressScreen', 'mattressResultsScreen',
-      'priceLookupScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'truckAlertsScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen'
+      'priceLookupScreen', 'promosScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'truckAlertsScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen'
     ];
 
     function hideAll() {
@@ -12125,6 +12323,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         storage:     { screen: 'storageScreen',     title: 'Storage Unit',      type: 'estimator-section' },
         mattress:    { screen: 'mattressScreen',    title: 'Mattress Calc',     type: 'estimator-section' },
         priceLookup: { screen: 'priceLookupScreen', title: 'Price Lookup',      type: 'price-lookup-section' },
+        promos:      { screen: 'promosScreen',      title: 'Coupon Lookup',     type: 'price-lookup-section' },
         jobPlan:     { screen: 'jobPlanScreen',     title: 'Job Plan',          type: 'job-plan-section' },
         settings:    { screen: 'settingsScreen',    title: 'Settings',          type: 'settings-section' },
         estimates:   { screen: 'estimatesScreen',   title: 'Estimates',         type: 'estimates-section' }
@@ -12137,6 +12336,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.getElementById('headerTitle').textContent = m.title;
       currentScreen = module;
 
+      if (module === 'promos') initPromosScreen();
       if (module === 'router') {
         if (String(currentUser.franchiseID) !== '90') {
           showHome();
