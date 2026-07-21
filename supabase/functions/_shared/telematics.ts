@@ -5,10 +5,26 @@
 //   - crewlogic-settings  (validate a token on save: "Connected ✓ — N trucks")
 //
 // Providers (per-franchise, either/or):
-//   motive  → GET api.gomotive.com/v1/vehicle_locations   (x-api-key: <token>)
+//   motive  → GET api.gomotive.com/v2/vehicle_locations   (x-api-key: <token>)
 //   linxup  → GET app02.linxup.com/ibis/rest/api/v2/locations
 //             (Authorization: Bearer <token>; token is the RAW Linxup REST token)
 
+// MEASURED 2026-07-21 — v1, v2 and v3 all return 200 with the same credential:
+//   v1 and v2 are the SAME feed (identical timestamps and shape in every sample).
+//   v3 is a DIFFERENT, far fresher feed, and returns richer data.
+// Two samples 43s apart while Truck 3 was moving:
+//   v1/v2  located_at 14:52:05Z — FROZEN across both calls (~28 min stale)
+//   v3     located_at 15:19:16Z → 15:20:01Z — tracking live, ~2s behind
+// v3 also gives a street address ("27 Schofield St, Providence, RI") instead of "7.4 mi S of
+// Lakeville", and an explicit vehicle_state (moving/off) instead of inferring from breadcrumbs.
+//
+// CAVEAT before switching: for a LONG-PARKED truck v3 reported an OLDER located_at than v1/v2
+// (v3 said yesterday 14:58Z, v1/v2 said today 03:48Z) — v3 looks like the last genuine GPS fix
+// while v1/v2 emit a later heartbeat for a stationary vehicle. More honest, but a parked truck
+// would display a much older "time ago" than it does today. Confirm that before flipping.
+//
+// Switching means rewriting fromMotive() for v3's shape and re-testing the map, the at-site
+// badges and disposal routing. Not done yet — owner decision.
 export const MOTIVE_URL = "https://api.gomotive.com/v2/vehicle_locations?per_page=100&page_no=1";
 export const LINXUP_URL = "https://app02.linxup.com/ibis/rest/api/v2/locations";
 
