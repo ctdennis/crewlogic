@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.56.0 | 2026-07-21">
+  <meta name="crewlogic-version" content="v5.58.1 | 2026-07-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1952,7 +1952,9 @@
                 <span>♻️ Recycling Disposal Costs <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(what you pay)</span></span><span id="cost-chevron-recycle">▾</span>
               </div>
               <div id="cost-section-recycle">
-                <div class="cost-grid" style="grid-template-columns:1fr 1fr 1fr 1fr 1fr;">
+                <!-- auto-fit, not a fixed 5-up: Pallet + Cardboard were added here and a hard
+                     column count would have squeezed all seven off the edge on a phone. -->
+                <div class="cost-grid" style="grid-template-columns:repeat(auto-fit,minmax(84px,1fr));">
                   <div class="settings-input-group">
                     <label class="settings-input-label">Mattress</label>
                     <input type="number" class="form-input cost-compact-input" id="settingsCostMattress" placeholder="10" inputmode="decimal" min="0">
@@ -1972,6 +1974,17 @@
                   <div class="settings-input-group">
                     <label class="settings-input-label">Paint Can</label>
                     <input type="number" class="form-input cost-compact-input" id="settingsCostPaint" placeholder="5" inputmode="decimal" min="0">
+                  </div>
+                  <!-- Pallet + Cardboard are PURE COST: no customer surcharge line exists for
+                       them, so unlike Mattress/TV/Freon/Tire/Paint they are not derived from the
+                       estimate's charges. Quantity is entered per-estimate in Cost Analysis. -->
+                  <div class="settings-input-group">
+                    <label class="settings-input-label">Pallet</label>
+                    <input type="number" class="form-input cost-compact-input" id="settingsCostPallet" placeholder="0" inputmode="decimal" min="0" title="What you pay per pallet at bulk drop-off. Pure cost — the customer is not charged for pallets.">
+                  </div>
+                  <div class="settings-input-group">
+                    <label class="settings-input-label">Cardboard</label>
+                    <input type="number" class="form-input cost-compact-input" id="settingsCostCardboard" placeholder="0" inputmode="decimal" min="0" title="What you pay per unit of cardboard at bulk drop-off. Pure cost — the customer is not charged for cardboard.">
                   </div>
                 </div>
               </div>
@@ -2763,6 +2776,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               <div class="form-group">
                 <div class="form-label">Cost per Can ($)</div>
                 <input type="number" class="form-input" id="caCanCost" placeholder="0" min="0" inputmode="decimal" oninput="saveCostAnalysisDraft();updateCostAnalysis()">
+              </div>
+              <!-- Pallets + Cardboard: PURE COST, no customer charge, so quantity is entered here
+                   rather than derived from the estimate's surcharge lines the way Mattress/TV/
+                   Freon/Tire/Paint are. Rates come from Settings -> Cost, not per-estimate. -->
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <div class="form-group">
+                  <div class="form-label">Pallets <span style="font-weight:400;color:var(--text-muted);font-size:10px;">(cost only)</span></div>
+                  <input type="number" class="form-input" id="caPallets" placeholder="0" min="0" inputmode="numeric" oninput="saveCostAnalysisDraft();updateCostAnalysis()">
+                </div>
+                <div class="form-group">
+                  <div class="form-label">Cardboard <span style="font-weight:400;color:var(--text-muted);font-size:10px;">(cost only)</span></div>
+                  <input type="number" class="form-input" id="caCardboard" placeholder="0" min="0" inputmode="numeric" oninput="saveCostAnalysisDraft();updateCostAnalysis()">
+                </div>
               </div>
 
               <!-- Distance Calculator -->
@@ -4630,10 +4656,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function closeRecycling() { const m = document.getElementById('recyclingModal'); if (m) m.style.display = 'none'; }
 
-    async function loadRecycling() {
+    // silent = a refresh triggered by acting on a ROW (save / close out / undo), not by opening
+    // the modal. It skips the "Loading…" blank so the list stays on screen while the refresh is in
+    // flight instead of flashing empty. Scroll position is handled inside renderRecycling(), which
+    // covers this AND the busy re-render that every row action fires first.
+    async function loadRecycling(silent) {
       const body = document.getElementById('recyclingBody');
       if (!body) return;
-      body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;">Loading…</div>';
+      if (!silent) body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;">Loading…</div>';
       try {
         const [list, sum] = await Promise.all([
           edgeFunctionCall('crewlogic-recycling', { action: 'listVisits', franchiseID: currentUser.franchiseID, status: 'all', includeShort: _recyIncludeShort }),
@@ -4733,6 +4763,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function renderRecycling() {
       const body = document.getElementById('recyclingBody');
       if (!body) return;
+      // Scroll is preserved HERE rather than at the call sites, because every row action re-renders
+      // TWICE — once to show the busy state, once after the refresh — and a fix in only one place
+      // still threw the owner back to the top. #recyclingModal is the scroll container
+      // (overflow-y:auto on the fixed backdrop), not #recyclingBody.
+      const scroller = document.getElementById('recyclingModal');
+      const keepTop = scroller ? scroller.scrollTop : null;
       const btn = (on, oc, label) => '<button onclick="' + oc + '" style="padding:7px 12px;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;border:1px solid ' + (on ? 'var(--accent-green)' : 'var(--border)') + ';background:' + (on ? 'var(--accent-green)' : 'var(--bg-input)') + ';color:' + (on ? 'var(--accent-text)' : 'var(--text-secondary)') + ';">' + label + '</button>';
 
       const s = _recySummary;
@@ -4860,6 +4896,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
 
       body.innerHTML = html;
+      // Restore AFTER the write, or the browser clamps against the old content height. Clamp to
+      // the NEW height too: acting on a row can remove it from the current filter (closing a visit
+      // drops it out of "To collect"), so the list may now be shorter than the saved offset.
+      if (keepTop != null && scroller) {
+        scroller.scrollTop = Math.min(keepTop, Math.max(0, scroller.scrollHeight - scroller.clientHeight));
+      }
     }
 
     async function saveRecycling(alertId) {
@@ -4883,7 +4925,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         alert('Could not save: ' + (e && e.message ? e.message : 'unknown error'));
       }
       delete _recyBusy[alertId];
-      await loadRecycling();
+      await loadRecycling(true);
     }
 
     // Clear a visit off "still to collect" WITHOUT recording an amount.
@@ -4910,7 +4952,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         alert('Could not close: ' + (e && e.message ? e.message : 'unknown error'));
       }
       delete _recyBusy[alertId];
-      await loadRecycling();
+      await loadRecycling(true);
     }
 
     async function undoRecycling(alertId) {
@@ -4920,7 +4962,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         await edgeFunctionCall('crewlogic-recycling', { action: 'deleteSettlement', franchiseID: currentUser.franchiseID, alertId });
       } catch (e) { /* reload reflects the true state either way */ }
       delete _recyBusy[alertId];
-      await loadRecycling();
+      await loadRecycling(true);
     }
 
     // ── Motive Card Reclass (super-admin / #90-internal) ─────────────────────────────────────────
@@ -18153,7 +18195,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               if (rate) surchargeDisp += (parseFloat(c.qty)||0) * rate;
             });
 
-            const netCostLive = laborCost + dispCost + fuelTotal + surchargeDisp + cans - recycRev;
+            // Pallets + cardboard: pure cost, quantity from the estimate, rate from settings.
+            const bulkRecyc = (parseFloat(ca.pallets) || 0) * (parseFloat(cs.costPallet) || 0)
+                            + (parseFloat(ca.cardboard) || 0) * (parseFloat(cs.costCardboard) || 0);
+            const netCostLive = laborCost + dispCost + fuelTotal + surchargeDisp + cans + bulkRecyc - recycRev;
             const grossMargin = (totalPrice - netCostLive) / totalPrice;
             const grossPct    = Math.round(grossMargin * 100);
             const targetMargin = parseFloat(ca.margin) || 0;
@@ -23155,6 +23200,18 @@ RECYCLING & DONATION
       updateFacility('recycling', i, 'settlementMode', v);
       const note = document.getElementById('facMoney-' + i);
       if (note) note.innerHTML = _facMoneyNote(v);
+      // The per-truck rate means the opposite thing on a cost facility, so its label has to move
+      // with the setting. Updated in place — re-rendering the list here is what used to drop an
+      // open dropdown mid-selection.
+      const rate = document.getElementById('facRate-' + i);
+      if (rate) {
+        const isCost = v === 'cost';
+        rate.style.color = isCost ? '#fca5a5' : '';
+        rate.placeholder = isCost ? '-$/truck' : '$/truck';
+        rate.title = isCost
+          ? 'What you PAY this recycler, $/truck (overrides default)'
+          : (v === 'none' ? 'Per-truck rate $/truck — this facility is set to no money either way, so it is not used in revenue' : 'Recycling revenue $/truck (overrides default)');
+      }
       await _persistFacilities('recycling', i);
     }
 
@@ -23197,8 +23254,19 @@ RECYCLING & DONATION
             'title="Disposal cost $/ton (overrides default)" ' +
             'oninput="updateFacility(\'' + type + '\',' + i + ',\'cost\',this.value ? parseFloat(this.value) : null)">';
         } else if (type === 'recycling') {
-          costField = '<input type="number" class="form-input" style="width:72px;flex-shrink:0;font-size:12px;padding:7px 8px;text-align:center;" placeholder="$/truck" min="0" value="' + (f.revenue != null ? f.revenue : '') + '" ' +
-            'title="Recycling revenue $/truck (overrides default)" ' +
+          // The per-truck rate is stored in ONE column but means opposite things depending on the
+          // money direction: at a metal recycler it is revenue in, at HandUp / electronics / tires
+          // it is what you PAY. Labelling it "revenue" on a cost facility reads as income you are
+          // owed — HandUp showed "350" as revenue when 350 is the charge. The field label and
+          // tooltip follow settlement_mode; the stored value is unchanged either way.
+          const _mode = (f.settlementMode || 'revenue');
+          const _isCost = _mode === 'cost';
+          const _ph = _isCost ? '-$/truck' : (_mode === 'none' ? '$/truck' : '$/truck');
+          const _tip = _isCost
+            ? 'What you PAY this recycler, $/truck (overrides default)'
+            : (_mode === 'none' ? 'Per-truck rate $/truck — this facility is set to no money either way, so it is not used in revenue' : 'Recycling revenue $/truck (overrides default)');
+          costField = '<input id="facRate-' + i + '" type="number" class="form-input" style="width:72px;flex-shrink:0;font-size:12px;padding:7px 8px;text-align:center;' + (_isCost ? 'color:#fca5a5;' : '') + '" placeholder="' + _ph + '" min="0" value="' + (f.revenue != null ? f.revenue : '') + '" ' +
+            'title="' + _tip + '" ' +
             'oninput="updateFacility(\'' + type + '\',' + i + ',\'revenue\',this.value ? parseFloat(this.value) : null)">';
         }
         return '<div style="margin-bottom:10px;">' +
@@ -23402,10 +23470,19 @@ RECYCLING & DONATION
 
     // Resolve per-site disposal cost or recycling revenue
     // Matches selected site address to facility object, falls back to global setting
+    //
+    // ADDRESS COMPARISON MUST BE TOLERANT — same rule as populateFacilityDropdowns' addrMatch.
+    // These used strict `===` while the dropdown that POPULATES the field trims and case-folds.
+    // A stray space or case change between when the address was saved on the estimate and when
+    // the facility was last edited meant the dropdown still showed the right site while this
+    // lookup missed it and silently fell back to the GLOBAL default — a wrong disposal cost or
+    // recycling rate on the estimate, with nothing on screen to indicate it.
+    const _facAddrEq = (a, b) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
+
     function getDisposalCost(selectedAddress) {
       const cs = (currentUser && currentUser.costSettings) || {};
       if (selectedAddress) {
-        const site = getFacilities('disposal').find(f => f.address === selectedAddress);
+        const site = getFacilities('disposal').find(f => _facAddrEq(f.address, selectedAddress));
         if (site && site.cost != null && site.cost !== '') return parseFloat(site.cost);
       }
       return parseFloat(cs.disposalCost) || 200;
@@ -23414,7 +23491,7 @@ RECYCLING & DONATION
     function getRecyclingRevenue(selectedAddress) {
       const cs = (currentUser && currentUser.costSettings) || {};
       if (selectedAddress) {
-        const site = getFacilities('recycling').find(f => f.address === selectedAddress);
+        const site = getFacilities('recycling').find(f => _facAddrEq(f.address, selectedAddress));
         if (site && site.revenue != null && site.revenue !== '') return parseFloat(site.revenue);
       }
       return parseFloat(cs.recyclingRevenue) || 0;
@@ -25046,6 +25123,7 @@ Please review the estimate below. If you have any questions or would like to adj
       'disposalWait','recyclingWait','donationWait',
       'recyclingRevenue','royaltyPct',
       'costMattress','costTV','costFreon','costTire','costPaint',
+      'costPallet','costCardboard',
       'containerRateDefault','containerIncludedTonsDefault','containerOverageDefault'
     ];
 
@@ -25157,7 +25235,10 @@ Please review the estimate below. If you have any questions or would like to adj
       const fieldMap = {
         'DisposalSite': 'disposalSite', 'RecyclingSite': 'recyclingSite',
         'DonationSite': 'donationSite', 'Days': 'days', 'Crew': 'crew',
-        'HrsDay': 'hrsDay', 'Margin': 'margin', 'Cans': 'cans', 'CanCost': 'canCost'
+        'HrsDay': 'hrsDay', 'Margin': 'margin', 'Cans': 'cans', 'CanCost': 'canCost',
+        // Without these two the quantities save but come back BLANK on reopening the estimate,
+        // and the cost silently drops off the next recalculation.
+        'Pallets': 'pallets', 'Cardboard': 'cardboard'
       };
       Object.entries(fieldMap).forEach(([f, key]) => {
         const el = document.getElementById('ca' + f);
@@ -25185,6 +25266,8 @@ Please review the estimate below. If you have any questions or would like to adj
       ca.margin   = parseFloat(document.getElementById('caMargin').value) || 0;
       ca.cans     = parseFloat(document.getElementById('caCans').value) || 0;
       ca.canCost  = parseFloat(document.getElementById('caCanCost').value) || 0;
+      ca.pallets   = parseFloat((document.getElementById('caPallets')   || {}).value) || 0;
+      ca.cardboard = parseFloat((document.getElementById('caCardboard') || {}).value) || 0;
       // Mark dirty only on genuine user edits — NOT during programmatic population/restore
       // (_suppressAutoSave) and NEVER for terminal won/lost estimates. updateCostAnalysis()
       // calls this to read fields into the model, so the display still recomputes regardless.
@@ -25447,8 +25530,18 @@ Please review the estimate below. If you have any questions or would like to adj
       const effSurcharge   = exc('recyclingFees') ? 0 : surchargeDisposalCost;
       const effCanTotal    = exc('cans')          ? 0 : canTotal;
 
-      const totalCosts = laborCost + dispCost + fuelTotal + canTotal + surchargeDisposalCost;
-      const effTotalCosts = effLaborCost + effDispCost + effFuelTotal + effCanTotal + effSurcharge;
+      // Pallets + cardboard — PURE COST (no customer surcharge), so quantity comes from the
+      // Cost Analysis inputs rather than the estimate's charge lines, and the rate from settings.
+      // Given its own exclusion key so it toggles like every other cost row.
+      const palletsQty   = parseFloat(ca.pallets) || 0;
+      const cardboardQty = parseFloat(ca.cardboard) || 0;
+      const costPallet    = parseFloat(cs.costPallet) || 0;
+      const costCardboard = parseFloat(cs.costCardboard) || 0;
+      const bulkRecycCost = palletsQty * costPallet + cardboardQty * costCardboard;
+      const effBulkRecyc  = exc('bulkRecyc') ? 0 : bulkRecycCost;
+
+      const totalCosts = laborCost + dispCost + fuelTotal + canTotal + surchargeDisposalCost + bulkRecycCost;
+      const effTotalCosts = effLaborCost + effDispCost + effFuelTotal + effCanTotal + effSurcharge + effBulkRecyc;
 
       // REVENUE OFFSETS
       const recycRevenue = trucksRecycled * recycRevRate;
@@ -25546,6 +25639,14 @@ Please review the estimate below. If you have any questions or would like to adj
       });
       lines.push(['Recycling/Disposal Fees', fmt(surchargeDisposalCost), 'recyclingFees', true, exc('recyclingFees')]);
       if (cans > 0) lines.push(['Cans (' + cans + ' × $' + canCost + ')', fmt(canTotal), 'cans', true, exc('cans')]);
+      // Only render when it actually costs something — a 0 line would sit on every estimate that
+      // never touches pallets or cardboard, which is most of them.
+      if (bulkRecycCost > 0) {
+        const _bits = [];
+        if (palletsQty > 0 && costPallet > 0) _bits.push(palletsQty + ' pallet' + (palletsQty === 1 ? '' : 's') + ' × $' + costPallet);
+        if (cardboardQty > 0 && costCardboard > 0) _bits.push(cardboardQty + ' cardboard × $' + costCardboard);
+        lines.push(['Pallets / Cardboard (' + _bits.join(', ') + ')', fmt(bulkRecycCost), 'bulkRecyc', true, exc('bulkRecyc')]);
+      }
 
       // Recycling revenue inline (credit against costs)
       if (trucksRecycled > 0 && recycRevRate > 0) {
