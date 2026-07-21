@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.58.0 | 2026-07-21">
+  <meta name="crewlogic-version" content="v5.58.1 | 2026-07-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4656,10 +4656,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function closeRecycling() { const m = document.getElementById('recyclingModal'); if (m) m.style.display = 'none'; }
 
-    async function loadRecycling() {
+    // silent = a refresh triggered by acting on a ROW (save / close out / undo), not by opening
+    // the modal. It skips the "Loading…" blank so the list stays on screen while the refresh is in
+    // flight instead of flashing empty. Scroll position is handled inside renderRecycling(), which
+    // covers this AND the busy re-render that every row action fires first.
+    async function loadRecycling(silent) {
       const body = document.getElementById('recyclingBody');
       if (!body) return;
-      body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;">Loading…</div>';
+      if (!silent) body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;">Loading…</div>';
       try {
         const [list, sum] = await Promise.all([
           edgeFunctionCall('crewlogic-recycling', { action: 'listVisits', franchiseID: currentUser.franchiseID, status: 'all', includeShort: _recyIncludeShort }),
@@ -4759,6 +4763,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function renderRecycling() {
       const body = document.getElementById('recyclingBody');
       if (!body) return;
+      // Scroll is preserved HERE rather than at the call sites, because every row action re-renders
+      // TWICE — once to show the busy state, once after the refresh — and a fix in only one place
+      // still threw the owner back to the top. #recyclingModal is the scroll container
+      // (overflow-y:auto on the fixed backdrop), not #recyclingBody.
+      const scroller = document.getElementById('recyclingModal');
+      const keepTop = scroller ? scroller.scrollTop : null;
       const btn = (on, oc, label) => '<button onclick="' + oc + '" style="padding:7px 12px;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;border:1px solid ' + (on ? 'var(--accent-green)' : 'var(--border)') + ';background:' + (on ? 'var(--accent-green)' : 'var(--bg-input)') + ';color:' + (on ? 'var(--accent-text)' : 'var(--text-secondary)') + ';">' + label + '</button>';
 
       const s = _recySummary;
@@ -4886,6 +4896,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
 
       body.innerHTML = html;
+      // Restore AFTER the write, or the browser clamps against the old content height. Clamp to
+      // the NEW height too: acting on a row can remove it from the current filter (closing a visit
+      // drops it out of "To collect"), so the list may now be shorter than the saved offset.
+      if (keepTop != null && scroller) {
+        scroller.scrollTop = Math.min(keepTop, Math.max(0, scroller.scrollHeight - scroller.clientHeight));
+      }
     }
 
     async function saveRecycling(alertId) {
@@ -4909,7 +4925,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         alert('Could not save: ' + (e && e.message ? e.message : 'unknown error'));
       }
       delete _recyBusy[alertId];
-      await loadRecycling();
+      await loadRecycling(true);
     }
 
     // Clear a visit off "still to collect" WITHOUT recording an amount.
@@ -4936,7 +4952,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         alert('Could not close: ' + (e && e.message ? e.message : 'unknown error'));
       }
       delete _recyBusy[alertId];
-      await loadRecycling();
+      await loadRecycling(true);
     }
 
     async function undoRecycling(alertId) {
@@ -4946,7 +4962,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         await edgeFunctionCall('crewlogic-recycling', { action: 'deleteSettlement', franchiseID: currentUser.franchiseID, alertId });
       } catch (e) { /* reload reflects the true state either way */ }
       delete _recyBusy[alertId];
-      await loadRecycling();
+      await loadRecycling(true);
     }
 
     // ── Motive Card Reclass (super-admin / #90-internal) ─────────────────────────────────────────
