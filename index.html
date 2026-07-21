@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.64.0 | 2026-07-21">
+  <meta name="crewlogic-version" content="v5.64.1 | 2026-07-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -7790,7 +7790,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       { key: 'estimates', label: 'Estimates', icon: '📝' },
       { key: 'volumeCheck', label: 'Volume Check', icon: '📐' },
       { key: 'priceLookup', label: 'Price Lookup', icon: '💲' },
-      { key: 'promos', label: 'Coupon Lookup', icon: '🎟️' },
       { key: 'manageJobs', label: 'Manage Jobs', icon: '🎤' },
       { key: 'jobPlan', label: 'Job Plan', icon: '📋' },
       { key: 'signs', label: 'Yard Signs', icon: '🪧' },
@@ -8510,11 +8509,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // The owner assigns which tiles each OTHER user sees (Settings → Team Members). A user with NO
     // saved toggles gets the new-user default set. This filter only HIDES a tile (display:none); it
     // never reveals one the capability gating (CRM/telematics/desktop) already hid.
-    const TILE_DEFAULT_ON = ['volumeCheck', 'priceLookup', 'promos', 'manageJobs'];
+    const TILE_DEFAULT_ON = ['volumeCheck', 'priceLookup', 'manageJobs'];
+    // Tiles EXEMPT from per-user toggling — every user on a capable franchise gets them. Owner
+    // 2026-07-21 on Coupon Lookup: "this should be available to all users... anyone with vonigo".
+    // It is a read-only reference lookup, and the people who most need it (whoever picks up the
+    // phone) are exactly the non-owner roles a toggle would hide it from. The Vonigo capability
+    // gate still applies — a native-pricing franchise has no promos to look up.
+    const TILE_ALWAYS_ON = ['promos'];
     function _applyTileMap(map) {
       const hasRows = map && Object.keys(map).length > 0;
       document.querySelectorAll('.module-card[data-card]').forEach(function (card) {
         const key = card.getAttribute('data-card');
+        if (TILE_ALWAYS_ON.indexOf(key) !== -1) return;   // never hidden by a per-user toggle
         const enabled = hasRows ? !!map[key] : (TILE_DEFAULT_ON.indexOf(key) !== -1);
         if (!enabled) card.style.display = 'none';
       });
