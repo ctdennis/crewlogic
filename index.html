@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.52.1 | 2026-07-21">
+  <meta name="crewlogic-version" content="v5.53.0 | 2026-07-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4665,6 +4665,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return h ? (h + 'h ' + m + 'm') : (m + 'm');
     }
 
+    // "8:10am → 8:23am · 13m". Clock times come from _alertClock, which formats in the FRANCHISE's
+    // timezone (mjFranchiseTz), not the browser's — a Cape Cod stop must not read as Pacific
+    // because someone opened the report while travelling.
+    //
+    // Owner reconciles these rows against a Google Sheet whose In/Out columns are the same Motive
+    // timestamps, so showing the window makes a row identifiable at a glance instead of having to
+    // infer it from date + duration.
+    function _recyWindow(r) {
+      const dur = _recyDur(r.durationSec);
+      const inT = _alertClock(r.startedAt);
+      if (!inT) return dur;
+      // No out-time (older rows predate end_time) → show the in-time alone rather than inventing
+      // one from start + duration, which would look authoritative and could be wrong.
+      const outT = r.endedAt ? _alertClock(r.endedAt) : '';
+      return outT ? (inT + ' → ' + outT + ' · ' + dur) : (inT + ' · ' + dur);
+    }
+
     function setRecyFilter(f) { _recyFilter = f; renderRecycling(); }
     function setRecyGeofence(g) { _recyGeofence = g; renderRecycling(); }
     async function setRecyGrain(g) {
@@ -4736,7 +4753,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           html += '<div style="background:var(--bg-input);border:1px solid ' + (r.settled ? 'var(--border)' : '#f59e0b55') + ';border-radius:10px;padding:10px 12px;">'
             + '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap;">'
             +   '<div style="font-size:13.5px;font-weight:700;color:var(--text-primary);">' + _hEsc(r.facilityName) + '</div>'
-            +   '<div style="font-size:11.5px;color:var(--text-muted);white-space:nowrap;">' + _recyDate(r.startedAt) + ' · ' + _hEsc(r.truck || '') + ' · ' + _recyDur(r.durationSec) + '</div>'
+            +   '<div style="font-size:11.5px;color:var(--text-muted);white-space:nowrap;">' + _recyDate(r.startedAt) + ' · ' + _hEsc(r.truck || '') + ' · ' + _recyWindow(r) + '</div>'
             + '</div>'
             + '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">'
             +   '<span style="font-size:11.5px;color:var(--text-muted);">$</span>'

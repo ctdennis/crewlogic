@@ -165,6 +165,10 @@ Deno.serve(async (req: Request) => {
         geofenceName: v.geofence_name,
         truck: v.vehicle_number,
         startedAt: v.start_time || v.created_at,
+        // Motive's own exit timestamp. No created_at fallback: created_at is when the ROW was
+        // written (for backfilled rows, the day the import ran), so falling back would print a
+        // confidently wrong out-time. Absent is better than wrong — the UI omits it.
+        endedAt: v.end_time || null,
         durationSec: v.duration,
         settled: !!s,
         amount: s ? Number(s.amount) : null,
