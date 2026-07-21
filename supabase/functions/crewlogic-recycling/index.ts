@@ -176,6 +176,13 @@ Deno.serve(async (req: Request) => {
     // over it — so a genuine, collectable visit disappears entirely. That is why the span is
     // computed and returned rather than just flagging the rows.
     const FLAP_GAP_SEC = 1800;   // 30 min between one exit and the next entry at the same fence
+    // BOTH parts of a split are shown, deliberately — they are not collapsed.
+    //
+    // Owner reconciles rows against what the vendor actually paid: "If there is only one payment
+    // for that day, I can question the vendor, especially if there are two trucks, less so if it
+    // is only one truck at nearly the same time. If a false positive, I'll just mark that one as
+    // close out." Collapsing would remove the evidence that decision is made from. The badge
+    // carries the signal (same truck, minutes apart) and Close out handles the false positive.
     const flapInfo = new Map<string, { spanSec: number; parts: number }>();
     const byTruckFence = new Map<string, any[]>();
     for (const v of visits) {
@@ -246,6 +253,8 @@ Deno.serve(async (req: Request) => {
     // Short stops drop out unless asked for — EXCEPT one that has already been settled or closed,
     // which must always remain visible. Hiding a row that carries a real recorded amount would
     // make that money vanish from every total with no way to find it again.
+    // A settled row is NEVER hidden — hiding a row that carries a recorded amount would make that
+    // money vanish from every total with no way to find it again.
     const rows = allRows.filter((r) => includeShort || !r.isShort || r.settled);
     const shortHidden = allRows.filter((r) => r.isShort && !r.settled).length;
 

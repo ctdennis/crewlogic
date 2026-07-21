@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.55.0 | 2026-07-21">
+  <meta name="crewlogic-version" content="v5.56.0 | 2026-07-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4611,10 +4611,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // "timing doesn't matter, I'm not looking for DSO or anything like an aging report."
     let _recyRows = [], _recyTotals = {}, _recySummary = null, _recyShortHidden = 0;
     let _recyFilter = 'outstanding';       // outstanding | collected | closed | all
-    // Sub-8-minute stops are hidden by default (drive-throughs / boundary noise), but revealable:
-    // owner needs them for payment validation, since a short stop by a DIFFERENT truck on the same
-    // day is a genuine second visit that may still be owed revenue.
-    let _recyIncludeShort = false;
+    // Short stops are SHOWN by default here, unlike the Alerts Report which still cuts at 8m. The
+    // two screens answer different questions: the report asks "was this a real stop", revenue asks
+    // "do I need to collect". Hiding them cost real money — on 6/29 two different trucks each made
+    // a sub-8m delivery to Zions and both were invisible, and three split visits were hidden
+    // entirely because both halves fell under the threshold while the true visit did not.
+    let _recyIncludeShort = true;
     let _recyGeofence = '';                // '' = every linked recycling facility
     let _recyGrain = 'month';
     let _recyBusy = {};                    // alertId -> true while its row is saving
@@ -4623,7 +4625,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const m = document.getElementById('recyclingModal');
       if (!m) return;
       m.style.display = 'flex';
-      _recyFilter = 'outstanding'; _recyGeofence = ''; _recyGrain = 'month'; _recyIncludeShort = false;
+      _recyFilter = 'outstanding'; _recyGeofence = ''; _recyGrain = 'month'; _recyIncludeShort = true;
       await loadRecycling();
     }
     function closeRecycling() { const m = document.getElementById('recyclingModal'); if (m) m.style.display = 'none'; }
@@ -4698,10 +4700,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // is what makes the row usable for payment validation.
     function _recyFlags(r) {
       const out = [];
+      // "same truck" is the operative word, not decoration: it is the signal owner decides on.
+      // Same truck minutes apart = probably one delivery the border split in two, so one payment is
+      // expected. Two DIFFERENT trucks close together = two real deliveries, and a single payment
+      // is worth querying with the vendor. Both rows stay visible either way; a false positive gets
+      // Close out.
       if (r.likelyFlap && r.flapSpanSec != null) {
-        out.push('<span title="A tight geofence border split one visit into ' + r.flapParts + ' events for the same truck. Neither part\'s duration is real — the true visit runs from the first entry to the last exit." '
+        out.push('<span title="Same truck, same facility, ' + r.flapParts + ' events within minutes — a tight geofence border usually splits ONE visit this way. The true visit runs first entry to last exit, so neither part\'s own duration is real. Expect a single payment; if it is genuinely one visit, Close out the extra row." '
           + 'style="font-size:10.5px;font-weight:700;color:#93c5fd;background:#1e3a5f;border:1px solid #2f5b8f;border-radius:5px;padding:2px 6px;">'
-          + '⚯ split visit · really ' + _recyDur(r.flapSpanSec) + '</span>');
+          + '⚯ same truck · ' + r.flapParts + ' stops · ' + _recyDur(r.flapSpanSec) + ' total</span>');
       }
       if (r.isShort) {
         out.push('<span title="Under the 8-minute threshold. Usually a drive-through, but a short stop by a different truck can be a real visit." '
@@ -4765,14 +4772,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + '</div>';
 
       // ── Short-stop toggle ──
-      // Stated by COUNT, not as a vague hint, so it is obvious whether anything is being withheld.
+      // Shown by DEFAULT here; the button hides them. When hidden it states the withheld count, so
+      // it is never ambiguous whether rows are missing from the view.
+      const nShort = _recyRows.filter(r => r.isShort).length;
       const nHidden = _recyShortHidden || 0;
-      if (_recyIncludeShort || nHidden) {
+      if (_recyIncludeShort ? nShort : nHidden) {
         html += '<div style="margin-bottom:10px;">'
-          + '<button onclick="toggleRecyShort()" style="padding:6px 11px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid ' + (_recyIncludeShort ? 'var(--accent-green)' : 'var(--border)') + ';background:' + (_recyIncludeShort ? 'var(--accent-green)' : 'var(--bg-input)') + ';color:' + (_recyIncludeShort ? 'var(--accent-text)' : 'var(--text-secondary)') + ';">'
-          +   (_recyIncludeShort ? '✓ Showing short stops (under 8m)' : 'Show ' + nHidden + ' short stop' + (nHidden === 1 ? '' : 's') + ' (under 8m)')
+          + '<button onclick="toggleRecyShort()" style="padding:6px 11px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--border);background:var(--bg-input);color:var(--text-secondary);">'
+          +   (_recyIncludeShort ? 'Hide ' + nShort + ' short stop' + (nShort === 1 ? '' : 's') + ' (under 8m)' : 'Show ' + nHidden + ' short stop' + (nHidden === 1 ? '' : 's') + ' (under 8m)')
           + '</button>'
-          + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:4px;">Stops under 8 minutes are usually drive-throughs, but a short stop by a different truck can be a real visit.</div>'
+          + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:4px;">Short stops are shown because a brief stop by a different truck is still a real delivery. Hiding them gives cleaner average durations.</div>'
           + '</div>';
       }
 
