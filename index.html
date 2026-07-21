@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.51.0 | 2026-07-20">
+  <meta name="crewlogic-version" content="v5.52.1 | 2026-07-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1269,6 +1269,18 @@
   </div>
 
   <!-- Alerts report (📊 button next to Live Alerts) — high-level reporting on geofence facility visits. Body filled by openAlertsReport(). -->
+  <!-- Recycling revenue — enter what was collected per visit, and see what is still to collect.
+       Replaces scanning a spreadsheet's green rows for a missing amount. -->
+  <div id="recyclingModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)closeRecycling()">
+    <div style="width:100%;max-width:720px;background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border);margin:auto;">
+      <div style="position:sticky;top:0;background:var(--bg-card);display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-bottom:1px solid var(--border);border-radius:var(--radius) var(--radius) 0 0;z-index:1;">
+        <div style="font-size:18px;font-weight:800;color:var(--text-primary);">♻️ Recycling Revenue</div>
+        <button onclick="closeRecycling()" aria-label="Close" style="background:none;border:none;color:var(--text-muted);font-size:26px;line-height:1;cursor:pointer;padding:0 4px;">&times;</button>
+      </div>
+      <div id="recyclingBody" style="padding:18px 22px;"></div>
+    </div>
+  </div>
+
   <div id="alertsReportModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)closeAlertsReport()">
     <div style="width:100%;max-width:640px;background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border);margin:auto;">
       <div style="position:sticky;top:0;background:var(--bg-card);display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-bottom:1px solid var(--border);border-radius:var(--radius) var(--radius) 0 0;z-index:1;">
@@ -4589,6 +4601,213 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       wrap.innerHTML = h;
     }
     function closeAlertsReport() { const m = document.getElementById('alertsReportModal'); if (m) m.style.display = 'none'; }
+
+    // ── ♻️ RECYCLING REVENUE ──────────────────────────────────────────────────────────────
+    // Enter what was collected against a recycling visit, and see what is still to collect.
+    //
+    // Replaces the spreadsheet workflow it was modelled on: recycling rows coloured green,
+    // scanned by eye for any row missing an amount. Two states only — a settlement exists
+    // (collected) or it does not (still to collect). No aging, no overdue, no DSO; Owner:
+    // "timing doesn't matter, I'm not looking for DSO or anything like an aging report."
+    let _recyRows = [], _recyTotals = {}, _recySummary = null;
+    let _recyFilter = 'outstanding';       // outstanding | collected | all
+    let _recyGeofence = '';                // '' = every linked recycling facility
+    let _recyGrain = 'month';
+    let _recyBusy = {};                    // alertId -> true while its row is saving
+
+    async function openRecycling() {
+      const m = document.getElementById('recyclingModal');
+      if (!m) return;
+      m.style.display = 'flex';
+      _recyFilter = 'outstanding'; _recyGeofence = ''; _recyGrain = 'month';
+      await loadRecycling();
+    }
+    function closeRecycling() { const m = document.getElementById('recyclingModal'); if (m) m.style.display = 'none'; }
+
+    async function loadRecycling() {
+      const body = document.getElementById('recyclingBody');
+      if (!body) return;
+      body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;">Loading…</div>';
+      try {
+        const [list, sum] = await Promise.all([
+          edgeFunctionCall('crewlogic-recycling', { action: 'listVisits', franchiseID: currentUser.franchiseID, status: 'all' }),
+          edgeFunctionCall('crewlogic-recycling', { action: 'summary', franchiseID: currentUser.franchiseID, grain: _recyGrain })
+        ]);
+        // No linked recycling facility is a SETUP state, not an empty result — say which, or the
+        // owner goes hunting for missing visits that were never going to be there.
+        if (list && list.unlinked) {
+          body.innerHTML = '<div style="color:var(--text-muted);font-size:13.5px;line-height:1.6;">'
+            + 'No recycling facilities are linked to a telematics geofence yet.<br><br>'
+            + 'Link them in <b style="color:var(--text-primary);">Settings → 💰 Cost → Facilities</b>, '
+            + 'then visits will appear here automatically.</div>';
+          return;
+        }
+        _recyRows = (list && list.visits) || [];
+        _recyTotals = (list && list.totals) || {};
+        _recySummary = sum && sum.success ? sum : null;
+      } catch (e) {
+        body.innerHTML = '<div style="color:var(--text-muted);">Could not load recycling revenue.</div>';
+        return;
+      }
+      renderRecycling();
+    }
+
+    function _recyMoney(n) {
+      const v = Number(n || 0);
+      return (v < 0 ? '-$' : '$') + Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    function _recyDate(iso) {
+      try { return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
+      catch (e) { return ''; }
+    }
+    function _recyDur(sec) {
+      const s = Math.round(sec || 0), h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+      return h ? (h + 'h ' + m + 'm') : (m + 'm');
+    }
+
+    function setRecyFilter(f) { _recyFilter = f; renderRecycling(); }
+    function setRecyGeofence(g) { _recyGeofence = g; renderRecycling(); }
+    async function setRecyGrain(g) {
+      _recyGrain = g;
+      try {
+        const sum = await edgeFunctionCall('crewlogic-recycling', { action: 'summary', franchiseID: currentUser.franchiseID, grain: g });
+        if (sum && sum.success) _recySummary = sum;
+      } catch (e) { /* keep the previous summary rather than blanking the panel */ }
+      renderRecycling();
+    }
+
+    function renderRecycling() {
+      const body = document.getElementById('recyclingBody');
+      if (!body) return;
+      const btn = (on, oc, label) => '<button onclick="' + oc + '" style="padding:7px 12px;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;border:1px solid ' + (on ? 'var(--accent-green)' : 'var(--border)') + ';background:' + (on ? 'var(--accent-green)' : 'var(--bg-input)') + ';color:' + (on ? 'var(--accent-text)' : 'var(--text-secondary)') + ';">' + label + '</button>';
+
+      const s = _recySummary;
+      let html = '';
+
+      // ── Headline: what came in, and what is still out there ──
+      if (s) {
+        html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">'
+          + '<div style="flex:1;min-width:150px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:12px 14px;">'
+          +   '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">Collected</div>'
+          +   '<div style="font-size:22px;font-weight:800;color:var(--accent-green);margin-top:2px;">' + _recyMoney(s.totalCollected) + '</div>'
+          +   '<div style="font-size:11.5px;color:var(--text-muted);">' + s.collectedVisits + ' visit' + (s.collectedVisits === 1 ? '' : 's')
+          +     (s.totalWeightLbs ? ' · ' + Math.round(s.totalWeightLbs).toLocaleString() + ' lbs' : '') + '</div>'
+          + '</div>'
+          + '<div style="flex:1;min-width:150px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:12px 14px;">'
+          +   '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">Still to collect</div>'
+          +   '<div style="font-size:22px;font-weight:800;color:' + (s.outstandingVisits ? '#f59e0b' : 'var(--text-primary)') + ';margin-top:2px;">' + s.outstandingVisits + '</div>'
+          +   '<div style="font-size:11.5px;color:var(--text-muted);">visit' + (s.outstandingVisits === 1 ? '' : 's') + ' with no amount entered</div>'
+          + '</div>'
+        + '</div>';
+      }
+
+      // ── Filters ──
+      html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">'
+        + btn(_recyFilter === 'outstanding', "setRecyFilter('outstanding')", 'To collect' + (_recyTotals.outstanding != null ? ' (' + _recyTotals.outstanding + ')' : ''))
+        + btn(_recyFilter === 'collected', "setRecyFilter('collected')", 'Collected' + (_recyTotals.collected != null ? ' (' + _recyTotals.collected + ')' : ''))
+        + btn(_recyFilter === 'all', "setRecyFilter('all')", 'All')
+        + '</div>';
+
+      const facs = [...new Set(_recyRows.map(r => r.facilityName))].sort();
+      if (facs.length > 1) {
+        html += '<select onchange="setRecyGeofence(this.value)" style="width:100%;margin-bottom:12px;padding:8px 10px;font-size:13px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);">'
+          + '<option value="">All facilities</option>'
+          + facs.map(f => {
+              const gid = (_recyRows.find(r => r.facilityName === f) || {}).geofenceId || '';
+              return '<option value="' + gid + '"' + (_recyGeofence === gid ? ' selected' : '') + '>' + _hEsc(f) + '</option>';
+            }).join('')
+          + '</select>';
+      }
+
+      // ── Visit rows ──
+      let rows = _recyRows;
+      if (_recyFilter === 'outstanding') rows = rows.filter(r => !r.settled);
+      else if (_recyFilter === 'collected') rows = rows.filter(r => r.settled);
+      if (_recyGeofence) rows = rows.filter(r => r.geofenceId === _recyGeofence);
+
+      if (!rows.length) {
+        html += '<div style="color:var(--text-muted);font-size:13.5px;padding:10px 0;">'
+          + (_recyFilter === 'outstanding' ? 'Nothing outstanding — every recycling visit has an amount recorded.' : 'No visits in this view.')
+          + '</div>';
+      } else {
+        html += '<div style="display:flex;flex-direction:column;gap:8px;">';
+        rows.slice(0, 300).forEach(r => {
+          const busy = !!_recyBusy[r.alertId];
+          html += '<div style="background:var(--bg-input);border:1px solid ' + (r.settled ? 'var(--border)' : '#f59e0b55') + ';border-radius:10px;padding:10px 12px;">'
+            + '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap;">'
+            +   '<div style="font-size:13.5px;font-weight:700;color:var(--text-primary);">' + _hEsc(r.facilityName) + '</div>'
+            +   '<div style="font-size:11.5px;color:var(--text-muted);white-space:nowrap;">' + _recyDate(r.startedAt) + ' · ' + _hEsc(r.truck || '') + ' · ' + _recyDur(r.durationSec) + '</div>'
+            + '</div>'
+            + '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">'
+            +   '<span style="font-size:11.5px;color:var(--text-muted);">$</span>'
+            +   '<input id="recyAmt-' + r.alertId + '" type="number" step="0.01" inputmode="decimal" placeholder="amount" value="' + (r.amount != null ? r.amount : '') + '" '
+            +     'style="width:100px;padding:7px 9px;font-size:13px;background:var(--bg-card);border:1px solid var(--border);border-radius:7px;color:var(--text-primary);">'
+            +   '<input id="recyLbs-' + r.alertId + '" type="number" step="1" inputmode="numeric" placeholder="lbs (optional)" value="' + (r.weightLbs != null ? r.weightLbs : '') + '" '
+            +     'style="width:120px;padding:7px 9px;font-size:13px;background:var(--bg-card);border:1px solid var(--border);border-radius:7px;color:var(--text-primary);">'
+            +   '<button onclick="saveRecycling(' + r.alertId + ')"' + (busy ? ' disabled' : '') + ' style="padding:7px 14px;border-radius:7px;border:none;background:var(--accent-green);color:var(--accent-text);font-size:12.5px;font-weight:700;cursor:pointer;">' + (busy ? 'Saving…' : (r.settled ? 'Update' : 'Save')) + '</button>'
+            +   (r.settled ? '<button onclick="undoRecycling(' + r.alertId + ')" title="Return this visit to \'still to collect\'" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:none;color:var(--text-muted);font-size:12px;cursor:pointer;">Undo</button>' : '')
+            +   (r.settled ? '<span style="font-size:11.5px;color:var(--accent-green);font-weight:700;">✓ collected ' + _recyDate(r.settledAt) + '</span>' : '')
+            + '</div>'
+          + '</div>';
+        });
+        html += '</div>';
+        if (rows.length > 300) html += '<div style="font-size:11.5px;color:var(--text-muted);margin-top:8px;">Showing the newest 300 of ' + rows.length + '.</div>';
+      }
+
+      // ── Collected by period ──
+      if (s && s.byPeriod && s.byPeriod.length) {
+        html += '<div style="margin-top:20px;border-top:1px solid var(--border);padding-top:14px;">'
+          + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
+          +   '<div style="font-weight:800;color:var(--text-primary);font-size:14px;">Collected over time</div>'
+          +   '<div style="display:flex;gap:5px;">'
+          +     ['day','week','month','year'].map(g => btn(_recyGrain === g, "setRecyGrain('" + g + "')", g)).join('')
+          +   '</div>'
+          + '</div>'
+          + '<div style="display:flex;flex-direction:column;gap:4px;">'
+          + s.byPeriod.slice(0, 18).map(p =>
+              '<div style="display:grid;grid-template-columns:1fr auto;gap:10px;padding:7px 11px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;font-size:12.5px;">'
+              + '<span style="color:var(--text-primary);">' + _hEsc(p.key) + '</span>'
+              + '<span style="color:var(--text-secondary);white-space:nowrap;">' + _recyMoney(p.amount) + ' · ' + p.visits + ' visit' + (p.visits === 1 ? '' : 's') + (p.weight ? ' · ' + Math.round(p.weight).toLocaleString() + ' lbs' : '') + '</span>'
+              + '</div>').join('')
+          + '</div></div>';
+      }
+
+      body.innerHTML = html;
+    }
+
+    async function saveRecycling(alertId) {
+      const amtEl = document.getElementById('recyAmt-' + alertId);
+      const lbsEl = document.getElementById('recyLbs-' + alertId);
+      if (!amtEl) return;
+      const raw = String(amtEl.value || '').trim();
+      // Blank is NOT zero. 0 is a real, meaningful value here ("collected nothing"), so a blank
+      // field must be refused rather than quietly recorded as a settlement of zero.
+      if (raw === '') { amtEl.focus(); amtEl.style.borderColor = '#ef4444';
+        setTimeout(() => { amtEl.style.borderColor = 'var(--border)'; }, 1600); return; }
+      _recyBusy[alertId] = true; renderRecycling();
+      try {
+        const res = await edgeFunctionCall('crewlogic-recycling', {
+          action: 'saveSettlement', franchiseID: currentUser.franchiseID,
+          alertId, amount: parseFloat(raw),
+          weightLbs: (lbsEl && String(lbsEl.value || '').trim() !== '') ? parseFloat(lbsEl.value) : null
+        });
+        if (!res || !res.success) throw new Error((res && res.error) || 'save failed');
+      } catch (e) {
+        alert('Could not save: ' + (e && e.message ? e.message : 'unknown error'));
+      }
+      delete _recyBusy[alertId];
+      await loadRecycling();
+    }
+
+    async function undoRecycling(alertId) {
+      if (!confirm('Remove the recorded amount and return this visit to "still to collect"?')) return;
+      _recyBusy[alertId] = true; renderRecycling();
+      try {
+        await edgeFunctionCall('crewlogic-recycling', { action: 'deleteSettlement', franchiseID: currentUser.franchiseID, alertId });
+      } catch (e) { /* reload reflects the true state either way */ }
+      delete _recyBusy[alertId];
+      await loadRecycling();
+    }
 
     // ── Motive Card Reclass (super-admin / #90-internal) ─────────────────────────────────────────
     let _crY = null, _crM = null, _crData = null, _crQbo = null; // year, month(0-11), last response, QBO status
@@ -10304,7 +10523,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<div id="dashMapPane" style="flex:1;min-width:0;height:42vh;min-height:320px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--bg-card);"></div>'
         +   '<div class="dash-divider" data-side="right" title="Drag to resize" style="flex:0 0 6px;align-self:stretch;cursor:col-resize;background:var(--btn-surface,#34485d);border-radius:3px;"></div>'
         +   '<div id="dashAlertsPanel" style="flex:0 0 300px;width:300px;height:42vh;min-height:320px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);overflow:hidden;display:flex;flex-direction:column;">'
-        +     '<div style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;">📡 Live Alerts<button onclick="openAlertsReport()" title="Alerts report" style="margin-left:8px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;cursor:pointer;">📊 Report</button><span class="gf-alerts-count" style="font-size:11px;font-weight:600;color:var(--text-muted);margin-left:auto;"></span></div>'
+        +     '<div style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;">📡 Live Alerts<button onclick="openAlertsReport()" title="Alerts report" style="margin-left:8px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;cursor:pointer;">📊 Report</button><button onclick="openRecycling()" title="Recycling revenue — enter what was collected, see what is outstanding" style="margin-left:5px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;cursor:pointer;">♻️ Revenue</button><span class="gf-alerts-count" style="font-size:11px;font-weight:600;color:var(--text-muted);margin-left:auto;"></span></div>'
         +     '<div id="dashAlertsList" class="gf-alerts-list" style="flex:1;overflow-y:auto;padding:6px 6px 10px;"></div>'
         +   '</div>'
         + '</div>';
@@ -22571,14 +22790,16 @@ RECYCLING & DONATION
         _geofenceOptions = [];        // fail quiet: the picker degrades to a note, never blocks Settings
       }
       _geofenceLoading = false;
-      // Re-render ALL three lists, not just the one that happened to trigger the load.
+      // Repaint ALL three lists' pickers, not just the one that happened to trigger the load.
       //
       // The Cost tab renders disposal, recycling and donation in sequence. The FIRST list starts
       // the fetch and sets _geofenceLoading; the other two then hit the guard at the top of this
-      // function and return immediately — so they never registered a callback. Re-rendering only
+      // function and return immediately — so they never registered a callback. Repainting only
       // `rerenderType` left the other two showing "Loading…" permanently.
-      if (typeof renderAllFacilityLists === 'function') renderAllFacilityLists();
-      else if (rerenderType) renderFacilityList(rerenderType);
+      //
+      // Pickers only — NOT renderAllFacilityLists(). This fires mid-interaction by nature, and a
+      // full rebuild here is what dropped an open dropdown and forced a re-pick.
+      _repaintGeofencePickers();
     }
 
     // Manual re-pull from Motive. Clears the page-lifetime cache and re-renders all three
@@ -22590,7 +22811,7 @@ RECYCLING & DONATION
       _geofenceOptions = null;
       _geofenceUnavailable = false;
       await loadGeofenceOptions();
-      renderAllFacilityLists();
+      _repaintGeofencePickers();   // pickers only — see loadGeofenceOptions
       if (btn) {
         const after = (_geofenceOptions || []).length;
         const delta = after - before;
@@ -22602,7 +22823,25 @@ RECYCLING & DONATION
       }
     }
 
+    // Wrapper carries a stable id so the picker can be repainted ALONE when the Motive lookup
+    // returns. That lookup is a network round trip and lands seconds after the Cost tab opens —
+    // long enough that the owner is already typing a name or choosing a Money setting. Repainting
+    // the whole list at that moment destroyed whatever they were doing.
     function _geofencePickerHtml(type, i, f) {
+      return '<div id="facGeo-' + type + '-' + i + '">' + _geofencePickerInner(type, i, f) + '</div>';
+    }
+
+    // Repaint ONLY the geofence pickers, leaving names, addresses, costs and Money selects alone.
+    function _repaintGeofencePickers() {
+      ['disposal', 'recycling', 'donation'].forEach(type => {
+        (getFacilities(type) || []).forEach((f, i) => {
+          const el = document.getElementById('facGeo-' + type + '-' + i);
+          if (el) el.innerHTML = _geofencePickerInner(type, i, f);
+        });
+      });
+    }
+
+    function _geofencePickerInner(type, i, f) {
       const cur = (f && f.geofenceId != null) ? String(f.geofenceId) : '';
       const label = '<span style="width:62px;font-size:11px;color:var(--text-muted);flex-shrink:0;">Geofence</span>';
       const tip = 'Links this facility to its telematics geofence. Matching is by ID, so renaming or ' +
@@ -22654,11 +22893,12 @@ RECYCLING & DONATION
 
       // Saved-state indicator: the pick persists on change, so say so plainly. Without it the
       // control looks identical whether or not the link reached the server.
-      const st = _geofenceSaveMsg[type + ':' + i];
-      const statusHtml = st === 'saving' ? '<span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">saving…</span>'
-        : st === 'saved'  ? '<span style="font-size:11px;color:var(--accent-green);flex-shrink:0;font-weight:700;">✓ saved</span>'
-        : st === 'failed' ? '<span style="font-size:11px;color:#ef4444;flex-shrink:0;font-weight:700;">✕ not saved</span>'
-        : (cur ? '<span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">#' + esc(cur) + '</span>' : '');
+      //
+      // Rendered as a STABLE, ALWAYS-PRESENT element so the save can update it in place. It used
+      // to be repainted by re-rendering the whole list, which tore out the DOM under whatever the
+      // owner had moved on to — open a dropdown, and it vanished mid-selection.
+      const statusHtml = '<span id="' + _facSaveId(type, i) + '" ' + _FAC_SAVE_BASE_STYLE + '>' +
+        _facSaveText(type, i, cur) + '</span>';
 
       // Say what was filtered out, so a "missing" geofence reads as mislabelled-in-Motive
       // rather than broken here.
@@ -22686,13 +22926,58 @@ RECYCLING & DONATION
     // Saves ONLY facilities (saveFacilities), never the scalar cost fields, so a half-typed
     // number elsewhere on the tab cannot be committed as a side effect of picking a geofence.
     let _geofenceSaveMsg = {};    // "type:index" -> transient status shown beside the picker
+
+    // ── SILENT SAVE ──────────────────────────────────────────────────────────────────────────
+    // These auto-saving controls must NEVER re-render the facility list. renderFacilityList()
+    // rebuilds the section's innerHTML, which destroys every element in it — including whatever
+    // control the owner moved to while the request was in flight. Picking a geofence and then
+    // reaching for the Money dropdown dropped the open list and forced a re-pick, once when the
+    // save started and again when it landed.
+    //
+    // So the status is a single stable <span> per row, updated in place by id. Same feedback,
+    // zero DOM churn, nothing to interrupt.
+    const _FAC_SAVE_BASE_STYLE = 'style="font-size:11px;flex-shrink:0;"';
+    function _facSaveId(type, i) { return 'facSave-' + type + '-' + i; }
+
+    function _facSaveText(type, i, cur) {
+      const st = _geofenceSaveMsg[type + ':' + i];
+      if (st === 'saving') return '<span style="color:var(--text-muted);">saving…</span>';
+      if (st === 'saved')  return '<span style="color:var(--accent-green);font-weight:700;">✓ saved</span>';
+      if (st === 'failed') return '<span style="color:#ef4444;font-weight:700;">✕ not saved</span>';
+      return cur ? '<span style="color:var(--text-muted);">#' + String(cur).replace(/</g, '&lt;') + '</span>' : '';
+    }
+
+    // Repaint just this row's status. Reads the current geofence out of memory so the idle
+    // "#<id>" state stays right after a change without consulting the DOM.
+    function _paintFacSave(type, i) {
+      const el = document.getElementById(_facSaveId(type, i));
+      if (!el) return;   // list was re-rendered for another reason; next paint picks it up
+      const list = getFacilities(type) || [];
+      const f = list[i] || {};
+      el.innerHTML = _facSaveText(type, i, f.geofenceId != null ? String(f.geofenceId) : '');
+    }
+
     async function _setFacilityGeofence(type, i, value) {
       const v = String(value || '').trim();
       updateFacility(type, i, 'geofenceId', v);
       updateFacility(type, i, 'provider', v ? 'motive' : '');
+      await _persistFacilities(type, i);
+    }
+
+    // Saves are SERIALISED. saveFacilities is a replace-set built from in-memory state, so two
+    // in flight at once can land out of order and the older payload wins — changing a geofence
+    // and then the Money setting a second later would silently revert the geofence. Chaining
+    // means each payload is built only after the previous save has landed.
+    let _facSaveChain = Promise.resolve();
+    function _persistFacilities(type, i) {
+      _facSaveChain = _facSaveChain.then(() => _doPersistFacilities(type, i), () => _doPersistFacilities(type, i));
+      return _facSaveChain;
+    }
+
+    async function _doPersistFacilities(type, i) {
       const key = type + ':' + i;
       _geofenceSaveMsg[key] = 'saving';
-      renderFacilityList(type);
+      _paintFacSave(type, i);
       try {
         const res = await facilitiesEdgeCall({
           action: 'saveFacilities',
@@ -22711,10 +22996,52 @@ RECYCLING & DONATION
       } catch (e) {
         _geofenceSaveMsg[key] = 'failed';
       }
-      renderFacilityList(type);
+      _paintFacSave(type, i);
       if (_geofenceSaveMsg[key] === 'saved') {
-        setTimeout(() => { delete _geofenceSaveMsg[key]; renderFacilityList(type); }, 2500);
+        setTimeout(() => { delete _geofenceSaveMsg[key]; _paintFacSave(type, i); }, 2500);
       }
+    }
+
+    // Money direction picker — RECYCLING ONLY.
+    //
+    // Disposal always costs and donation is always free, so offering the control there is noise.
+    // Recycling is the one type where it genuinely varies: metal recyclers pay us, mattress /
+    // electronics / tire recyclers charge us, cardboard and pallets are free. Motive can't tell
+    // us which — its category is plain "Recycling" for all of them — so it is set here.
+    //
+    // This drives what the Recycling Revenue screen counts. A facility left on "They pay us" that
+    // actually charges you shows up forever as money owed that will never arrive.
+    function _settlementPickerHtml(type, i, f) {
+      if (type !== 'recycling') return '';
+      const cur = (f && f.settlementMode) ? String(f.settlementMode) : 'revenue';
+      const tip = 'Which way money moves at this facility. Only "They pay us" sites appear in ' +
+                  'Recycling Revenue — the others would sit there as uncollectable forever.';
+      const opt = (v, label) => '<option value="' + v + '"' + (cur === v ? ' selected' : '') + '>' + label + '</option>';
+      // Stable id, updated in place — same no-re-render rule as the save indicator above.
+      return '<div style="display:flex;gap:6px;align-items:center;margin-top:4px;" title="' + tip + '">' +
+        '<span style="width:62px;font-size:11px;color:var(--text-muted);flex-shrink:0;">Money</span>' +
+        '<select class="form-input" style="flex:1;min-width:0;font-size:12px;padding:6px 8px;" ' +
+          'onchange="_setFacilitySettlement(' + i + ',this.value)">' +
+          opt('revenue', 'They pay us — metal') +
+          opt('cost',    'We pay them — mattress, electronics, tires') +
+          opt('none',    'No money either way — cardboard, pallets') +
+        '</select>' +
+        '<span id="facMoney-' + i + '" style="font-size:11px;flex-shrink:0;">' + _facMoneyNote(cur) + '</span>' +
+      '</div>';
+    }
+
+    function _facMoneyNote(mode) {
+      return mode === 'revenue'
+        ? '<span style="color:var(--accent-green);">in Revenue</span>'
+        : '<span style="color:var(--text-muted);">not tracked</span>';
+    }
+
+    async function _setFacilitySettlement(i, value) {
+      const v = String(value || 'revenue');
+      updateFacility('recycling', i, 'settlementMode', v);
+      const note = document.getElementById('facMoney-' + i);
+      if (note) note.innerHTML = _facMoneyNote(v);
+      await _persistFacilities('recycling', i);
     }
 
     // ── Settings screen: render facility rows ──
@@ -22773,6 +23100,7 @@ RECYCLING & DONATION
             '<button onclick="removeFacility(\'' + type + '\',' + i + ')" style="flex-shrink:0;padding:7px 9px;background:none;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;">✕</button>' +
           '</div>' +
           _geofencePickerHtml(type, i, f) +
+          _settlementPickerHtml(type, i, f) +
         '</div>';
       }).join('');
     }

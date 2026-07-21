@@ -977,7 +977,7 @@ async function handleGetFacilities(
   // from its telematics geofence the first time an owner edited an unrelated field.
   const facs = (await supabaseGet(
     `/rest/v1/facilities?franchise_id=eq.${franchiseUUID}` +
-      `&select=id,type,name,address,per_ton_rate,minimum_type,minimum_value,is_default,sort_order,provider,provider_geofence_id` +
+      `&select=id,type,name,address,per_ton_rate,minimum_type,minimum_value,is_default,sort_order,provider,provider_geofence_id,settlement_mode` +
       `&order=type.asc,sort_order.asc`,
   )) as Array<Record<string, unknown>>;
 
@@ -1014,6 +1014,9 @@ async function handleGetFacilities(
       // Telematics link — the stable facility identity (see contract-recycling-revenue D1).
       provider: (f.provider as string) || "",
       geofenceId: f.provider_geofence_id != null ? String(f.provider_geofence_id) : "",
+      // Which way money moves (migration 0063). Same replace-set hazard as the geofence link:
+      // absent from this round-trip = reset on the next unrelated save.
+      settlementMode: (f.settlement_mode as string) || "revenue",
     };
     if (f.type === "disposal") site.cost = toNum(f.per_ton_rate);
     else if (f.type === "recycling") site.revenue = toNum(f.per_ton_rate);
@@ -1164,6 +1167,11 @@ async function handleListGeofences(
   });
 }
 
+// Accepted values for facilities.settlement_mode (migration 0063). Anything else is rejected in
+// favour of the type default — the DB check constraint would reject it anyway, and a failed
+// insert here would take the whole replace-set down with it.
+const SETTLEMENT_MODES = new Set(["revenue", "cost", "none"]);
+
 // HANDLER: saveFacilities — replace-set the franchise's facilities/hours/holidays.
 // Accepts the same shape getFacilities returns.
 async function handleSaveFacilities(
@@ -1207,6 +1215,11 @@ async function handleSaveFacilities(
         sort_order: idx,
         provider: gid != null ? (prov === "linxup" ? "linxup" : "motive") : null,
         provider_geofence_id: gid,
+        // Money direction. Falls back to the type's truth rather than a blanket 'revenue', so a
+        // client that predates this field cannot turn every disposal site into "they pay us".
+        settlement_mode: SETTLEMENT_MODES.has(String((s && (s as Record<string, unknown>).settlementMode) ?? ""))
+          ? String((s as Record<string, unknown>).settlementMode)
+          : (type === "disposal" ? "cost" : type === "donation" ? "none" : "revenue"),
       });
       hoursSrc.push((s && s.hours && typeof s.hours === "object") ? (s.hours as Record<string, unknown>) : null);
     });
