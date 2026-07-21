@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.52.1 | 2026-07-21">
+  <meta name="crewlogic-version" content="v5.56.0 | 2026-07-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4609,8 +4609,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // scanned by eye for any row missing an amount. Two states only — a settlement exists
     // (collected) or it does not (still to collect). No aging, no overdue, no DSO; Owner:
     // "timing doesn't matter, I'm not looking for DSO or anything like an aging report."
-    let _recyRows = [], _recyTotals = {}, _recySummary = null;
-    let _recyFilter = 'outstanding';       // outstanding | collected | all
+    let _recyRows = [], _recyTotals = {}, _recySummary = null, _recyShortHidden = 0;
+    let _recyFilter = 'outstanding';       // outstanding | collected | closed | all
+    // Short stops are SHOWN by default here, unlike the Alerts Report which still cuts at 8m. The
+    // two screens answer different questions: the report asks "was this a real stop", revenue asks
+    // "do I need to collect". Hiding them cost real money — on 6/29 two different trucks each made
+    // a sub-8m delivery to Zions and both were invisible, and three split visits were hidden
+    // entirely because both halves fell under the threshold while the true visit did not.
+    let _recyIncludeShort = true;
     let _recyGeofence = '';                // '' = every linked recycling facility
     let _recyGrain = 'month';
     let _recyBusy = {};                    // alertId -> true while its row is saving
@@ -4619,7 +4625,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const m = document.getElementById('recyclingModal');
       if (!m) return;
       m.style.display = 'flex';
-      _recyFilter = 'outstanding'; _recyGeofence = ''; _recyGrain = 'month';
+      _recyFilter = 'outstanding'; _recyGeofence = ''; _recyGrain = 'month'; _recyIncludeShort = true;
       await loadRecycling();
     }
     function closeRecycling() { const m = document.getElementById('recyclingModal'); if (m) m.style.display = 'none'; }
@@ -4630,8 +4636,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;">Loading…</div>';
       try {
         const [list, sum] = await Promise.all([
-          edgeFunctionCall('crewlogic-recycling', { action: 'listVisits', franchiseID: currentUser.franchiseID, status: 'all' }),
-          edgeFunctionCall('crewlogic-recycling', { action: 'summary', franchiseID: currentUser.franchiseID, grain: _recyGrain })
+          edgeFunctionCall('crewlogic-recycling', { action: 'listVisits', franchiseID: currentUser.franchiseID, status: 'all', includeShort: _recyIncludeShort }),
+          edgeFunctionCall('crewlogic-recycling', { action: 'summary', franchiseID: currentUser.franchiseID, grain: _recyGrain, includeShort: _recyIncludeShort })
         ]);
         // No linked recycling facility is a SETUP state, not an empty result — say which, or the
         // owner goes hunting for missing visits that were never going to be there.
@@ -4644,6 +4650,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         }
         _recyRows = (list && list.visits) || [];
         _recyTotals = (list && list.totals) || {};
+        // Top-level on the response, NOT inside totals — reading it off _recyTotals silently
+        // yields 0 and the reveal button never appears.
+        _recyShortHidden = (list && list.shortHidden) || 0;
         _recySummary = sum && sum.success ? sum : null;
       } catch (e) {
         body.innerHTML = '<div style="color:var(--text-muted);">Could not load recycling revenue.</div>';
@@ -4665,6 +4674,51 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return h ? (h + 'h ' + m + 'm') : (m + 'm');
     }
 
+    // "8:10am → 8:23am · 13m". Clock times come from _alertClock, which formats in the FRANCHISE's
+    // timezone (mjFranchiseTz), not the browser's — a Cape Cod stop must not read as Pacific
+    // because someone opened the report while travelling.
+    //
+    // Owner reconciles these rows against a Google Sheet whose In/Out columns are the same Motive
+    // timestamps, so showing the window makes a row identifiable at a glance instead of having to
+    // infer it from date + duration.
+    function _recyWindow(r) {
+      const dur = _recyDur(r.durationSec);
+      const inT = _alertClock(r.startedAt);
+      if (!inT) return dur;
+      // No out-time (older rows predate end_time) → show the in-time alone rather than inventing
+      // one from start + duration, which would look authoritative and could be wrong.
+      const outT = r.endedAt ? _alertClock(r.endedAt) : '';
+      return outT ? (inT + ' → ' + outT + ' · ' + dur) : (inT + ' · ' + dur);
+    }
+
+    // Badges under the header line: why this row is unusual.
+    //
+    // The split-visit badge exists because the halves LIE. Owner: a tight geofence border makes one
+    // visit register as two, "the first is a valid in, and the second entry is a valid out" — so
+    // neither half's duration is real. Worse, both halves can land under 8 minutes while the true
+    // visit is well over, which hides a genuine collectable stop completely. Showing the true span
+    // is what makes the row usable for payment validation.
+    function _recyFlags(r) {
+      const out = [];
+      // "same truck" is the operative word, not decoration: it is the signal owner decides on.
+      // Same truck minutes apart = probably one delivery the border split in two, so one payment is
+      // expected. Two DIFFERENT trucks close together = two real deliveries, and a single payment
+      // is worth querying with the vendor. Both rows stay visible either way; a false positive gets
+      // Close out.
+      if (r.likelyFlap && r.flapSpanSec != null) {
+        out.push('<span title="Same truck, same facility, ' + r.flapParts + ' events within minutes — a tight geofence border usually splits ONE visit this way. The true visit runs first entry to last exit, so neither part\'s own duration is real. Expect a single payment; if it is genuinely one visit, Close out the extra row." '
+          + 'style="font-size:10.5px;font-weight:700;color:#93c5fd;background:#1e3a5f;border:1px solid #2f5b8f;border-radius:5px;padding:2px 6px;">'
+          + '⚯ same truck · ' + r.flapParts + ' stops · ' + _recyDur(r.flapSpanSec) + ' total</span>');
+      }
+      if (r.isShort) {
+        out.push('<span title="Under the 8-minute threshold. Usually a drive-through, but a short stop by a different truck can be a real visit." '
+          + 'style="font-size:10.5px;font-weight:700;color:#fcd34d;background:#3f2d0a;border:1px solid #6b4f10;border-radius:5px;padding:2px 6px;">'
+          + 'short stop</span>');
+      }
+      return out.length ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">' + out.join('') + '</div>' : '';
+    }
+
+    async function toggleRecyShort() { _recyIncludeShort = !_recyIncludeShort; await loadRecycling(); }
     function setRecyFilter(f) { _recyFilter = f; renderRecycling(); }
     function setRecyGeofence(g) { _recyGeofence = g; renderRecycling(); }
     async function setRecyGrain(g) {
@@ -4698,6 +4752,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           +   '<div style="font-size:22px;font-weight:800;color:' + (s.outstandingVisits ? '#f59e0b' : 'var(--text-primary)') + ';margin-top:2px;">' + s.outstandingVisits + '</div>'
           +   '<div style="font-size:11.5px;color:var(--text-muted);">visit' + (s.outstandingVisits === 1 ? '' : 's') + ' with no amount entered</div>'
           + '</div>'
+          // Closed money stays ON SCREEN rather than just vanishing from outstanding. These are
+          // visits written off or paid-but-never-recorded — real money in the second case — so
+          // burying them would quietly shrink the picture with no trace.
+          + (s.closedVisits ? '<div style="flex:1;min-width:150px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:12px 14px;">'
+              + '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">Closed</div>'
+              + '<div style="font-size:22px;font-weight:800;color:var(--text-secondary);margin-top:2px;">' + s.closedVisits + '</div>'
+              + '<div style="font-size:11.5px;color:var(--text-muted);">cleared with no amount</div>'
+            + '</div>' : '')
         + '</div>';
       }
 
@@ -4705,8 +4767,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">'
         + btn(_recyFilter === 'outstanding', "setRecyFilter('outstanding')", 'To collect' + (_recyTotals.outstanding != null ? ' (' + _recyTotals.outstanding + ')' : ''))
         + btn(_recyFilter === 'collected', "setRecyFilter('collected')", 'Collected' + (_recyTotals.collected != null ? ' (' + _recyTotals.collected + ')' : ''))
+        + (_recyTotals.closed ? btn(_recyFilter === 'closed', "setRecyFilter('closed')", 'Closed (' + _recyTotals.closed + ')') : '')
         + btn(_recyFilter === 'all', "setRecyFilter('all')", 'All')
         + '</div>';
+
+      // ── Short-stop toggle ──
+      // Shown by DEFAULT here; the button hides them. When hidden it states the withheld count, so
+      // it is never ambiguous whether rows are missing from the view.
+      const nShort = _recyRows.filter(r => r.isShort).length;
+      const nHidden = _recyShortHidden || 0;
+      if (_recyIncludeShort ? nShort : nHidden) {
+        html += '<div style="margin-bottom:10px;">'
+          + '<button onclick="toggleRecyShort()" style="padding:6px 11px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--border);background:var(--bg-input);color:var(--text-secondary);">'
+          +   (_recyIncludeShort ? 'Hide ' + nShort + ' short stop' + (nShort === 1 ? '' : 's') + ' (under 8m)' : 'Show ' + nHidden + ' short stop' + (nHidden === 1 ? '' : 's') + ' (under 8m)')
+          + '</button>'
+          + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:4px;">Short stops are shown because a brief stop by a different truck is still a real delivery. Hiding them gives cleaner average durations.</div>'
+          + '</div>';
+      }
 
       const facs = [...new Set(_recyRows.map(r => r.facilityName))].sort();
       if (facs.length > 1) {
@@ -4721,8 +4798,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       // ── Visit rows ──
       let rows = _recyRows;
+      // Closed is its own bucket, never folded into Collected — a visit cleared with no amount is
+      // not a collection, and showing it as a $0 row beside real money would misread.
       if (_recyFilter === 'outstanding') rows = rows.filter(r => !r.settled);
-      else if (_recyFilter === 'collected') rows = rows.filter(r => r.settled);
+      else if (_recyFilter === 'collected') rows = rows.filter(r => r.settled && r.resolution !== 'closed');
+      else if (_recyFilter === 'closed') rows = rows.filter(r => r.settled && r.resolution === 'closed');
       if (_recyGeofence) rows = rows.filter(r => r.geofenceId === _recyGeofence);
 
       if (!rows.length) {
@@ -4733,11 +4813,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         html += '<div style="display:flex;flex-direction:column;gap:8px;">';
         rows.slice(0, 300).forEach(r => {
           const busy = !!_recyBusy[r.alertId];
-          html += '<div style="background:var(--bg-input);border:1px solid ' + (r.settled ? 'var(--border)' : '#f59e0b55') + ';border-radius:10px;padding:10px 12px;">'
+          const closed = r.settled && r.resolution === 'closed';
+          html += '<div style="background:var(--bg-input);border:1px solid ' + (r.settled ? 'var(--border)' : '#f59e0b55') + ';border-radius:10px;padding:10px 12px;' + (closed ? 'opacity:0.72;' : '') + '">'
             + '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap;">'
             +   '<div style="font-size:13.5px;font-weight:700;color:var(--text-primary);">' + _hEsc(r.facilityName) + '</div>'
-            +   '<div style="font-size:11.5px;color:var(--text-muted);white-space:nowrap;">' + _recyDate(r.startedAt) + ' · ' + _hEsc(r.truck || '') + ' · ' + _recyDur(r.durationSec) + '</div>'
+            +   '<div style="font-size:11.5px;color:var(--text-muted);white-space:nowrap;">' + _recyDate(r.startedAt) + ' · ' + _hEsc(r.truck || '') + ' · ' + _recyWindow(r) + '</div>'
             + '</div>'
+            + _recyFlags(r)
             + '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">'
             +   '<span style="font-size:11.5px;color:var(--text-muted);">$</span>'
             +   '<input id="recyAmt-' + r.alertId + '" type="number" step="0.01" inputmode="decimal" placeholder="amount" value="' + (r.amount != null ? r.amount : '') + '" '
@@ -4745,8 +4827,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             +   '<input id="recyLbs-' + r.alertId + '" type="number" step="1" inputmode="numeric" placeholder="lbs (optional)" value="' + (r.weightLbs != null ? r.weightLbs : '') + '" '
             +     'style="width:120px;padding:7px 9px;font-size:13px;background:var(--bg-card);border:1px solid var(--border);border-radius:7px;color:var(--text-primary);">'
             +   '<button onclick="saveRecycling(' + r.alertId + ')"' + (busy ? ' disabled' : '') + ' style="padding:7px 14px;border-radius:7px;border:none;background:var(--accent-green);color:var(--accent-text);font-size:12.5px;font-weight:700;cursor:pointer;">' + (busy ? 'Saving…' : (r.settled ? 'Update' : 'Save')) + '</button>'
+            // Close out — clears the visit without claiming an amount. Only offered while the
+            // visit is outstanding; once settled, Undo is the way back.
+            +   (!r.settled ? '<button onclick="closeOutRecycling(' + r.alertId + ')"' + (busy ? ' disabled' : '') + ' title="Clear this visit without recording an amount — nothing collected, or payment taken but never written down" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:none;color:var(--text-muted);font-size:12px;cursor:pointer;">Close out</button>' : '')
             +   (r.settled ? '<button onclick="undoRecycling(' + r.alertId + ')" title="Return this visit to \'still to collect\'" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:none;color:var(--text-muted);font-size:12px;cursor:pointer;">Undo</button>' : '')
-            +   (r.settled ? '<span style="font-size:11.5px;color:var(--accent-green);font-weight:700;">✓ collected ' + _recyDate(r.settledAt) + '</span>' : '')
+            +   (closed
+                  ? '<span style="font-size:11.5px;color:var(--text-muted);font-weight:700;">— closed ' + _recyDate(r.settledAt) + (r.note ? ' · ' + _hEsc(r.note) : '') + '</span>'
+                  : (r.settled ? '<span style="font-size:11.5px;color:var(--accent-green);font-weight:700;">✓ collected ' + _recyDate(r.settledAt) + '</span>' : ''))
             + '</div>'
           + '</div>';
         });
@@ -4794,6 +4881,33 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (!res || !res.success) throw new Error((res && res.error) || 'save failed');
       } catch (e) {
         alert('Could not save: ' + (e && e.message ? e.message : 'unknown error'));
+      }
+      delete _recyBusy[alertId];
+      await loadRecycling();
+    }
+
+    // Clear a visit off "still to collect" WITHOUT recording an amount.
+    //
+    // Two real cases: nothing was collected and nothing is coming, or payment was taken but never
+    // written into the sheet. Entering 0 would be wrong for both — 0 means "collected nothing",
+    // and in the paid-but-unrecorded case it would understate real revenue. Closed visits are
+    // reported separately, never inside the collected total.
+    //
+    // The reason is captured as a note so a closed row can still be read months later.
+    // NOTE: named closeOutRecycling, NOT closeRecycling — closeRecycling() already exists and
+    // closes the MODAL. Reusing that name silently overrides it and breaks the ✕ button.
+    async function closeOutRecycling(alertId) {
+      const why = prompt('Close this visit without recording an amount.\n\nOptional note (e.g. "paid, never recorded" or "nothing collected"):', '');
+      if (why === null) return;   // cancelled — distinct from an empty note, which is allowed
+      _recyBusy[alertId] = true; renderRecycling();
+      try {
+        const res = await edgeFunctionCall('crewlogic-recycling', {
+          action: 'closeVisit', franchiseID: currentUser.franchiseID,
+          alertId, note: String(why || '').trim() || null
+        });
+        if (!res || !res.success) throw new Error((res && res.error) || 'close failed');
+      } catch (e) {
+        alert('Could not close: ' + (e && e.message ? e.message : 'unknown error'));
       }
       delete _recyBusy[alertId];
       await loadRecycling();
