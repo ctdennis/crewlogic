@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.60.0 | 2026-07-21">
+  <meta name="crewlogic-version" content="v5.61.0 | 2026-07-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4643,6 +4643,39 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // a sub-8m delivery to Zions and both were invisible, and three split visits were hidden
     // entirely because both halves fell under the threshold while the true visit did not.
     let _recyIncludeShort = true;
+    let _recyFrom = '', _recyTo = '';      // YYYY-MM-DD in the FRANCHISE's local calendar; '' = no bound
+
+    // Convert a franchise-LOCAL calendar day into the exact UTC instant that day starts or ends.
+    //
+    // MUST be timezone-aware, not browser-local: a report run from another zone would otherwise shift
+    // every boundary, and visits late on the last day of a range would fall outside it. Two passes
+    // because the offset itself depends on the instant (DST) — the first pass gets an approximate
+    // instant, the second corrects using the offset actually in force there.
+    function _recyDayBoundIso(ymd, endOfDay) {
+      if (!ymd) return null;
+      const p = String(ymd).split('-').map(Number);
+      if (p.length !== 3 || p.some(isNaN)) return null;
+      const tz = (typeof mjFranchiseTz === 'function') ? mjFranchiseTz() : 'America/New_York';
+      // Whole seconds only. formatToParts does NOT report milliseconds, so carrying .999 into the
+      // offset arithmetic loses it and pushes the end-of-day bound ~1s into the NEXT day — caught
+      // by the boundary tests. Solve at second precision, add the millisecond tail at the end.
+      const want = Date.UTC(p[0], p[1] - 1, p[2], endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0);
+      let guess = want;
+      for (let i = 0; i < 2; i++) {
+        let asLocal;
+        try {
+          const f = new Intl.DateTimeFormat('en-US', {
+            timeZone: tz, hour12: false, year: 'numeric', month: '2-digit',
+            day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
+          }).formatToParts(new Date(guess));
+          const g = t => Number((f.find(x => x.type === t) || {}).value);
+          let hh = g('hour'); if (hh === 24) hh = 0;   // some engines render midnight as 24
+          asLocal = Date.UTC(g('year'), g('month') - 1, g('day'), hh, g('minute'), g('second'));
+        } catch (e) { return new Date(want).toISOString(); }
+        guess = guess - (asLocal - want);
+      }
+      return new Date(guess + (endOfDay ? 999 : 0)).toISOString();
+    }
     let _recyGeofence = '';                // '' = every linked recycling facility
     let _recyGrain = 'month';
     let _recyBusy = {};                    // alertId -> true while its row is saving
@@ -4652,6 +4685,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!m) return;
       m.style.display = 'flex';
       _recyFilter = 'outstanding'; _recyGeofence = ''; _recyGrain = 'month'; _recyIncludeShort = true;
+      _recyFrom = ''; _recyTo = '';
       await loadRecycling();
     }
     function closeRecycling() { const m = document.getElementById('recyclingModal'); if (m) m.style.display = 'none'; }
@@ -4665,13 +4699,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!body) return;
       if (!silent) body.innerHTML = '<div style="color:var(--text-muted);font-size:14px;">Loading…</div>';
       try {
+        // One range, applied to BOTH calls — the headline cards, the chart and the row list must
+        // never describe different spans of time.
+        const _rFrom = _recyDayBoundIso(_recyFrom, false);
+        const _rTo   = _recyDayBoundIso(_recyTo, true);
         const [list, sum] = await Promise.all([
-          edgeFunctionCall('crewlogic-recycling', { action: 'listVisits', franchiseID: currentUser.franchiseID, status: 'all', includeShort: _recyIncludeShort }),
+          edgeFunctionCall('crewlogic-recycling', { action: 'listVisits', franchiseID: currentUser.franchiseID, status: 'all', includeShort: _recyIncludeShort, from: _rFrom, to: _rTo }),
           // geofenceId scopes the headline cards + over-time chart to the selected facility.
           // listVisits stays UNSCOPED: the facility <select> is built from _recyRows, so scoping
           // the fetch would leave the dropdown holding only the facility already chosen and there
           // would be no way to pick a different one, or get back to All.
-          edgeFunctionCall('crewlogic-recycling', { action: 'summary', franchiseID: currentUser.franchiseID, grain: _recyGrain, includeShort: _recyIncludeShort, geofenceId: _recyGeofence || '' })
+          edgeFunctionCall('crewlogic-recycling', { action: 'summary', franchiseID: currentUser.franchiseID, grain: _recyGrain, includeShort: _recyIncludeShort, geofenceId: _recyGeofence || '', from: _rFrom, to: _rTo })
         ]);
         // No linked recycling facility is a SETUP state, not an empty result — say which, or the
         // owner goes hunting for missing visits that were never going to be there.
@@ -4752,6 +4790,38 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return out.length ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">' + out.join('') + '</div>' : '';
     }
 
+    // null = leave that end alone, so each input can be changed independently.
+    async function setRecyRange(from, to) {
+      if (from !== null) _recyFrom = String(from || '');
+      if (to !== null) _recyTo = String(to || '');
+      // A backwards range returns nothing and reads as "no data" rather than "bad input" — swap it.
+      if (_recyFrom && _recyTo && _recyFrom > _recyTo) { const t = _recyFrom; _recyFrom = _recyTo; _recyTo = t; }
+      await loadRecycling(true);
+    }
+
+    // Presets computed in the FRANCHISE's calendar, not the browser's — near midnight or from
+    // another zone, "this month" must mean the franchise's month.
+    async function setRecyPreset(which) {
+      const tz = (typeof mjFranchiseTz === 'function') ? mjFranchiseTz() : 'America/New_York';
+      let y, m, d;
+      try {
+        const f = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
+          .formatToParts(new Date());
+        const g = t => Number((f.find(x => x.type === t) || {}).value);
+        y = g('year'); m = g('month'); d = g('day');
+      } catch (e) { const n = new Date(); y = n.getFullYear(); m = n.getMonth() + 1; d = n.getDate(); }
+      const pad = n => String(n).padStart(2, '0');
+      const lastDay = (yy, mm) => new Date(Date.UTC(yy, mm, 0)).getUTCDate();   // mm is 1-based
+      if (which === 'all') { _recyFrom = ''; _recyTo = ''; }
+      else if (which === 'tm') { _recyFrom = y + '-' + pad(m) + '-01'; _recyTo = y + '-' + pad(m) + '-' + pad(d); }
+      else if (which === 'lm') {
+        const ly = m === 1 ? y - 1 : y, lm = m === 1 ? 12 : m - 1;
+        _recyFrom = ly + '-' + pad(lm) + '-01';
+        _recyTo = ly + '-' + pad(lm) + '-' + pad(lastDay(ly, lm));
+      } else if (which === 'ytd') { _recyFrom = y + '-01-01'; _recyTo = y + '-' + pad(m) + '-' + pad(d); }
+      await loadRecycling(true);
+    }
+
     async function toggleRecyShort() { _recyIncludeShort = !_recyIncludeShort; await loadRecycling(); }
     function setRecyFilter(f) { _recyFilter = f; renderRecycling(); }
     // Refetches rather than just re-filtering the rows: the headline cards and the over-time chart
@@ -4768,7 +4838,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // changing either control.
         const sum = await edgeFunctionCall('crewlogic-recycling', {
           action: 'summary', franchiseID: currentUser.franchiseID, grain: g,
-          includeShort: _recyIncludeShort, geofenceId: _recyGeofence || ''
+          includeShort: _recyIncludeShort, geofenceId: _recyGeofence || '',
+          from: _recyDayBoundIso(_recyFrom, false), to: _recyDayBoundIso(_recyTo, true)
         });
         if (sum && sum.success) _recySummary = sum;
       } catch (e) { /* keep the previous summary rather than blanking the panel */ }
@@ -4835,6 +4906,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + '<div style="font-size:10.5px;color:var(--text-muted);margin-top:4px;">Short stops are shown because a brief stop by a different truck is still a real delivery. Hiding them gives cleaner average durations.</div>'
           + '</div>';
       }
+
+      // ── Date range ──
+      // Separate from the day/week/month/year control below, which sets the CHART's bucket size,
+      // not what is included. This bounds the whole screen: cards, chart and rows alike.
+      const _pill = (label, on, oc) => '<button onclick="' + oc + '" style="padding:5px 10px;border-radius:7px;font-size:11.5px;font-weight:700;cursor:pointer;border:1px solid ' + (on ? 'var(--accent-green)' : 'var(--border)') + ';background:' + (on ? 'var(--accent-green)' : 'var(--bg-input)') + ';color:' + (on ? 'var(--accent-text)' : 'var(--text-secondary)') + ';">' + label + '</button>';
+      const _noRange = !_recyFrom && !_recyTo;
+      html += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">'
+        + '<span style="font-size:11.5px;color:var(--text-muted);">Dates</span>'
+        + '<input type="date" value="' + _hEsc(_recyFrom) + '" onchange="setRecyRange(this.value, null)" title="From (inclusive)" style="font-size:12px;padding:5px 7px;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:7px;color-scheme:dark;">'
+        + '<span style="font-size:11.5px;color:var(--text-muted);">to</span>'
+        + '<input type="date" value="' + _hEsc(_recyTo) + '" onchange="setRecyRange(null, this.value)" title="To (inclusive — the whole day counts)" style="font-size:12px;padding:5px 7px;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:7px;color-scheme:dark;">'
+        + _pill('All time', _noRange, "setRecyPreset('all')")
+        + _pill('This month', false, "setRecyPreset('tm')")
+        + _pill('Last month', false, "setRecyPreset('lm')")
+        + _pill('YTD', false, "setRecyPreset('ytd')")
+        + '</div>';
 
       const facs = [...new Set(_recyRows.map(r => r.facilityName))].sort();
       if (facs.length > 1) {
