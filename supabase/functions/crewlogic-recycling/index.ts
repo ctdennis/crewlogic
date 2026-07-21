@@ -145,8 +145,14 @@ Deno.serve(async (req: Request) => {
         .in("geofence_id", geofenceIds)
         .order("created_at", { ascending: false })
         .range(from, to);
-      if (fromIso) q = q.gte("created_at", fromIso);
-      if (toIso) q = q.lte("created_at", toIso);
+      // Range filters on START_TIME, not created_at. created_at is when the ROW was written, and
+      // 190 of #90's 2,019 exit rows drift more than 5 minutes from the actual visit — the live
+      // webhook writes ~40s late, and the backfill later. Filtering on created_at would bucket
+      // those visits on the wrong day, and near a month boundary in the wrong month, which is
+      // exactly what a date-range report must not do. start_time is never null on these rows
+      // (verified prod 2026-07-21: 0 of 2,019).
+      if (fromIso) q = q.gte("start_time", fromIso);
+      if (toIso) q = q.lte("start_time", toIso);
       return q;
     });
 
