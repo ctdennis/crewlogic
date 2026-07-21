@@ -139,9 +139,11 @@ interface MotiveV3Entry {
 function v3StateToStatus(s?: string): string | null {
   const v = String(s || "").toLowerCase();
   if (!v) return null;
-  // "mov" not "move" — v3 sends "moving", which does NOT contain the substring "move".
+  // Match on the STEM, not the dictionary word: v3 sends gerunds. "moving" does not contain
+  // "move", and "idling" does not contain "idle" — both branches were dead until this was caught
+  // by reading the live output rather than trusting the code.
   if (v.includes("mov") || v.includes("driv")) return "breadcrumb";
-  if (v.includes("idle")) return "engine_idle";
+  if (v.includes("idl")) return "engine_idle";
   if (v === "on" || v.includes("ignition_on")) return "ignition_on";
   if (v === "off" || v.includes("stop") || v.includes("park")) return "engine_stop";
   return v;
