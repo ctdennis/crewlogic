@@ -60,8 +60,13 @@ Left in place deliberately; none of it is visible to a tester and removing it me
 - Tables `sign_rewards` (incl. `promovault_request` / `promovault_response` /
   `promovault_reward_id` / `reward_link` / `error_message`) and `sign_credits.consumed_by_reward`.
 
-With the frontend call sites gone, `issueReward` has no caller. **Decide separately** whether to
-strip it from `crewlogic-ai` and drop the secret — that is a backend cleanup, not a visibility fix.
+With the frontend call sites gone, `issueReward` has no caller.
+
+**DECIDED 2026-07-22: leave all of it in place, including the `PROMOVAULT_API_KEY` secret.** Owner:
+*"stop asking me to sunset the promo vault api key. Leave it there, we will pick it up again and it
+harms nothing having it resting there for now."* The feature is coming back, so tearing the backend
+out only creates work to rebuild it. Do not re-propose removing the secret, the `issueReward`
+action, or the `sign_rewards` columns.
 
 ## 4. Where this is going instead
 
