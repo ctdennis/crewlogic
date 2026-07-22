@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.65.0 | 2026-07-22">
+  <meta name="crewlogic-version" content="v5.65.1 | 2026-07-22">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1587,7 +1587,7 @@
             <input type="date" id="trucksJobDate" onchange="setTrucksJobDate(this.value)" style="font-size:13px;padding:6px 8px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);color-scheme:dark;">
             <button onclick="shiftTrucksJobDay(1)" title="Next day" style="font-size:13px;padding:7px 11px;background:var(--btn-surface,#34485d);color:var(--text-primary,#eef4fa);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:700;">▶</button>
             <span id="trucksDayRel" style="font-size:12px;color:var(--text-muted,#6e8194);font-weight:600;"></span>
-            <button id="trucksLookaheadBtn" onclick="toggleTrucksLookahead()" title="Show jobs for the next 3 days from the selected day, as white dots" style="font-size:12px;padding:7px 12px;background:var(--bg-input,#1e2f40);color:var(--text-muted,#6e8194);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;white-space:nowrap;">◌ +3 days</button>
+            <button id="trucksLookaheadBtn" onclick="toggleTrucksLookahead()" title="Show jobs for the next 3 days from the selected day, as magenta dots" style="font-size:12px;padding:7px 12px;background:var(--bg-input,#1e2f40);color:var(--text-muted,#6e8194);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;white-space:nowrap;">◌ +3 days</button>
           </div>
           <button id="trucksRefreshBtn" onclick="showTrucks()" style="font-size:13px;padding:7px 16px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;">🔄 Refresh</button>
         </div>
@@ -1596,7 +1596,7 @@
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:14px;border-radius:50%;flex:0 0 auto;background:#00E785;"></span> Truck · live</span>
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:14px;border-radius:50%;flex:0 0 auto;background:#6e8194;"></span> Truck · last report &gt;1h ago</span>
           <span id="jobsLegendRoutes" style="display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap;"></span>
-          <span id="lookaheadLegend" style="display:none;align-items:center;gap:6px;"><span style="width:12px;height:12px;border-radius:50%;flex:0 0 auto;background:#fff;border:2px solid #fff;box-shadow:0 0 0 1.5px rgba(0,0,0,.9);"></span> Next 3 days (<span id="lookaheadLegendCount">0</span>)</span>
+          <span id="lookaheadLegend" style="display:none;align-items:center;gap:6px;"><span style="width:12px;height:12px;border-radius:50%;flex:0 0 auto;background:#ff2bd6;border:2px solid #fff;box-shadow:0 0 0 1.5px rgba(0,0,0,.9);"></span> Next 3 days (<span id="lookaheadLegendCount">0</span>)</span>
         </div>
         <div id="trucksList" style="margin-top:14px;display:flex;flex-direction:column;gap:8px;"></div>
       </div>
@@ -9552,7 +9552,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       loadJobMarkers(); // reload the job overlay for the selected day; trucks stay live
       if (_trucksLookahead) loadLookaheadDots(); // shift the +3-day look-ahead window too
     }
-    // Look-ahead: white outlined dots for OPEN jobs in the next 3 days (selected day +1..+3), hoverable.
+    // Look-ahead: magenta dots for OPEN jobs in the next 3 days (selected day +1..+3), hoverable.
     function _lookaheadDayLabel(offset) {
       const d = new Date(); d.setDate(d.getDate() + offset);
       return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
@@ -9615,14 +9615,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           total++;
           const icon = L.divIcon({
             className: 'job-lookahead-dot',
-            // White core + DARK OUTER HALO, deliberately not a new hue. No single colour survives
-            // satellite imagery — anything picked sits on dark canopy AND bright rooftops AND gray
-            // asphalt somewhere in the same frame. What makes a marker readable on aerial is the
-            // light/dark edge, so the zero-blur box-shadow adds a guaranteed outline for free (no
-            // extra DOM). The old #00E785 ring also collided with the live-truck dot, which is the
-            // same green. Keeps these visually quieter than today's jobs, which was the original
-            // intent ("faint gray dots").
-            html: '<div style="width:15px;height:15px;border-radius:50%;background:#fff;border:2.5px solid #fff;box-shadow:0 0 0 1.5px rgba(0,0,0,.9), 0 1px 3px rgba(0,0,0,.5);"></div>',
+            // MAGENTA core + white ring + dark outer halo. Magenta is the one hue absent from both
+            // the app palette and from aerial imagery — there is no natural magenta, so it cannot
+            // be lost in vegetation, asphalt or rooftops the way the old #00E785 green was (which
+            // also collided with the live-truck dot, the same green).
+            //
+            // The two rings are what make it work on satellite, not the hue alone: no single colour
+            // survives every background in one frame, so the white ring separates it from dark
+            // canopy and the zero-blur box-shadow adds a dark edge against bright roofs. Free — no
+            // extra DOM.
+            html: '<div style="width:15px;height:15px;border-radius:50%;background:#ff2bd6;border:2.5px solid #fff;box-shadow:0 0 0 1.5px rgba(0,0,0,.9), 0 1px 3px rgba(0,0,0,.5);"></div>',
             iconSize: [15, 15], iconAnchor: [7.5, 7.5]
           });
           const route = j.route ? ((String(j.route).match(/\(([^)]+)\)/) || [])[1] || String(j.route).replace(/\s*\(.*\)\s*/, '')).trim() : '';
@@ -10995,7 +10997,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<input type="date" id="dashTrucksJobDate" onchange="setTrucksJobDate(this.value)" style="font-size:13px;padding:5px 8px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);color-scheme:dark;">'
         +   '<button onclick="shiftTrucksJobDay(1)" title="Next day" style="font-size:13px;padding:6px 11px;background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm);cursor:pointer;font-weight:700;">▶</button>'
         +   '<span id="dashTrucksDayRel" style="font-size:12px;color:var(--text-muted);font-weight:600;"></span>'
-        +   '<button id="dashTrucksLookaheadBtn" onclick="toggleTrucksLookahead()" title="Show jobs for the next 3 days from the selected day, as white dots" style="font-size:12px;padding:6px 12px;background:var(--bg-input,#1e2f40);color:var(--text-muted);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;white-space:nowrap;">◌ +3 days</button>'
+        +   '<button id="dashTrucksLookaheadBtn" onclick="toggleTrucksLookahead()" title="Show jobs for the next 3 days from the selected day, as magenta dots" style="font-size:12px;padding:6px 12px;background:var(--bg-input,#1e2f40);color:var(--text-muted);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;white-space:nowrap;">◌ +3 days</button>'
         +   '<button onclick="showTrucks()" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🔄 Refresh</button>'
         +   '<button id="dashDispBtn" onclick="dashFindDisposal()" title="Plan a dump: tap a truck, then the destination job" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🗑️ Find disposal</button>'
         +   '<button onclick="dashGeneratePlan()" title="Generate the AI Job Plan for the selected day" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">📋 Generate plan</button>'
