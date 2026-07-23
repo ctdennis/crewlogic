@@ -1,6 +1,8 @@
 # Job Mirror — Vonigo Outage DR (FW-58)
 
-**Status:** Design approved 2026-07-23 (owner). Next gate: migration `0067` + steady-state sync. Backfill run is BLOCKED until Vonigo recovers (Vonigo is the data source). Tracked as **FW-58** in `.HUB/Hub.md`.
+> **⚠️ SUPERSEDED 2026-07-23 — DO NOT BUILD THE STANDALONE TABLE BELOW.** Discovery mid-design: an Owner-approved (2026-07-19) **canonical job model already exists and is migrated** — `jobs` + `job_appointments` + `job_crew` + `external_refs` + `customers` + `routes` (migrations 0052-0055), built CRM-agnostic *specifically to map onto Vonigo* ("adds a CRM = rows not columns"; contract `docs/contract-jobs-schema.md`). The Vonigo outage mirror is therefore the **Vonigo read-only adapter into that model**, NOT a new table. `external_refs` already provides the `(entity_type, provider, external_id)` idempotency key and a `last_synced_at` staleness field. The standalone `job_mirror`/`jobs` schema and migration `0067` below are discarded (0067 removed, never applied). The columns/decisions here (phone/email, notes role-gating, retention, cancellation/reschedule handling) still inform the adapter, but the *container* is the canonical model. Redirection pending Owner path choice; a Vonigo-adapter contract will replace this doc.
+
+**Status:** Design SUPERSEDED — see banner above. Tracked as **FW-58** in `.HUB/Hub.md`. Backfill still BLOCKED until Vonigo recovers regardless of path.
 
 ## Purpose
 
