@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.73.0 | 2026-07-23">
+  <meta name="crewlogic-version" content="v5.74.0 | 2026-07-23">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9077,13 +9077,26 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       });
     }
 
-    async function renderBackupSchedule() {
+    // Entry point (nav). Resets the filter state to defaults, then loads.
+    // The actual fetch lives in _bsLoad() so the date pickers can re-fetch (v5.74.0).
+    function renderBackupSchedule() {
+      const toolsEl = document.getElementById('backupScheduleTools');
+      if (toolsEl) toolsEl.innerHTML = '';
+      _bsFrom = _bsDefaultFrom();
+      _bsTo = _bsDefaultTo();
+      _bsRoute = '';
+      _bsText = '';
+      _bsLoad();
+    }
+
+    // Fetch the window [_bsFrom .. _bsTo] from crewlogic-jobs and re-render.
+    // Called on first open AND on any date-picker change (re-fetch). Preserves the
+    // tools bar / picker values across a reload because they derive from module vars.
+    async function _bsLoad() {
       const listEl = document.getElementById('backupScheduleList');
       const bannerEl = document.getElementById('backupScheduleBanner');
-      const toolsEl = document.getElementById('backupScheduleTools');
       if (!listEl) return;
-      bannerEl.innerHTML = '';
-      if (toolsEl) toolsEl.innerHTML = '';
+      if (bannerEl) bannerEl.innerHTML = '';
       listEl.innerHTML = '<div class="estimates-empty">Loading your schedule…</div>';
 
       // Full login required — the dev sign-in bypass has no Supabase session.
@@ -9094,11 +9107,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         return;
       }
 
-      // Window: today-1 .. today+7 as local calendar dates (YYYY-MM-DD).
-      const _ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-      const _from = new Date(); _from.setDate(_from.getDate() - 1);
-      const _to = new Date(); _to.setDate(_to.getDate() + 7);
-      const dateFrom = _ymd(_from), dateTo = _ymd(_to);
+      // Window comes from the From/To pickers (module vars), defaulting to today-1 .. today+7.
+      const dateFrom = _bsFrom || _bsDefaultFrom();
+      const dateTo = _bsTo || _bsDefaultTo();
 
       let data;
       try {
@@ -9110,26 +9121,28 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         data = await res.json();
       } catch (e) {
         console.error('Backup Schedule fetch failed:', e);
-        bannerEl.innerHTML = '';
+        if (bannerEl) bannerEl.innerHTML = '';
         listEl.innerHTML = '<div class="estimates-empty">Couldn’t load your backup schedule right now. Check your connection and try again.</div>';
         return;
       }
 
       if (!data || data.success !== true) {
         console.error('Backup Schedule returned non-success:', data);
-        bannerEl.innerHTML = '';
+        if (bannerEl) bannerEl.innerHTML = '';
         listEl.innerHTML = '<div class="estimates-empty">Couldn’t load your backup schedule right now. Please try again shortly.</div>';
         return;
       }
 
       // ---- Health banner ----
       const health = data.health;
-      if (health && health.isUp === true) {
-        bannerEl.innerHTML = '<div style="padding:11px 14px;border-radius:var(--radius-sm);background:rgba(0,231,133,0.12);border:1px solid var(--accent-green);color:var(--text-primary);font-size:13px;font-weight:600;">✅ Vonigo is live — this is a backup copy' + (health.lastChecked ? ' (last checked ' + _bsEsc(_bsTimeOnly(health.lastChecked)) + ')' : '') + '</div>';
-      } else if (health && health.isUp === false) {
-        bannerEl.innerHTML = '<div style="padding:11px 14px;border-radius:var(--radius-sm);background:rgba(251,146,60,0.14);border:1px solid var(--accent-orange,#fb923c);color:var(--text-primary);font-size:13px;font-weight:600;">⚠️ Vonigo is DOWN — showing your last-known schedule' + (health.lastChanged ? ' (as of ' + _bsEsc(_bsDateTime(health.lastChanged)) + ')' : '') + '. Route from here and collect manually.</div>';
-      } else {
-        bannerEl.innerHTML = '<div style="padding:11px 14px;border-radius:var(--radius-sm);background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-size:13px;font-weight:600;">Backup copy of your Vonigo schedule.</div>';
+      if (bannerEl) {
+        if (health && health.isUp === true) {
+          bannerEl.innerHTML = '<div style="padding:11px 14px;border-radius:var(--radius-sm);background:rgba(0,231,133,0.12);border:1px solid var(--accent-green);color:var(--text-primary);font-size:13px;font-weight:600;">✅ Vonigo is live — this is a backup copy' + (health.lastChecked ? ' (last checked ' + _bsEsc(_bsTimeOnly(health.lastChecked)) + ')' : '') + '</div>';
+        } else if (health && health.isUp === false) {
+          bannerEl.innerHTML = '<div style="padding:11px 14px;border-radius:var(--radius-sm);background:rgba(251,146,60,0.14);border:1px solid var(--accent-orange,#fb923c);color:var(--text-primary);font-size:13px;font-weight:600;">⚠️ Vonigo is DOWN — showing your last-known schedule' + (health.lastChanged ? ' (as of ' + _bsEsc(_bsDateTime(health.lastChanged)) + ')' : '') + '. Route from here and collect manually.</div>';
+        } else {
+          bannerEl.innerHTML = '<div style="padding:11px 14px;border-radius:var(--radius-sm);background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-size:13px;font-weight:600;">Backup copy of your Vonigo schedule.</div>';
+        }
       }
 
       // ---- Jobs ----
@@ -9142,13 +9155,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _bsSelected = new Set();
       appts.forEach(a => { if (a && a.id != null) _bsById[String(a.id)] = a; });
 
+      // Route dropdown depends on the fetched set — if the selected route is no
+      // longer present after a re-fetch, fall back to "All routes".
+      const routeSet = {};
+      appts.forEach(a => { const rn = (a.snapshot || {}).route_name; if (rn) routeSet[String(rn)] = true; });
+      if (_bsRoute && !routeSet[_bsRoute]) _bsRoute = '';
+
+      // Always render the tools bar (keeps the date pickers usable even on an empty window).
+      _bsRenderTools();
       if (appts.length === 0) {
         listEl.innerHTML = '<div class="estimates-empty">No jobs in this window.</div>';
         return;
       }
-
-      _bsRenderTools();
-      _bsRenderList(appts);
+      _bsRenderList(_bsCurrentFiltered());
     }
 
     // ===== Backup Schedule enhancements (v5.73.0, additive): search, detail card, CSV export, bulk crew email =====
@@ -9156,6 +9175,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _bsHealth = null;    // last-loaded Vonigo health payload
     let _bsById = {};        // String(id) -> appointment
     let _bsSelected = new Set(); // selected appointment ids for the bulk-email action
+    // Filter state (v5.74.0). Date range = server-side fetch window; route + text = client-side.
+    let _bsFrom = '';        // YYYY-MM-DD, fetch window start (From picker)
+    let _bsTo = '';          // YYYY-MM-DD, fetch window end (To picker)
+    let _bsRoute = '';       // selected snapshot.route_name ('' = All routes)
+    let _bsText = '';        // free-text filter (customer name + address only)
+
+    function _bsYmd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+    function _bsDefaultFrom() { const d = new Date(); d.setDate(d.getDate() - 1); return _bsYmd(d); }
+    function _bsDefaultTo() { const d = new Date(); d.setDate(d.getDate() + 7); return _bsYmd(d); }
 
     function _bsCust(a) { const s = (a.snapshot || {}).customer_display; return (s && s.name) ? String(s.name) : ''; }
     function _bsPhone(a) { const s = (a.snapshot || {}).customer_display || {}; return s.phone ? String(s.phone) : ''; }
@@ -9173,30 +9201,71 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       cancelled: { t: 'Cancelled', c: 'var(--accent-orange,#fb923c)' }
     };
 
-    // Case-insensitive substring match across the fields the owner would search on.
+    // Case-insensitive substring match on customer NAME + ADDRESS only (v5.74.0).
+    // Route has its own dropdown; date has the From/To pickers — so they're out of the text match.
     function _bsMatch(a, q) {
       if (!q) return true;
-      const snap = a.snapshot || {}, job = a.job || {};
-      const hay = [
-        _bsCust(a), a.scheduled_date, _bsDayHeader(a.scheduled_date), snap.route_name,
-        _bsMinutesToTime(a.start_minutes), _bsAddrFull(a), job.job_number
-      ].map(x => String(x == null ? '' : x).toLowerCase()).join('  |  ');
+      const hay = [_bsCust(a), _bsAddrFull(a)]
+        .map(x => String(x == null ? '' : x).toLowerCase()).join('  |  ');
       return hay.indexOf(q.toLowerCase()) >= 0;
     }
+    // AND-combine the route dropdown and the name/address text box against _bsData.
+    // (The date range is applied server-side at fetch time, so _bsData already reflects it.)
     function _bsCurrentFiltered() {
-      const inp = document.getElementById('bsSearchInput');
-      const q = inp ? inp.value.trim() : '';
-      return _bsData.filter(a => _bsMatch(a, q));
+      const q = (_bsText || '').trim();
+      return _bsData.filter(a => {
+        if (_bsRoute) { const rn = String((a.snapshot || {}).route_name || ''); if (rn !== _bsRoute) return false; }
+        return _bsMatch(a, q);
+      });
     }
     function _bsApplyFilter() { _bsRenderList(_bsCurrentFiltered()); }
+
+    // Text box → update state + re-filter (client-side, no re-fetch).
+    function _bsOnText(v) { _bsText = v; _bsApplyFilter(); }
+    // Route dropdown → update state + re-filter (client-side, no re-fetch).
+    function _bsOnRoute(v) { _bsRoute = v || ''; _bsApplyFilter(); }
+    // From/To pickers → re-fetch the window. Guard: From must not be after To.
+    function _bsOnDateChange() {
+      const fEl = document.getElementById('bsDateFrom');
+      const tEl = document.getElementById('bsDateTo');
+      const fv = (fEl && fEl.value) ? fEl.value : _bsDefaultFrom();
+      const tv = (tEl && tEl.value) ? tEl.value : _bsDefaultTo();
+      const note = document.getElementById('bsDateNote');
+      if (fv > tv) { // YYYY-MM-DD sorts chronologically
+        if (note) { note.textContent = '“From” is after “To”.'; note.style.display = ''; }
+        return;
+      }
+      if (note) { note.textContent = ''; note.style.display = 'none'; }
+      _bsFrom = fv; _bsTo = tv;
+      _bsLoad();
+    }
 
     function _bsRenderTools() {
       const el = document.getElementById('backupScheduleTools');
       if (!el) return;
       const defEmail = _bsEsc((typeof currentUser !== 'undefined' && currentUser && currentUser.email) || '');
+      const inputStyle = 'padding:8px 10px;background:var(--bg-input,#253545);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;';
+      const lblStyle = 'font-size:12px;color:var(--text-muted);';
+      // Distinct routes from the currently-loaded set, sorted (rebuilt on every load).
+      const routeSet = {};
+      _bsData.forEach(a => { const rn = (a.snapshot || {}).route_name; if (rn) routeSet[String(rn)] = true; });
+      const routes = Object.keys(routeSet).sort();
       let h = '';
+      // Row 1 — date range (re-fetches) + route dropdown (client-side filter).
       h += '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">';
-      h += '<input id="bsSearchInput" type="text" oninput="_bsApplyFilter()" placeholder="Search name, date, route, address…" style="flex:1 1 200px;min-width:150px;padding:8px 10px;background:var(--bg-input,#253545);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;">';
+      h += '<label style="' + lblStyle + '">From</label>';
+      h += '<input id="bsDateFrom" type="date" value="' + _bsEsc(_bsFrom || _bsDefaultFrom()) + '" onchange="_bsOnDateChange()" style="' + inputStyle + '">';
+      h += '<label style="' + lblStyle + '">To</label>';
+      h += '<input id="bsDateTo" type="date" value="' + _bsEsc(_bsTo || _bsDefaultTo()) + '" onchange="_bsOnDateChange()" style="' + inputStyle + '">';
+      h += '<span id="bsDateNote" style="display:none;font-size:12px;color:#ff7676;font-weight:600;"></span>';
+      h += '<select id="bsRouteSel" onchange="_bsOnRoute(this.value)" title="Filter by route" style="' + inputStyle + 'flex:1 1 140px;min-width:130px;">';
+      h += '<option value=""' + (_bsRoute ? '' : ' selected') + '>All routes</option>';
+      routes.forEach(r => { h += '<option value="' + _bsEsc(r) + '"' + (_bsRoute === r ? ' selected' : '') + '>' + _bsEsc(r) + '</option>'; });
+      h += '</select>';
+      h += '</div>';
+      // Row 2 — name/address search + CSV download.
+      h += '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">';
+      h += '<input id="bsSearchInput" type="text" value="' + _bsEsc(_bsText || '') + '" oninput="_bsOnText(this.value)" placeholder="Search name or address…" style="flex:1 1 200px;min-width:150px;' + inputStyle + '">';
       h += '<button onclick="_bsDownloadCsv()" title="Download the current list as a spreadsheet (CSV)" style="flex:0 0 auto;padding:8px 12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;">⬇ Download</button>';
       h += '</div>';
       h += '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">';
