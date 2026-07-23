@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.80.0 | 2026-07-23">
+  <meta name="crewlogic-version" content="v5.81.0 | 2026-07-23">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9098,11 +9098,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (bannerEl) bannerEl.innerHTML = '';
       listEl.innerHTML = '<div class="estimates-empty">Loading your schedule…</div>';
 
-      // Full login required — the dev sign-in bypass has no Supabase session.
-      let sess = null;
-      try { sess = (await supabaseClient.auth.getSession()).data.session; } catch (e) { sess = null; }
-      if (!sess) {
-        listEl.innerHTML = '<div class="estimates-empty">Backup Schedule needs a full login. The dev bypass has no session — sign in with email/Google to view it.</div>';
+      // Auth matches the rest of the app: anon key + the franchise resolved at login (Google users have
+      // no Supabase Auth JWT). Need a resolved franchise to scope the read.
+      const _bsFr = (typeof currentUser !== 'undefined' && currentUser && currentUser.franchiseInternalID) || '';
+      if (!_bsFr) {
+        listEl.innerHTML = '<div class="estimates-empty">Please sign in to view your Backup Schedule.</div>';
         return;
       }
 
@@ -9114,8 +9114,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       try {
         const res = await fetch(SUPABASE_URL + '/functions/v1/crewlogic-jobs', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': EDGE_ANON_KEY, 'Authorization': 'Bearer ' + sess.access_token },
-          body: JSON.stringify({ action: 'list', dateFrom: dateFrom, dateTo: dateTo })
+          headers: { 'Content-Type': 'application/json', 'apikey': EDGE_ANON_KEY, 'Authorization': 'Bearer ' + EDGE_ANON_KEY },
+          body: JSON.stringify({ action: 'list', franchiseInternalID: _bsFr, dateFrom: dateFrom, dateTo: dateTo })
         });
         data = await res.json();
       } catch (e) {

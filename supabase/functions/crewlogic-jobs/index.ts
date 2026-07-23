@@ -1,20 +1,20 @@
-// Supabase Edge Function: crewlogic-jobs (read-only slice) — FW-58 / docs/contract-vonigo-adapter.md §6
+// Supabase Edge Function: crewlogic-jobs (read-only) — FW-58 / docs/contract-vonigo-adapter.md §6
 //
-// The franchise-scoped READ path over the canonical job model. v1 ships only the read actions the DR
-// board needs; native authoring (create/update/transition/cancel) is a separate contract.
+// The franchise-scoped READ path over the canonical job model, for the Backup Schedule (DR) board.
 //
-//   action 'list' — appointments in a date range (the board): { dateFrom, dateTo, status? }
-//   action 'get'  — one job + its appointments:               { jobId }
+//   action 'list' — appointments in a date range (the board): { franchiseInternalID, dateFrom, dateTo, status? }
+//   action 'get'  — one job + its appointments:                { franchiseInternalID, jobId }
 //
-// AUTH: this is customer data. The function runs queries with the CALLER'S JWT, so Row-Level Security
-// (franchise_id = current_franchise_id()) scopes every row to the caller's own franchise — a user can
-// never read another franchise's jobs. Anonymous callers get 401. The client must send the user's
-// access_token (supabaseClient.auth.getSession().access_token) as the Bearer token, NOT the anon key.
+// AUTH MODEL — matches the rest of the app (crewlogic-settings / crewlogic-todays-workorders): the app
+// authenticates most users (Google) with a CUSTOM session that has no Supabase Auth JWT, so it calls
+// edge functions with the anon key and passes the franchise it already resolved at login. This function
+// therefore uses the SERVICE role and scopes every query by the caller-supplied franchiseInternalID.
+// (SEC follow-up, app-wide: verify the franchise server-side once the auth model is unified — same open
+// item as crewlogic-settings/-todays-workorders, which trust the client franchiseID today.)
 //
-// notes_internal (confidential, Vonigo field 200) is intentionally NOT returned in v1.
+// notes_internal (confidential, Vonigo field 200) is intentionally NOT returned.
 //
-// Deploy (DEV):
-//   supabase functions deploy --project-ref bagkimfwmpwjfhfhmsrb crewlogic-jobs --use-api --no-verify-jwt
+// Deploy: supabase functions deploy <ref> crewlogic-jobs --use-api --no-verify-jwt
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -24,26 +24,23 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
-const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') || '';
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-
-// Vonigo up/down state for the DR board banner. service_health is RLS-locked (service-role only), so
-// read it with the service key. Returns { isUp, lastChecked, lastChanged } or null if unknown.
-async function vonigoHealth(): Promise<Record<string, unknown> | null> {
-  try {
-    const svc = createClient(SUPABASE_URL, SERVICE_KEY);
-    const { data } = await svc.from('service_health').select('is_up, last_checked, last_changed').eq('service', 'vonigo').limit(1);
-    const row = data && data[0];
-    return row ? { isUp: row.is_up, lastChecked: row.last_checked, lastChanged: row.last_changed } : null;
-  } catch { return null; }
-}
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
 }
 function str(v: unknown): string { return v == null ? '' : String(v).trim(); }
 
-// Appointment + its job + provider snapshot. RLS on all three tables scopes to the caller's franchise.
+// Vonigo up/down state for the DR board banner (service_health is service-role only).
+async function vonigoHealth(db: ReturnType<typeof createClient>): Promise<Record<string, unknown> | null> {
+  try {
+    const { data } = await db.from('service_health').select('is_up, last_checked, last_changed').eq('service', 'vonigo').limit(1);
+    const row = data && data[0];
+    return row ? { isUp: row.is_up, lastChecked: row.last_checked, lastChanged: row.last_changed } : null;
+  } catch { return null; }
+}
+
+// Appointment + its job + provider snapshot.
 const APPT_SELECT =
   'id, scheduled_date, start_minutes, duration_minutes, status, ' +
   'job:jobs!inner ( id, job_number, status, origin, service_address, service_city, service_state, service_zip, service_lat, service_lng, items_description ), ' +
@@ -53,28 +50,23 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ success: false, error: 'method_not_allowed' }, 405);
 
-  // Run AS the caller so RLS applies. Reject anonymous / anon-key callers (no real user).
-  const authHeader = req.headers.get('Authorization') || '';
-  const asUser = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: authHeader } } });
-  const { data: userData } = await asUser.auth.getUser();
-  if (!userData?.user) return json({ success: false, error: 'unauthorized' }, 401);
-
   const body = await req.json().catch(() => ({} as Record<string, unknown>));
   const action = str(body.action) || 'list';
+  const franchiseInternalID = str(body.franchiseInternalID);
+  if (!franchiseInternalID) return json({ success: false, error: 'franchiseInternalID required' }, 400);
+
+  const db = createClient(SUPABASE_URL, SERVICE_KEY);
 
   try {
     if (action === 'list') {
       const dateFrom = str(body.dateFrom);
       const dateTo = str(body.dateTo);
       if (!dateFrom || !dateTo) return json({ success: false, error: 'dateFrom and dateTo required (YYYY-MM-DD)' }, 400);
-      // Cap the payload so a very wide date range can't bloat the page or silently hit PostgREST's
-      // default 1000-row cut. Fetch LIMIT+1 to detect truncation, return LIMIT with a `truncated` flag
-      // so the client can tell the user to narrow the dates.
-      // Keep the MOST RECENT rows when a range exceeds the cap (order desc), so the latest 500 load and
-      // older jobs are reached by narrowing to an EARLIER window. The client re-groups by day (ascending)
-      // for display, so the on-screen order is unchanged — this only decides WHICH 500 survive the cap.
+      // Cap the payload; keep the MOST RECENT rows (order desc) so older jobs are reached by narrowing
+      // to an earlier window. The client re-groups by day for display, so on-screen order is unchanged.
       const LIMIT = 500;
-      let q = asUser.from('job_appointments').select(APPT_SELECT)
+      let q = db.from('job_appointments').select(APPT_SELECT)
+        .eq('franchise_id', franchiseInternalID)
         .gte('scheduled_date', dateFrom).lte('scheduled_date', dateTo)
         .order('scheduled_date', { ascending: false })
         .limit(LIMIT + 1);
@@ -84,19 +76,19 @@ Deno.serve(async (req: Request) => {
       if (error) throw error;
       const rows = data || [];
       const truncated = rows.length > LIMIT;
-      return json({ success: true, appointments: shape(truncated ? rows.slice(0, LIMIT) : rows), truncated, health: await vonigoHealth() });
+      return json({ success: true, appointments: shape(truncated ? rows.slice(0, LIMIT) : rows), truncated, health: await vonigoHealth(db) });
     }
 
     if (action === 'get') {
       const jobId = str(body.jobId);
       if (!jobId) return json({ success: false, error: 'jobId required' }, 400);
-      const { data: jobRows, error: jErr } = await asUser.from('jobs')
+      const { data: jobRows, error: jErr } = await db.from('jobs')
         .select('id, job_number, status, origin, service_address, service_city, service_state, service_zip, service_lat, service_lng, items_description')
-        .eq('id', jobId).limit(1);
+        .eq('id', jobId).eq('franchise_id', franchiseInternalID).limit(1);
       if (jErr) throw jErr;
       if (!jobRows || !jobRows.length) return json({ success: false, error: 'job_not_found' }, 404);
-      const { data: appts, error: aErr } = await asUser.from('job_appointments').select(APPT_SELECT)
-        .eq('job_id', jobId).order('scheduled_date', { ascending: true });
+      const { data: appts, error: aErr } = await db.from('job_appointments').select(APPT_SELECT)
+        .eq('franchise_id', franchiseInternalID).eq('job_id', jobId).order('scheduled_date', { ascending: true });
       if (aErr) throw aErr;
       return json({ success: true, job: jobRows[0], appointments: shape(appts || []) });
     }
@@ -108,8 +100,7 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-// PostgREST returns the to-one snapshot embed as an object or a 1-element array depending on detection;
-// normalize to a single object so the client shape is stable.
+// PostgREST returns the to-one snapshot embed as an object or a 1-element array; normalize to a single object.
 function shape(rows: Record<string, unknown>[]): Record<string, unknown>[] {
   return rows.map((r) => {
     const snap = r.snapshot;
