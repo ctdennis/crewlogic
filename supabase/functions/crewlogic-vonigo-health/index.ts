@@ -94,7 +94,9 @@ Deno.serve(async (req: Request) => {
       await fetch(SUPABASE_URL + "/functions/v1/crewlogic-notify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject, text }),
+        // Owner's real inbox — the shared notify default (bluecollartechai@gmail.com) is where
+        // signup/feedback go, but the owner wants operational Vonigo alerts here.
+        body: JSON.stringify({ subject, text, to: "charles.dennis@junkluggers.com" }),
       }).catch((e) => console.error("[vonigo-health] notify failed:", (e as Error).message));
     }
 
