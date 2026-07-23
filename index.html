@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.75.0 | 2026-07-23">
+  <meta name="crewlogic-version" content="v5.76.0 | 2026-07-23">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9226,7 +9226,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         return _bsMatch(a, q);
       });
     }
-    function _bsApplyFilter() { _bsRenderList(_bsCurrentFiltered()); }
+    function _bsApplyFilter() { _bsRenderList(_bsCurrentFiltered()); _bsUpdateEmailBtn(); }
 
     // Text box → update state + re-filter (client-side, no re-fetch).
     function _bsOnText(v) { _bsText = v; _bsApplyFilter(); }
@@ -9271,16 +9271,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       routes.forEach(r => { h += '<option value="' + _bsEsc(r) + '"' + (_bsRoute === r ? ' selected' : '') + '>' + _bsEsc(r) + '</option>'; });
       h += '</select>';
       h += '</div>';
-      // Row 2 — name/address search + CSV download.
-      h += '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">';
+      // Row 2 — name/address search + select-all (of the active window).
+      h += '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:8px;">';
       h += '<input id="bsSearchInput" type="text" value="' + _bsEsc(_bsText || '') + '" oninput="_bsOnText(this.value)" placeholder="Search name or address…" style="flex:1 1 200px;min-width:150px;' + inputStyle + '">';
-      h += '<button onclick="_bsDownloadCsv()" title="Download the current list as a spreadsheet (CSV)" style="flex:0 0 auto;padding:8px 12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;">⬇ Download</button>';
+      h += '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;"><input type="checkbox" id="bsSelectAll" onchange="_bsToggleSelectAll(this.checked)" style="width:16px;height:16px;cursor:pointer;"> Select all</label>';
       h += '</div>';
       h += '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">';
       h += '<label style="font-size:12px;color:var(--text-muted);">Send to:</label>';
       h += '<input id="bsEmailTo" type="email" value="' + defEmail + '" placeholder="crew@…" style="flex:1 1 160px;min-width:130px;padding:7px 10px;background:var(--bg-input,#253545);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;">';
       h += '<button id="bsEmailBtn" onclick="_bsEmailSelected()" disabled style="flex:0 0 auto;opacity:0.5;padding:8px 12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm,8px);color:#04371f;font-size:13px;font-weight:700;cursor:pointer;">✉ Email selected</button>';
       h += '<button id="bsTextBtn" onclick="_bsTextSelected()" disabled title="Open your messaging app with the selected jobs pre-filled" style="flex:0 0 auto;opacity:0.5;padding:8px 12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;font-weight:700;cursor:pointer;">💬 Text selected</button>';
+      h += '<button id="bsDownloadBtn" onclick="_bsDownloadCsv()" disabled title="Download the selected jobs as a spreadsheet (CSV)" style="flex:0 0 auto;opacity:0.5;padding:8px 12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;">⬇ Download selected</button>';
       h += '<span id="bsEmailMsg" style="font-size:12px;color:var(--text-muted);"></span>';
       h += '</div>';
       el.innerHTML = h;
@@ -9288,18 +9289,24 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function _bsUpdateEmailBtn() {
       const n = _bsSelected.size;
-      const btn = document.getElementById('bsEmailBtn');
-      if (btn) {
-        btn.disabled = n === 0;
-        btn.style.opacity = n === 0 ? '0.5' : '1';
-        btn.textContent = '✉ Email selected' + (n ? (' (' + n + ')') : '');
+      [['bsEmailBtn', '✉ Email selected'], ['bsTextBtn', '💬 Text selected'], ['bsDownloadBtn', '⬇ Download selected']].forEach(function (pair) {
+        const b = document.getElementById(pair[0]);
+        if (b) { b.disabled = n === 0; b.style.opacity = n === 0 ? '0.5' : '1'; b.textContent = pair[1] + (n ? (' (' + n + ')') : ''); }
+      });
+      // Reflect the select-all box against the ACTIVE (filtered) window.
+      const sa = document.getElementById('bsSelectAll');
+      if (sa) {
+        const filtered = _bsCurrentFiltered();
+        const inSel = filtered.filter(a => _bsSelected.has(String(a.id))).length;
+        sa.checked = filtered.length > 0 && inSel === filtered.length;
+        sa.indeterminate = inSel > 0 && inSel < filtered.length;
       }
-      const tbtn = document.getElementById('bsTextBtn');
-      if (tbtn) {
-        tbtn.disabled = n === 0;
-        tbtn.style.opacity = n === 0 ? '0.5' : '1';
-        tbtn.textContent = '💬 Text selected' + (n ? (' (' + n + ')') : '');
-      }
+    }
+    // Select / clear every appointment in the ACTIVE (filtered) window.
+    function _bsToggleSelectAll(checked) {
+      _bsCurrentFiltered().forEach(a => { const id = String(a.id); if (checked) _bsSelected.add(id); else _bsSelected.delete(id); });
+      _bsRenderList(_bsCurrentFiltered());
+      _bsUpdateEmailBtn();
     }
     function _bsToggleSelect(id, checked) {
       if (checked) _bsSelected.add(String(id)); else _bsSelected.delete(String(id));
@@ -9430,7 +9437,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // ---- CSV export (no external library) ----
     function _bsCsvCell(v) { return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; }
     function _bsDownloadCsv() {
-      const rows = _bsCurrentFiltered();
+      const rows = _bsSelectedSorted();   // selected jobs only (not the whole window)
+      if (rows.length === 0) return;
       const header = ['Date', 'Time', 'Customer', 'Phone', 'Address', 'Route', 'Status', 'Amount', 'Job#'];
       const lines = [header.map(_bsCsvCell).join(',')];
       rows.forEach(a => {
@@ -9452,9 +9460,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // ---- Bulk email selected jobs to the crew ----
-    // Selected jobs bundled as plain text, SORTED by day then time (earliest first). Shared by the
-    // email body and the Text (SMS) body so both carry identical info in the same order.
-    function _bsSelectedBody() {
+    // Selected appointments, SORTED by day then time (earliest first) — the shared basis for the email
+    // body, the SMS body, and the CSV download, so all three carry the same jobs in the same order.
+    function _bsSelectedSorted() {
       const sel = _bsData.filter(a => _bsSelected.has(String(a.id)));
       sel.sort((a, b) => {
         const da = String(a.scheduled_date || ''), db = String(b.scheduled_date || '');
@@ -9463,6 +9471,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const bm = (b.start_minutes == null) ? -1 : b.start_minutes;
         return am - bm;
       });
+      return sel;
+    }
+
+    // Selected jobs bundled as plain text. Shared by the email body and the Text (SMS) body.
+    function _bsSelectedBody() {
+      const sel = _bsSelectedSorted();
       const blocks = sel.map(a => {
         const snap = a.snapshot || {}, job = a.job || {};
         const amount = (snap.import_total !== null && snap.import_total !== undefined && !isNaN(snap.import_total)) ? ('$' + Number(snap.import_total).toFixed(2)) : '—';
