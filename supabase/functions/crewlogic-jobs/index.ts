@@ -67,15 +67,22 @@ Deno.serve(async (req: Request) => {
       const dateFrom = str(body.dateFrom);
       const dateTo = str(body.dateTo);
       if (!dateFrom || !dateTo) return json({ success: false, error: 'dateFrom and dateTo required (YYYY-MM-DD)' }, 400);
+      // Cap the payload so a very wide date range can't bloat the page or silently hit PostgREST's
+      // default 1000-row cut. Fetch LIMIT+1 to detect truncation, return LIMIT with a `truncated` flag
+      // so the client can tell the user to narrow the dates.
+      const LIMIT = 500;
       let q = asUser.from('job_appointments').select(APPT_SELECT)
         .gte('scheduled_date', dateFrom).lte('scheduled_date', dateTo)
         .order('scheduled_date', { ascending: true })
-        .order('start_minutes', { ascending: true, nullsFirst: true });
+        .order('start_minutes', { ascending: true, nullsFirst: true })
+        .limit(LIMIT + 1);
       const statuses = Array.isArray(body.status) ? (body.status as unknown[]).map(String) : null;
       if (statuses && statuses.length) q = q.in('status', statuses);
       const { data, error } = await q;
       if (error) throw error;
-      return json({ success: true, appointments: shape(data || []), health: await vonigoHealth() });
+      const rows = data || [];
+      const truncated = rows.length > LIMIT;
+      return json({ success: true, appointments: shape(truncated ? rows.slice(0, LIMIT) : rows), truncated, health: await vonigoHealth() });
     }
 
     if (action === 'get') {

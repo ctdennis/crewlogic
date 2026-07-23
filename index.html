@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.74.0 | 2026-07-23">
+  <meta name="crewlogic-version" content="v5.75.0 | 2026-07-23">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9151,6 +9151,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // operate on it WITHOUT re-fetching (v5.73.0).
       _bsData = appts;
       _bsHealth = health;
+      _bsTruncated = data.truncated === true;
       _bsById = {};
       _bsSelected = new Set();
       appts.forEach(a => { if (a && a.id != null) _bsById[String(a.id)] = a; });
@@ -9168,6 +9169,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         return;
       }
       _bsRenderList(_bsCurrentFiltered());
+      if (_bsTruncated) {
+        const note = document.createElement('div');
+        note.setAttribute('style', 'margin:10px 0;padding:9px 12px;border-radius:var(--radius-sm,8px);background:rgba(251,146,60,0.12);border:1px solid var(--accent-orange,#fb923c);color:var(--text-primary);font-size:12px;font-weight:600;');
+        note.textContent = 'Showing the first 500 jobs — narrow the date range to see the rest.';
+        listEl.insertBefore(note, listEl.firstChild);
+      }
     }
 
     // ===== Backup Schedule enhancements (v5.73.0, additive): search, detail card, CSV export, bulk crew email =====
@@ -9175,6 +9182,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _bsHealth = null;    // last-loaded Vonigo health payload
     let _bsById = {};        // String(id) -> appointment
     let _bsSelected = new Set(); // selected appointment ids for the bulk-email action
+    let _bsTruncated = false; // true when crewlogic-jobs capped the result (range too wide) — v5.75.0
     // Filter state (v5.74.0). Date range = server-side fetch window; route + text = client-side.
     let _bsFrom = '';        // YYYY-MM-DD, fetch window start (From picker)
     let _bsTo = '';          // YYYY-MM-DD, fetch window end (To picker)
@@ -9272,18 +9280,26 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       h += '<label style="font-size:12px;color:var(--text-muted);">Send to:</label>';
       h += '<input id="bsEmailTo" type="email" value="' + defEmail + '" placeholder="crew@…" style="flex:1 1 160px;min-width:130px;padding:7px 10px;background:var(--bg-input,#253545);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;">';
       h += '<button id="bsEmailBtn" onclick="_bsEmailSelected()" disabled style="flex:0 0 auto;opacity:0.5;padding:8px 12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm,8px);color:#04371f;font-size:13px;font-weight:700;cursor:pointer;">✉ Email selected</button>';
+      h += '<button id="bsTextBtn" onclick="_bsTextSelected()" disabled title="Open your messaging app with the selected jobs pre-filled" style="flex:0 0 auto;opacity:0.5;padding:8px 12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;font-weight:700;cursor:pointer;">💬 Text selected</button>';
       h += '<span id="bsEmailMsg" style="font-size:12px;color:var(--text-muted);"></span>';
       h += '</div>';
       el.innerHTML = h;
       _bsUpdateEmailBtn();
     }
     function _bsUpdateEmailBtn() {
-      const btn = document.getElementById('bsEmailBtn');
-      if (!btn) return;
       const n = _bsSelected.size;
-      btn.disabled = n === 0;
-      btn.style.opacity = n === 0 ? '0.5' : '1';
-      btn.textContent = '✉ Email selected' + (n ? (' (' + n + ')') : '');
+      const btn = document.getElementById('bsEmailBtn');
+      if (btn) {
+        btn.disabled = n === 0;
+        btn.style.opacity = n === 0 ? '0.5' : '1';
+        btn.textContent = '✉ Email selected' + (n ? (' (' + n + ')') : '');
+      }
+      const tbtn = document.getElementById('bsTextBtn');
+      if (tbtn) {
+        tbtn.disabled = n === 0;
+        tbtn.style.opacity = n === 0 ? '0.5' : '1';
+        tbtn.textContent = '💬 Text selected' + (n ? (' (' + n + ')') : '');
+      }
     }
     function _bsToggleSelect(id, checked) {
       if (checked) _bsSelected.add(String(id)); else _bsSelected.delete(String(id));
@@ -9436,17 +9452,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // ---- Bulk email selected jobs to the crew ----
-    async function _bsEmailSelected() {
-      if (_bsSelected.size === 0) return;
-      const toInp = document.getElementById('bsEmailTo');
-      const to = toInp ? toInp.value.trim() : '';
-      const msgEl = document.getElementById('bsEmailMsg');
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
-        if (msgEl) { msgEl.textContent = 'Enter a valid email address.'; msgEl.style.color = '#ff7676'; }
-        return;
-      }
-      // Selected jobs, kept in schedule order.
+    // Selected jobs bundled as plain text, SORTED by day then time (earliest first). Shared by the
+    // email body and the Text (SMS) body so both carry identical info in the same order.
+    function _bsSelectedBody() {
       const sel = _bsData.filter(a => _bsSelected.has(String(a.id)));
+      sel.sort((a, b) => {
+        const da = String(a.scheduled_date || ''), db = String(b.scheduled_date || '');
+        if (da !== db) return da < db ? -1 : 1;
+        const am = (a.start_minutes == null) ? -1 : a.start_minutes;
+        const bm = (b.start_minutes == null) ? -1 : b.start_minutes;
+        return am - bm;
+      });
       const blocks = sel.map(a => {
         const snap = a.snapshot || {}, job = a.job || {};
         const amount = (snap.import_total !== null && snap.import_total !== undefined && !isNaN(snap.import_total)) ? ('$' + Number(snap.import_total).toFixed(2)) : '—';
@@ -9461,8 +9477,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (job.items_description) L.push('Items: ' + job.items_description);
         return L.join('\n');
       });
-      const text = 'Jobs from CrewLogic Backup Schedule:\n\n' + blocks.join('\n\n----------------------------------------\n\n');
-      const subject = 'CrewLogic — ' + sel.length + ' job' + (sel.length === 1 ? '' : 's');
+      return { count: sel.length, text: 'Jobs from CrewLogic Backup Schedule:\n\n' + blocks.join('\n\n----------------------------------------\n\n') };
+    }
+
+    // Open the device's default messaging app with the selected jobs pre-filled (the user picks the
+    // recipient in their app). Same info + order as the email. sms:?&body= works on iOS and Android.
+    function _bsTextSelected() {
+      if (_bsSelected.size === 0) return;
+      const body = _bsSelectedBody();
+      window.location.href = 'sms:?&body=' + encodeURIComponent(body.text);
+    }
+
+    async function _bsEmailSelected() {
+      if (_bsSelected.size === 0) return;
+      const toInp = document.getElementById('bsEmailTo');
+      const to = toInp ? toInp.value.trim() : '';
+      const msgEl = document.getElementById('bsEmailMsg');
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+        if (msgEl) { msgEl.textContent = 'Enter a valid email address.'; msgEl.style.color = '#ff7676'; }
+        return;
+      }
+      const _body = _bsSelectedBody();
+      const text = _body.text;
+      const subject = 'CrewLogic — ' + _body.count + ' job' + (_body.count === 1 ? '' : 's');
       const btn = document.getElementById('bsEmailBtn');
       if (btn) btn.disabled = true;
       if (msgEl) { msgEl.textContent = 'Sending…'; msgEl.style.color = 'var(--text-muted)'; }
