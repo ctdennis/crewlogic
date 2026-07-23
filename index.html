@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.76.0 | 2026-07-23">
+  <meta name="crewlogic-version" content="v5.77.0 | 2026-07-23">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1687,7 +1687,6 @@
       <!-- BACKUP SCHEDULE — local mirror of Vonigo jobs; works during a Vonigo outage -->
       <div class="price-lookup-section" id="backupScheduleScreen">
         <div class="section-title fade-in">Backup Schedule</div>
-        <div class="section-desc fade-in fade-in-delay-1">A local copy of your Vonigo jobs so you can find, route and collect even during an outage.</div>
         <div id="backupScheduleBanner" class="fade-in fade-in-delay-2" style="margin-bottom:12px;"></div>
         <div id="backupScheduleTools" class="fade-in fade-in-delay-2" style="margin-bottom:10px;"></div>
         <div id="backupScheduleList" class="fade-in fade-in-delay-2"></div>
@@ -9251,7 +9250,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _bsRenderTools() {
       const el = document.getElementById('backupScheduleTools');
       if (!el) return;
-      const defEmail = _bsEsc((typeof currentUser !== 'undefined' && currentUser && currentUser.email) || '');
       const inputStyle = 'padding:8px 10px;background:var(--bg-input,#253545);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;';
       const lblStyle = 'font-size:12px;color:var(--text-muted);';
       // Distinct routes from the currently-loaded set, sorted (rebuilt on every load).
@@ -9259,37 +9257,36 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _bsData.forEach(a => { const rn = (a.snapshot || {}).route_name; if (rn) routeSet[String(rn)] = true; });
       const routes = Object.keys(routeSet).sort();
       let h = '';
-      // Row 1 — date range (re-fetches) + route dropdown (client-side filter).
+      // Row 1 — date range (re-fetches the window).
       h += '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">';
       h += '<label style="' + lblStyle + '">From</label>';
       h += '<input id="bsDateFrom" type="date" value="' + _bsEsc(_bsFrom || _bsDefaultFrom()) + '" onchange="_bsOnDateChange()" style="' + inputStyle + '">';
       h += '<label style="' + lblStyle + '">To</label>';
       h += '<input id="bsDateTo" type="date" value="' + _bsEsc(_bsTo || _bsDefaultTo()) + '" onchange="_bsOnDateChange()" style="' + inputStyle + '">';
       h += '<span id="bsDateNote" style="display:none;font-size:12px;color:#ff7676;font-weight:600;"></span>';
-      h += '<select id="bsRouteSel" onchange="_bsOnRoute(this.value)" title="Filter by route" style="' + inputStyle + 'flex:1 1 140px;min-width:130px;">';
+      h += '</div>';
+      // Row 2 — name/address search (full width, client-side filter).
+      h += '<div style="display:flex;margin-bottom:8px;">';
+      h += '<input id="bsSearchInput" type="text" value="' + _bsEsc(_bsText || '') + '" oninput="_bsOnText(this.value)" placeholder="Search name or address…" style="flex:1 1 auto;width:100%;' + inputStyle + '">';
+      h += '</div>';
+      // Row 3 — control bar directly above the list: select-all + narrow route filter (left), actions (right).
+      h += '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">';
+      h += '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;"><input type="checkbox" id="bsSelectAll" onchange="_bsToggleSelectAll(this.checked)" style="width:16px;height:16px;cursor:pointer;"> Select all</label>';
+      h += '<select id="bsRouteSel" onchange="_bsOnRoute(this.value)" title="Filter by route" style="' + inputStyle + 'flex:0 0 auto;width:100px;">';
       h += '<option value=""' + (_bsRoute ? '' : ' selected') + '>All routes</option>';
       routes.forEach(r => { h += '<option value="' + _bsEsc(r) + '"' + (_bsRoute === r ? ' selected' : '') + '>' + _bsEsc(r) + '</option>'; });
       h += '</select>';
-      h += '</div>';
-      // Row 2 — name/address search + select-all (of the active window).
-      h += '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:8px;">';
-      h += '<input id="bsSearchInput" type="text" value="' + _bsEsc(_bsText || '') + '" oninput="_bsOnText(this.value)" placeholder="Search name or address…" style="flex:1 1 200px;min-width:150px;' + inputStyle + '">';
-      h += '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;"><input type="checkbox" id="bsSelectAll" onchange="_bsToggleSelectAll(this.checked)" style="width:16px;height:16px;cursor:pointer;"> Select all</label>';
-      h += '</div>';
-      h += '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">';
-      h += '<label style="font-size:12px;color:var(--text-muted);">Send to:</label>';
-      h += '<input id="bsEmailTo" type="email" value="' + defEmail + '" placeholder="crew@…" style="flex:1 1 160px;min-width:130px;padding:7px 10px;background:var(--bg-input,#253545);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;">';
-      h += '<button id="bsEmailBtn" onclick="_bsEmailSelected()" disabled style="flex:0 0 auto;opacity:0.5;padding:8px 12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm,8px);color:#04371f;font-size:13px;font-weight:700;cursor:pointer;">✉ Email selected</button>';
-      h += '<button id="bsTextBtn" onclick="_bsTextSelected()" disabled title="Open your messaging app with the selected jobs pre-filled" style="flex:0 0 auto;opacity:0.5;padding:8px 12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;font-weight:700;cursor:pointer;">💬 Text selected</button>';
-      h += '<button id="bsDownloadBtn" onclick="_bsDownloadCsv()" disabled title="Download the selected jobs as a spreadsheet (CSV)" style="flex:0 0 auto;opacity:0.5;padding:8px 12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;">⬇ Download selected</button>';
-      h += '<span id="bsEmailMsg" style="font-size:12px;color:var(--text-muted);"></span>';
+      h += '<button id="bsTextBtn" onclick="_bsTextSelected()" disabled title="Open your messaging app with the selected jobs pre-filled" style="margin-left:auto;flex:0 0 auto;opacity:0.5;padding:8px 12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;font-weight:700;cursor:pointer;">💬 Text</button>';
+      h += '<button id="bsEmailBtn" onclick="_bsEmailSelected()" disabled style="flex:0 0 auto;opacity:0.5;padding:8px 12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm,8px);color:#04371f;font-size:13px;font-weight:700;cursor:pointer;">✉ Email</button>';
+      h += '<button id="bsDownloadBtn" onclick="_bsDownloadCsv()" disabled title="Download the selected jobs as a spreadsheet (CSV)" style="flex:0 0 auto;opacity:0.5;padding:8px 12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;">⬇ Download</button>';
+      h += '<span id="bsEmailMsg" style="flex:0 0 auto;font-size:12px;color:var(--text-muted);"></span>';
       h += '</div>';
       el.innerHTML = h;
       _bsUpdateEmailBtn();
     }
     function _bsUpdateEmailBtn() {
       const n = _bsSelected.size;
-      [['bsEmailBtn', '✉ Email selected'], ['bsTextBtn', '💬 Text selected'], ['bsDownloadBtn', '⬇ Download selected']].forEach(function (pair) {
+      [['bsEmailBtn', '✉ Email'], ['bsTextBtn', '💬 Text'], ['bsDownloadBtn', '⬇ Download']].forEach(function (pair) {
         const b = document.getElementById(pair[0]);
         if (b) { b.disabled = n === 0; b.style.opacity = n === 0 ? '0.5' : '1'; b.textContent = pair[1] + (n ? (' (' + n + ')') : ''); }
       });
@@ -9502,30 +9499,63 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       window.location.href = 'sms:?&body=' + encodeURIComponent(body.text);
     }
 
-    async function _bsEmailSelected() {
+    // ✉ Email → open the multi-recipient modal (reuses the _bsOpenDetail fixed-overlay style).
+    // The actual send happens in _bsEmailSend(). Guard: only opens with a selection.
+    function _bsCloseEmailModal() { const o = document.getElementById('bsEmailOverlay'); if (o) o.remove(); }
+    function _bsEmailSelected() {
+      if (_bsSelected.size === 0) return;
+      const n = _bsSelected.size;
+      const defEmail = _bsEsc((typeof currentUser !== 'undefined' && currentUser && currentUser.email) || '');
+      const inputStyle = 'padding:8px 10px;background:var(--bg-input,#253545);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:14px;';
+      let c = '';
+      c += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px;">';
+      c += '<div style="font-size:15px;font-weight:700;color:var(--text-primary);">Email selected jobs (' + n + ')</div>';
+      c += '<button onclick="_bsCloseEmailModal()" aria-label="Close" style="flex:0 0 auto;background:none;border:none;color:var(--text-muted);font-size:22px;line-height:1;cursor:pointer;">×</button>';
+      c += '</div>';
+      c += '<input id="bsEmailTo" type="text" value="' + defEmail + '" placeholder="crew@…" style="width:100%;box-sizing:border-box;margin-bottom:6px;' + inputStyle + '">';
+      c += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Separate multiple addresses with commas.</div>';
+      c += '<div style="display:flex;gap:8px;align-items:center;">';
+      c += '<button onclick="_bsEmailSend()" style="flex:0 0 auto;padding:9px 16px;background:var(--accent-green);border:none;border-radius:var(--radius-sm,8px);color:#04371f;font-size:14px;font-weight:700;cursor:pointer;">Send</button>';
+      c += '<button onclick="_bsCloseEmailModal()" style="flex:0 0 auto;padding:9px 16px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:14px;font-weight:600;cursor:pointer;">Cancel</button>';
+      c += '<span id="bsEmailModalMsg" style="font-size:12px;color:var(--text-muted);"></span>';
+      c += '</div>';
+
+      const overlay = document.createElement('div');
+      overlay.id = 'bsEmailOverlay';
+      overlay.setAttribute('style', 'position:fixed;inset:0;z-index:100001;background:rgba(0,0,0,0.6);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;');
+      overlay.onclick = function (e) { if (e.target === overlay) _bsCloseEmailModal(); };
+      overlay.innerHTML = '<div style="width:100%;max-width:440px;margin-top:60px;background:var(--bg-card,#1e2f40);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,10px);padding:18px 18px 20px;box-shadow:0 10px 40px rgba(0,0,0,0.5);">' + c + '</div>';
+      document.body.appendChild(overlay);
+      const inp = document.getElementById('bsEmailTo');
+      if (inp) { try { inp.focus(); inp.select(); } catch (e) {} }
+    }
+
+    async function _bsEmailSend() {
       if (_bsSelected.size === 0) return;
       const toInp = document.getElementById('bsEmailTo');
-      const to = toInp ? toInp.value.trim() : '';
-      const msgEl = document.getElementById('bsEmailMsg');
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
-        if (msgEl) { msgEl.textContent = 'Enter a valid email address.'; msgEl.style.color = '#ff7676'; }
+      const raw = toInp ? toInp.value.trim() : '';
+      const msgEl = document.getElementById('bsEmailModalMsg');
+      // At least one comma-separated address must look like an email.
+      const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+      const anyValid = parts.some(p => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p));
+      if (!anyValid) {
+        if (msgEl) { msgEl.textContent = 'Enter at least one valid email'; msgEl.style.color = '#ff7676'; }
         return;
       }
       const _body = _bsSelectedBody();
       const text = _body.text;
       const subject = 'CrewLogic — ' + _body.count + ' job' + (_body.count === 1 ? '' : 's');
-      const btn = document.getElementById('bsEmailBtn');
-      if (btn) btn.disabled = true;
       if (msgEl) { msgEl.textContent = 'Sending…'; msgEl.style.color = 'var(--text-muted)'; }
       let res;
-      try { res = await edgeFunctionCall('crewlogic-notify', { subject: subject, text: text, to: to }); }
+      // The notify function accepts a comma-separated `to`; pass the raw string through.
+      try { res = await edgeFunctionCall('crewlogic-notify', { subject: subject, text: text, to: raw }); }
       catch (e) { console.error('[backup-schedule] email send failed:', e); res = { success: false }; }
       if (res && res.success === true) {
-        if (msgEl) { msgEl.textContent = '✓ Sent to ' + to; msgEl.style.color = 'var(--accent-green)'; }
+        if (msgEl) { msgEl.textContent = '✓ Sent'; msgEl.style.color = 'var(--accent-green)'; }
+        setTimeout(_bsCloseEmailModal, 1000);
       } else {
         if (msgEl) { msgEl.textContent = 'Couldn\'t send right now — please try again.'; msgEl.style.color = '#ff7676'; }
       }
-      _bsUpdateEmailBtn();
     }
 
     // ===== "Where are my trucks?" — telematics truck locations (Linxup/Motive via crewlogic-trucks) =====
