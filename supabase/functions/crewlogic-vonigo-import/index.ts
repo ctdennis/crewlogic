@@ -153,8 +153,9 @@ Deno.serve(async (req: Request) => {
       return out;
     };
 
-    // 4) Paginate WorkOrders across the window and mirror each.
+    // 4) Pull ALL WorkOrders across the window (paginated) into memory.
     const PAGE = 200;
+    const allWOs: VWorkOrder[] = [];
     for (let pageNo = 1; pageNo <= 500; pageNo++) {
       const woRes = await fetch(VONIGO_BASE + '/data/WorkOrders/', {
         method: 'POST',
@@ -169,8 +170,25 @@ Deno.serve(async (req: Request) => {
       if (woData.errNo !== 0) throw new Error('vonigo WorkOrders failed: ' + (woData.errMsg || 'errNo ' + woData.errNo));
       const workOrders: VWorkOrder[] = woData.WorkOrders || [];
       if (!workOrders.length) break;
+      for (const w of workOrders) allWOs.push(w);
+      if (workOrders.length < PAGE) break;
+    }
 
-      for (const wo of workOrders) {
+    // Pre-fetch every unique customer's contact IN PARALLEL (batched) so the per-customer /data/Contacts/
+    // calls don't serialize into the 150s function limit on busy franchises. Populates contactCache; the
+    // loop below reads from it. Skipped for deep-history (skipContacts) — those rows are name-only.
+    if (!skipContacts) {
+      const clientIDs = [...new Set(allWOs.map((w) => {
+        const cr = (w.Relations || []).find((r) => r.relationType === 'client');
+        return cr?.objectID ? String(cr.objectID) : '';
+      }).filter(Boolean))];
+      const CBATCH = 12;
+      for (let i = 0; i < clientIDs.length; i += CBATCH) {
+        await Promise.all(clientIDs.slice(i, i + CBATCH).map((cid) => fetchContact(cid)));
+      }
+    }
+
+    for (const wo of allWOs) {
         counts.workOrders++;
         try {
           const fields = wo.Fields || [];
@@ -195,7 +213,7 @@ Deno.serve(async (req: Request) => {
           const contactName = str(getField(fields, F_CONTACT)?.fieldValue);
           // Customer phone/email from the Vonigo Contact (by clientID), cached per client this run.
           const clientID = clientRel?.objectID ? String(clientRel.objectID) : '';
-          const contactInfo = (clientID && !skipContacts) ? await fetchContact(clientID) : { phone: '', email: '' };
+          const contactInfo = (clientID && !skipContacts) ? (contactCache.get(clientID) || { phone: '', email: '' }) : { phone: '', email: '' };
           const startMin = parseInt(str(getField(fields, F_TIME_MIN)?.fieldValue) || '', 10);
           const durationMin = parseInt(str(getField(fields, F_DURATION)?.fieldValue) || '', 10);
           const price = parseFloat(str(getField(fields, F_PRICE)?.fieldValue) || '') || null;
@@ -271,8 +289,6 @@ Deno.serve(async (req: Request) => {
           counts.errors++;
           console.error('[vonigo-import] WO ' + String(wo.objectID) + ' failed:', (e as Error).message);
         }
-      }
-      if (workOrders.length < PAGE) break;
     }
 
     return json({ success: true, franchiseID, action, window: { dateStart, dateEnd }, counts });
