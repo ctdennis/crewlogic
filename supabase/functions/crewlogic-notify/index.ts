@@ -30,8 +30,11 @@ Deno.serve(async (req: Request) => {
   // the default inbox; a caller that wants a different owner address (e.g. the Vonigo health alert)
   // passes one. Basic shape check so a bad value can't turn into a Resend error.
   const isEmail = (s: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
-  const toOverride = String(body.to || "").trim();
-  const to = isEmail(toOverride) ? toOverride : TO;
+  // `to` may be a single email, a comma/semicolon-separated string, or an array (the DR board's Email
+  // modal supports multiple recipients). Validate + de-dup; fall back to the default inbox if none valid.
+  const toRaw = Array.isArray(body.to) ? (body.to as unknown[]) : String(body.to || "").split(/[,;]+/);
+  const toList = [...new Set(toRaw.map((x) => String(x).trim()).filter(isEmail))];
+  const to: string | string[] = toList.length ? toList : TO;
   // Optional BCC fan-out (array of emails). Used by the Vonigo health alert to notify every affected
   // owner in ONE send while keeping each recipient's address private from the others. Filtered to
   // valid, de-duplicated addresses; an empty/absent list just sends to `to`.

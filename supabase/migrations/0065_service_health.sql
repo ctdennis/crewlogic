@@ -28,8 +28,8 @@ comment on table public.service_health is
 alter table public.service_health enable row level security;
 
 -- ── CRON (run once per environment; documented, not auto-applied) ─────────────────────────
--- Ping Vonigo every 5 minutes:
---   select cron.schedule('crewlogic-vonigo-health', '*/5 * * * *', $$
+-- Ping Vonigo every minute (owner 2026-07-23; the health fn debounces with a 3-strike rule, 0069):
+--   select cron.schedule('crewlogic-vonigo-health', '* * * * *', $$
 --     select net.http_post(
 --       url := 'https://<PROJECT_REF>.supabase.co/functions/v1/crewlogic-vonigo-health',
 --       headers := jsonb_build_object('Content-Type','application/json'),
