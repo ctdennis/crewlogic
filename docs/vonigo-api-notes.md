@@ -78,9 +78,21 @@ only correct read method (2/3 = Edit/Add), so this is not "try another method".
 
 => The daily driver/lugger role is an attribute of the ASSIGNMENT itself (the editable "Driver"
 text box under a route's "View Assignment"), a relationship NOT exposed by the object-field schema
-and NOT one of the 32 object types — so it is likely a relationship operation, not an enumerable
-object. That assignment endpoint is the one piece still needed; the System schema cannot surface
-it.
+and NOT one of the 32 object types — so it is likely a relationship OPERATION, not an enumerable
+object. The System schema maps objects+fields, NOT operations, so it cannot surface this.
+
+Grepped the Work Order (12), Route (5) and Job (10) field schemas for crew/role/driver/lugger/
+assign: the only hit is **Work Order field 11177 = "Number of Luggers"** (tagSelect dropdown, RW) —
+a job-level COUNT, useful for labour costing, but NOT the per-person role. Crew(50) raw response
+has no Fields key at all.
+
+**FINDING A HIDDEN ENDPOINT — the operation-level equivalent of the System schema:** the assignment
+write is almost certainly an undocumented endpoint (the documented index has no Crew section, but
+the Crew object exists and the UI writes assignments). URL-guessing is exhausted (/data/Crews/,
+/resources/crews/, /data/CrewMembers/ all return HTML = 404). The reliable path is the **browser
+Network tab**: in the Vonigo tab, DevTools → Network, filter `api/v1`, then assign a crew / change
+a role — the request shows the exact URL + payload. Capture that and the write wires up like
+promos. This is the ground-truth move for any undocumented Vonigo operation.
 
 ## Multiple Get — `/data/Multiple/`  (tested 2026-07-23)
 
