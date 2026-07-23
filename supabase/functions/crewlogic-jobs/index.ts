@@ -46,7 +46,7 @@ function str(v: unknown): string { return v == null ? '' : String(v).trim(); }
 // Appointment + its job + provider snapshot. RLS on all three tables scopes to the caller's franchise.
 const APPT_SELECT =
   'id, scheduled_date, start_minutes, duration_minutes, status, ' +
-  'job:jobs!inner ( id, job_number, status, origin, service_address, service_city, service_state, service_zip, service_lat, service_lng ), ' +
+  'job:jobs!inner ( id, job_number, status, origin, service_address, service_city, service_state, service_zip, service_lat, service_lng, items_description ), ' +
   'snapshot:job_source_snapshot ( import_total, crew_display, customer_display, route_name, synced_at )';
 
 Deno.serve(async (req: Request) => {
@@ -82,7 +82,7 @@ Deno.serve(async (req: Request) => {
       const jobId = str(body.jobId);
       if (!jobId) return json({ success: false, error: 'jobId required' }, 400);
       const { data: jobRows, error: jErr } = await asUser.from('jobs')
-        .select('id, job_number, status, origin, service_address, service_city, service_state, service_zip, service_lat, service_lng')
+        .select('id, job_number, status, origin, service_address, service_city, service_state, service_zip, service_lat, service_lng, items_description')
         .eq('id', jobId).limit(1);
       if (jErr) throw jErr;
       if (!jobRows || !jobRows.length) return json({ success: false, error: 'job_not_found' }, 404);
