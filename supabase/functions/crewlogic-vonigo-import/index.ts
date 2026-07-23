@@ -121,8 +121,13 @@ Deno.serve(async (req: Request) => {
 
     // 3) Window in the franchise's zone (naive clock-face epoch — Vonigo convention).
     const tz = resolveTimezoneLogged(fr.cost_settings, `vonigo-import f=${franchiseID}`);
-    const dateStart = franchiseDayEpoch(tz, -Math.abs(daysBack));
-    const dateEnd = franchiseDayEpoch(tz, Math.abs(daysForward) + 1);
+    // Explicit epoch window (dateStart/dateEnd) lets a caller month-chunk a big backfill; otherwise a
+    // window around today from daysBack/daysForward.
+    const dateStart = (body.dateStart != null) ? Number(body.dateStart) : franchiseDayEpoch(tz, -Math.abs(daysBack));
+    const dateEnd = (body.dateEnd != null) ? Number(body.dateEnd) : franchiseDayEpoch(tz, Math.abs(daysForward) + 1);
+    // Deep-history backfill sets skipContacts to skip the per-customer /data/Contacts/ fetch (fast; name
+    // only, no phone/email) — old jobs don't need a callable number. Recent syncs keep it false.
+    const skipContacts = body.skipContacts === true;
     const now = new Date().toISOString();
 
     // Per-invocation contact cache: one /data/Contacts/ fetch per unique clientID (best-effort).
@@ -190,7 +195,7 @@ Deno.serve(async (req: Request) => {
           const contactName = str(getField(fields, F_CONTACT)?.fieldValue);
           // Customer phone/email from the Vonigo Contact (by clientID), cached per client this run.
           const clientID = clientRel?.objectID ? String(clientRel.objectID) : '';
-          const contactInfo = clientID ? await fetchContact(clientID) : { phone: '', email: '' };
+          const contactInfo = (clientID && !skipContacts) ? await fetchContact(clientID) : { phone: '', email: '' };
           const startMin = parseInt(str(getField(fields, F_TIME_MIN)?.fieldValue) || '', 10);
           const durationMin = parseInt(str(getField(fields, F_DURATION)?.fieldValue) || '', 10);
           const price = parseFloat(str(getField(fields, F_PRICE)?.fieldValue) || '') || null;
