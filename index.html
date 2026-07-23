@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.71.1 | 2026-07-23">
+  <meta name="crewlogic-version" content="v5.72.0 | 2026-07-23">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1561,6 +1561,12 @@
             <div class="module-desc">Check what a promo code is worth &amp; if you can honour it</div>
           </div>
 
+          <div class="module-card fade-in fade-in-delay-4" id="backupScheduleCard" data-card="backupSchedule" onclick="openModule('backupSchedule')">
+            <div class="module-icon">📅</div>
+            <div class="module-name">Backup Schedule</div>
+            <div class="module-desc">Local copy of your Vonigo jobs — works during an outage</div>
+          </div>
+
           <div class="module-card fade-in fade-in-delay-4" id="signsModuleCard" data-card="signs" style="display:none;" onclick="openModule('signs')">
             <div class="module-icon">🪧</div>
             <div class="module-name">Yard Signs</div>
@@ -1676,6 +1682,14 @@
         </div>
 
         <div id="promoResult" style="margin-top:14px;"></div>
+      </div>
+
+      <!-- BACKUP SCHEDULE — local mirror of Vonigo jobs; works during a Vonigo outage -->
+      <div class="price-lookup-section" id="backupScheduleScreen">
+        <div class="section-title fade-in">Backup Schedule</div>
+        <div class="section-desc fade-in fade-in-delay-1">A local copy of your Vonigo jobs so you can find, route and collect even during an outage.</div>
+        <div id="backupScheduleBanner" class="fade-in fade-in-delay-2" style="margin-bottom:12px;"></div>
+        <div id="backupScheduleList" class="fade-in fade-in-delay-2"></div>
       </div>
 
       <!-- DISPATCH DASHBOARD (desktop) — multi-pane layout injected by renderDashboard() -->
@@ -8780,7 +8794,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       'disposalRouterScreen',
       'storageScreen', 'storageResultsScreen',
       'mattressScreen', 'mattressResultsScreen',
-      'priceLookupScreen', 'promosScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'truckAlertsScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen'
+      'priceLookupScreen', 'promosScreen', 'backupScheduleScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'truckAlertsScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen'
     ];
 
     function hideAll() {
@@ -9018,6 +9032,161 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Apply the user's saved card order, then enable drag-to-reorder (init once).
       applyHomeCardOrder();
       initHomeCardSort();
+    }
+
+    // ===== Backup Schedule — local mirror of Vonigo jobs (crewlogic-jobs); works during a Vonigo outage =====
+    function showBackupSchedule() {
+      hideAll();
+      document.getElementById('backBtn').classList.add('visible');
+      document.getElementById('backupScheduleScreen').classList.add('active');
+      document.getElementById('headerTitle').textContent = 'Backup Schedule';
+      currentScreen = 'backupSchedule';
+      renderBackupSchedule();
+    }
+
+    // Minutes-from-midnight -> "h:mm AM/PM"
+    function _bsMinutesToTime(mins) {
+      if (mins === null || mins === undefined || isNaN(mins)) return 'All day';
+      let h = Math.floor(mins / 60), m = mins % 60;
+      const ap = h >= 12 ? 'PM' : 'AM';
+      h = h % 12; if (h === 0) h = 12;
+      return h + ':' + String(m).padStart(2, '0') + ' ' + ap;
+    }
+    // ISO -> "h:mm AM/PM"
+    function _bsTimeOnly(iso) {
+      try { return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); }
+      catch (e) { return ''; }
+    }
+    // ISO -> "Mon D, h:mm AM/PM"
+    function _bsDateTime(iso) {
+      try { return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
+      catch (e) { return ''; }
+    }
+    // "YYYY-MM-DD" -> "Tue, Jul 28" (parse as local, not UTC, to avoid a day slip)
+    function _bsDayHeader(ymd) {
+      try {
+        const p = String(ymd).split('-');
+        const d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+        return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      } catch (e) { return ymd; }
+    }
+    function _bsEsc(s) {
+      return String(s == null ? '' : s).replace(/[<>&"]/g, function (c) {
+        return { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c];
+      });
+    }
+
+    async function renderBackupSchedule() {
+      const listEl = document.getElementById('backupScheduleList');
+      const bannerEl = document.getElementById('backupScheduleBanner');
+      if (!listEl) return;
+      bannerEl.innerHTML = '';
+      listEl.innerHTML = '<div class="estimates-empty">Loading your schedule…</div>';
+
+      // Full login required — the dev sign-in bypass has no Supabase session.
+      let sess = null;
+      try { sess = (await supabaseClient.auth.getSession()).data.session; } catch (e) { sess = null; }
+      if (!sess) {
+        listEl.innerHTML = '<div class="estimates-empty">Backup Schedule needs a full login. The dev bypass has no session — sign in with email/Google to view it.</div>';
+        return;
+      }
+
+      // Window: today-1 .. today+7 as local calendar dates (YYYY-MM-DD).
+      const _ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      const _from = new Date(); _from.setDate(_from.getDate() - 1);
+      const _to = new Date(); _to.setDate(_to.getDate() + 7);
+      const dateFrom = _ymd(_from), dateTo = _ymd(_to);
+
+      let data;
+      try {
+        const res = await fetch(SUPABASE_URL + '/functions/v1/crewlogic-jobs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': EDGE_ANON_KEY, 'Authorization': 'Bearer ' + sess.access_token },
+          body: JSON.stringify({ action: 'list', dateFrom: dateFrom, dateTo: dateTo })
+        });
+        data = await res.json();
+      } catch (e) {
+        console.error('Backup Schedule fetch failed:', e);
+        bannerEl.innerHTML = '';
+        listEl.innerHTML = '<div class="estimates-empty">Couldn’t load your backup schedule right now. Check your connection and try again.</div>';
+        return;
+      }
+
+      if (!data || data.success !== true) {
+        console.error('Backup Schedule returned non-success:', data);
+        bannerEl.innerHTML = '';
+        listEl.innerHTML = '<div class="estimates-empty">Couldn’t load your backup schedule right now. Please try again shortly.</div>';
+        return;
+      }
+
+      // ---- Health banner ----
+      const health = data.health;
+      if (health && health.isUp === true) {
+        bannerEl.innerHTML = '<div style="padding:11px 14px;border-radius:var(--radius-sm);background:rgba(0,231,133,0.12);border:1px solid var(--accent-green);color:var(--text-primary);font-size:13px;font-weight:600;">✅ Vonigo is live — this is a backup copy' + (health.lastChecked ? ' (last checked ' + _bsEsc(_bsTimeOnly(health.lastChecked)) + ')' : '') + '</div>';
+      } else if (health && health.isUp === false) {
+        bannerEl.innerHTML = '<div style="padding:11px 14px;border-radius:var(--radius-sm);background:rgba(251,146,60,0.14);border:1px solid var(--accent-orange,#fb923c);color:var(--text-primary);font-size:13px;font-weight:600;">⚠️ Vonigo is DOWN — showing your last-known schedule' + (health.lastChanged ? ' (as of ' + _bsEsc(_bsDateTime(health.lastChanged)) + ')' : '') + '. Route from here and collect manually.</div>';
+      } else {
+        bannerEl.innerHTML = '<div style="padding:11px 14px;border-radius:var(--radius-sm);background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-size:13px;font-weight:600;">Backup copy of your Vonigo schedule.</div>';
+      }
+
+      // ---- Jobs ----
+      const appts = Array.isArray(data.appointments) ? data.appointments : [];
+      if (appts.length === 0) {
+        listEl.innerHTML = '<div class="estimates-empty">No jobs in this window.</div>';
+        return;
+      }
+
+      // Group by scheduled_date, then sort within a day by start_minutes (nulls first).
+      const byDay = {};
+      appts.forEach(a => { const d = a.scheduled_date || ''; (byDay[d] = byDay[d] || []).push(a); });
+      const days = Object.keys(byDay).sort();
+
+      let html = '';
+      days.forEach(day => {
+        const rows = byDay[day].slice().sort((a, b) => {
+          const am = (a.start_minutes === null || a.start_minutes === undefined) ? -1 : a.start_minutes;
+          const bm = (b.start_minutes === null || b.start_minutes === undefined) ? -1 : b.start_minutes;
+          return am - bm;
+        });
+        html += '<div style="margin:16px 0 8px;font-size:13px;font-weight:700;color:var(--text-muted);letter-spacing:0.3px;">' + _bsEsc(_bsDayHeader(day)) + '</div>';
+        rows.forEach(a => {
+          const snap = a.snapshot || {};
+          const job = a.job || {};
+          const isCancelled = a.status === 'cancelled';
+          const cust = (snap.customer_display && snap.customer_display.name) ? snap.customer_display.name : '—';
+          const addr = String(job.service_address || '').split('\n')[0];
+          const time = _bsMinutesToTime(a.start_minutes);
+          const money = (snap.import_total !== null && snap.import_total !== undefined && !isNaN(snap.import_total)) ? ('$' + Number(snap.import_total).toFixed(2)) : '';
+          const badgeMap = {
+            scheduled: { t: 'Scheduled', c: 'var(--accent-green)' },
+            working:   { t: 'Working',   c: 'var(--accent-yellow,#f5c518)' },
+            done:      { t: 'Done',      c: 'var(--text-muted)' },
+            cancelled: { t: 'Cancelled', c: 'var(--accent-orange,#fb923c)' }
+          };
+          const badge = badgeMap[a.status] || { t: a.status || '—', c: 'var(--text-muted)' };
+          const dim = isCancelled ? 'opacity:0.55;' : '';
+          const strike = isCancelled ? 'text-decoration:line-through;' : '';
+
+          html += '<div style="display:flex;gap:10px;align-items:stretch;padding:10px 12px;margin-bottom:8px;background:var(--bg-card,#1e2f40);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);' + dim + '">';
+          // Time column
+          html += '<div style="flex:0 0 auto;min-width:66px;font-size:12px;font-weight:700;color:var(--text-secondary);font-family:\'Space Mono\',monospace;align-self:center;">' + _bsEsc(time) + '</div>';
+          // Body
+          html += '<div style="flex:1;min-width:0;">';
+          html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px;">';
+          html += '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;color:var(--text-primary);' + strike + '">' + _bsEsc(cust) + '</div>';
+          html += '<span style="flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:0.4px;color:' + badge.c + ';border:1px solid ' + badge.c + ';border-radius:6px;padding:2px 7px;text-transform:uppercase;">' + _bsEsc(badge.t) + '</span>';
+          html += '</div>';
+          if (addr) html += '<div style="font-size:12px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📍 ' + _bsEsc(addr) + '</div>';
+          html += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:4px;">';
+          if (snap.route_name) html += '<span style="font-size:11px;color:var(--text-secondary);">🚚 ' + _bsEsc(snap.route_name) + '</span>';
+          if (money) html += '<span style="font-size:12px;color:var(--text-secondary);">💰 <strong style="color:var(--accent-green);font-family:\'Space Mono\',monospace;">' + _bsEsc(money) + '</strong></span>';
+          if (job.job_number) html += '<span style="font-size:10px;color:var(--text-muted);font-family:monospace;">#' + _bsEsc(job.job_number) + '</span>';
+          html += '</div>';
+          html += '</div>';
+          html += '</div>';
+        });
+      });
+      listEl.innerHTML = html;
     }
 
     // ===== "Where are my trucks?" — telematics truck locations (Linxup/Motive via crewlogic-trucks) =====
@@ -12358,6 +12527,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('headerTitle').textContent = 'Job Router';
         currentScreen = 'disposalRouter';
         initDisposalRouter();
+        return;
+      }
+      if (module === 'backupSchedule') {
+        showBackupSchedule();
         return;
       }
       if (module === 'manageJobs') {
