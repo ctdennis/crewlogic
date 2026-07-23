@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.67.0 | 2026-07-23">
+  <meta name="crewlogic-version" content="v5.68.0 | 2026-07-23">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9505,7 +9505,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!list.length) {
         return '<div style="margin-top:3px;color:#9fb0c0;">👷 <span style="color:#6e8194;">Crew not assigned yet</span></div>';
       }
-      return '<div style="margin-top:3px;color:#cdd6df;">👷 ' + list.map(function (n) { return _truckEsc(n); }).join(' · ') + '</div>';
+      // Crew entries are {name, title} objects (todays-workorders) OR bare name strings (dispatch's
+      // listRouteJobs, which carries no title) — handle both. Job Title (user field 166) is FREE
+      // TEXT set per franchise habit, so it is shown raw in muted parens and never drives logic.
+      const one = function (c) {
+        if (c && typeof c === 'object') {
+          const nm = _truckEsc(c.name || '');
+          return c.title ? nm + ' <span style="color:#6e8194;">(' + _truckEsc(c.title) + ')</span>' : nm;
+        }
+        return _truckEsc(String(c));
+      };
+      return '<div style="margin-top:3px;color:#cdd6df;">👷 ' + list.map(one).join(' · ') + '</div>';
     }
     function _vonigoApptLinkHtml(workOrderID, jobID) {
       if (!jobID) return '';
@@ -10028,7 +10038,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function loadJobMarkers(refit = true) {
       if (typeof L === 'undefined' || !_trucksMap) return;
       try {
-        const data = await edgeFunctionCall('crewlogic-todays-workorders', { franchiseID: currentUser.franchiseID, dayOffset: _trucksJobDay, includeCoords: true });
+        const data = await edgeFunctionCall('crewlogic-todays-workorders', { franchiseID: currentUser.franchiseID, dayOffset: _trucksJobDay, includeCoords: true, includeCrewTitles: true });
         // Server returns jobs sorted by appointment time → this IS each route's stop order.
         const jobs = (data.workOrders || []).filter(j => j.lat != null && j.lon != null); // keep completed (shown grayed); cancelled is filtered server-side
         if (_jobLayer) _jobLayer.clearLayers(); else _jobMarkers.forEach(m => _trucksMap.removeLayer(m));
