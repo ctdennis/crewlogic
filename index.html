@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.72.0 | 2026-07-23">
+  <meta name="crewlogic-version" content="v5.73.0 | 2026-07-23">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1689,6 +1689,7 @@
         <div class="section-title fade-in">Backup Schedule</div>
         <div class="section-desc fade-in fade-in-delay-1">A local copy of your Vonigo jobs so you can find, route and collect even during an outage.</div>
         <div id="backupScheduleBanner" class="fade-in fade-in-delay-2" style="margin-bottom:12px;"></div>
+        <div id="backupScheduleTools" class="fade-in fade-in-delay-2" style="margin-bottom:10px;"></div>
         <div id="backupScheduleList" class="fade-in fade-in-delay-2"></div>
       </div>
 
@@ -9079,8 +9080,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function renderBackupSchedule() {
       const listEl = document.getElementById('backupScheduleList');
       const bannerEl = document.getElementById('backupScheduleBanner');
+      const toolsEl = document.getElementById('backupScheduleTools');
       if (!listEl) return;
       bannerEl.innerHTML = '';
+      if (toolsEl) toolsEl.innerHTML = '';
       listEl.innerHTML = '<div class="estimates-empty">Loading your schedule…</div>';
 
       // Full login required — the dev sign-in bypass has no Supabase session.
@@ -9131,12 +9134,102 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       // ---- Jobs ----
       const appts = Array.isArray(data.appointments) ? data.appointments : [];
+      // Hold the loaded data at module scope so search / detail / export / email all
+      // operate on it WITHOUT re-fetching (v5.73.0).
+      _bsData = appts;
+      _bsHealth = health;
+      _bsById = {};
+      _bsSelected = new Set();
+      appts.forEach(a => { if (a && a.id != null) _bsById[String(a.id)] = a; });
+
       if (appts.length === 0) {
         listEl.innerHTML = '<div class="estimates-empty">No jobs in this window.</div>';
         return;
       }
 
-      // Group by scheduled_date, then sort within a day by start_minutes (nulls first).
+      _bsRenderTools();
+      _bsRenderList(appts);
+    }
+
+    // ===== Backup Schedule enhancements (v5.73.0, additive): search, detail card, CSV export, bulk crew email =====
+    let _bsData = [];        // last-loaded appointments (source of truth for search/export/email)
+    let _bsHealth = null;    // last-loaded Vonigo health payload
+    let _bsById = {};        // String(id) -> appointment
+    let _bsSelected = new Set(); // selected appointment ids for the bulk-email action
+
+    function _bsCust(a) { const s = (a.snapshot || {}).customer_display; return (s && s.name) ? String(s.name) : ''; }
+    function _bsPhone(a) { const s = (a.snapshot || {}).customer_display || {}; return s.phone ? String(s.phone) : ''; }
+    function _bsEmailOf(a) { const s = (a.snapshot || {}).customer_display || {}; return s.email ? String(s.email) : ''; }
+    // Full one-line address (street + city/state/zip) for maps + export + email.
+    function _bsAddrFull(a) {
+      const j = a.job || {};
+      const parts = [String(j.service_address || '').split('\n')[0], j.service_city, j.service_state, j.service_zip];
+      return parts.map(x => String(x == null ? '' : x).trim()).filter(Boolean).join(', ');
+    }
+    const _BS_BADGE = {
+      scheduled: { t: 'Scheduled', c: 'var(--accent-green)' },
+      working:   { t: 'Working',   c: 'var(--accent-yellow,#f5c518)' },
+      done:      { t: 'Done',      c: 'var(--text-muted)' },
+      cancelled: { t: 'Cancelled', c: 'var(--accent-orange,#fb923c)' }
+    };
+
+    // Case-insensitive substring match across the fields the owner would search on.
+    function _bsMatch(a, q) {
+      if (!q) return true;
+      const snap = a.snapshot || {}, job = a.job || {};
+      const hay = [
+        _bsCust(a), a.scheduled_date, _bsDayHeader(a.scheduled_date), snap.route_name,
+        _bsMinutesToTime(a.start_minutes), _bsAddrFull(a), job.job_number
+      ].map(x => String(x == null ? '' : x).toLowerCase()).join('  |  ');
+      return hay.indexOf(q.toLowerCase()) >= 0;
+    }
+    function _bsCurrentFiltered() {
+      const inp = document.getElementById('bsSearchInput');
+      const q = inp ? inp.value.trim() : '';
+      return _bsData.filter(a => _bsMatch(a, q));
+    }
+    function _bsApplyFilter() { _bsRenderList(_bsCurrentFiltered()); }
+
+    function _bsRenderTools() {
+      const el = document.getElementById('backupScheduleTools');
+      if (!el) return;
+      const defEmail = _bsEsc((typeof currentUser !== 'undefined' && currentUser && currentUser.email) || '');
+      let h = '';
+      h += '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">';
+      h += '<input id="bsSearchInput" type="text" oninput="_bsApplyFilter()" placeholder="Search name, date, route, address…" style="flex:1 1 200px;min-width:150px;padding:8px 10px;background:var(--bg-input,#253545);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;">';
+      h += '<button onclick="_bsDownloadCsv()" title="Download the current list as a spreadsheet (CSV)" style="flex:0 0 auto;padding:8px 12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;">⬇ Download</button>';
+      h += '</div>';
+      h += '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">';
+      h += '<label style="font-size:12px;color:var(--text-muted);">Send to:</label>';
+      h += '<input id="bsEmailTo" type="email" value="' + defEmail + '" placeholder="crew@…" style="flex:1 1 160px;min-width:130px;padding:7px 10px;background:var(--bg-input,#253545);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;">';
+      h += '<button id="bsEmailBtn" onclick="_bsEmailSelected()" disabled style="flex:0 0 auto;opacity:0.5;padding:8px 12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm,8px);color:#04371f;font-size:13px;font-weight:700;cursor:pointer;">✉ Email selected</button>';
+      h += '<span id="bsEmailMsg" style="font-size:12px;color:var(--text-muted);"></span>';
+      h += '</div>';
+      el.innerHTML = h;
+      _bsUpdateEmailBtn();
+    }
+    function _bsUpdateEmailBtn() {
+      const btn = document.getElementById('bsEmailBtn');
+      if (!btn) return;
+      const n = _bsSelected.size;
+      btn.disabled = n === 0;
+      btn.style.opacity = n === 0 ? '0.5' : '1';
+      btn.textContent = '✉ Email selected' + (n ? (' (' + n + ')') : '');
+    }
+    function _bsToggleSelect(id, checked) {
+      if (checked) _bsSelected.add(String(id)); else _bsSelected.delete(String(id));
+      _bsUpdateEmailBtn();
+    }
+
+    // Render the day-grouped list from a (possibly filtered) set. Each row is clickable → detail card;
+    // its checkbox stops propagation so ticking a job doesn't open the card.
+    function _bsRenderList(appts) {
+      const listEl = document.getElementById('backupScheduleList');
+      if (!listEl) return;
+      if (!appts || appts.length === 0) {
+        listEl.innerHTML = '<div class="estimates-empty">No matching jobs.</div>';
+        return;
+      }
       const byDay = {};
       appts.forEach(a => { const d = a.scheduled_date || ''; (byDay[d] = byDay[d] || []).push(a); });
       const days = Object.keys(byDay).sort();
@@ -9153,21 +9246,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const snap = a.snapshot || {};
           const job = a.job || {};
           const isCancelled = a.status === 'cancelled';
-          const cust = (snap.customer_display && snap.customer_display.name) ? snap.customer_display.name : '—';
+          const cust = _bsCust(a) || '—';
           const addr = String(job.service_address || '').split('\n')[0];
           const time = _bsMinutesToTime(a.start_minutes);
           const money = (snap.import_total !== null && snap.import_total !== undefined && !isNaN(snap.import_total)) ? ('$' + Number(snap.import_total).toFixed(2)) : '';
-          const badgeMap = {
-            scheduled: { t: 'Scheduled', c: 'var(--accent-green)' },
-            working:   { t: 'Working',   c: 'var(--accent-yellow,#f5c518)' },
-            done:      { t: 'Done',      c: 'var(--text-muted)' },
-            cancelled: { t: 'Cancelled', c: 'var(--accent-orange,#fb923c)' }
-          };
-          const badge = badgeMap[a.status] || { t: a.status || '—', c: 'var(--text-muted)' };
+          const badge = _BS_BADGE[a.status] || { t: a.status || '—', c: 'var(--text-muted)' };
           const dim = isCancelled ? 'opacity:0.55;' : '';
           const strike = isCancelled ? 'text-decoration:line-through;' : '';
+          const idEsc = _bsEsc(a.id);
+          const checked = _bsSelected.has(String(a.id)) ? 'checked' : '';
 
-          html += '<div style="display:flex;gap:10px;align-items:stretch;padding:10px 12px;margin-bottom:8px;background:var(--bg-card,#1e2f40);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);' + dim + '">';
+          html += '<div onclick="_bsOpenDetail(\'' + idEsc + '\')" style="cursor:pointer;display:flex;gap:10px;align-items:stretch;padding:10px 12px;margin-bottom:8px;background:var(--bg-card,#1e2f40);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);' + dim + '">';
+          // Select checkbox (does not open the detail card)
+          html += '<div style="flex:0 0 auto;align-self:center;"><input type="checkbox" ' + checked + ' onclick="event.stopPropagation();_bsToggleSelect(\'' + idEsc + '\',this.checked)" style="width:18px;height:18px;cursor:pointer;"></div>';
           // Time column
           html += '<div style="flex:0 0 auto;min-width:66px;font-size:12px;font-weight:700;color:var(--text-secondary);font-family:\'Space Mono\',monospace;align-self:center;">' + _bsEsc(time) + '</div>';
           // Body
@@ -9187,6 +9278,134 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         });
       });
       listEl.innerHTML = html;
+    }
+
+    // ---- Detail card (modal overlay) ----
+    function _bsCloseDetail() { const o = document.getElementById('bsDetailOverlay'); if (o) o.remove(); }
+    function _bsOpenDetail(id) {
+      const a = _bsById[String(id)];
+      if (!a) return;
+      const snap = a.snapshot || {}, job = a.job || {};
+      const cust = _bsCust(a);
+      const addrFull = _bsAddrFull(a);
+      const dirUrl = _mapsDirUrl(addrFull);
+      const phone = _bsPhone(a);
+      const telHref = phone.replace(/[^\d+]/g, '');
+      const email = _bsEmailOf(a);
+      const money = (snap.import_total !== null && snap.import_total !== undefined && !isNaN(snap.import_total)) ? ('$' + Number(snap.import_total).toFixed(2)) : '';
+      const badge = _BS_BADGE[a.status] || { t: a.status || '—', c: 'var(--text-muted)' };
+      const statusLabel = a.status === 'done' ? '✓ Completed' : (a.status === 'cancelled' ? '✕ Cancelled' : (a.status === 'working' ? '● Working' : 'Scheduled'));
+
+      let c = '';
+      // Header
+      let head = 'Stop';
+      if (snap.route_name) head += ' • ' + _bsEsc(snap.route_name);
+      c += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:2px;">';
+      c += '<div style="font-size:15px;font-weight:700;color:var(--text-primary);">' + head + (job.job_number ? ' • ' + _vonigoJobInline(job.job_number) : '') + '</div>';
+      c += '<button onclick="_bsCloseDetail()" aria-label="Close" style="flex:0 0 auto;background:none;border:none;color:var(--text-muted);font-size:22px;line-height:1;cursor:pointer;">×</button>';
+      c += '</div>';
+      c += '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">' + _bsEsc(_bsDayHeader(a.scheduled_date)) + ' · ' + _bsEsc(_bsMinutesToTime(a.start_minutes)) + ' · <span style="color:' + badge.c + ';font-weight:700;">' + _bsEsc(statusLabel) + '</span></div>';
+      // Job total
+      if (money) c += '<div style="font-size:18px;font-weight:800;color:var(--accent-green);font-family:\'Space Mono\',monospace;margin-bottom:10px;">' + _bsEsc(money) + '</div>';
+      // Customer
+      if (cust) c += '<div style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">' + _bsEsc(cust) + '</div>';
+      // Address → directions
+      if (addrFull) {
+        c += '<div style="font-size:13px;margin-bottom:8px;">📍 ' + (dirUrl
+          ? '<a href="' + dirUrl + '" target="_blank" rel="noopener" style="color:#6db3ff;text-decoration:none;font-weight:600;">' + _bsEsc(addrFull) + ' <span style="font-size:11px;">(directions)</span></a>'
+          : '<span style="color:var(--text-primary);">' + _bsEsc(addrFull) + '</span>') + '</div>';
+      }
+      // Phone → call + text
+      if (phone) {
+        c += '<div style="font-size:13px;margin-bottom:8px;display:flex;gap:14px;flex-wrap:wrap;">';
+        c += '<a href="tel:' + _bsEsc(telHref) + '" style="color:#6db3ff;text-decoration:none;font-weight:600;">📞 ' + _bsEsc(phone) + '</a>';
+        c += '<a href="sms:' + _bsEsc(telHref) + '" style="color:#6db3ff;text-decoration:none;font-weight:600;">💬 Text</a>';
+        c += '</div>';
+      }
+      // Email → mailto (only if present)
+      if (email) c += '<div style="font-size:13px;margin-bottom:8px;">✉️ <a href="mailto:' + _bsEsc(email) + '" style="color:#6db3ff;text-decoration:none;font-weight:600;">' + _bsEsc(email) + '</a></div>';
+      // Crew
+      const crew = Array.isArray(snap.crew_display) ? snap.crew_display : [];
+      if (crew.length) {
+        c += '<div style="font-size:13px;margin-bottom:8px;"><div style="color:var(--text-muted);margin-bottom:3px;">👷 Assigned to:</div><ul style="margin:0;padding-left:20px;color:var(--text-primary);">';
+        crew.forEach(m => { const nm = (m && m.name) ? m.name : ''; if (nm) c += '<li>' + _bsEsc(nm) + '</li>'; });
+        c += '</ul></div>';
+      }
+      // Items
+      if (job.items_description) c += '<div style="font-size:13px;margin-bottom:4px;"><span style="color:var(--text-muted);">Items:</span> <span style="color:var(--text-primary);">' + _bsEsc(job.items_description) + '</span></div>';
+
+      const overlay = document.createElement('div');
+      overlay.id = 'bsDetailOverlay';
+      overlay.setAttribute('style', 'position:fixed;inset:0;z-index:100001;background:rgba(0,0,0,0.6);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;');
+      overlay.onclick = function (e) { if (e.target === overlay) _bsCloseDetail(); };
+      overlay.innerHTML = '<div style="width:100%;max-width:440px;margin-top:40px;background:var(--bg-card,#1e2f40);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,10px);padding:18px 18px 20px;box-shadow:0 10px 40px rgba(0,0,0,0.5);">' + c + '</div>';
+      document.body.appendChild(overlay);
+    }
+
+    // ---- CSV export (no external library) ----
+    function _bsCsvCell(v) { return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; }
+    function _bsDownloadCsv() {
+      const rows = _bsCurrentFiltered();
+      const header = ['Date', 'Time', 'Customer', 'Phone', 'Address', 'Route', 'Status', 'Amount', 'Job#'];
+      const lines = [header.map(_bsCsvCell).join(',')];
+      rows.forEach(a => {
+        const snap = a.snapshot || {}, job = a.job || {};
+        const amount = (snap.import_total !== null && snap.import_total !== undefined && !isNaN(snap.import_total)) ? Number(snap.import_total).toFixed(2) : '';
+        lines.push([
+          a.scheduled_date || '', _bsMinutesToTime(a.start_minutes), _bsCust(a), _bsPhone(a),
+          _bsAddrFull(a), snap.route_name || '', a.status || '', amount, job.job_number || ''
+        ].map(_bsCsvCell).join(','));
+      });
+      const blob = new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const d = new Date();
+      const stamp = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      const link = document.createElement('a');
+      link.href = url; link.download = 'backup-schedule-' + stamp + '.csv';
+      document.body.appendChild(link); link.click(); document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    // ---- Bulk email selected jobs to the crew ----
+    async function _bsEmailSelected() {
+      if (_bsSelected.size === 0) return;
+      const toInp = document.getElementById('bsEmailTo');
+      const to = toInp ? toInp.value.trim() : '';
+      const msgEl = document.getElementById('bsEmailMsg');
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+        if (msgEl) { msgEl.textContent = 'Enter a valid email address.'; msgEl.style.color = '#ff7676'; }
+        return;
+      }
+      // Selected jobs, kept in schedule order.
+      const sel = _bsData.filter(a => _bsSelected.has(String(a.id)));
+      const blocks = sel.map(a => {
+        const snap = a.snapshot || {}, job = a.job || {};
+        const amount = (snap.import_total !== null && snap.import_total !== undefined && !isNaN(snap.import_total)) ? ('$' + Number(snap.import_total).toFixed(2)) : '—';
+        const L = [];
+        L.push((_bsDayHeader(a.scheduled_date) || a.scheduled_date || '') + ' · ' + _bsMinutesToTime(a.start_minutes));
+        L.push('Customer: ' + (_bsCust(a) || '—'));
+        L.push('Address: ' + (_bsAddrFull(a) || '—'));
+        L.push('Phone: ' + (_bsPhone(a) || '—'));
+        if (snap.route_name) L.push('Route: ' + snap.route_name);
+        L.push('Status: ' + (a.status || '—'));
+        L.push('Amount: ' + amount);
+        if (job.items_description) L.push('Items: ' + job.items_description);
+        return L.join('\n');
+      });
+      const text = 'Jobs from CrewLogic Backup Schedule:\n\n' + blocks.join('\n\n----------------------------------------\n\n');
+      const subject = 'CrewLogic — ' + sel.length + ' job' + (sel.length === 1 ? '' : 's');
+      const btn = document.getElementById('bsEmailBtn');
+      if (btn) btn.disabled = true;
+      if (msgEl) { msgEl.textContent = 'Sending…'; msgEl.style.color = 'var(--text-muted)'; }
+      let res;
+      try { res = await edgeFunctionCall('crewlogic-notify', { subject: subject, text: text, to: to }); }
+      catch (e) { console.error('[backup-schedule] email send failed:', e); res = { success: false }; }
+      if (res && res.success === true) {
+        if (msgEl) { msgEl.textContent = '✓ Sent to ' + to; msgEl.style.color = 'var(--accent-green)'; }
+      } else {
+        if (msgEl) { msgEl.textContent = 'Couldn\'t send right now — please try again.'; msgEl.style.color = '#ff7676'; }
+      }
+      _bsUpdateEmailBtn();
     }
 
     // ===== "Where are my trucks?" — telematics truck locations (Linxup/Motive via crewlogic-trucks) =====
