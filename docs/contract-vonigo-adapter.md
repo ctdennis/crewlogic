@@ -1,6 +1,6 @@
 # Contract — Vonigo Read-Only Adapter (Outage DR) — FW-58
 
-**Status:** DRAFT for Owner sign-off (contract-before-code gate 1). No schema/code until approved. Supersedes `docs/plan-job-mirror-dr.md`. Builds on the approved canonical job model (`docs/contract-jobs-schema.md`, 2026-07-19).
+**Status:** APPROVED 2026-07-23 (Owner: "continue with the build") — O1-O4 accepted as recommended (canonical tables stay pristine; provider-specific DR bits go in the `job_source_snapshot` sidecar). BUILDING dev-first. Supersedes `docs/plan-job-mirror-dr.md`. Builds on the approved canonical job model (`docs/contract-jobs-schema.md`, 2026-07-19). Vonigo recovered 2026-07-23 18:30 UTC, so the backfill + phone/email field-ID lookup are unblocked.
 
 ## 1. Purpose & scope
 
