@@ -21,6 +21,9 @@ create table if not exists public.job_source_snapshot (
   provider        text not null default 'vonigo',
   import_total    numeric(12,2),          -- O3: amount to collect (provider total), DR display only
   crew_display    jsonb,                  -- O1: [{id,name,title}] crew names for display (NOT job_crew)
+  customer_display jsonb,                 -- {name,phone,email} for DR display — avoids coupling the
+                                          -- read-only mirror to native customers dedup/type/source (v1);
+                                          -- phone/email fill once the Vonigo field IDs are resolved
   route_name      text,                   -- O2: denormalized route label
   raw             jsonb,                  -- full provider WorkOrder payload
   synced_at       timestamptz,            -- last successful pull of this snapshot ("as of" staleness)
