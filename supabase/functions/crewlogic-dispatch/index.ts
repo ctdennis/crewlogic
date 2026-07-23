@@ -160,7 +160,11 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
     const labelDone = GRAY_LABELS.has(gf(f, F.label).optionID || 0);
     const zoneRel = rel.find((x: any) => x.relationType === 'zone');
     const clientRel = rel.find((x: any) => x.relationType === 'client'); // CLIENT account name (e.g. "Clean City Pros"); field 183 is the on-site CONTACT — wrong for commercial clients
-    return { jobID: jobRel ? String(jobRel.objectID) : null, woID: String(w.objectID), route: rname, routeCode: shortRoute(rname), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: (clientRel && clientRel.name) || gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), labelDone, labelOpt: gf(f, F.label).optionID || 0, apptCount: parseInt(String(w.countWorkOrders ?? '0'), 10) || 0, zoneID: zoneRel ? String(zoneRel.objectID) : '', zoneName: zoneRel ? zoneRel.name : '', lat: null as number | null, lon: null as number | null };
+    // Crew comes through as one Relation per member (crew id=7435 Nicholson, Joe). Names only — the
+    // job card just shows who is on it. driver/lugger role is NOT in this relation; it lives in the
+    // crew-member record, so the card can't distinguish them yet.
+    const crew = rel.filter((x: any) => x.relationType === 'crew').map((c: any) => String(c.name || '').trim()).filter(Boolean);
+    return { jobID: jobRel ? String(jobRel.objectID) : null, crew, woID: String(w.objectID), route: rname, routeCode: shortRoute(rname), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: (clientRel && clientRel.name) || gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), labelDone, labelOpt: gf(f, F.label).optionID || 0, apptCount: parseInt(String(w.countWorkOrders ?? '0'), 10) || 0, zoneID: zoneRel ? String(zoneRel.objectID) : '', zoneName: zoneRel ? zoneRel.name : '', lat: null as number | null, lon: null as number | null };
   }).filter((j: any) => j.jobID
     // hide CANCELLED only — plain "Cancelled" (optionID 162) AND same-day "Cancelled - Today" (different
     // optionID, caught by the text test). COMPLETED/ARCHIVED jobs are KEPT (flagged completed → grayed on
@@ -419,6 +423,39 @@ Deno.serve(async (req: Request) => {
       return json({ success: true, dayID, durationMin, routes: ordered, boardStartMin, boardEndMin });
     }
 
+
+    // action=crewByRoute — READ ONLY (list read; no method, so no write path). RETAINED.
+    //
+    // Pulls a day's WorkOrders and extracts the crew Relations grouped by route. Crew is NOT in the
+    // normalised listRouteJobs output — it arrives as a Relation (`crew id=7435 Nicholson, Joe`)
+    // alongside route/job/client, and that is the ONLY place the API exposes it: there is no Crews
+    // endpoint, and /resources/routes/ carries none.
+    //
+    // Kept because FW-57 needs repeated captures: verifying route-level assignment cascades, and
+    // confirming the crew relation SURVIVES archiving once a job is paid (if it does not, labour
+    // costing must capture crew BEFORE payment). See .HUB/Hub.md FW-57.
+    if (action === 'crewByRoute') {
+      const dayID = String(body.dayID || '');
+      const ds = dayEpoch(dayID), de = ds + 86400;
+      const r = await vpost(token, '/data/WorkOrders/', { franchiseID, pageNo: '1', pageSize: '200', isCompleteObject: 'true', dateMode: '3', dateStart: String(ds), dateEnd: String(de) });
+      const gf = (f: any[], id: number) => (f.find((x: any) => x.fieldID === id) || {});
+      const out = (r.WorkOrders || []).map(function (w: any) {
+        const rel = w.Relations || [], f = w.Fields || [];
+        const pick = (t: string) => rel.filter(function (x: any) { return x.relationType === t; })[0];
+        const route = pick('route'), job = pick('job'), client = pick('client');
+        return {
+          wo: w.objectID,
+          job: job ? job.objectID : null,
+          client: client ? client.name : null,
+          route: route ? route.name : null,
+          status: gf(f, F.status).fieldValue || null,
+          statusOptionID: gf(f, F.status).optionID ?? null,
+          crew: rel.filter(function (x: any) { return x.relationType === 'crew'; })
+                   .map(function (c: any) { return { id: String(c.objectID), name: c.name }; }),
+        };
+      });
+      return json({ success: true, dayID, errNo: r.errNo, count: out.length, workOrders: out });
+    }
 
     // action=rawObjects — READ ONLY (list + method '-1' reads, no writes). RETAINED, not temporary.
     //

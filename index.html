@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.66.0 | 2026-07-22">
+  <meta name="crewlogic-version" content="v5.67.0 | 2026-07-23">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9496,10 +9496,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // Clickable Vonigo link to the Job page (Job_Main.aspx?jobID=) — the appointment sub-page only
     // renders inside Vonigo's own frame, so the Job page is the deepest link that loads clean.
+    // Crew line for the job Details card. Names come from the WorkOrder's crew Relations. A future
+    // date, or a job Vonigo hasn't been crewed yet, has none — say so plainly rather than showing a
+    // blank line, since "crew not assigned yet" is itself the useful answer (owner catches
+    // unassigned tipped jobs before payroll).
+    function _crewLineHtml(crew) {
+      const list = Array.isArray(crew) ? crew.filter(Boolean) : [];
+      if (!list.length) {
+        return '<div style="margin-top:3px;color:#9fb0c0;">👷 <span style="color:#6e8194;">Crew not assigned yet</span></div>';
+      }
+      return '<div style="margin-top:3px;color:#cdd6df;">👷 ' + list.map(function (n) { return _truckEsc(n); }).join(' · ') + '</div>';
+    }
     function _vonigoApptLinkHtml(workOrderID, jobID) {
       if (!jobID) return '';
       const url = 'https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(jobID));
-      return '<div style="margin-top:3px;"><a href="' + url + '" target="_blank" rel="noopener" style="color:#6db3ff;font-weight:600;text-decoration:none;">🔗 Open job in Vonigo</a></div>';
+      return '<div style="margin-top:3px;"><a href="' + url + '" target="_blank" rel="noopener" style="color:#6db3ff;font-weight:600;text-decoration:none;">🔗 Open Job ' + _truckEsc(String(jobID)) + ' in Vonigo</a></div>';
     }
     function _truckTimeAgo(ms) {
       if (!ms) return '';
@@ -9641,6 +9652,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + (addr ? '<br>' + _addrLink(addr, addr, _truckEsc, '#6db3ff') : '')
             + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (base + k) + '"></div>'
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
+            + _crewLineHtml(j.crew)
             + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap);
@@ -10067,7 +10079,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               + items.map(it => _truckEsc(it)).join('<br>')
               + '</div>'
             : '';
-          const pop = '<div style="font-size:13px;line-height:1.5;min-width:185px;max-width:250px;">'
+          const pop = '<div style="font-size:13px;line-height:1.5;">'
             + '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;">'
               + '<b>Stop ' + n + ' · ' + _truckEsc(rkey) + '</b>'
               + (j.timeLabel ? '<span style="color:#6e8194;white-space:nowrap;font-weight:600;">' + _truckEsc(j.timeLabel) + '</span>' : '')
@@ -10078,6 +10090,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + (addr ? '<div>' + _addrLink(addr, addr, _truckEsc, '#6db3ff') + '</div>' : '')
             + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (_trucksJobDay || 0) + '"></div>'
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
+            + _crewLineHtml(j.crew)
             + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
             + itemsHtml
             + '</div>';
