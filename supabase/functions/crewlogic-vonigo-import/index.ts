@@ -34,8 +34,10 @@ const VONIGO_BASE = 'https://junkluggers.vonigo.com/api/v1';
 // WorkOrder fieldIDs (objectTypeID WorkOrder) — same set crewlogic-todays-workorders reads.
 const F_STATUS = 181, F_CONTACT = 183, F_ADDRESS = 184, F_DATE = 185, F_DURATION = 186;
 const F_LABEL = 201, F_PRICE = 813, F_TIME_MIN = 9082, F_ITEMS = 10336, F_NOTES = 200;
-const F_PHONE = 10288;  // contact phone on the WorkOrder (verified from raw payloads 2026-07-23). Email
-                        // is NOT on the WO (it lives on the Vonigo client record) — a follow-up lookup.
+// Customer phone/email live on the Vonigo CONTACT object (fetched by clientID via /data/Contacts/),
+// NOT the WorkOrder — the same source crewlogic-job-lookup uses. Captured at IMPORT time so they
+// survive an outage (a lazy lookup would fail exactly when the DR board is needed).
+const F_CONTACT_EMAIL = 97, F_CONTACT_PHONE = 1088;
 
 // Vonigo status optionIDs
 const ST_CANCELLED = 162, ST_INPROGRESS = 163, ST_COMPLETED = 164, ST_ARCHIVED = 165;
@@ -123,6 +125,29 @@ Deno.serve(async (req: Request) => {
     const dateEnd = franchiseDayEpoch(tz, Math.abs(daysForward) + 1);
     const now = new Date().toISOString();
 
+    // Per-invocation contact cache: one /data/Contacts/ fetch per unique clientID (best-effort).
+    const contactCache = new Map<string, { phone: string; email: string }>();
+    const fetchContact = async (clientID: string): Promise<{ phone: string; email: string }> => {
+      if (contactCache.has(clientID)) return contactCache.get(clientID)!;
+      let out = { phone: "", email: "" };
+      try {
+        const cd = await (await fetch(VONIGO_BASE + "/data/Contacts/", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ securityToken, clientID, sortMode: "1", sortDirection: "0", pageNo: "1", pageSize: "50", isCompleteObject: "true" }),
+        })).json();
+        const cf: VField[] = ((cd.Contacts || [])[0]?.Fields) || [];
+        const email = str(cf.find((f) => f.fieldID === F_CONTACT_EMAIL)?.fieldValue);
+        out = {
+          phone: str(cf.find((f) => f.fieldID === F_CONTACT_PHONE)?.fieldValue),
+          email: /noemail/i.test(email) ? "" : email,   // Vonigo's "noemail@noemail.com" placeholder = no email
+        };
+      } catch (e) {
+        console.error("[vonigo-import] contact fetch failed (client " + clientID + "):", (e as Error).message);
+      }
+      contactCache.set(clientID, out);
+      return out;
+    };
+
     // 4) Paginate WorkOrders across the window and mirror each.
     const PAGE = 200;
     for (let pageNo = 1; pageNo <= 500; pageNo++) {
@@ -163,7 +188,9 @@ Deno.serve(async (req: Request) => {
           const items = str(getField(fields, F_ITEMS)?.fieldValue);
           const notes = str(getField(fields, F_NOTES)?.fieldValue);
           const contactName = str(getField(fields, F_CONTACT)?.fieldValue);
-          const phone = str(getField(fields, F_PHONE)?.fieldValue);
+          // Customer phone/email from the Vonigo Contact (by clientID), cached per client this run.
+          const clientID = clientRel?.objectID ? String(clientRel.objectID) : '';
+          const contactInfo = clientID ? await fetchContact(clientID) : { phone: '', email: '' };
           const startMin = parseInt(str(getField(fields, F_TIME_MIN)?.fieldValue) || '', 10);
           const durationMin = parseInt(str(getField(fields, F_DURATION)?.fieldValue) || '', 10);
           const price = parseFloat(str(getField(fields, F_PRICE)?.fieldValue) || '') || null;
@@ -225,7 +252,7 @@ Deno.serve(async (req: Request) => {
             appointment_id: apUuid, franchise_id: franchiseInternalID, provider: 'vonigo',
             import_total: price,
             crew_display: crew.length ? crew : null,
-            customer_display: { name: clientRel?.name || contactName || null, phone: phone || null, email: null },
+            customer_display: { name: clientRel?.name || contactName || null, phone: contactInfo.phone || null, email: contactInfo.email || null },
             route_name: routeRel?.name || null,
             raw: wo, synced_at: now,
           }, { onConflict: 'appointment_id' });
