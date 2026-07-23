@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.69.0 | 2026-07-23">
+  <meta name="crewlogic-version" content="v5.70.0 | 2026-07-23">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9509,17 +9509,28 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!list.length) {
         return '<div style="margin-top:3px;color:#9fb0c0;">👷 <span style="color:#6e8194;">Crew not assigned yet</span></div>';
       }
-      // Crew entries are {name, title} objects (todays-workorders) OR bare name strings (dispatch's
-      // listRouteJobs, which carries no title) — handle both. Job Title (user field 166) is FREE
-      // TEXT set per franchise habit, so it is shown raw in muted parens and never drives logic.
-      const one = function (c) {
-        if (c && typeof c === 'object') {
-          const nm = _truckEsc(c.name || '');
-          return c.title ? nm + ' <span style="color:#6e8194;">(' + _truckEsc(c.title) + ')</span>' : nm;
-        }
-        return _truckEsc(String(c));
-      };
-      return '<div style="margin-top:3px;color:#cdd6df;">👷 ' + list.map(one).join(' · ') + '</div>';
+      // Entries are {name, title} objects (todays-workorders) or bare name strings (dispatch's
+      // listRouteJobs, no title) — normalise both. Job Title (user field 166) is FREE TEXT set per
+      // franchise habit and can be STALE/WRONG, so it is shown raw and only used for one advisory
+      // check below — never to drive a write.
+      const norm = list.map(function (c) {
+        return (c && typeof c === 'object') ? { name: String(c.name || ''), title: String(c.title || '') } : { name: String(c), title: '' };
+      });
+      const haveTitles = norm.some(function (c) { return c.title; });
+      const hasDriver = norm.some(function (c) { return /driver/i.test(c.title); });
+      // "No driver" alert fires only when we CAN judge (titles present), the crew is 2+, and none
+      // reads as a driver. A solo crew is skipped on purpose — one person drove themselves (an
+      // estimate visit or a dump run), so "no driver" is meaningless there (owner's operating
+      // model). The message points at Vonigo because the title, not the app, is what's wrong.
+      const noDriver = haveTitles && norm.length >= 2 && !hasDriver;
+      const warn = noDriver
+        ? ' <span title="No Driver, Please check titles in Vonigo" style="cursor:help;color:#fbbf24;font-weight:700;">⚠️</span>'
+        : '';
+      const bullets = norm.map(function (c) {
+        const t = c.title ? ' <span style="color:#6e8194;">(' + _truckEsc(c.title) + ')</span>' : '';
+        return '<div style="margin-left:16px;color:#cdd6df;">- ' + _truckEsc(c.name) + t + '</div>';
+      }).join('');
+      return '<div style="margin-top:3px;color:#9fb0c0;">👷 Assigned to:' + warn + '</div>' + bullets;
     }
     // Compact inline Vonigo job link for the card header — "Job 867753", clickable, opens Vonigo.
     // Replaces the separate "🔗 Open Job … in Vonigo" line so the number sits in the title row and
