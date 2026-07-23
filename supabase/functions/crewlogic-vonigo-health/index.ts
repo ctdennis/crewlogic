@@ -90,13 +90,25 @@ Deno.serve(async (req: Request) => {
           "Native features are UNAFFECTED: pricing, recycling revenue, coupon lookup.\n\n" +
           "Users may see errors on the Vonigo-dependent screens. Nothing to fix on CrewLogic's side - " +
           "it recovers when Vonigo's servers come back. You'll get a follow-up email when it does.";
+      // Recipients: every owner conducting business in Vonigo (pro/enterprise or a current beta
+      // tester) per vonigo_alert_recipients() (migration 0066). The owner's admin inbox is the
+      // anchored visible To and always included; the rest go by BCC so no owner's address is exposed
+      // to the others. If the lookup fails/returns nothing, the admin still gets the alert.
+      const ADMIN = "charles.dennis@junkluggers.com";
+      let bcc: string[] = [];
+      try {
+        const { data: recips, error } = await db.rpc("vonigo_alert_recipients");
+        if (error) throw error;
+        bcc = (recips as { email: string }[] | null || [])
+          .map((r) => r.email).filter((e) => e && e !== ADMIN);
+      } catch (e) {
+        console.error("[vonigo-health] recipient lookup failed, alerting admin only:", (e as Error).message);
+      }
       // Best-effort: a notify failure must not break the health check (or it would stop updating state).
       await fetch(SUPABASE_URL + "/functions/v1/crewlogic-notify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // Owner's real inbox — the shared notify default (bluecollartechai@gmail.com) is where
-        // signup/feedback go, but the owner wants operational Vonigo alerts here.
-        body: JSON.stringify({ subject, text, to: "charles.dennis@junkluggers.com" }),
+        body: JSON.stringify({ subject, text, to: ADMIN, bcc }),
       }).catch((e) => console.error("[vonigo-health] notify failed:", (e as Error).message));
     }
 
