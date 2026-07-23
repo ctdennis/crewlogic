@@ -25,6 +25,18 @@ const CORS = {
 };
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') || '';
+const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+
+// Vonigo up/down state for the DR board banner. service_health is RLS-locked (service-role only), so
+// read it with the service key. Returns { isUp, lastChecked, lastChanged } or null if unknown.
+async function vonigoHealth(): Promise<Record<string, unknown> | null> {
+  try {
+    const svc = createClient(SUPABASE_URL, SERVICE_KEY);
+    const { data } = await svc.from('service_health').select('is_up, last_checked, last_changed').eq('service', 'vonigo').limit(1);
+    const row = data && data[0];
+    return row ? { isUp: row.is_up, lastChecked: row.last_checked, lastChanged: row.last_changed } : null;
+  } catch { return null; }
+}
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -63,7 +75,7 @@ Deno.serve(async (req: Request) => {
       if (statuses && statuses.length) q = q.in('status', statuses);
       const { data, error } = await q;
       if (error) throw error;
-      return json({ success: true, appointments: shape(data || []) });
+      return json({ success: true, appointments: shape(data || []), health: await vonigoHealth() });
     }
 
     if (action === 'get') {
