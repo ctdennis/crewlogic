@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.66.0 | 2026-07-22">
+  <meta name="crewlogic-version" content="v5.71.1 | 2026-07-23">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9197,6 +9197,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function dashFindDisposal() {
       _dispMode = true; _dispPick = { truck: null, job: null }; _dispClearRoutes();
       const bar = document.getElementById('dashDispBar'); if (bar) bar.style.display = 'flex';
+      // The Cheapest & Fastest rail section only exists while disposal-finding is active — hidden
+      // otherwise so the rail isn't cluttered by an empty "Run Find disposal" box.
+      const sec = document.getElementById('dashDispSection'); if (sec) sec.style.display = '';
       _dispClearBody();
       _dispStatus('Tap a <b>truck</b> on the map…');
       const btn = document.getElementById('dashDispBtn'); if (btn) { btn.style.background = 'var(--accent-green,#00E785)'; btn.style.color = '#06121d'; }
@@ -9204,6 +9207,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _dispCancel() {
       _dispMode = false; _dispPick = { truck: null, job: null }; _dispClearRoutes();
       const bar = document.getElementById('dashDispBar'); if (bar) bar.style.display = 'none';
+      const sec = document.getElementById('dashDispSection'); if (sec) sec.style.display = 'none';
       _dispClearBody();
       const btn = document.getElementById('dashDispBtn'); if (btn) { btn.style.background = 'var(--bg-input,#1e2f40)'; btn.style.color = 'var(--text-primary)'; }
     }
@@ -9448,34 +9452,40 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _nearestTruckHtml(lat, lon, jtime, jtlabel, jdur, joffset) {
       const nt = _nearestTruck(lat, lon);
       if (!nt) return '';
-      // Straight-line "mi away" renders instantly; the drive-time ETA (Google, traffic-aware) fills the
-      // .job-eta slot async once the card is in the rail (see _fillJobEta), using the embedded coords.
-      return '<div style="color:#cdd6df;">🚚 ' + _truckEsc(nt.name) + ' — ' + nt.mi.toFixed(1) + ' mi away'
-        + '<span class="job-eta" data-tlat="' + nt.lat + '" data-tlon="' + nt.lon + '" data-jlat="' + lat + '" data-jlon="' + lon + '" data-jtime="' + (jtime != null ? jtime : '') + '" data-jtlabel="' + _truckEsc(String(jtlabel || '')) + '" data-jdur="' + (jdur != null ? jdur : '') + '" data-joffset="' + (joffset != null ? joffset : 0) + '" style="color:#9fb0c0;"></span></div>';
+      // Mirrors the crew block: a "🚚 Truck N — <arrival>" header row, then indented bullets.
+      // "mi away" is instant; the arrival (row 1) and drive-time (a bullet) fill async from
+      // _fillJobEta once the card is in the rail, using the coords embedded on .job-eta-arrival.
+      return '<div style="margin-top:3px;color:#cdd6df;">🚚 ' + _truckEsc(nt.name)
+        + '<span class="job-eta-arrival" data-tlat="' + nt.lat + '" data-tlon="' + nt.lon + '" data-jlat="' + lat + '" data-jlon="' + lon + '" data-jtime="' + (jtime != null ? jtime : '') + '" data-jtlabel="' + _truckEsc(String(jtlabel || '')) + '" data-jdur="' + (jdur != null ? jdur : '') + '" data-joffset="' + (joffset != null ? joffset : 0) + '"></span></div>'
+        + '<div style="margin-left:16px;color:#cdd6df;">• ' + nt.mi.toFixed(1) + ' mi away</div>'
+        + '<div class="job-eta-drive" style="margin-left:16px;color:#cdd6df;"></div>';
     }
     // Fill the .job-eta slot in the rail's Job-details card with the truck→job drive time (traffic-aware,
     // via crewlogic-estimate pointDistance = Google Distance Matrix). Fire-and-forget after the card renders.
     async function _fillJobEta() {
-      const el = document.querySelector('#dashLeftJobBody .job-eta'); if (!el) return;
+      const el = document.querySelector('#dashLeftJobBody .job-eta-arrival'); if (!el) return;
+      const driveEl = document.querySelector('#dashLeftJobBody .job-eta-drive');
       const tlat = el.getAttribute('data-tlat'), tlon = el.getAttribute('data-tlon');
       const jlat = el.getAttribute('data-jlat'), jlon = el.getAttribute('data-jlon');
       const jtime = el.getAttribute('data-jtime'), jtlabel = el.getAttribute('data-jtlabel'), jdur = el.getAttribute('data-jdur'), joffset = el.getAttribute('data-joffset');
       if (!tlat || !tlon || !jlat || !jlon) return;
-      el.textContent = ' · …';
+      if (driveEl) driveEl.textContent = '\u2022 …';
       try {
         const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: tlat + ',' + tlon, dest: jlat + ',' + jlon });
         if (data && data.success && data.durationText) {
+          // Arrival goes on ROW 1 after "Truck N — "; drive time drops to a bullet with the miles.
           const info = _arrivalInfo(data.minutes, jtime, jtlabel, jdur, joffset);
           let arrHtml = '';
           if (info) {
-            if (info.future) arrHtml = ' · <span style="color:#9fb0c0;">📅 ' + _truckEsc(info.text) + '</span>';
-            else if (info.late === true) arrHtml = ' · <span style="color:#ef4444;font-weight:600;">⚠️ ' + _truckEsc(info.text) + ' — outside window, contact customer</span>';
-            else if (info.late === false) arrHtml = ' · <span style="color:#22c55e;font-weight:600;">✅ ' + _truckEsc(info.text) + '</span>';
-            else arrHtml = ' · ' + _truckEsc(info.text);
+            if (info.future) arrHtml = ' — <span style="color:#9fb0c0;">📅 ' + _truckEsc(info.text) + '</span>';
+            else if (info.late === true) arrHtml = ' — <span style="color:#ef4444;font-weight:600;">⚠️ ' + _truckEsc(info.text) + ' — outside window, contact customer</span>';
+            else if (info.late === false) arrHtml = ' — <span style="color:#22c55e;font-weight:600;">✅ ' + _truckEsc(info.text) + '</span>';
+            else arrHtml = ' — ' + _truckEsc(info.text);
           }
-          el.innerHTML = ' · ~' + _truckEsc(data.durationText) + ' drive' + (data.inTraffic ? ' in traffic' : '') + arrHtml;
-        } else { el.textContent = ''; }
-      } catch (_e) { el.textContent = ''; }
+          el.innerHTML = arrHtml;
+          if (driveEl) driveEl.textContent = '\u2022 ~' + data.durationText + ' drive' + (data.inTraffic ? ' in traffic' : '');
+        } else { el.textContent = ''; if (driveEl) driveEl.textContent = ''; }
+      } catch (_e) { el.textContent = ''; if (driveEl) driveEl.textContent = ''; }
     }
     // Recompute the nearest-truck line from CURRENT truck positions each time a job card opens — trucks
     // move, so this must refresh per click, not be baked at marker-load. Then fill the drive-time ETA.
@@ -9496,10 +9506,50 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // Clickable Vonigo link to the Job page (Job_Main.aspx?jobID=) — the appointment sub-page only
     // renders inside Vonigo's own frame, so the Job page is the deepest link that loads clean.
+    // Crew line for the job Details card. Names come from the WorkOrder's crew Relations. A future
+    // date, or a job Vonigo hasn't been crewed yet, has none — say so plainly rather than showing a
+    // blank line, since "crew not assigned yet" is itself the useful answer (owner catches
+    // unassigned tipped jobs before payroll).
+    function _crewLineHtml(crew) {
+      const list = Array.isArray(crew) ? crew.filter(Boolean) : [];
+      if (!list.length) {
+        return '<div style="margin-top:3px;color:#9fb0c0;">👷 <span style="color:#6e8194;">Crew not assigned yet</span></div>';
+      }
+      // Entries are {name, title} objects (todays-workorders) or bare name strings (dispatch's
+      // listRouteJobs, no title) — normalise both. Job Title (user field 166) is FREE TEXT set per
+      // franchise habit and can be STALE/WRONG, so it is shown raw and only used for one advisory
+      // check below — never to drive a write.
+      const norm = list.map(function (c) {
+        return (c && typeof c === 'object') ? { name: String(c.name || ''), title: String(c.title || '') } : { name: String(c), title: '' };
+      });
+      const haveTitles = norm.some(function (c) { return c.title; });
+      const hasDriver = norm.some(function (c) { return /driver/i.test(c.title); });
+      // "No driver" alert fires only when we CAN judge (titles present), the crew is 2+, and none
+      // reads as a driver. A solo crew is skipped on purpose — one person drove themselves (an
+      // estimate visit or a dump run), so "no driver" is meaningless there (owner's operating
+      // model). The message points at Vonigo because the title, not the app, is what's wrong.
+      const noDriver = haveTitles && norm.length >= 2 && !hasDriver;
+      const warn = noDriver
+        ? ' <span title="No Driver, Please check titles in Vonigo" style="cursor:help;color:#fbbf24;font-weight:700;">⚠️</span>'
+        : '';
+      const bullets = norm.map(function (c) {
+        const t = c.title ? ' <span style="color:#6e8194;">(' + _truckEsc(c.title) + ')</span>' : '';
+        return '<div style="margin-left:16px;color:#cdd6df;">\u2022 ' + _truckEsc(c.name) + t + '</div>';
+      }).join('');
+      return '<div style="margin-top:3px;color:#9fb0c0;">👷 Assigned to:' + warn + '</div>' + bullets;
+    }
+    // Compact inline Vonigo job link for the card header — "Job 867753", clickable, opens Vonigo.
+    // Replaces the separate "🔗 Open Job … in Vonigo" line so the number sits in the title row and
+    // the card loses one row + one icon (decluttering).
+    function _vonigoJobInline(jobID) {
+      if (!jobID) return '';
+      const url = 'https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(jobID));
+      return '<a href="' + url + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open in Vonigo" style="color:#6db3ff;font-weight:600;text-decoration:none;">Job ' + _truckEsc(String(jobID)) + '</a>';
+    }
     function _vonigoApptLinkHtml(workOrderID, jobID) {
       if (!jobID) return '';
       const url = 'https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(jobID));
-      return '<div style="margin-top:3px;"><a href="' + url + '" target="_blank" rel="noopener" style="color:#6db3ff;font-weight:600;text-decoration:none;">🔗 Open job in Vonigo</a></div>';
+      return '<div style="margin-top:3px;"><a href="' + url + '" target="_blank" rel="noopener" style="color:#6db3ff;font-weight:600;text-decoration:none;">🔗 Open Job ' + _truckEsc(String(jobID)) + ' in Vonigo</a></div>';
     }
     function _truckTimeAgo(ms) {
       if (!ms) return '';
@@ -9636,12 +9686,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const addr = j.address ? _truckProperAddr(String(j.address).replace(/\n/g, ', ').replace(/\s+/g, ' ').replace(/\s+,/g, ',').trim()) : '';
           const tip = '<div style="font-size:12px;line-height:1.4;">'
             + '<b>' + dayLabel + '</b>' + (j.timeLabel ? ' · ' + _truckEsc(j.timeLabel) : '') + (route ? ' · ' + _truckEsc(route) : '')
+            + (j.jobID ? ' · ' + _vonigoJobInline(j.jobID) : '')
             + '<br>' + _truckEsc(j.clientName || 'Job')
-            + (Number(j.price) > 0 ? '<br><span style="font-weight:800;color:#00E785;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>' : '')
+            + (Number(j.price) > 0 ? '<br><span style="color:#9fb0c0;">Job Total: </span><span style="font-weight:800;color:#00E785;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>' : '')
             + (addr ? '<br>' + _addrLink(addr, addr, _truckEsc, '#6db3ff') : '')
-            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (base + k) + '"></div>'
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
-            + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
+            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (base + k) + '"></div>'
+            + _crewLineHtml(j.crew)
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap);
           // Details in the fixed in-map hover box (no popup → no clip/pan); measure + disposal-pick first.
@@ -10016,7 +10067,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function loadJobMarkers(refit = true) {
       if (typeof L === 'undefined' || !_trucksMap) return;
       try {
-        const data = await edgeFunctionCall('crewlogic-todays-workorders', { franchiseID: currentUser.franchiseID, dayOffset: _trucksJobDay, includeCoords: true });
+        const data = await edgeFunctionCall('crewlogic-todays-workorders', { franchiseID: currentUser.franchiseID, dayOffset: _trucksJobDay, includeCoords: true, includeCrewTitles: true });
         // Server returns jobs sorted by appointment time → this IS each route's stop order.
         const jobs = (data.workOrders || []).filter(j => j.lat != null && j.lon != null); // keep completed (shown grayed); cancelled is filtered server-side
         if (_jobLayer) _jobLayer.clearLayers(); else _jobMarkers.forEach(m => _trucksMap.removeLayer(m));
@@ -10067,18 +10118,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               + items.map(it => _truckEsc(it)).join('<br>')
               + '</div>'
             : '';
-          const pop = '<div style="font-size:13px;line-height:1.5;min-width:185px;max-width:250px;">'
+          const pop = '<div style="font-size:13px;line-height:1.5;">'
+            // Header row: Stop · route · Job link  |  time. Job number joins the title row.
             + '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;">'
-              + '<b>Stop ' + n + ' · ' + _truckEsc(rkey) + '</b>'
-              + (j.timeLabel ? '<span style="color:#6e8194;white-space:nowrap;font-weight:600;">' + _truckEsc(j.timeLabel) + '</span>' : '')
+              + '<div><b>Stop ' + n + ' · ' + _truckEsc(rkey) + '</b>' + (j.jobID ? ' · ' + _vonigoJobInline(j.jobID) : '') + '</div>'
+              + (j.timeLabel ? '<span style="color:#9fb0c0;white-space:nowrap;font-weight:600;">' + _truckEsc(j.timeLabel) + '</span>' : '')
             + '</div>'
-            + (done ? '<div style="color:#6e8194;font-weight:700;font-size:11px;margin-top:2px;">✓ Completed</div>' : '')
-            + (Number(j.price) > 0 ? '<div style="font-weight:800;color:#00E785;font-size:13px;margin-top:2px;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</div>' : '')
+            + (done ? '<div style="color:#9fb0c0;font-weight:700;font-size:11px;margin-top:2px;">✓ Completed</div>' : '')
+            + (Number(j.price) > 0 ? '<div style="margin-top:2px;"><span style="color:#9fb0c0;">Job Total: </span><span style="font-weight:800;color:#00E785;font-size:13px;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span></div>' : '')
             + '<div style="margin-top:3px;">🏠 ' + _truckEsc(j.clientName || 'Job') + '</div>'
             + (addr ? '<div>' + _addrLink(addr, addr, _truckEsc, '#6db3ff') + '</div>' : '')
-            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (_trucksJobDay || 0) + '"></div>'
+            // Phone directly under the address, so address+phone read as one contact block, and
+            // truck+crew group together below it.
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
-            + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
+            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (_trucksJobDay || 0) + '"></div>'
+            + _crewLineHtml(j.crew)
             + itemsHtml
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: done ? 0.6 : 1 }).addTo(_jobLayer || _trucksMap);
@@ -11028,7 +11082,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +       '<div onclick="_railToggle(this)" style="padding:9px 12px;font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">📍 Details<span style="margin-left:auto;font-size:12px;color:var(--text-muted);">▾</span></div>'
         +       '<div id="dashLeftJobBody" style="padding:2px 6px 8px;"><div class="dash-rail-empty" style="color:var(--text-muted);font-size:13px;padding:10px;">Tap a job or truck for details.</div></div>'
         +     '</div>'
-        +     '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input,#1e2f40);overflow:hidden;flex-shrink:0;">'
+        +     '<div id="dashDispSection" style="display:none;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input,#1e2f40);overflow:hidden;flex-shrink:0;">'
         +       '<div onclick="_railToggle(this)" style="padding:9px 12px;font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">🗑️ Cheapest &amp; Fastest<span style="margin-left:auto;font-size:12px;color:var(--text-muted);">▾</span></div>'
         +       '<div id="dashLeftDispBody" style="padding:2px 6px 8px;"><div class="dash-rail-empty" style="color:var(--text-muted);font-size:13px;padding:10px;">Run 🗑️ Find disposal for routes.</div></div>'
         +     '</div>'

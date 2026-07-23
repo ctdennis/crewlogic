@@ -200,6 +200,9 @@ Deno.serve(async (req: Request) => {
     // EXPLICIT cancel is a safe delete signal, unlike "missing from list"). Default off keeps the
     // customer-facing picker clean.
     const includeCancelled = body.includeCancelled === true;
+    // Resolve crew Job Titles (extra Vonigo calls) only when the caller wants them — the trucks/
+    // dispatch map does; Job Plan does not.
+    const includeCrewTitles = body.includeCrewTitles === true;
 
     if (!franchiseID) {
       return new Response(JSON.stringify({ success: false, error: 'franchiseID required' }), {
@@ -347,6 +350,14 @@ Deno.serve(async (req: Request) => {
         const jobRel = relations.find((r) => r.relationType === 'job');
         const routeRel = relations.find((r) => r.relationType === 'route');
         const clientRel = relations.find((r) => r.relationType === 'client'); // CLIENT account name (e.g. "Clean City Pros"); field 183 is the on-site CONTACT — wrong for commercial clients
+        // Crew: one Relation per member (crew id=7435 Nicholson, Joe). id kept so the job title
+        // (field 166 on the user) can be resolved below. Names/ids only — the assignment ROLE
+        // (driver/lugger, set per route per day) is NOT on this relation; that lives behind the
+        // route's crew assignment, a separate object not exposed here.
+        const crew = relations
+          .filter((r) => r.relationType === 'crew')
+          .map((c) => ({ id: c.objectID != null ? String(c.objectID) : null, name: String(c.name || '').trim(), title: '' as string }))
+          .filter((c) => c.name);
 
         const timeMin = parseInt(getField(fields, F_TIME_MINUTES)?.fieldValue || '0', 10);
         const dateService = parseInt(getField(fields, F_DATE_SERVICE)?.fieldValue || '0', 10);
@@ -364,6 +375,7 @@ Deno.serve(async (req: Request) => {
           status: statusLabel,
           statusOptionID,
           route: routeRel?.name || '',
+          crew,
           dateService,
           price,
           isComplete: statusOptionID === STATUS_COMPLETED || statusOptionID === STATUS_ARCHIVED,
@@ -406,6 +418,34 @@ Deno.serve(async (req: Request) => {
     // Cache-first via geocode_cache. Google (rooftop) is the PRIMARY geocoder; Census is a fallback on a
     // transient Google failure. A cached row is trusted ONLY if provider='google' — Census-sourced or
     // missing rows get (re)geocoded with Google, so old inaccurate Census pins auto-upgrade on next fetch.
+    // Resolve each crew member's Job Title (user field 166). Opt-in via includeCrewTitles so the
+    // Job Plan and other callers don't pay for it. DEDUPED across the whole day — Carter appears on
+    // many jobs but is looked up ONCE — so it is unique-crew-count calls (~a handful), run in
+    // parallel. Title is FREE TEXT set per franchise habit (some daily, some defaulted), so it is
+    // shown raw, never used as logic. Failure is silent: a missing title just leaves the name alone.
+    if (includeCrewTitles) {
+      const ids = new Set<string>();
+      for (const w of workOrders) for (const c of ((w as { crew?: Array<{ id: string | null }> }).crew || [])) if (c.id) ids.add(c.id);
+      const titleById = new Map<string, string>();
+      await Promise.all([...ids].map(async (id) => {
+        try {
+          const ur = await fetch(VONIGO_BASE + '/resources/users/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ securityToken, method: '1', objectID: id, isCompleteObject: 'true' }),
+          });
+          const uj = await ur.json();
+          const f166 = (uj.Fields || []).find((f: { fieldID: number }) => f.fieldID === 166);
+          if (f166 && f166.fieldValue) titleById.set(id, String(f166.fieldValue).trim());
+        } catch { /* leave title blank */ }
+      }));
+      for (const w of workOrders) {
+        for (const c of ((w as { crew?: Array<{ id: string | null; title: string }> }).crew || [])) {
+          if (c.id && titleById.has(c.id)) c.title = titleById.get(c.id) as string;
+        }
+      }
+    }
+
     if (includeCoords) {
       const GKEY = Deno.env.get('GOOGLE_GEOCODING_API_KEY') || Deno.env.get('GOOGLE_MAPS_API_KEY') || '';
       const toGeocode = workOrders.filter((w) => w.address);
