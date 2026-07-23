@@ -70,11 +70,13 @@ Deno.serve(async (req: Request) => {
       // Cap the payload so a very wide date range can't bloat the page or silently hit PostgREST's
       // default 1000-row cut. Fetch LIMIT+1 to detect truncation, return LIMIT with a `truncated` flag
       // so the client can tell the user to narrow the dates.
+      // Keep the MOST RECENT rows when a range exceeds the cap (order desc), so the latest 500 load and
+      // older jobs are reached by narrowing to an EARLIER window. The client re-groups by day (ascending)
+      // for display, so the on-screen order is unchanged — this only decides WHICH 500 survive the cap.
       const LIMIT = 500;
       let q = asUser.from('job_appointments').select(APPT_SELECT)
         .gte('scheduled_date', dateFrom).lte('scheduled_date', dateTo)
-        .order('scheduled_date', { ascending: true })
-        .order('start_minutes', { ascending: true, nullsFirst: true })
+        .order('scheduled_date', { ascending: false })
         .limit(LIMIT + 1);
       const statuses = Array.isArray(body.status) ? (body.status as unknown[]).map(String) : null;
       if (statuses && statuses.length) q = q.in('status', statuses);
