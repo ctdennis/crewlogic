@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.68.0 | 2026-07-23">
+  <meta name="crewlogic-version" content="v5.69.0 | 2026-07-23">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9197,6 +9197,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function dashFindDisposal() {
       _dispMode = true; _dispPick = { truck: null, job: null }; _dispClearRoutes();
       const bar = document.getElementById('dashDispBar'); if (bar) bar.style.display = 'flex';
+      // The Cheapest & Fastest rail section only exists while disposal-finding is active — hidden
+      // otherwise so the rail isn't cluttered by an empty "Run Find disposal" box.
+      const sec = document.getElementById('dashDispSection'); if (sec) sec.style.display = '';
       _dispClearBody();
       _dispStatus('Tap a <b>truck</b> on the map…');
       const btn = document.getElementById('dashDispBtn'); if (btn) { btn.style.background = 'var(--accent-green,#00E785)'; btn.style.color = '#06121d'; }
@@ -9204,6 +9207,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _dispCancel() {
       _dispMode = false; _dispPick = { truck: null, job: null }; _dispClearRoutes();
       const bar = document.getElementById('dashDispBar'); if (bar) bar.style.display = 'none';
+      const sec = document.getElementById('dashDispSection'); if (sec) sec.style.display = 'none';
       _dispClearBody();
       const btn = document.getElementById('dashDispBtn'); if (btn) { btn.style.background = 'var(--bg-input,#1e2f40)'; btn.style.color = 'var(--text-primary)'; }
     }
@@ -9517,6 +9521,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       };
       return '<div style="margin-top:3px;color:#cdd6df;">👷 ' + list.map(one).join(' · ') + '</div>';
     }
+    // Compact inline Vonigo job link for the card header — "Job 867753", clickable, opens Vonigo.
+    // Replaces the separate "🔗 Open Job … in Vonigo" line so the number sits in the title row and
+    // the card loses one row + one icon (decluttering).
+    function _vonigoJobInline(jobID) {
+      if (!jobID) return '';
+      const url = 'https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(jobID));
+      return '<a href="' + url + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open in Vonigo" style="color:#6db3ff;font-weight:600;text-decoration:none;">Job ' + _truckEsc(String(jobID)) + '</a>';
+    }
     function _vonigoApptLinkHtml(workOrderID, jobID) {
       if (!jobID) return '';
       const url = 'https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(jobID));
@@ -9657,13 +9669,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const addr = j.address ? _truckProperAddr(String(j.address).replace(/\n/g, ', ').replace(/\s+/g, ' ').replace(/\s+,/g, ',').trim()) : '';
           const tip = '<div style="font-size:12px;line-height:1.4;">'
             + '<b>' + dayLabel + '</b>' + (j.timeLabel ? ' · ' + _truckEsc(j.timeLabel) : '') + (route ? ' · ' + _truckEsc(route) : '')
+            + (j.jobID ? ' · ' + _vonigoJobInline(j.jobID) : '')
             + '<br>' + _truckEsc(j.clientName || 'Job')
-            + (Number(j.price) > 0 ? '<br><span style="font-weight:800;color:#00E785;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>' : '')
+            + (Number(j.price) > 0 ? '<br><span style="color:#9fb0c0;">Job Total: </span><span style="font-weight:800;color:#00E785;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>' : '')
             + (addr ? '<br>' + _addrLink(addr, addr, _truckEsc, '#6db3ff') : '')
-            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (base + k) + '"></div>'
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
+            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (base + k) + '"></div>'
             + _crewLineHtml(j.crew)
-            + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap);
           // Details in the fixed in-map hover box (no popup → no clip/pan); measure + disposal-pick first.
@@ -10090,18 +10102,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               + '</div>'
             : '';
           const pop = '<div style="font-size:13px;line-height:1.5;">'
+            // Header row: Stop · route · Job link  |  time. Job number joins the title row.
             + '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;">'
-              + '<b>Stop ' + n + ' · ' + _truckEsc(rkey) + '</b>'
-              + (j.timeLabel ? '<span style="color:#6e8194;white-space:nowrap;font-weight:600;">' + _truckEsc(j.timeLabel) + '</span>' : '')
+              + '<div><b>Stop ' + n + ' · ' + _truckEsc(rkey) + '</b>' + (j.jobID ? ' · ' + _vonigoJobInline(j.jobID) : '') + '</div>'
+              + (j.timeLabel ? '<span style="color:#9fb0c0;white-space:nowrap;font-weight:600;">' + _truckEsc(j.timeLabel) + '</span>' : '')
             + '</div>'
-            + (done ? '<div style="color:#6e8194;font-weight:700;font-size:11px;margin-top:2px;">✓ Completed</div>' : '')
-            + (Number(j.price) > 0 ? '<div style="font-weight:800;color:#00E785;font-size:13px;margin-top:2px;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</div>' : '')
+            + (done ? '<div style="color:#9fb0c0;font-weight:700;font-size:11px;margin-top:2px;">✓ Completed</div>' : '')
+            + (Number(j.price) > 0 ? '<div style="margin-top:2px;"><span style="color:#9fb0c0;">Job Total: </span><span style="font-weight:800;color:#00E785;font-size:13px;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span></div>' : '')
             + '<div style="margin-top:3px;">🏠 ' + _truckEsc(j.clientName || 'Job') + '</div>'
             + (addr ? '<div>' + _addrLink(addr, addr, _truckEsc, '#6db3ff') + '</div>' : '')
-            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (_trucksJobDay || 0) + '"></div>'
+            // Phone directly under the address, so address+phone read as one contact block, and
+            // truck+crew group together below it.
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
+            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (_trucksJobDay || 0) + '"></div>'
             + _crewLineHtml(j.crew)
-            + _vonigoApptLinkHtml(j.workOrderID, j.jobID)
             + itemsHtml
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: done ? 0.6 : 1 }).addTo(_jobLayer || _trucksMap);
@@ -11051,7 +11065,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +       '<div onclick="_railToggle(this)" style="padding:9px 12px;font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">📍 Details<span style="margin-left:auto;font-size:12px;color:var(--text-muted);">▾</span></div>'
         +       '<div id="dashLeftJobBody" style="padding:2px 6px 8px;"><div class="dash-rail-empty" style="color:var(--text-muted);font-size:13px;padding:10px;">Tap a job or truck for details.</div></div>'
         +     '</div>'
-        +     '<div style="border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input,#1e2f40);overflow:hidden;flex-shrink:0;">'
+        +     '<div id="dashDispSection" style="display:none;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-input,#1e2f40);overflow:hidden;flex-shrink:0;">'
         +       '<div onclick="_railToggle(this)" style="padding:9px 12px;font-size:13px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">🗑️ Cheapest &amp; Fastest<span style="margin-left:auto;font-size:12px;color:var(--text-muted);">▾</span></div>'
         +       '<div id="dashLeftDispBody" style="padding:2px 6px 8px;"><div class="dash-rail-empty" style="color:var(--text-muted);font-size:13px;padding:10px;">Run 🗑️ Find disposal for routes.</div></div>'
         +     '</div>'
