@@ -25,6 +25,7 @@
 //   - email = Contact fieldID 97; phone = Contact fieldID 1088.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { vonigoJson, VonigoUnavailable, VONIGO_DOWN_BODY } from '../_shared/vonigo.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -113,7 +114,7 @@ Deno.serve(async (req: Request) => {
     authUrl.searchParams.set('company', 'Vonigo');
     authUrl.searchParams.set('userName', creds.vonigo_username);
     authUrl.searchParams.set('password', creds.vonigo_md5);
-    const authData = await (await fetch(authUrl.toString())).json();
+    const authData = await vonigoJson(await fetch(authUrl.toString()));
     if (authData.errNo !== 0 || !authData.securityToken) {
       console.error(`[job-lookup][${reqId}] Vonigo auth failed: ${authData.errMsg || 'no token'}`);
       return jsonResponse({ success: false, error: 'Vonigo auth failed', reqId }, 502);
@@ -121,7 +122,7 @@ Deno.serve(async (req: Request) => {
     const securityToken = authData.securityToken;
 
     // 3) Query the WorkOrder by jobID
-    const woData = await (await fetch(VONIGO_BASE + '/data/WorkOrders/', {
+    const woData = await vonigoJson(await fetch(VONIGO_BASE + '/data/WorkOrders/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -133,7 +134,7 @@ Deno.serve(async (req: Request) => {
         sortDirection: '1',
         isCompleteObject: 'true',
       }),
-    })).json();
+    }));
 
     // Match the n8n behavior: any non-result — Vonigo validation error (e.g. an
     // invalid/nonexistent job number → errNo -600), an error code, or an empty
@@ -209,6 +210,11 @@ Deno.serve(async (req: Request) => {
     });
 
   } catch (e) {
+    // Vonigo down (Cloudflare 522 / HTML) → clean message instead of the raw "Unexpected token '<'".
+    if (e instanceof VonigoUnavailable) {
+      console.error(`[job-lookup][${reqId}] Vonigo unavailable (non-JSON response)`);
+      return jsonResponse({ ...VONIGO_DOWN_BODY, reqId }, 503);
+    }
     const err = e as Error;
     console.error(`[job-lookup][${reqId}] error:`, err?.stack || err?.message || err);
     return jsonResponse({ success: false, error: err.message || String(err), reqId }, 500);
