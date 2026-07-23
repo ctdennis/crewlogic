@@ -69,11 +69,18 @@ schema pull — likely a franchise-membership sub-object, still not located.
 
 ### The per-route driver/lugger role — narrowed, still open
 
-Confirmed it is NOT a field: the **Crew object (type 50) returns ZERO fields** (empty schema
-despite isHasFields:true), the User object has no role field, and the WorkOrder crew Relation
-carries none. So the daily driver/lugger role is an attribute of the ASSIGNMENT itself (the
-editable "Driver" text box under a route's "View Assignment"), a relationship not exposed by the
-object-field schema. That assignment endpoint is the one piece still needed.
+Confirmed it is NOT a field, and NOT a param/method issue. The **Crew object (type 50) returns
+ZERO fields** across FIVE tries — bare, +serviceTypeID(11), +clientTypeID(1), +franchiseID(90),
+and service+franchise combined — all method 1, all errNo 0, all empty (despite isHasFields:true;
+that flag means Crew CAN carry fields, but #90 has none defined). The User object has fields but no
+role among them, and the WorkOrder crew Relation carries only id/name/isActive. Method 1 is the
+only correct read method (2/3 = Edit/Add), so this is not "try another method".
+
+=> The daily driver/lugger role is an attribute of the ASSIGNMENT itself (the editable "Driver"
+text box under a route's "View Assignment"), a relationship NOT exposed by the object-field schema
+and NOT one of the 32 object types — so it is likely a relationship operation, not an enumerable
+object. That assignment endpoint is the one piece still needed; the System schema cannot surface
+it.
 
 ## Multiple Get — `/data/Multiple/`  (tested 2026-07-23)
 
