@@ -25,8 +25,55 @@ System endpoints (from the API index, NOT yet exercised):
 
 **When we build this:** pull the System maps once, cache them (they change rarely), and every
 future Vonigo feature reads field/option/type by NAME instead of a hard-coded ID inferred from
-contents. NEEDED FIRST — the System endpoint doc pages (path + params + method), same as we did for
-promos/users. Do NOT blind-probe for them; the whole point is to stop guessing.
+contents.
+
+### CONFIRMED WORKING 2026-07-23 — the System endpoints are live and give the full schema
+
+All System endpoints are POST to **`/system/objects/`** (except External Page Labels →
+`/System/Forms/`), disambiguated by which params are present.
+
+- **Object types** — `POST /system/objects/ {securityToken}` (no method) → 32 objects with
+  `objectTypeID` + `name` + `isHasFields`. THIS is the objectID Multiple's `Lists[]` wants (the
+  sample's `12`/`13` = **Work Order / Invoice**, now confirmed).
+- **Fields for an object** — `POST /system/objects/ {method:'1', objectID:<objectTypeID>}` →
+  full field list: `fieldID`, `field` (NAME), `fieldType` (e.g. tagInput/tagSelect/tagDate/
+  tagPhone), `fieldMode` (**RW** writable / **S** system-readonly), `fieldBlock`, `isFieldRequired`,
+  `fieldValidator`, `defaultOptionID`. This is the map that ends "what is field 166?".
+- **Field options** — `POST /system/objects/ {method:'1', fieldID:<id>}` → option list for a
+  dropdown (`tagSelect`) field. A FREE-TEXT (`tagInput`) field has none — field 166 returns
+  errNo -501 for options, which is correct, not a failure.
+
+### Object-type ID map (confirmed 2026-07-23)
+
+| ID | Object | ID | Object | ID | Object |
+|---|---|---|---|---|---|
+| 1 | Franchise | 12 | **Work Order** | 39 | Expense |
+| 5 | Route | 13 | **Invoice** | 48 | Note |
+| 6 | Vehicle | 15 | **User** | 50 | **Crew** |
+| 7 | Client | 17 | Request | 52 | Royalty (no fields) |
+| 8 | Contact | 18 | Payment | 57 | Charge |
+| 10 | Job | 19 | Case | 61 | Email |
+| 11 | Vendor | 20 | Location | 78 | Service Type |
+| 21 | Task | 23 | Price List | 84 | Waypoint |
+| 28 | Lead | 31 | Quote | 36 | Tax |
+
+(68 PriceList / 69 PriceBlock / 70 PriceItem / 71 Signature / 74 BookOff report `isHasFields:false`.)
+
+### Field 166 — CONFIRMED from the schema, not inferred
+
+`{fieldID:166, field:"Job Title", fieldType:"tagInput" (free text), fieldMode:"RW" (writable),
+fieldBlock:"Work Contact Details", isFieldRequired:true}`. So it IS writable — but it is the
+profile Job Title, still NOT the per-route daily role. Field 167="Status" (tagSelect, system),
+168="Name". Position lives in block "Franchise Specific Data" but did NOT appear in the User field
+schema pull — likely a franchise-membership sub-object, still not located.
+
+### The per-route driver/lugger role — narrowed, still open
+
+Confirmed it is NOT a field: the **Crew object (type 50) returns ZERO fields** (empty schema
+despite isHasFields:true), the User object has no role field, and the WorkOrder crew Relation
+carries none. So the daily driver/lugger role is an attribute of the ASSIGNMENT itself (the
+editable "Driver" text box under a route's "View Assignment"), a relationship not exposed by the
+object-field schema. That assignment endpoint is the one piece still needed.
 
 ## Multiple Get — `/data/Multiple/`  (tested 2026-07-23)
 
