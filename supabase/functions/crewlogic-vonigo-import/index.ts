@@ -34,6 +34,8 @@ const VONIGO_BASE = 'https://junkluggers.vonigo.com/api/v1';
 // WorkOrder fieldIDs (objectTypeID WorkOrder) — same set crewlogic-todays-workorders reads.
 const F_STATUS = 181, F_CONTACT = 183, F_ADDRESS = 184, F_DATE = 185, F_DURATION = 186;
 const F_LABEL = 201, F_PRICE = 813, F_TIME_MIN = 9082, F_ITEMS = 10336, F_NOTES = 200;
+const F_PHONE = 10288;  // contact phone on the WorkOrder (verified from raw payloads 2026-07-23). Email
+                        // is NOT on the WO (it lives on the Vonigo client record) — a follow-up lookup.
 
 // Vonigo status optionIDs
 const ST_CANCELLED = 162, ST_INPROGRESS = 163, ST_COMPLETED = 164, ST_ARCHIVED = 165;
@@ -161,6 +163,7 @@ Deno.serve(async (req: Request) => {
           const items = str(getField(fields, F_ITEMS)?.fieldValue);
           const notes = str(getField(fields, F_NOTES)?.fieldValue);
           const contactName = str(getField(fields, F_CONTACT)?.fieldValue);
+          const phone = str(getField(fields, F_PHONE)?.fieldValue);
           const startMin = parseInt(str(getField(fields, F_TIME_MIN)?.fieldValue) || '', 10);
           const durationMin = parseInt(str(getField(fields, F_DURATION)?.fieldValue) || '', 10);
           const price = parseFloat(str(getField(fields, F_PRICE)?.fieldValue) || '') || null;
@@ -222,7 +225,7 @@ Deno.serve(async (req: Request) => {
             appointment_id: apUuid, franchise_id: franchiseInternalID, provider: 'vonigo',
             import_total: price,
             crew_display: crew.length ? crew : null,
-            customer_display: { name: clientRel?.name || contactName || null, phone: null, email: null },
+            customer_display: { name: clientRel?.name || contactName || null, phone: phone || null, email: null },
             route_name: routeRel?.name || null,
             raw: wo, synced_at: now,
           }, { onConflict: 'appointment_id' });
