@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.70.0 | 2026-07-23">
+  <meta name="crewlogic-version" content="v5.71.0 | 2026-07-23">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9452,34 +9452,40 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _nearestTruckHtml(lat, lon, jtime, jtlabel, jdur, joffset) {
       const nt = _nearestTruck(lat, lon);
       if (!nt) return '';
-      // Straight-line "mi away" renders instantly; the drive-time ETA (Google, traffic-aware) fills the
-      // .job-eta slot async once the card is in the rail (see _fillJobEta), using the embedded coords.
-      return '<div style="color:#cdd6df;">🚚 ' + _truckEsc(nt.name) + ' — ' + nt.mi.toFixed(1) + ' mi away'
-        + '<span class="job-eta" data-tlat="' + nt.lat + '" data-tlon="' + nt.lon + '" data-jlat="' + lat + '" data-jlon="' + lon + '" data-jtime="' + (jtime != null ? jtime : '') + '" data-jtlabel="' + _truckEsc(String(jtlabel || '')) + '" data-jdur="' + (jdur != null ? jdur : '') + '" data-joffset="' + (joffset != null ? joffset : 0) + '" style="color:#9fb0c0;"></span></div>';
+      // Mirrors the crew block: a "🚚 Truck N — <arrival>" header row, then indented bullets.
+      // "mi away" is instant; the arrival (row 1) and drive-time (a bullet) fill async from
+      // _fillJobEta once the card is in the rail, using the coords embedded on .job-eta-arrival.
+      return '<div style="margin-top:3px;color:#cdd6df;">🚚 ' + _truckEsc(nt.name)
+        + '<span class="job-eta-arrival" data-tlat="' + nt.lat + '" data-tlon="' + nt.lon + '" data-jlat="' + lat + '" data-jlon="' + lon + '" data-jtime="' + (jtime != null ? jtime : '') + '" data-jtlabel="' + _truckEsc(String(jtlabel || '')) + '" data-jdur="' + (jdur != null ? jdur : '') + '" data-joffset="' + (joffset != null ? joffset : 0) + '"></span></div>'
+        + '<div style="margin-left:16px;color:#cdd6df;">- ' + nt.mi.toFixed(1) + ' mi away</div>'
+        + '<div class="job-eta-drive" style="margin-left:16px;color:#cdd6df;"></div>';
     }
     // Fill the .job-eta slot in the rail's Job-details card with the truck→job drive time (traffic-aware,
     // via crewlogic-estimate pointDistance = Google Distance Matrix). Fire-and-forget after the card renders.
     async function _fillJobEta() {
-      const el = document.querySelector('#dashLeftJobBody .job-eta'); if (!el) return;
+      const el = document.querySelector('#dashLeftJobBody .job-eta-arrival'); if (!el) return;
+      const driveEl = document.querySelector('#dashLeftJobBody .job-eta-drive');
       const tlat = el.getAttribute('data-tlat'), tlon = el.getAttribute('data-tlon');
       const jlat = el.getAttribute('data-jlat'), jlon = el.getAttribute('data-jlon');
       const jtime = el.getAttribute('data-jtime'), jtlabel = el.getAttribute('data-jtlabel'), jdur = el.getAttribute('data-jdur'), joffset = el.getAttribute('data-joffset');
       if (!tlat || !tlon || !jlat || !jlon) return;
-      el.textContent = ' · …';
+      if (driveEl) driveEl.textContent = '- …';
       try {
         const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: tlat + ',' + tlon, dest: jlat + ',' + jlon });
         if (data && data.success && data.durationText) {
+          // Arrival goes on ROW 1 after "Truck N — "; drive time drops to a bullet with the miles.
           const info = _arrivalInfo(data.minutes, jtime, jtlabel, jdur, joffset);
           let arrHtml = '';
           if (info) {
-            if (info.future) arrHtml = ' · <span style="color:#9fb0c0;">📅 ' + _truckEsc(info.text) + '</span>';
-            else if (info.late === true) arrHtml = ' · <span style="color:#ef4444;font-weight:600;">⚠️ ' + _truckEsc(info.text) + ' — outside window, contact customer</span>';
-            else if (info.late === false) arrHtml = ' · <span style="color:#22c55e;font-weight:600;">✅ ' + _truckEsc(info.text) + '</span>';
-            else arrHtml = ' · ' + _truckEsc(info.text);
+            if (info.future) arrHtml = ' — <span style="color:#9fb0c0;">📅 ' + _truckEsc(info.text) + '</span>';
+            else if (info.late === true) arrHtml = ' — <span style="color:#ef4444;font-weight:600;">⚠️ ' + _truckEsc(info.text) + ' — outside window, contact customer</span>';
+            else if (info.late === false) arrHtml = ' — <span style="color:#22c55e;font-weight:600;">✅ ' + _truckEsc(info.text) + '</span>';
+            else arrHtml = ' — ' + _truckEsc(info.text);
           }
-          el.innerHTML = ' · ~' + _truckEsc(data.durationText) + ' drive' + (data.inTraffic ? ' in traffic' : '') + arrHtml;
-        } else { el.textContent = ''; }
-      } catch (_e) { el.textContent = ''; }
+          el.innerHTML = arrHtml;
+          if (driveEl) driveEl.textContent = '- ~' + data.durationText + ' drive' + (data.inTraffic ? ' in traffic' : '');
+        } else { el.textContent = ''; if (driveEl) driveEl.textContent = ''; }
+      } catch (_e) { el.textContent = ''; if (driveEl) driveEl.textContent = ''; }
     }
     // Recompute the nearest-truck line from CURRENT truck positions each time a job card opens — trucks
     // move, so this must refresh per click, not be baked at marker-load. Then fill the drive-time ETA.
