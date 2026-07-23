@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.77.0 | 2026-07-23">
+  <meta name="crewlogic-version" content="v5.78.0 | 2026-07-23">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9276,10 +9276,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       h += '<option value=""' + (_bsRoute ? '' : ' selected') + '>All routes</option>';
       routes.forEach(r => { h += '<option value="' + _bsEsc(r) + '"' + (_bsRoute === r ? ' selected' : '') + '>' + _bsEsc(r) + '</option>'; });
       h += '</select>';
-      h += '<button id="bsTextBtn" onclick="_bsTextSelected()" disabled title="Open your messaging app with the selected jobs pre-filled" style="margin-left:auto;flex:0 0 auto;opacity:0.5;padding:8px 12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;font-weight:700;cursor:pointer;">💬 Text</button>';
-      h += '<button id="bsEmailBtn" onclick="_bsEmailSelected()" disabled style="flex:0 0 auto;opacity:0.5;padding:8px 12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm,8px);color:#04371f;font-size:13px;font-weight:700;cursor:pointer;">✉ Email</button>';
-      h += '<button id="bsDownloadBtn" onclick="_bsDownloadCsv()" disabled title="Download the selected jobs as a spreadsheet (CSV)" style="flex:0 0 auto;opacity:0.5;padding:8px 12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:13px;font-weight:600;cursor:pointer;">⬇ Download</button>';
-      h += '<span id="bsEmailMsg" style="flex:0 0 auto;font-size:12px;color:var(--text-muted);"></span>';
+      // The three actions stay together on ONE row (grouped, no-wrap) and share an identical height
+      // (Email's) — box-sizing:border-box + a fixed height so the bordered buttons don't grow taller.
+      const _bsBtn = 'flex:0 0 auto;height:34px;box-sizing:border-box;padding:0 12px;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--radius-sm,8px);font-size:13px;cursor:pointer;';
+      const _bsSurf = 'background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);';
+      h += '<div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:nowrap;">';
+      h += '<button id="bsTextBtn" onclick="_bsTextSelected()" disabled title="Open your messaging app with the selected jobs pre-filled" style="' + _bsBtn + _bsSurf + 'opacity:0.5;font-weight:700;">💬 Text</button>';
+      h += '<button id="bsEmailBtn" onclick="_bsEmailSelected()" disabled style="' + _bsBtn + 'opacity:0.5;font-weight:700;background:var(--accent-green);border:1px solid var(--accent-green);color:#04371f;">✉ Email</button>';
+      h += '<button id="bsDownloadBtn" onclick="_bsDownloadCsv()" disabled title="Download the selected jobs as a spreadsheet (CSV)" style="' + _bsBtn + _bsSurf + 'opacity:0.5;font-weight:600;">⬇ Download</button>';
+      h += '</div>';
+      h += '<span id="bsEmailMsg" style="flex:1 1 100%;font-size:12px;color:var(--text-muted);"></span>';
       h += '</div>';
       el.innerHTML = h;
       _bsUpdateEmailBtn();
