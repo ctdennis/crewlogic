@@ -91,24 +91,29 @@ Deno.serve(async (req: Request) => {
           "Users may see errors on the Vonigo-dependent screens. Nothing to fix on CrewLogic's side - " +
           "it recovers when Vonigo's servers come back. You'll get a follow-up email when it does.";
       // Recipients: every owner conducting business in Vonigo (pro/enterprise or a current beta
-      // tester) per vonigo_alert_recipients() (migration 0066). The owner's admin inbox is the
-      // anchored visible To and always included; the rest go by BCC so no owner's address is exposed
-      // to the others. If the lookup fails/returns nothing, the admin still gets the alert.
-      const ADMIN = "charles.dennis@junkluggers.com";
-      let bcc: string[] = [];
+      // tester) per vonigo_alert_recipients() (migration 0066). ALL go by BCC — including the admin —
+      // so everyone is delivered identically and no owner's address is exposed to the others. The
+      // visible To falls back to crewlogic-notify's default ops inbox.
+      //
+      // Why admin-in-BCC: the first live recovery alert (2026-07-23 18:30 UTC) reached all 8 BCC'd
+      // owners but NOT the admin, who was the sole visible To — the To slot to that one mailbox dropped
+      // the message while every BCC delivered. Moving the admin into BCC delivers them like the 8 that
+      // worked.
+      let recipients: string[] = [];
       try {
         const { data: recips, error } = await db.rpc("vonigo_alert_recipients");
         if (error) throw error;
-        bcc = (recips as { email: string }[] | null || [])
-          .map((r) => r.email).filter((e) => e && e !== ADMIN);
+        recipients = (recips as { email: string }[] | null || []).map((r) => r.email).filter(Boolean);
       } catch (e) {
-        console.error("[vonigo-health] recipient lookup failed, alerting admin only:", (e as Error).message);
+        console.error("[vonigo-health] recipient lookup failed:", (e as Error).message);
       }
+      if (!recipients.length) recipients = ["charles.dennis@junkluggers.com"];  // never let an alert vanish
       // Best-effort: a notify failure must not break the health check (or it would stop updating state).
+      // No `to` → notify uses its default ops inbox; every owner (incl. admin) is a BCC.
       await fetch(SUPABASE_URL + "/functions/v1/crewlogic-notify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject, text, to: ADMIN, bcc }),
+        body: JSON.stringify({ subject, text, bcc: recipients }),
       }).catch((e) => console.error("[vonigo-health] notify failed:", (e as Error).message));
     }
 
