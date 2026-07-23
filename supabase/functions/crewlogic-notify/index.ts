@@ -26,6 +26,17 @@ Deno.serve(async (req: Request) => {
   const body = await req.json().catch(() => ({} as Record<string, unknown>));
   const subject = String(body.subject || "").trim();
   const text = String(body.text || "").trim();
+  // Optional per-call recipient override. Existing callers (signup, feedback) pass no `to` and keep
+  // the default inbox; a caller that wants a different owner address (e.g. the Vonigo health alert)
+  // passes one. Basic shape check so a bad value can't turn into a Resend error.
+  const isEmail = (s: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
+  const toOverride = String(body.to || "").trim();
+  const to = isEmail(toOverride) ? toOverride : TO;
+  // Optional BCC fan-out (array of emails). Used by the Vonigo health alert to notify every affected
+  // owner in ONE send while keeping each recipient's address private from the others. Filtered to
+  // valid, de-duplicated addresses; an empty/absent list just sends to `to`.
+  const bccRaw = Array.isArray(body.bcc) ? (body.bcc as unknown[]) : [];
+  const bcc = [...new Set(bccRaw.map((x) => String(x).trim()).filter(isEmail))];
   if (!subject || !text) return json({ success: false, error: "subject and text are required" }, 400);
 
   const apiKey = Deno.env.get("RESEND_API_KEY");
@@ -38,7 +49,7 @@ Deno.serve(async (req: Request) => {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { "Authorization": "Bearer " + apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: FROM, to: TO, subject, text }),
+      body: JSON.stringify({ from: FROM, to, subject, text, ...(bcc.length ? { bcc } : {}) }),
     });
     const data = await res.json().catch(() => ({} as Record<string, unknown>));
     if (!res.ok) {
