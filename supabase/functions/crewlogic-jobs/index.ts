@@ -74,9 +74,16 @@ Deno.serve(async (req: Request) => {
       if (statuses && statuses.length) q = q.in('status', statuses);
       const { data, error } = await q;
       if (error) throw error;
+      // Overall date bounds for this franchise, so the client can constrain the From/To pickers to the
+      // range that actually has data.
+      const [lo, hi] = await Promise.all([
+        db.from('job_appointments').select('scheduled_date').eq('franchise_id', franchiseInternalID).not('scheduled_date', 'is', null).order('scheduled_date', { ascending: true }).limit(1),
+        db.from('job_appointments').select('scheduled_date').eq('franchise_id', franchiseInternalID).not('scheduled_date', 'is', null).order('scheduled_date', { ascending: false }).limit(1),
+      ]);
+      const bounds = { min: (lo.data && lo.data[0]?.scheduled_date) || null, max: (hi.data && hi.data[0]?.scheduled_date) || null };
       const rows = data || [];
       const truncated = rows.length > LIMIT;
-      return json({ success: true, appointments: shape(truncated ? rows.slice(0, LIMIT) : rows), truncated, health: await vonigoHealth(db) });
+      return json({ success: true, appointments: shape(truncated ? rows.slice(0, LIMIT) : rows), truncated, bounds, health: await vonigoHealth(db) });
     }
 
     if (action === 'get') {
