@@ -76,6 +76,13 @@ async function franchiseTz(franchiseID: string): Promise<string> {
   } catch { return DEFAULT_TZ; }
 }
 function shortRoute(name: string): string { const m = String(name || '').match(/\(([^)]+)\)/); return m ? m[1] : String(name || '').trim(); }
+// Calendar date (YYYYMMDD) of an epoch in an IANA tz — for "booked same day" (created-day === service-day).
+function ymdInTz(epochSec: number, tz: string): string {
+  if (!Number.isFinite(epochSec) || epochSec <= 0) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(epochSec * 1000));
+  const g = (t: string) => (parts.find((p) => p.type === t) || { value: '' }).value;
+  return g('year') + g('month') + g('day');
+}
 
 async function vonigoAuth(franchiseID: string): Promise<{ token: string } | { error: string }> {
   const sb = supa();
@@ -164,7 +171,7 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
     // job card just shows who is on it. driver/lugger role is NOT in this relation; it lives in the
     // crew-member record, so the card can't distinguish them yet.
     const crew = rel.filter((x: any) => x.relationType === 'crew').map((c: any) => String(c.name || '').trim()).filter(Boolean);
-    return { jobID: jobRel ? String(jobRel.objectID) : null, crew, woID: String(w.objectID), route: rname, routeCode: shortRoute(rname), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: (clientRel && clientRel.name) || gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), labelDone, labelOpt: gf(f, F.label).optionID || 0, apptCount: parseInt(String(w.countWorkOrders ?? '0'), 10) || 0, zoneID: zoneRel ? String(zoneRel.objectID) : '', zoneName: zoneRel ? zoneRel.name : '', lat: null as number | null, lon: null as number | null };
+    return { jobID: jobRel ? String(jobRel.objectID) : null, crew, woID: String(w.objectID), route: rname, routeCode: shortRoute(rname), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: (clientRel && clientRel.name) || gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), labelDone, labelOpt: gf(f, F.label).optionID || 0, apptCount: parseInt(String(w.countWorkOrders ?? '0'), 10) || 0, bookedOnline: /online booking/i.test(gf(f, F.summary).fieldValue || ''), dateCreated: String(w.dateCreated || ''), dateService: String(w.dateService || ''), zoneID: zoneRel ? String(zoneRel.objectID) : '', zoneName: zoneRel ? zoneRel.name : '', lat: null as number | null, lon: null as number | null };
   }).filter((j: any) => j.jobID
     // hide CANCELLED only — plain "Cancelled" (optionID 162) AND same-day "Cancelled - Today" (different
     // optionID, caught by the text test). COMPLETED/ARCHIVED jobs are KEPT (flagged completed → grayed on
@@ -395,17 +402,18 @@ Deno.serve(async (req: Request) => {
       // Board DISPLAY uses 30-min granularity = the route's RAW open time (like Vonigo), not "where a full
       // 120-min job fits" — otherwise the ~2h before each job reads as blocked/gray. The actual move/
       // duration writes still validate the real job length via the lock step.
-      const [routes, jobs, openSlots] = await Promise.all([
+      const [routes, jobs, openSlots, tz] = await Promise.all([
         getRoutesFull(token, dayID),
         listRouteJobs(token, franchiseID, dayID, undefined, false),
         suggestSlotsFn(token, franchiseID, dayID, 30).catch(() => []),
+        franchiseTz(franchiseID),
       ]);
       const byId: Record<string, any> = {};
       for (const r of routes) byId[r.id] = { id: r.id, code: r.code, name: r.name, isActive: r.isActive, jobs: [], open: [] };
       for (const j of jobs) {
         const k = j.routeID; if (!k) continue;
         if (!byId[k]) byId[k] = { id: k, code: j.routeCode, name: j.route, isActive: true, jobs: [], open: [] };
-        byId[k].jobs.push({ woID: j.woID, jobID: j.jobID, client: j.client, timeMin: j.timeMin, durationMin: j.durationMin, timeLabel: j.timeLabel, status: j.status, completed: j.completed, labelDone: j.labelDone, labelOpt: j.labelOpt, apptCount: j.apptCount, zoneID: j.zoneID, zoneName: j.zoneName, zip: j.zip, address: j.address, routeCode: j.routeCode, price: j.price, summary: j.summary, items: j.items });
+        byId[k].jobs.push({ woID: j.woID, jobID: j.jobID, client: j.client, timeMin: j.timeMin, durationMin: j.durationMin, timeLabel: j.timeLabel, status: j.status, completed: j.completed, labelDone: j.labelDone, labelOpt: j.labelOpt, apptCount: j.apptCount, zoneID: j.zoneID, zoneName: j.zoneName, zip: j.zip, address: j.address, routeCode: j.routeCode, price: j.price, summary: j.summary, items: j.items, bookedOnline: j.bookedOnline, bookedSameDay: !!(j.dateCreated && j.dateService && ymdInTz(+j.dateCreated, tz) === ymdInTz(+j.dateService, tz)) });
       }
       for (const s of openSlots) { const k = String(s.routeID); if (byId[k]) byId[k].open.push({ startTime: s.startTime, label: s.label }); }
       // Emit in getRoutesFull's sequence order — NOT Object.values(byId), which JS reorders by the
