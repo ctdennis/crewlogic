@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.87.0 | 2026-07-24">
+  <meta name="crewlogic-version" content="v5.88.0 | 2026-07-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10307,6 +10307,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (sub) sub.textContent = trucks.length + ' truck' + (trucks.length === 1 ? '' : 's') + ' · live from ' + provLabel + ' · auto-updating';
         renderTrucks(trucks, !isRefresh);  // fit the map only on first load, not on auto-refresh
         if (!isRefresh) loadJobMarkers();  // jobs are static this session — load once, don't re-pull every cycle
+        if (!isRefresh) _loadTruckCrew();  // Phase 1: infer likely crew per truck from today's job dwells
         if (!isRefresh && _trucksMapEl === 'dashMapPane') loadGeofenceAlerts();  // right-rail live geofence/ignition alerts (dispatch dashboard only)
       } catch (e) {
         if (isRefresh) { console.warn('trucks auto-refresh failed (non-fatal):', e); return; }
@@ -10571,6 +10572,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         });
         const veh = [t.year, t.make, t.model].filter(Boolean).join(' ');
         const move = [(t.speed != null ? t.speed + ' mph' : ''), (t.heading || '')].filter(Boolean).join(' ');
+        // Phase-1 crew inference: likely crew + tip-split / no-crew warnings (docs/plan-truck-crew-inference.md).
+        const _cd = _truckCrew[_normVeh(t.name)]; let crewHtml = '';
+        if (_cd) {
+          const _jn = (a) => (a || []).join(' · ');
+          if (_cd.confidence === 'high' && _cd.crew.length) crewHtml += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;font-size:12px;"><span style="color:#9fb0c0;font-weight:700;">Crew (likely):</span> ' + _truckEsc(_jn(_cd.crew)) + '<span style="color:#6e8194;"> · ' + _cd.jobsWithCrew + ' jobs' + (_cd.routes.length === 1 ? ' · ' + _truckEsc(_cd.routes[0]) : '') + '</span></div>';
+          else if (_cd.confidence === 'low' && _cd.candidates.length) crewHtml += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;font-size:12px;"><span style="color:#9fb0c0;font-weight:700;">Crew (low confidence):</span> possibly ' + _truckEsc(_jn(_cd.candidates)) + '<span style="color:#6e8194;"> · ' + _cd.routes.length + ' routes today</span></div>';
+          else if (_cd.confidence === 'unknown') crewHtml += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;font-size:12px;color:#9fb0c0;">Crew: can\'t determine (no crew on today\'s jobs)</div>';
+          if (_cd.mismatches && _cd.mismatches.length) { const _who = [...new Set([].concat.apply([], _cd.mismatches.map(m => m.missing)))]; crewHtml += '<div style="margin-top:6px;padding:7px 9px;background:rgba(251,146,60,.13);border:1px solid #fb923c;border-radius:6px;font-size:11.5px;color:#fdba74;line-height:1.4;">⚠ <b>' + _truckEsc(_who.join(' · ')) + '</b> dwelled at ' + _cd.mismatches.length + ' job' + (_cd.mismatches.length > 1 ? 's' : '') + ' not assigned to them — add them in Vonigo so tips credit them: ' + _truckEsc(_cd.mismatches.map(m => m.client).filter(Boolean).join(', ')) + '</div>'; }
+          if (_cd.noCrew && _cd.noCrew.length) crewHtml += '<div style="margin-top:6px;padding:7px 9px;background:rgba(148,163,184,.13);border:1px solid #64748b;border-radius:6px;font-size:11.5px;color:#cbd5e1;line-height:1.4;">⚠ ' + _cd.noCrew.length + ' of this truck\'s jobs have no crew assigned in Vonigo: ' + _truckEsc(_cd.noCrew.join(', ')) + '</div>';
+        }
         const pop = '<div style="font-size:13px;line-height:1.5;min-width:150px;">'
           + '<b>' + (i + 1) + '. ' + _truckEsc(t.name) + '</b>'
           + (veh ? '<br>' + _truckEsc(veh) : '')
@@ -10578,6 +10589,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + '<br>' + _truckEsc([_truckStateLabel(t), move].filter(Boolean).join(' · '))
           + (t.lastUpdate ? '<br><span style="color:#6e8194;">' + _truckEsc(_truckTimeAgo(t.lastUpdate)) + '</span>' : '')
           + (t.vin ? '<br><span style="color:#6e8194;font-size:11px;">VIN ' + _truckEsc(t.vin) + '</span>' : '')
+          + crewHtml
           + (nearJobs.length ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;color:#F59E0B;font-weight:700;font-size:12px;">🏠 At ' + nearJobs.length + ' job' + (nearJobs.length > 1 ? 's' : '') + ' here</div>' + nearJobs.map(j => '<div style="font-size:12px;color:#cdd6df;">' + _truckEsc(j.clientName || 'Job') + (j._routeShort ? ' · ' + _truckEsc(j._routeShort) : '') + '</div>').join('') : '')
           + (nearSite ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;color:' + nearSite.color + ';font-weight:700;font-size:12px;">' + nearSite.emoji + ' At ' + _truckEsc(nearSite.name) + '</div>' : '')
           + (!nearSite && atYard ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;color:#93c5fd;font-weight:700;font-size:12px;">🏠 At ' + _truckEsc(curGf.name) + (gfSince ? ' since ' + _truckEsc(_alertClock(new Date(gfSince).toISOString())) : '') + '</div>' : '')
@@ -10792,6 +10804,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // Dispatch dashboard only: the alerts rail (#dashAlertsPanel) sits beside the dashboard trucks map.
     // Refresh the map size (the rail shares its flex row), then load into the shared list.
+    // Phase-1 truck crew inference (docs/plan-truck-crew-inference.md). Cache keyed by normalized vehicle name.
+    let _truckCrew = {};
+    // Preload today's per-truck crew (service-role edge fn — token-independent; job_arrive data is prod-only),
+    // then re-render trucks so the popups pick it up. Fire-and-forget; popups omit the crew line until it lands.
+    async function _loadTruckCrew() {
+      const fid = currentUser && currentUser.franchiseInternalID;
+      if (!fid) return;
+      const d = new Date(); d.setHours(0, 0, 0, 0); // franchise-local start of today (viewer TZ = franchise TZ for #90)
+      try {
+        const resp = await edgeFunctionCall('crewlogic-geofence-alerts', { action: 'crew-infer', franchiseInternalID: fid, sinceIso: d.toISOString() });
+        if (!resp || !resp.success || !Array.isArray(resp.trucks)) return;
+        const map = {};
+        resp.trucks.forEach(t => { if (t && t.vehicle_number) map[_normVeh(t.vehicle_number)] = t; });
+        _truckCrew = map;
+        if (_trucksData && _trucksData.length) renderTrucks(_trucksData, false); // refresh popups with crew
+      } catch (e) { /* non-fatal — popups just omit the crew line */ }
+    }
     async function loadGeofenceAlerts() {
       setTimeout(() => { try { if (_trucksMap) _trucksMap.invalidateSize(); } catch (e) {} }, 60);
       await _fetchAndRenderAlerts();
