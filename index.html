@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.88.4 | 2026-07-24">
+  <meta name="crewlogic-version" content="v5.89.0 | 2026-07-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10369,11 +10369,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (st === 'stale')   return t.lastUpdate ? 'No recent report' : 'No position reported';
       return _truckStatusLabel(t);
     }
+    // Bold-red UNPLUGGED alert — surfaced in the truck list AND the Live Alerts rail whenever a truck is
+    // offline/unplugged. Unplugging hides the driver from the GPS + dash-cam, so it's a high-risk red flag.
+    function _offlineTruckAlertRows() {
+      const offs = (_trucksData || []).filter(t => _truckState(t) === 'offline');
+      if (!offs.length) return '';
+      return offs.map(t => '<div style="padding:11px 13px;background:#ef4444;border-bottom:2px solid #b91c1c;color:#fff;font-weight:800;font-size:12.5px;line-height:1.35;letter-spacing:0.2px;">'
+        + '⚠ ' + _truckEsc(t.name || 'A truck') + ' UNPLUGGED — GPS &amp; camera offline. High risk; investigate now.'
+        + '</div>').join('');
+    }
     function renderTrucks(trucks, fit) {
       _trucksData = trucks || []; // keep latest truck positions/names for nearest-truck popups
       const listEl = document.getElementById('trucksList');
       if (listEl) {
-        listEl.innerHTML = trucks.map((t, i) => {
+        listEl.innerHTML = _offlineTruckAlertRows() + trucks.map((t, i) => {
           const veh = [t.year, t.make, t.model].filter(Boolean).join(' ');
           const label = _truckStateLabel(t);
           const badge = _truckStateColor(t);
@@ -10855,7 +10864,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           };
         }
       });
-      const html = rows.length ? rows.map(r => _geofenceAlertRow(r, _activeDwell)).join('') : '<div style="padding:14px 10px;color:var(--text-muted,#6e8194);font-size:12px;text-align:center;">No recent alerts.</div>';
+      const offlineHtml = _offlineTruckAlertRows();  // bold-red UNPLUGGED banner pinned to the top
+      const html = offlineHtml + (rows.length ? rows.map(r => _geofenceAlertRow(r, _activeDwell)).join('') : (offlineHtml ? '' : '<div style="padding:14px 10px;color:var(--text-muted,#6e8194);font-size:12px;text-align:center;">No recent alerts.</div>'));
       lists.forEach(l => { l.innerHTML = html; });
       _shownAlertIds = new Set(rows.map(r => r.id));
       const cnt = rows.length ? (rows.length + (rows.length >= 50 ? '+' : '')) : '';
