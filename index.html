@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.83.0 | 2026-07-24">
+  <meta name="crewlogic-version" content="v5.84.0 | 2026-07-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10671,15 +10671,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           j._routeShort = rkey;                // stamp a short route label for the "job under truck" popup
           routeStop[rkey] = (routeStop[rkey] || 0) + 1;
           const n = routeStop[rkey];           // stop number within this route
-          const baseColor = colorFor(rkey);    // memoize the route's color even for completed stops
-          // Match the board's 3-state (owner 2026-07-06): PAID (status 164/165) or Lost (9993) → gray + faded;
-          // NOT STARTED (New Appt 9984 / no label) → route color; anything else UNPAID (estimate taken) → amber.
-          const done = !!j.isComplete || j.labelOpt === 9993; // paid or Lost → gray + faded marker
-          const notStarted = (!j.labelOpt || j.labelOpt === 9984);
-          const natlAcct = (j.labelOpt === 9981); // National Account → its own dark blue, not amber
-          const doWorkNow = (j.labelOpt === 9975); // Est Converted → Do Work Now hit → reserved green
-          const estTaken = (!done && !notStarted && !natlAcct && !doWorkNow);
-          const color = done ? '#5b6b7a' : (natlAcct ? NATL_ACCT_COLOR : (doWorkNow ? DO_WORK_NOW_COLOR : (estTaken ? EST_TAKEN_COLOR : baseColor)));
+          colorFor(rkey);                      // keep the route-color memo warm (used elsewhere), even though pins now color by label
+          // Owner 2026-07-24: map pins match Vonigo's EXACT label colors, in sync with the board + Vonigo.
+          // The ONLY non-parity color is gray for a fully paid + completed job. Lost (9993) shows its Vonigo
+          // red. Route is still conveyed by the stop NUMBER (and the popup), just no longer by pin color.
+          const done = !!j.isComplete;         // paid + completed → gray + faded (the sole Vonigo-parity exception)
+          const color = done ? '#5b6b7a' : mjLabelColor(j.labelOpt);
           const icon = L.divIcon({
             className: 'job-stop-marker',
             html: '<svg width="22" height="22" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.5));">' +
@@ -11430,17 +11427,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Pill BODY color by Vonigo LABEL (field 201). Vonigo's standard (global, not per-franchise) label colors,
     // eyeballed 2026-06-22; "done" labels (245/9996/9993) render gray anyway. None/unknown → New Appointment
     // blue (active default). Route is conveyed by the lane, not the body color.
-    function mjLabelColor(opt) { const M = { 245: '#6cc070', 9996: '#7fae8a', 9993: '#e0492e', 9984: '#45b6e6', 9981: '#1f4e79', 9975: '#2f9e78', 9973: '#9b59b6', 9971: '#e85fa0', 9970: '#9a8fa6', 247: '#c79fd6', 249: '#aab3bd' }; return M[opt] || '#45b6e6'; }
-    // RESERVED status colors — deliberately OUTSIDE _ROUTE_COLORS, mjZoneColor, and mjLabelColor so they never
-    // collide with a route, zone, or other label. Do NOT add these hexes to any of those palettes.
-    //   EST_TAKEN (amber)    — label 245 "Est Completed Job": estimate priced, Do Work Now NOT yet hit.
-    //   DO_WORK_NOW (green)  — label 9975 "Est Converted": Do Work Now hit / customer agreed / job authorized.
-    //   NATL_ACCT (dark blue)— label 9981 National Account.
-    //   Gray (#5b6b7a)       — truly done: PAID/status 164/165 + Lost(9993).
-    // (The route green #22c55e was pulled from _ROUTE_COLORS so routes can't clash with DO_WORK_NOW.)
-    const EST_TAKEN_COLOR = '#ffab00';
-    const DO_WORK_NOW_COLOR = '#22c55e'; // label 9975 "Est Converted" — Do Work Now hit; RESERVED, kept out of the route palette
-    const NATL_ACCT_COLOR = '#1f4e79'; // National Account (label 9981) — dark blue like Vonigo; its OWN status color, NOT the amber "estimate taken"
+    // EXACT Vonigo appointment-label colors (WorkOrder field 201 optionID → the hex Vonigo paints on its own
+    // schedule), verified against live #90 WorkOrders 2026-07-24. Full map + booking/conversion process in
+    // memory note vonigo-appointment-label-colors. Owner 2026-07-24: the board/map/home must match these
+    // EXACTLY; the ONLY non-parity color is gray for fully paid+completed jobs (handled per-renderer).
+    function mjLabelColor(opt) { const M = {
+      245:  '#C0D587',  // Estimate Completed (Job) — light yellow-green
+      9996: '#B8C84D',  // Estimate Completed (Est. Only) — dark yellow-green
+      9975: '#54AD5B',  // Estimate Converted (Job) — green
+      9970: '#9596BA',  // Estimate Converted (Est. Only) — gray-purple
+      9984: '#6EBFE7',  // New Appointment — blue
+      9973: '#AA4CB3',  // Estimate Only — purple
+      9993: '#D65136',  // Lost — red
+      9981: '#1f4e79'   // National Account — dark blue (no official Vonigo color)
+    }; return M[opt] || '#6EBFE7'; }  // unknown/unset → New-Appointment blue (never gray — gray means paid+done)
+    // GRAY #5b6b7a — the sole non-Vonigo-parity job color: a fully paid + completed job (status 164/165).
+    // (The 2026-07-06 amber "estimate taken" / green "do work now" / dark-blue national-account overlay was
+    //  removed 2026-07-24 so the board + map match Vonigo's exact label colors; 9981 lives in mjLabelColor now.)
     // Left-stripe color by PRICING ZONE. Vonigo's per-franchise zone colors are NOT API-readable, so this is a
     // stable CrewLogic palette keyed deterministically to the zone id (consistent per franchise; flags a job
     // whose zone is unusual for its lane). Zone NAME is shown in the tooltip.
@@ -11542,19 +11545,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const left = ((j.timeMin - startMin) / 60) * PXH, w = Math.max(((j.durationMin || 60) / 60) * PXH, 50);
           const name = mjEsc((String(j.client || '').split(',')[0]) || j.client || 'Job');
           const city = mjAddrParts(j.address).city, jidA = mjEsc(String(j.jobID || '')), wkey = mjEsc(String(j.woID || j.jobID || '')); // jidA = display JobID; wkey = UNIQUE per-appointment lookup key (woID)
-          // Body = label color (Vonigo parity); gray when done. Left stripe = pricing zone (inset box-shadow).
-          // 3 states (owner rule 2026-07-06):
-          //   PAID/dead — status Completed/Archived (164/165, = payment) OR Lost (9993) → gray + faded + locked.
-          //   NOT STARTED — New Appt (9984) or no label yet → normal color (nothing estimated).
-          //   ESTIMATE TAKEN — anything else while UNPAID (an estimate/price exists, e.g. Est Converted 9975,
-          //     Est Completed 245) → reserved amber, still an ACTIVE job (draggable, no ✓). Gray is reserved
-          //     for truly-paid; the estimate label no longer grays a job (245 fires pre-payment and flaps).
-          const done = (!!j.completed || j.labelOpt === 9993);
-          const notStarted = (!j.labelOpt || j.labelOpt === 9984);
-          const natlAcct = (j.labelOpt === 9981); // National Account → its own dark blue, not amber
-          const doWorkNow = (j.labelOpt === 9975); // Est Converted → Do Work Now hit → reserved green
-          const estTaken = (!done && !notStarted && !natlAcct && !doWorkNow);
-          const bg = done ? '#5b6b7a' : (natlAcct ? NATL_ACCT_COLOR : (doWorkNow ? DO_WORK_NOW_COLOR : (estTaken ? EST_TAKEN_COLOR : mjLabelColor(j.labelOpt)))), zoneStripe = mjZoneColor(j.zoneID);
+          // Body = the EXACT Vonigo label color (parity with the map + Vonigo). Left stripe = pricing zone.
+          // Owner 2026-07-24: the ONLY non-parity color is gray for a fully paid + completed job (status
+          // 164/165), which also stays locked (no drag) + shows ✓. Lost (9993) now shows its Vonigo red, not
+          // gray. (Replaces the 2026-07-06 amber "estimate taken" / green "do work now" dispatch overlay.)
+          const done = !!j.completed;  // fully paid + completed → gray + locked (sole Vonigo-parity exception)
+          const bg = done ? '#5b6b7a' : mjLabelColor(j.labelOpt), zoneStripe = mjZoneColor(j.zoneID);
           const canDrag = dnd && !done;
           const dragAttrs = canDrag ? ' draggable="true" ondragstart="dashDragStart(event)" ondragend="dashClearDragGhost()" data-wo="' + mjEsc(String(j.woID || '')) + '" data-dur="' + (j.durationMin || 90) + '" data-zip="' + mjEsc(String(j.zip || '')) + '" data-client="' + mjEsc(String(j.client || '')) + '" data-day="' + mjEsc(String(data.dayID || '')) + '" data-route="' + mjEsc(rc) + '" data-tlabel="' + mjEsc(String(j.timeLabel || '')) + '" data-tmin="' + (j.timeMin != null ? j.timeMin : '') + '"' : '';
           h += '<div' + dragAttrs + ' onclick="mjTip(event,\'' + wkey + '\',true)" data-jid="' + wkey + '" title="' + (canDrag ? 'Drag to move' : (done ? 'Completed — adjust in Vonigo' : '')) + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:3px;bottom:3px;background:' + bg + ';opacity:' + (done ? '0.72' : '1') + ';border-radius:5px;padding:2px 5px 2px 9px;overflow:hidden;cursor:' + (canDrag ? 'grab' : 'pointer') + ';box-shadow:inset 5px 0 0 0 ' + zoneStripe + ',0 1px 2px rgba(0,0,0,.3);">';
