@@ -195,7 +195,7 @@ Deno.serve(async (req: Request) => {
     // external_refs is no longer maintained here — source_external_id is the mirror's identity key.
     interface Rec {
       jobID: string; woID: string; serviceDate: string; startMin: number | null; durationMin: number | null;
-      status: string; jobComplete: boolean; address: string; items: string; notes: string; price: number | null;
+      status: string; jobComplete: boolean; labelOptID: number | null; address: string; items: string; notes: string; price: number | null;
       crew: { id: unknown; name: string }[]; routeName: string; custName: string; phone: string; email: string; raw: VWorkOrder;
     }
     const recs: Rec[] = [];
@@ -224,6 +224,7 @@ Deno.serve(async (req: Request) => {
         durationMin: (Number.isFinite(durationMin) && durationMin > 0) ? durationMin : null,
         status: apptStatus(statusOptID, statusLabel),
         jobComplete: isJobComplete(statusOptID),
+        labelOptID: Number(getField(fields, F_LABEL)?.optionID) || null,   // Vonigo appointment label (field 201) → board color
         address: str(getField(fields, F_ADDRESS)?.fieldValue),
         items: str(getField(fields, F_ITEMS)?.fieldValue),
         notes: str(getField(fields, F_NOTES)?.fieldValue),
@@ -278,7 +279,7 @@ Deno.serve(async (req: Request) => {
         appointment_id: apptId, franchise_id: franchiseInternalID, provider: 'vonigo',
         import_total: r.price, crew_display: r.crew.length ? r.crew : null,
         customer_display: { name: r.custName || null, phone: r.phone || null, email: r.email || null },
-        route_name: r.routeName || null, raw: r.raw, synced_at: now,
+        route_name: r.routeName || null, label_optionid: r.labelOptID, raw: r.raw, synced_at: now,
       };
     }).filter(Boolean) as Record<string, unknown>[];
     for (const c of chunk(snapRows, CHUNK)) {

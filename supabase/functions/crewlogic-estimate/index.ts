@@ -620,6 +620,43 @@ async function applyLivePriceBookTaxIDs(
   }
 }
 
+// Vonigo WorkOrder appointment-label field + the "Estimate Completed (Est. Only)" option.
+const F_WO_LABEL = 201;
+const LABEL_ESTIMATE_COMPLETED_EST_ONLY = 9996;
+
+// After an estimate is posted, stamp the job's appointment label to "Estimate Completed (Est. Only)"
+// (dark yellow-green; Vonigo then flips it to Converted when the customer books). The label lives on the
+// WorkOrder, NOT the Quote, so we look up the job's WorkOrder(s) and edit field 201 on each.
+// BEST-EFFORT + NON-FATAL: the quote already exists — a failure here logs a warning and never fails the
+// submission. Returns how many WorkOrders were successfully labeled.
+async function setEstimateCompletedLabel(securityToken: string, jobID: string): Promise<number> {
+  try {
+    const woResp = await (await fetch(VONIGO_BASE + "/data/WorkOrders/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ securityToken, jobID, pageNo: "1", pageSize: "20", isCompleteObject: "true" }),
+    })).json();
+    const wos = (woResp && Array.isArray(woResp.WorkOrders)) ? woResp.WorkOrders : [];
+    if (!wos.length) { console.warn(`[submitQuote] label: no WorkOrders found for job ${jobID}`); return 0; }
+    let set = 0;
+    for (const wo of wos) {
+      const woID = wo && wo.objectID;
+      if (!woID) continue;
+      const editData = await (await fetch(VONIGO_BASE + "/data/WorkOrders/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ securityToken, method: "2", objectID: String(woID), Fields: [{ fieldID: F_WO_LABEL, optionID: LABEL_ESTIMATE_COMPLETED_EST_ONLY }] }),
+      })).json();
+      if (editData && editData.errNo === 0) set++;
+      else console.warn(`[submitQuote] label set WO ${woID} errNo ${editData?.errNo}: ${editData?.errMsg || ""}`);
+    }
+    return set;
+  } catch (e) {
+    console.warn(`[submitQuote] label set error for job ${jobID}: ${(e as Error).message}`);
+    return 0;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // HANDLER: submitQuote
 // Creates a Vonigo quote from an estimate and uploads its photos. Mirrors the n8n
@@ -747,7 +784,14 @@ async function handleSubmitQuote(body: Record<string, unknown>): Promise<Respons
     console.warn(`[submitQuote] edit fields errNo ${editData.errNo}: ${editData.errMsg || ""} (quote ${quoteID} created OK)`);
   }
 
-  return jsonResponse({ success: true, quoteID, photosUploaded });
+  // 4) Stamp the appointment label to "Estimate Completed (Est. Only)" (best-effort, non-fatal).
+  //    Prefer the job we attached the quote to; fall back to the created quote's own jobID.
+  const labelJobID = body.jobID ? String(body.jobID) : String((createData.Quote && createData.Quote.jobID) || "");
+  let labelSet = 0;
+  if (labelJobID) labelSet = await setEstimateCompletedLabel(securityToken, labelJobID);
+  else console.warn("[submitQuote] label: no jobID available (standalone quote) — appointment label not set");
+
+  return jsonResponse({ success: true, quoteID, photosUploaded, labelSet });
 }
 
 function jsonResponse(data: unknown, status: number = 200): Response {

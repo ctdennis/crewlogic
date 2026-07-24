@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.82.0 | 2026-07-24">
+  <meta name="crewlogic-version" content="v5.84.0 | 2026-07-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9211,6 +9211,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       cancelled: { t: 'Cancelled', c: 'var(--accent-orange,#fb923c)' }
     };
 
+    // Vonigo appointment LABEL (WorkOrder field 201 optionID) → exact Vonigo schedule colors, so the board
+    // matches what crews see in Vonigo. optionIDs verified against live #90 WorkOrders 2026-07-24; full map
+    // + booking/conversion process in memory note vonigo-appointment-label-colors. t=row chip, n=full name.
+    const _BS_LABEL = {
+      9984: { t: 'New Appt',       n: 'New Appointment',                c: '#6EBFE7' },  // blue
+      9996: { t: 'Est · Est-Only', n: 'Estimate Completed (Est. Only)', c: '#B8C84D' },  // dk yellow-green
+      245:  { t: 'Est · Job',      n: 'Estimate Completed (Job)',       c: '#C0D587' },  // lt yellow-green
+      9975: { t: 'Conv · Job',     n: 'Estimate Converted (Job)',       c: '#54AD5B' },  // green
+      9970: { t: 'Conv · Est',     n: 'Estimate Converted (Est. Only)', c: '#9596BA' },  // gray-purple
+      9973: { t: 'Est Only',       n: 'Estimate Only',                  c: '#AA4CB3' },  // purple
+      9993: { t: 'Lost',           n: 'Lost',                           c: '#D65136' },  // red
+      9981: { t: "Nat'l Acct",     n: 'National Account',               c: '#9aa7b5' }   // no Vonigo color → neutral
+    };
+    // Returns { t, n, c } for the appointment's Vonigo label, or null if unknown/native.
+    function _bsLabelOf(a) { const id = (a.snapshot || {}).label_optionid; return (id != null && _BS_LABEL[id]) ? _BS_LABEL[id] : null; }
+
     // Case-insensitive substring match on customer NAME + ADDRESS only (v5.74.0).
     // Route has its own dropdown; date has the From/To pickers — so they're out of the text match.
     function _bsMatch(a, q) {
@@ -9354,12 +9370,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const time = _bsMinutesToTime(a.start_minutes);
           const money = (snap.import_total !== null && snap.import_total !== undefined && !isNaN(snap.import_total)) ? ('$' + Number(snap.import_total).toFixed(2)) : '';
           const badge = _BS_BADGE[a.status] || { t: a.status || '—', c: 'var(--text-muted)' };
+          const lbl = _bsLabelOf(a);
           const dim = isCancelled ? 'opacity:0.55;' : '';
           const strike = isCancelled ? 'text-decoration:line-through;' : '';
           const idEsc = _bsEsc(a.id);
           const checked = _bsSelected.has(String(a.id)) ? 'checked' : '';
 
           html += '<div onclick="_bsOpenDetail(\'' + idEsc + '\')" style="cursor:pointer;display:flex;gap:10px;align-items:stretch;padding:10px 12px;margin-bottom:8px;background:var(--bg-card,#1e2f40);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);' + dim + '">';
+          // Left color stripe = the Vonigo appointment-label color (matches the Vonigo schedule at a glance)
+          html += '<div style="flex:0 0 4px;align-self:stretch;border-radius:3px;background:' + (lbl ? lbl.c : 'transparent') + ';"></div>';
           // Select checkbox (does not open the detail card)
           html += '<div style="flex:0 0 auto;align-self:center;"><input type="checkbox" ' + checked + ' onclick="event.stopPropagation();_bsToggleSelect(\'' + idEsc + '\',this.checked)" style="width:18px;height:18px;cursor:pointer;"></div>';
           // Time column
@@ -9368,7 +9387,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           html += '<div style="flex:1;min-width:0;">';
           html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px;">';
           html += '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;color:var(--text-primary);' + strike + '">' + _bsEsc(cust) + '</div>';
-          html += '<span style="flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:0.4px;color:' + badge.c + ';border:1px solid ' + badge.c + ';border-radius:6px;padding:2px 7px;text-transform:uppercase;">' + _bsEsc(badge.t) + '</span>';
+          // Prefer the Vonigo label chip (color-matched to Vonigo); fall back to the canonical status badge.
+          if (lbl) html += '<span style="flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:0.3px;color:' + lbl.c + ';border:1px solid ' + lbl.c + ';border-radius:6px;padding:2px 7px;white-space:nowrap;">' + _bsEsc(lbl.t) + '</span>';
+          else html += '<span style="flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:0.4px;color:' + badge.c + ';border:1px solid ' + badge.c + ';border-radius:6px;padding:2px 7px;text-transform:uppercase;">' + _bsEsc(badge.t) + '</span>';
           html += '</div>';
           if (addr) html += '<div style="font-size:12px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📍 ' + _bsEsc(addr) + '</div>';
           html += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:4px;">';
@@ -9397,6 +9418,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const email = _bsEmailOf(a);
       const money = (snap.import_total !== null && snap.import_total !== undefined && !isNaN(snap.import_total)) ? ('$' + Number(snap.import_total).toFixed(2)) : '';
       const badge = _BS_BADGE[a.status] || { t: a.status || '—', c: 'var(--text-muted)' };
+      const lbl = _bsLabelOf(a);
       const statusLabel = a.status === 'done' ? '✓ Completed' : (a.status === 'cancelled' ? '✕ Cancelled' : (a.status === 'working' ? '● Working' : 'Scheduled'));
 
       let c = '';
@@ -9408,6 +9430,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       c += '<button onclick="_bsCloseDetail()" aria-label="Close" style="flex:0 0 auto;background:none;border:none;color:var(--text-muted);font-size:22px;line-height:1;cursor:pointer;">×</button>';
       c += '</div>';
       c += '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">' + _bsEsc(_bsDayHeader(a.scheduled_date)) + ' · ' + _bsEsc(_bsMinutesToTime(a.start_minutes)) + ' · <span style="color:' + badge.c + ';font-weight:700;">' + _bsEsc(statusLabel) + '</span></div>';
+      // Vonigo appointment label (color-matched to the Vonigo schedule)
+      if (lbl) c += '<div style="margin:-4px 0 10px;"><span style="display:inline-block;font-size:11px;font-weight:700;color:' + lbl.c + ';border:1px solid ' + lbl.c + ';border-radius:6px;padding:3px 9px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:' + lbl.c + ';margin-right:6px;vertical-align:middle;"></span>' + _bsEsc(lbl.n) + '</span></div>';
       // Job total
       if (money) c += '<div style="font-size:18px;font-weight:800;color:var(--accent-green);font-family:\'Space Mono\',monospace;margin-bottom:10px;">' + _bsEsc(money) + '</div>';
       // Customer
@@ -9450,14 +9474,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _bsDownloadCsv() {
       const rows = _bsSelectedSorted();   // selected jobs only (not the whole window)
       if (rows.length === 0) return;
-      const header = ['Date', 'Time', 'Customer', 'Phone', 'Address', 'Route', 'Status', 'Amount', 'Job#'];
+      const header = ['Date', 'Time', 'Customer', 'Phone', 'Address', 'Route', 'Label', 'Status', 'Amount', 'Job#'];
       const lines = [header.map(_bsCsvCell).join(',')];
       rows.forEach(a => {
         const snap = a.snapshot || {}, job = a.job || {};
         const amount = (snap.import_total !== null && snap.import_total !== undefined && !isNaN(snap.import_total)) ? Number(snap.import_total).toFixed(2) : '';
+        const lbl = _bsLabelOf(a);
         lines.push([
           a.scheduled_date || '', _bsMinutesToTime(a.start_minutes), _bsCust(a), _bsPhone(a),
-          _bsAddrFull(a), snap.route_name || '', a.status || '', amount, job.job_number || ''
+          _bsAddrFull(a), snap.route_name || '', (lbl ? lbl.n : ''), a.status || '', amount, job.job_number || ''
         ].map(_bsCsvCell).join(','));
       });
       const blob = new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
@@ -10646,15 +10671,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           j._routeShort = rkey;                // stamp a short route label for the "job under truck" popup
           routeStop[rkey] = (routeStop[rkey] || 0) + 1;
           const n = routeStop[rkey];           // stop number within this route
-          const baseColor = colorFor(rkey);    // memoize the route's color even for completed stops
-          // Match the board's 3-state (owner 2026-07-06): PAID (status 164/165) or Lost (9993) → gray + faded;
-          // NOT STARTED (New Appt 9984 / no label) → route color; anything else UNPAID (estimate taken) → amber.
-          const done = !!j.isComplete || j.labelOpt === 9993; // paid or Lost → gray + faded marker
-          const notStarted = (!j.labelOpt || j.labelOpt === 9984);
-          const natlAcct = (j.labelOpt === 9981); // National Account → its own dark blue, not amber
-          const doWorkNow = (j.labelOpt === 9975); // Est Converted → Do Work Now hit → reserved green
-          const estTaken = (!done && !notStarted && !natlAcct && !doWorkNow);
-          const color = done ? '#5b6b7a' : (natlAcct ? NATL_ACCT_COLOR : (doWorkNow ? DO_WORK_NOW_COLOR : (estTaken ? EST_TAKEN_COLOR : baseColor)));
+          colorFor(rkey);                      // keep the route-color memo warm (used elsewhere), even though pins now color by label
+          // Owner 2026-07-24: map pins match Vonigo's EXACT label colors, in sync with the board + Vonigo.
+          // The ONLY non-parity color is gray for a fully paid + completed job. Lost (9993) shows its Vonigo
+          // red. Route is still conveyed by the stop NUMBER (and the popup), just no longer by pin color.
+          const done = !!j.isComplete;         // paid + completed → gray + faded (the sole Vonigo-parity exception)
+          const color = done ? '#5b6b7a' : mjLabelColor(j.labelOpt);
           const icon = L.divIcon({
             className: 'job-stop-marker',
             html: '<svg width="22" height="22" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.5));">' +
@@ -11405,17 +11427,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Pill BODY color by Vonigo LABEL (field 201). Vonigo's standard (global, not per-franchise) label colors,
     // eyeballed 2026-06-22; "done" labels (245/9996/9993) render gray anyway. None/unknown → New Appointment
     // blue (active default). Route is conveyed by the lane, not the body color.
-    function mjLabelColor(opt) { const M = { 245: '#6cc070', 9996: '#7fae8a', 9993: '#e0492e', 9984: '#45b6e6', 9981: '#1f4e79', 9975: '#2f9e78', 9973: '#9b59b6', 9971: '#e85fa0', 9970: '#9a8fa6', 247: '#c79fd6', 249: '#aab3bd' }; return M[opt] || '#45b6e6'; }
-    // RESERVED status colors — deliberately OUTSIDE _ROUTE_COLORS, mjZoneColor, and mjLabelColor so they never
-    // collide with a route, zone, or other label. Do NOT add these hexes to any of those palettes.
-    //   EST_TAKEN (amber)    — label 245 "Est Completed Job": estimate priced, Do Work Now NOT yet hit.
-    //   DO_WORK_NOW (green)  — label 9975 "Est Converted": Do Work Now hit / customer agreed / job authorized.
-    //   NATL_ACCT (dark blue)— label 9981 National Account.
-    //   Gray (#5b6b7a)       — truly done: PAID/status 164/165 + Lost(9993).
-    // (The route green #22c55e was pulled from _ROUTE_COLORS so routes can't clash with DO_WORK_NOW.)
-    const EST_TAKEN_COLOR = '#ffab00';
-    const DO_WORK_NOW_COLOR = '#22c55e'; // label 9975 "Est Converted" — Do Work Now hit; RESERVED, kept out of the route palette
-    const NATL_ACCT_COLOR = '#1f4e79'; // National Account (label 9981) — dark blue like Vonigo; its OWN status color, NOT the amber "estimate taken"
+    // EXACT Vonigo appointment-label colors (WorkOrder field 201 optionID → the hex Vonigo paints on its own
+    // schedule), verified against live #90 WorkOrders 2026-07-24. Full map + booking/conversion process in
+    // memory note vonigo-appointment-label-colors. Owner 2026-07-24: the board/map/home must match these
+    // EXACTLY; the ONLY non-parity color is gray for fully paid+completed jobs (handled per-renderer).
+    function mjLabelColor(opt) { const M = {
+      245:  '#C0D587',  // Estimate Completed (Job) — light yellow-green
+      9996: '#B8C84D',  // Estimate Completed (Est. Only) — dark yellow-green
+      9975: '#54AD5B',  // Estimate Converted (Job) — green
+      9970: '#9596BA',  // Estimate Converted (Est. Only) — gray-purple
+      9984: '#6EBFE7',  // New Appointment — blue
+      9973: '#AA4CB3',  // Estimate Only — purple
+      9993: '#D65136',  // Lost — red
+      9981: '#1f4e79'   // National Account — dark blue (no official Vonigo color)
+    }; return M[opt] || '#6EBFE7'; }  // unknown/unset → New-Appointment blue (never gray — gray means paid+done)
+    // GRAY #5b6b7a — the sole non-Vonigo-parity job color: a fully paid + completed job (status 164/165).
+    // (The 2026-07-06 amber "estimate taken" / green "do work now" / dark-blue national-account overlay was
+    //  removed 2026-07-24 so the board + map match Vonigo's exact label colors; 9981 lives in mjLabelColor now.)
     // Left-stripe color by PRICING ZONE. Vonigo's per-franchise zone colors are NOT API-readable, so this is a
     // stable CrewLogic palette keyed deterministically to the zone id (consistent per franchise; flags a job
     // whose zone is unusual for its lane). Zone NAME is shown in the tooltip.
@@ -11517,19 +11545,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const left = ((j.timeMin - startMin) / 60) * PXH, w = Math.max(((j.durationMin || 60) / 60) * PXH, 50);
           const name = mjEsc((String(j.client || '').split(',')[0]) || j.client || 'Job');
           const city = mjAddrParts(j.address).city, jidA = mjEsc(String(j.jobID || '')), wkey = mjEsc(String(j.woID || j.jobID || '')); // jidA = display JobID; wkey = UNIQUE per-appointment lookup key (woID)
-          // Body = label color (Vonigo parity); gray when done. Left stripe = pricing zone (inset box-shadow).
-          // 3 states (owner rule 2026-07-06):
-          //   PAID/dead — status Completed/Archived (164/165, = payment) OR Lost (9993) → gray + faded + locked.
-          //   NOT STARTED — New Appt (9984) or no label yet → normal color (nothing estimated).
-          //   ESTIMATE TAKEN — anything else while UNPAID (an estimate/price exists, e.g. Est Converted 9975,
-          //     Est Completed 245) → reserved amber, still an ACTIVE job (draggable, no ✓). Gray is reserved
-          //     for truly-paid; the estimate label no longer grays a job (245 fires pre-payment and flaps).
-          const done = (!!j.completed || j.labelOpt === 9993);
-          const notStarted = (!j.labelOpt || j.labelOpt === 9984);
-          const natlAcct = (j.labelOpt === 9981); // National Account → its own dark blue, not amber
-          const doWorkNow = (j.labelOpt === 9975); // Est Converted → Do Work Now hit → reserved green
-          const estTaken = (!done && !notStarted && !natlAcct && !doWorkNow);
-          const bg = done ? '#5b6b7a' : (natlAcct ? NATL_ACCT_COLOR : (doWorkNow ? DO_WORK_NOW_COLOR : (estTaken ? EST_TAKEN_COLOR : mjLabelColor(j.labelOpt)))), zoneStripe = mjZoneColor(j.zoneID);
+          // Body = the EXACT Vonigo label color (parity with the map + Vonigo). Left stripe = pricing zone.
+          // Owner 2026-07-24: the ONLY non-parity color is gray for a fully paid + completed job (status
+          // 164/165), which also stays locked (no drag) + shows ✓. Lost (9993) now shows its Vonigo red, not
+          // gray. (Replaces the 2026-07-06 amber "estimate taken" / green "do work now" dispatch overlay.)
+          const done = !!j.completed;  // fully paid + completed → gray + locked (sole Vonigo-parity exception)
+          const bg = done ? '#5b6b7a' : mjLabelColor(j.labelOpt), zoneStripe = mjZoneColor(j.zoneID);
           const canDrag = dnd && !done;
           const dragAttrs = canDrag ? ' draggable="true" ondragstart="dashDragStart(event)" ondragend="dashClearDragGhost()" data-wo="' + mjEsc(String(j.woID || '')) + '" data-dur="' + (j.durationMin || 90) + '" data-zip="' + mjEsc(String(j.zip || '')) + '" data-client="' + mjEsc(String(j.client || '')) + '" data-day="' + mjEsc(String(data.dayID || '')) + '" data-route="' + mjEsc(rc) + '" data-tlabel="' + mjEsc(String(j.timeLabel || '')) + '" data-tmin="' + (j.timeMin != null ? j.timeMin : '') + '"' : '';
           h += '<div' + dragAttrs + ' onclick="mjTip(event,\'' + wkey + '\',true)" data-jid="' + wkey + '" title="' + (canDrag ? 'Drag to move' : (done ? 'Completed — adjust in Vonigo' : '')) + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:3px;bottom:3px;background:' + bg + ';opacity:' + (done ? '0.72' : '1') + ';border-radius:5px;padding:2px 5px 2px 9px;overflow:hidden;cursor:' + (canDrag ? 'grab' : 'pointer') + ';box-shadow:inset 5px 0 0 0 ' + zoneStripe + ',0 1px 2px rgba(0,0,0,.3);">';
