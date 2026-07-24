@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.85.0 | 2026-07-24">
+  <meta name="crewlogic-version" content="v5.86.0 | 2026-07-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10527,7 +10527,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const nearJobs = (t.lat != null && t.lon != null)
           ? (_trucksJobsData || []).filter(j => j.lat != null && j.lon != null && _distM(t.lat, t.lon, j.lat, j.lon) <= 60)
           : [];
-        const jobBadge = nearJobs.length ? '<path d="M31 25.5 L37.5 31 L37.5 37.5 L24.5 37.5 L24.5 31 Z" fill="#F59E0B" stroke="#fff" stroke-width="1.3"/>' : '';
+        // The "job under truck" house badge matches the map's job icons: OUTER = route-color ring, INNER =
+        // Vonigo label fill (gray if paid+completed). Uses the closest job under the truck (nearJobs[0]).
+        const _jbUnder = nearJobs[0] || {};
+        const _jbFill = _jbUnder.isComplete ? '#5b6b7a' : mjLabelColor(_jbUnder.labelOpt);
+        const _jbBorder = mjRouteColor(_jbUnder._routeShort || _jbUnder.route);
+        const jobBadge = nearJobs.length
+          ? '<path d="M31 25.5 L37.5 31 L37.5 37.5 L24.5 37.5 L24.5 31 Z" fill="none" stroke="' + _jbBorder + '" stroke-width="3" stroke-linejoin="round"/>'
+            + '<path d="M31 25.5 L37.5 31 L37.5 37.5 L24.5 37.5 L24.5 31 Z" fill="' + _jbFill + '" stroke="#fff" stroke-width="1.1" stroke-linejoin="round"/>'
+          : '';
         // Truck currently INSIDE a disposal/recycling/donation geofence (telematics, via geofence_alerts)
         // → badge its emoji (🗑️/♻️/🎁) bare, matching the standalone facility markers on the map.
         const nearSite = _truckCurrentFacility[_normVeh(t.name)] || null;
@@ -10677,12 +10685,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           // red. Route is still conveyed by the stop NUMBER (and the popup), just no longer by pin color.
           const done = !!j.isComplete;         // paid + completed → gray + faded (the sole Vonigo-parity exception)
           const color = done ? '#5b6b7a' : mjLabelColor(j.labelOpt);
+          const routeBorder = mjRouteColor(rkey); // route color = the house BORDER (matches the board's route cell)
           const icon = L.divIcon({
             className: 'job-stop-marker',
-            html: '<svg width="22" height="22" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.5));">' +
-              '<path d="M12 3 L21 11 L21 21 L3 21 L3 11 Z" fill="' + color + '" stroke="#fff" stroke-width="1.8"/>' +
+            // Two stacked house paths: OUTER = route-color ring (which route) + INNER = Vonigo label fill with a
+            // thin white edge (which status) — so one stop shows BOTH its route and its label at a glance.
+            html: '<svg width="24" height="24" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.55));">' +
+              '<path d="M12 3 L21 11 L21 21 L3 21 L3 11 Z" fill="none" stroke="' + routeBorder + '" stroke-width="4.5" stroke-linejoin="round"/>' +
+              '<path d="M12 3 L21 11 L21 21 L3 21 L3 11 Z" fill="' + color + '" stroke="#fff" stroke-width="1.3" stroke-linejoin="round"/>' +
               '<text x="12" y="18.5" text-anchor="middle" font-size="9.5" font-weight="800" fill="#fff" font-family="sans-serif">' + n + '</text></svg>',
-            iconSize: [22, 22], iconAnchor: [11, 11], popupAnchor: [0, -12]
+            iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -13]
           });
           const addr = j.address ? _truckProperAddr(String(j.address).replace(/\n/g, ', ').replace(/\s+/g, ' ').replace(/\s+,/g, ',').trim()) : '';
           const items = String(j.items || '').split('\n').map(s => s.trim()).filter(Boolean);
@@ -11452,6 +11464,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // stable CrewLogic palette keyed deterministically to the zone id (consistent per franchise; flags a job
     // whose zone is unusual for its lane). Zone NAME is shown in the tooltip.
     function mjZoneColor(zoneID) { if (!zoneID) return 'transparent'; const P = ['#22c55e', '#eab308', '#ec4899', '#3b82f6', '#f97316', '#a855f7', '#06b6d4', '#ef4444', '#84cc16', '#14b8a6']; let n = 0; const s = String(zoneID); for (let i = 0; i < s.length; i++) n = (n * 31 + s.charCodeAt(i)) >>> 0; return P[n % P.length]; }
+    // Deterministic ROUTE color, keyed on the route CODE — so a given route is the SAME color on BOTH the map
+    // (house-icon border) and the schedule board (route-label cell), regardless of render order (owner 2026-07-24).
+    // Normalizes "Route 3 (MA3ALL)" / "MA3ALL" / "ma3all" to one key so both surfaces hash identically.
+    function mjRouteColor(route) {
+      let s = String(route == null ? '' : route).trim();
+      const paren = s.match(/\(([^)]+)\)/);
+      if (paren && paren[1].trim()) s = paren[1].trim();
+      s = s.replace(/\s*\(.*\)\s*/, '').trim().toUpperCase();
+      if (!s || s === '?' || s === 'UNROUTED') return '#8a9bb0'; // neutral slate for unrouted/unknown
+      const P = ['#3b82f6', '#a855f7', '#ef4444', '#14b8a6', '#f97316', '#ec4899', '#06b6d4', '#eab308', '#84cc16', '#8b5cf6'];
+      let n = 0; for (let i = 0; i < s.length; i++) n = (n * 31 + s.charCodeAt(i)) >>> 0;
+      return P[n % P.length];
+    }
     let _mjBoardByID = {};
     let _mjBoardDayID = ''; // the day tab currently shown — passed as the voice/text command's default working day
     let _mjMoveJob = null;       // set while in tap-to-place "move mode" on the mobile board
@@ -11528,7 +11553,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           ? ' class="mj-lane" data-day="' + mjEsc(String(data.dayID || '')) + '" data-routeid="' + mjEsc(String(rt.id || '')) + '" data-routecode="' + mjEsc(rc) + '" data-start="' + startMin + '" data-pxh="' + PXH + '" data-open="' + mjEsc(JSON.stringify(open.map(s => [s.startTime, s.label || '']))) + '" data-jobs="' + mjEsc(JSON.stringify(laneJobs.map(j => [j.timeMin, j.timeMin + (j.durationMin || 60)]))) + '" ondragover="dashDragOver(event)" ondrop="dashDrop(event)" ondblclick="boardSlotDblClick(event)"'
           : '';
         h += '<div style="display:flex;height:' + ROW + 'px;border-bottom:1px solid var(--border);">';
-        h += '<div style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:var(--text-secondary);border-right:1px solid var(--border);padding:0 2px;text-align:center;word-break:break-all;">' + mjEsc(rc) + '</div>';
+        const rColor = mjRouteColor(rc); // route-label cell background = the map house-icon border color for this route
+        h += '<div style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:' + rColor + ';display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:800;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.4);border-right:1px solid var(--border);padding:0 2px;text-align:center;word-break:break-all;">' + mjEsc(rc) + '</div>';
         h += '<div' + dropAttrs + ' style="position:relative;width:' + trackW + 'px;">';
         // blocked-default base tint (whole lane not bookable unless an open band overrides) — light gray
         h += '<div style="position:absolute;inset:0;background:rgba(255,255,255,0.14);pointer-events:none;"></div>';
