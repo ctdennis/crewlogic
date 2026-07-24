@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.90.1 | 2026-07-24">
+  <meta name="crewlogic-version" content="v5.91.0 | 2026-07-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -17677,7 +17677,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       };
       try {
         const blob = await (await fetch(base64)).blob();
-        const bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
+        // Decode DIRECTLY at (near) the target size — resizeWidth makes the browser downscale during decode
+        // instead of rastering the full 12MP image (~48MB) into memory first. Aspect is preserved (height
+        // auto-computed); the canvas below still fits to maxW×maxH. Unknown option is ignored on old browsers
+        // (falls back to full decode), so it's a safe progressive win. This is the key Android low-memory fix.
+        const bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image', resizeWidth: maxW, resizeQuality: 'high' });
         const out = toCanvas(bitmap.width, bitmap.height, (ctx, dw, dh) => ctx.drawImage(bitmap, 0, 0, dw, dh));
         if (bitmap.close) bitmap.close();
         return out;
@@ -23254,9 +23258,10 @@ RECYCLING & DONATION
       if (!toProcess.length) { alert('Maximum ' + MAX + ' photos per room.'); return; }
       for (const file of toProcess) {
         try {
-          const base64 = await ensureJpegBase64(file);
+          let base64 = await ensureJpegBase64(file);
           const hiRes  = await compressChargePhoto(base64);   // stored/uploaded (1920×1440, oriented)
-          const thumb  = await compressForAnalysis(base64);   // grid thumb + AI (800×600, oriented)
+          base64 = null;                                       // free the full-res base64 before the next photo (Android low-memory)
+          const thumb  = await compressForAnalysis(hiRes);     // thumb from the 1920px hiRes — no 2nd full-res decode
           const suffix = 'r' + _photoSession.active + '_' + room.photos.length;
           const photoID = await queueUnassignedPhotoForRoom(thumb, hiRes, suffix); // IDB + background upload
           room.photos.push({ photoID, thumb, driveUrl: null, uploadFailed: false });
@@ -23500,9 +23505,10 @@ RECYCLING & DONATION
       statusEl.textContent = 'Processing ' + toProcess.length + ' photo' + (toProcess.length !== 1 ? 's' : '') + '...';
 
       for (const file of toProcess) {
-        const base64 = await ensureJpegBase64(file);
+        let base64 = await ensureJpegBase64(file);
         const compressed = await compressChargePhoto(base64);
-        const analysisImg = await compressForAnalysis(base64);
+        base64 = null; // free the full-res base64 before the next photo (Android low-memory)
+        const analysisImg = await compressForAnalysis(compressed); // thumb from the 1920px hiRes — no 2nd full-res decode
         const idx = photoRoomPending.length;
         const suffix = String(idx);
 
