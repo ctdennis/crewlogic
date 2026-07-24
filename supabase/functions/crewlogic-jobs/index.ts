@@ -44,7 +44,7 @@ async function vonigoHealth(db: ReturnType<typeof createClient>): Promise<Record
 const APPT_SELECT =
   'id, scheduled_date, start_minutes, duration_minutes, status, ' +
   'job:jobs!inner ( id, job_number, status, origin, service_address, service_city, service_state, service_zip, service_lat, service_lng, items_description ), ' +
-  'snapshot:job_source_snapshot ( import_total, crew_display, customer_display, route_name, synced_at )';
+  'snapshot:job_source_snapshot ( import_total, crew_display, customer_display, route_name, label_optionid, synced_at )';
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });

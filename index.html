@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.82.0 | 2026-07-24">
+  <meta name="crewlogic-version" content="v5.83.0 | 2026-07-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9211,6 +9211,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       cancelled: { t: 'Cancelled', c: 'var(--accent-orange,#fb923c)' }
     };
 
+    // Vonigo appointment LABEL (WorkOrder field 201 optionID) → exact Vonigo schedule colors, so the board
+    // matches what crews see in Vonigo. optionIDs verified against live #90 WorkOrders 2026-07-24; full map
+    // + booking/conversion process in memory note vonigo-appointment-label-colors. t=row chip, n=full name.
+    const _BS_LABEL = {
+      9984: { t: 'New Appt',       n: 'New Appointment',                c: '#6EBFE7' },  // blue
+      9996: { t: 'Est · Est-Only', n: 'Estimate Completed (Est. Only)', c: '#B8C84D' },  // dk yellow-green
+      245:  { t: 'Est · Job',      n: 'Estimate Completed (Job)',       c: '#C0D587' },  // lt yellow-green
+      9975: { t: 'Conv · Job',     n: 'Estimate Converted (Job)',       c: '#54AD5B' },  // green
+      9970: { t: 'Conv · Est',     n: 'Estimate Converted (Est. Only)', c: '#9596BA' },  // gray-purple
+      9973: { t: 'Est Only',       n: 'Estimate Only',                  c: '#AA4CB3' },  // purple
+      9993: { t: 'Lost',           n: 'Lost',                           c: '#D65136' },  // red
+      9981: { t: "Nat'l Acct",     n: 'National Account',               c: '#9aa7b5' }   // no Vonigo color → neutral
+    };
+    // Returns { t, n, c } for the appointment's Vonigo label, or null if unknown/native.
+    function _bsLabelOf(a) { const id = (a.snapshot || {}).label_optionid; return (id != null && _BS_LABEL[id]) ? _BS_LABEL[id] : null; }
+
     // Case-insensitive substring match on customer NAME + ADDRESS only (v5.74.0).
     // Route has its own dropdown; date has the From/To pickers — so they're out of the text match.
     function _bsMatch(a, q) {
@@ -9354,12 +9370,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const time = _bsMinutesToTime(a.start_minutes);
           const money = (snap.import_total !== null && snap.import_total !== undefined && !isNaN(snap.import_total)) ? ('$' + Number(snap.import_total).toFixed(2)) : '';
           const badge = _BS_BADGE[a.status] || { t: a.status || '—', c: 'var(--text-muted)' };
+          const lbl = _bsLabelOf(a);
           const dim = isCancelled ? 'opacity:0.55;' : '';
           const strike = isCancelled ? 'text-decoration:line-through;' : '';
           const idEsc = _bsEsc(a.id);
           const checked = _bsSelected.has(String(a.id)) ? 'checked' : '';
 
           html += '<div onclick="_bsOpenDetail(\'' + idEsc + '\')" style="cursor:pointer;display:flex;gap:10px;align-items:stretch;padding:10px 12px;margin-bottom:8px;background:var(--bg-card,#1e2f40);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);' + dim + '">';
+          // Left color stripe = the Vonigo appointment-label color (matches the Vonigo schedule at a glance)
+          html += '<div style="flex:0 0 4px;align-self:stretch;border-radius:3px;background:' + (lbl ? lbl.c : 'transparent') + ';"></div>';
           // Select checkbox (does not open the detail card)
           html += '<div style="flex:0 0 auto;align-self:center;"><input type="checkbox" ' + checked + ' onclick="event.stopPropagation();_bsToggleSelect(\'' + idEsc + '\',this.checked)" style="width:18px;height:18px;cursor:pointer;"></div>';
           // Time column
@@ -9368,7 +9387,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           html += '<div style="flex:1;min-width:0;">';
           html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px;">';
           html += '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;color:var(--text-primary);' + strike + '">' + _bsEsc(cust) + '</div>';
-          html += '<span style="flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:0.4px;color:' + badge.c + ';border:1px solid ' + badge.c + ';border-radius:6px;padding:2px 7px;text-transform:uppercase;">' + _bsEsc(badge.t) + '</span>';
+          // Prefer the Vonigo label chip (color-matched to Vonigo); fall back to the canonical status badge.
+          if (lbl) html += '<span style="flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:0.3px;color:' + lbl.c + ';border:1px solid ' + lbl.c + ';border-radius:6px;padding:2px 7px;white-space:nowrap;">' + _bsEsc(lbl.t) + '</span>';
+          else html += '<span style="flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:0.4px;color:' + badge.c + ';border:1px solid ' + badge.c + ';border-radius:6px;padding:2px 7px;text-transform:uppercase;">' + _bsEsc(badge.t) + '</span>';
           html += '</div>';
           if (addr) html += '<div style="font-size:12px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📍 ' + _bsEsc(addr) + '</div>';
           html += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:4px;">';
@@ -9397,6 +9418,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const email = _bsEmailOf(a);
       const money = (snap.import_total !== null && snap.import_total !== undefined && !isNaN(snap.import_total)) ? ('$' + Number(snap.import_total).toFixed(2)) : '';
       const badge = _BS_BADGE[a.status] || { t: a.status || '—', c: 'var(--text-muted)' };
+      const lbl = _bsLabelOf(a);
       const statusLabel = a.status === 'done' ? '✓ Completed' : (a.status === 'cancelled' ? '✕ Cancelled' : (a.status === 'working' ? '● Working' : 'Scheduled'));
 
       let c = '';
@@ -9408,6 +9430,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       c += '<button onclick="_bsCloseDetail()" aria-label="Close" style="flex:0 0 auto;background:none;border:none;color:var(--text-muted);font-size:22px;line-height:1;cursor:pointer;">×</button>';
       c += '</div>';
       c += '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">' + _bsEsc(_bsDayHeader(a.scheduled_date)) + ' · ' + _bsEsc(_bsMinutesToTime(a.start_minutes)) + ' · <span style="color:' + badge.c + ';font-weight:700;">' + _bsEsc(statusLabel) + '</span></div>';
+      // Vonigo appointment label (color-matched to the Vonigo schedule)
+      if (lbl) c += '<div style="margin:-4px 0 10px;"><span style="display:inline-block;font-size:11px;font-weight:700;color:' + lbl.c + ';border:1px solid ' + lbl.c + ';border-radius:6px;padding:3px 9px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:' + lbl.c + ';margin-right:6px;vertical-align:middle;"></span>' + _bsEsc(lbl.n) + '</span></div>';
       // Job total
       if (money) c += '<div style="font-size:18px;font-weight:800;color:var(--accent-green);font-family:\'Space Mono\',monospace;margin-bottom:10px;">' + _bsEsc(money) + '</div>';
       // Customer
@@ -9450,14 +9474,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _bsDownloadCsv() {
       const rows = _bsSelectedSorted();   // selected jobs only (not the whole window)
       if (rows.length === 0) return;
-      const header = ['Date', 'Time', 'Customer', 'Phone', 'Address', 'Route', 'Status', 'Amount', 'Job#'];
+      const header = ['Date', 'Time', 'Customer', 'Phone', 'Address', 'Route', 'Label', 'Status', 'Amount', 'Job#'];
       const lines = [header.map(_bsCsvCell).join(',')];
       rows.forEach(a => {
         const snap = a.snapshot || {}, job = a.job || {};
         const amount = (snap.import_total !== null && snap.import_total !== undefined && !isNaN(snap.import_total)) ? Number(snap.import_total).toFixed(2) : '';
+        const lbl = _bsLabelOf(a);
         lines.push([
           a.scheduled_date || '', _bsMinutesToTime(a.start_minutes), _bsCust(a), _bsPhone(a),
-          _bsAddrFull(a), snap.route_name || '', a.status || '', amount, job.job_number || ''
+          _bsAddrFull(a), snap.route_name || '', (lbl ? lbl.n : ''), a.status || '', amount, job.job_number || ''
         ].map(_bsCsvCell).join(','));
       });
       const blob = new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
