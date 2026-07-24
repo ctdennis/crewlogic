@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.81.0 | 2026-07-23">
+  <meta name="crewlogic-version" content="v5.82.0 | 2026-07-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9151,6 +9151,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _bsData = appts;
       _bsHealth = health;
       _bsTruncated = data.truncated === true;
+      _bsBounds = data.bounds || null;
       _bsById = {};
       _bsSelected = new Set();
       appts.forEach(a => { if (a && a.id != null) _bsById[String(a.id)] = a; });
@@ -9171,7 +9172,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (_bsTruncated) {
         const note = document.createElement('div');
         note.setAttribute('style', 'margin:10px 0;padding:9px 12px;border-radius:var(--radius-sm,8px);background:rgba(251,146,60,0.12);border:1px solid var(--accent-orange,#fb923c);color:var(--text-primary);font-size:12px;font-weight:600;');
-        note.textContent = 'Showing the most recent 500 jobs — pick an earlier date range to see older ones.';
+        note.textContent = 'Showing the most recent 500 jobs — pick a smaller date range to see them all.';
         listEl.insertBefore(note, listEl.firstChild);
       }
     }
@@ -9182,6 +9183,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _bsById = {};        // String(id) -> appointment
     let _bsSelected = new Set(); // selected appointment ids for the bulk-email action
     let _bsTruncated = false; // true when crewlogic-jobs capped the result (range too wide) — v5.75.0
+    let _bsBounds = null;      // {min,max} overall date range for this franchise (constrains the pickers)
+    let _bsSortDesc = false;   // day order: false = oldest first (chronological), true = newest first
     // Filter state (v5.74.0). Date range = server-side fetch window; route + text = client-side.
     let _bsFrom = '';        // YYYY-MM-DD, fetch window start (From picker)
     let _bsTo = '';          // YYYY-MM-DD, fetch window end (To picker)
@@ -9226,6 +9229,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       });
     }
     function _bsApplyFilter() { _bsRenderList(_bsCurrentFiltered()); _bsUpdateEmailBtn(); }
+    // Flip the day order (newest / oldest first) — re-renders the toolbar (button label) + the list.
+    function _bsToggleSort() { _bsSortDesc = !_bsSortDesc; _bsRenderTools(); _bsApplyFilter(); }
 
     // Text box → update state + re-filter (client-side, no re-fetch).
     function _bsOnText(v) { _bsText = v; _bsApplyFilter(); }
@@ -9257,17 +9262,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _bsData.forEach(a => { const rn = (a.snapshot || {}).route_name; if (rn) routeSet[String(rn)] = true; });
       const routes = Object.keys(routeSet).sort();
       let h = '';
-      // Row 1 — date range (re-fetches the window).
+      // Row 1 — date range (re-fetches). Pickers are constrained to the range that actually has data.
+      const _bnd = _bsBounds ? (' min="' + _bsEsc(_bsBounds.min || '') + '" max="' + _bsEsc(_bsBounds.max || '') + '"') : '';
       h += '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">';
       h += '<label style="' + lblStyle + '">From</label>';
-      h += '<input id="bsDateFrom" type="date" value="' + _bsEsc(_bsFrom || _bsDefaultFrom()) + '" onchange="_bsOnDateChange()" style="' + inputStyle + '">';
+      h += '<input id="bsDateFrom" type="date"' + _bnd + ' value="' + _bsEsc(_bsFrom || _bsDefaultFrom()) + '" onchange="_bsOnDateChange()" style="' + inputStyle + '">';
       h += '<label style="' + lblStyle + '">To</label>';
-      h += '<input id="bsDateTo" type="date" value="' + _bsEsc(_bsTo || _bsDefaultTo()) + '" onchange="_bsOnDateChange()" style="' + inputStyle + '">';
+      h += '<input id="bsDateTo" type="date"' + _bnd + ' value="' + _bsEsc(_bsTo || _bsDefaultTo()) + '" onchange="_bsOnDateChange()" style="' + inputStyle + '">';
       h += '<span id="bsDateNote" style="display:none;font-size:12px;color:#ff7676;font-weight:600;"></span>';
       h += '</div>';
-      // Row 2 — name/address search (full width, client-side filter).
-      h += '<div style="display:flex;margin-bottom:8px;">';
-      h += '<input id="bsSearchInput" type="text" value="' + _bsEsc(_bsText || '') + '" oninput="_bsOnText(this.value)" placeholder="Search name or address…" style="flex:1 1 auto;width:100%;' + inputStyle + '">';
+      // Row 2 — name/address search + date-order toggle (newest / oldest first).
+      h += '<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">';
+      h += '<input id="bsSearchInput" type="text" value="' + _bsEsc(_bsText || '') + '" oninput="_bsOnText(this.value)" placeholder="Search name or address…" style="flex:1 1 auto;' + inputStyle + '">';
+      h += '<button onclick="_bsToggleSort()" title="Toggle date order (newest / oldest first)" style="flex:0 0 auto;white-space:nowrap;padding:8px 10px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);border-radius:var(--radius-sm,8px);color:var(--text-primary);font-size:12px;font-weight:600;cursor:pointer;">' + (_bsSortDesc ? '↓ Newest' : '↑ Oldest') + '</button>';
       h += '</div>';
       // Row 3 — control bar directly above the list: select-all + narrow route filter (left), actions (right).
       h += '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">';
@@ -9328,6 +9335,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const byDay = {};
       appts.forEach(a => { const d = a.scheduled_date || ''; (byDay[d] = byDay[d] || []).push(a); });
       const days = Object.keys(byDay).sort();
+      if (_bsSortDesc) days.reverse();
 
       let html = '';
       days.forEach(day => {

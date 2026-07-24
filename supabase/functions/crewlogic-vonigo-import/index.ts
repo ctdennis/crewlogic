@@ -188,107 +188,102 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // ── BATCHED WRITE PATH ──────────────────────────────────────────────────────────────────
+    // Parse each valid WO into a record, then BULK-UPSERT jobs → appointments → snapshots keyed on
+    // source_external_id (the provider id, unique per franchise; migration 0070). This turns thousands
+    // of round-trips into ~10, so busy franchises (Kevin/Queens+LI, NYC-scale) fit the 150s limit.
+    // external_refs is no longer maintained here — source_external_id is the mirror's identity key.
+    interface Rec {
+      jobID: string; woID: string; serviceDate: string; startMin: number | null; durationMin: number | null;
+      status: string; jobComplete: boolean; address: string; items: string; notes: string; price: number | null;
+      crew: { id: unknown; name: string }[]; routeName: string; custName: string; phone: string; email: string; raw: VWorkOrder;
+    }
+    const recs: Rec[] = [];
     for (const wo of allWOs) {
-        counts.workOrders++;
-        try {
-          const fields = wo.Fields || [];
-          const relations = wo.Relations || [];
-          const jobRel = relations.find((r) => r.relationType === 'job');
-          const clientRel = relations.find((r) => r.relationType === 'client');
-          const routeRel = relations.find((r) => r.relationType === 'route');
-          const crew = relations.filter((r) => r.relationType === 'crew').map((c) => ({ id: c.objectID, name: c.name || '' }));
+      counts.workOrders++;
+      const fields = wo.Fields || [];
+      const relations = wo.Relations || [];
+      const jobRel = relations.find((r) => r.relationType === 'job');
+      const clientRel = relations.find((r) => r.relationType === 'client');
+      const routeRel = relations.find((r) => r.relationType === 'route');
+      const crew = relations.filter((r) => r.relationType === 'crew').map((c) => ({ id: c.objectID, name: c.name || '' }));
+      const jobID = jobRel?.objectID ? String(jobRel.objectID) : '';
+      const woID = String(wo.objectID);
+      const serviceEpoch = parseInt(str(getField(fields, F_DATE)?.fieldValue) || '0', 10);
+      const serviceDate = serviceDateFromEpoch(serviceEpoch);
+      if (!jobID || !serviceDate) { counts.skipped++; continue; }
+      const statusOptID = getField(fields, F_STATUS)?.optionID || 0;
+      const statusLabel = str(getField(fields, F_STATUS)?.fieldValue);
+      const clientID = clientRel?.objectID ? String(clientRel.objectID) : '';
+      const ci = (clientID && !skipContacts) ? (contactCache.get(clientID) || { phone: '', email: '' }) : { phone: '', email: '' };
+      const startMin = parseInt(str(getField(fields, F_TIME_MIN)?.fieldValue) || '', 10);
+      const durationMin = parseInt(str(getField(fields, F_DURATION)?.fieldValue) || '', 10);
+      recs.push({
+        jobID, woID, serviceDate,
+        startMin: Number.isFinite(startMin) ? startMin : null,
+        durationMin: (Number.isFinite(durationMin) && durationMin > 0) ? durationMin : null,
+        status: apptStatus(statusOptID, statusLabel),
+        jobComplete: isJobComplete(statusOptID),
+        address: str(getField(fields, F_ADDRESS)?.fieldValue),
+        items: str(getField(fields, F_ITEMS)?.fieldValue),
+        notes: str(getField(fields, F_NOTES)?.fieldValue),
+        price: parseFloat(str(getField(fields, F_PRICE)?.fieldValue) || '') || null,
+        crew, routeName: routeRel?.name || '',
+        custName: clientRel?.name || str(getField(fields, F_CONTACT)?.fieldValue) || '',
+        phone: ci.phone, email: ci.email, raw: wo,
+      });
+    }
 
-          const jobID = jobRel?.objectID ? String(jobRel.objectID) : '';
-          const woID = String(wo.objectID);
-          const serviceEpoch = parseInt(str(getField(fields, F_DATE)?.fieldValue) || '0', 10);
-          const serviceDate = serviceDateFromEpoch(serviceEpoch);
-          // Need a job to group under and a schedulable date (appointment date is NOT NULL).
-          if (!jobID || !serviceDate) { counts.skipped++; continue; }
+    const chunk = <T>(arr: T[], n: number): T[][] => { const o: T[][] = []; for (let i = 0; i < arr.length; i += n) o.push(arr.slice(i, i + n)); return o; };
+    const CHUNK = 500;
 
-          const statusOptID = getField(fields, F_STATUS)?.optionID || 0;
-          const statusLabel = str(getField(fields, F_STATUS)?.fieldValue);
-          const address = str(getField(fields, F_ADDRESS)?.fieldValue);
-          const items = str(getField(fields, F_ITEMS)?.fieldValue);
-          const notes = str(getField(fields, F_NOTES)?.fieldValue);
-          const contactName = str(getField(fields, F_CONTACT)?.fieldValue);
-          // Customer phone/email from the Vonigo Contact (by clientID), cached per client this run.
-          const clientID = clientRel?.objectID ? String(clientRel.objectID) : '';
-          const contactInfo = (clientID && !skipContacts) ? (contactCache.get(clientID) || { phone: '', email: '' }) : { phone: '', email: '' };
-          const startMin = parseInt(str(getField(fields, F_TIME_MIN)?.fieldValue) || '', 10);
-          const durationMin = parseInt(str(getField(fields, F_DURATION)?.fieldValue) || '', 10);
-          const price = parseFloat(str(getField(fields, F_PRICE)?.fieldValue) || '') || null;
+    // JOBS — dedupe by jobID; a job is 'completed' only if EVERY WorkOrder under it is complete.
+    const jobAgg = new Map<string, { address: string; items: string; notes: string; allComplete: boolean }>();
+    for (const r of recs) {
+      const j = jobAgg.get(r.jobID);
+      if (!j) jobAgg.set(r.jobID, { address: r.address, items: r.items, notes: r.notes, allComplete: r.jobComplete });
+      else { j.allComplete = j.allComplete && r.jobComplete; if (!j.address && r.address) j.address = r.address; }
+    }
+    const jobRows = [...jobAgg.entries()].map(([jobID, j]) => ({
+      franchise_id: franchiseInternalID, source_external_id: jobID, job_number: jobID, origin: 'import',
+      status: j.allComplete ? 'completed' : 'scheduled',
+      service_address: j.address || '(no address)', items_description: j.items || null, notes_internal: j.notes || null,
+    }));
+    const jobUuid = new Map<string, string>();
+    for (const c of chunk(jobRows, CHUNK)) {
+      const { data, error } = await db.from('jobs').upsert(c, { onConflict: 'franchise_id,source_external_id' }).select('id, source_external_id');
+      if (error) throw error;
+      for (const row of (data || [])) jobUuid.set(String(row.source_external_id), String(row.id));
+      counts.jobs += c.length;
+    }
 
-          // ── JOB (upsert via external_refs) ──
-          const jobRef = await db.from('external_refs')
-            .select('crewlogic_id').eq('entity_type', 'job').eq('provider', 'vonigo').eq('external_id', jobID).limit(1);
-          let jobUuid = jobRef.data && jobRef.data[0]?.crewlogic_id as string | undefined;
-          const jobBase: Record<string, unknown> = {
-            service_address: address || '(no address)',
-            items_description: items || null,
-            notes_internal: notes || null,
-          };
-          if (isJobComplete(statusOptID)) jobBase.status = 'completed';
-          if (jobUuid) {
-            const upd = await db.from('jobs').update(jobBase).eq('id', jobUuid);
-            if (upd.error) throw upd.error;
-          } else {
-            const ins = await db.from('jobs').insert({
-              franchise_id: franchiseInternalID, job_number: jobID, origin: 'import',
-              status: isJobComplete(statusOptID) ? 'completed' : 'scheduled', ...jobBase,
-            }).select('id').single();
-            if (ins.error) throw ins.error;
-            jobUuid = ins.data.id as string;
-            counts.jobs++;
-            const rref = await db.from('external_refs').upsert(
-              { entity_type: 'job', crewlogic_id: jobUuid, franchise_id: franchiseInternalID, provider: 'vonigo', external_id: jobID, last_synced_at: now },
-              { onConflict: 'entity_type,provider,external_id' });
-            if (rref.error) throw rref.error;
-          }
+    // APPOINTMENTS — one per woID.
+    const apptRows = recs.map((r) => ({
+      franchise_id: franchiseInternalID, source_external_id: r.woID, job_id: jobUuid.get(r.jobID),
+      scheduled_date: r.serviceDate, start_minutes: r.startMin, duration_minutes: r.durationMin, status: r.status,
+    })).filter((a) => a.job_id);
+    const apptUuid = new Map<string, string>();
+    for (const c of chunk(apptRows, CHUNK)) {
+      const { data, error } = await db.from('job_appointments').upsert(c, { onConflict: 'franchise_id,source_external_id' }).select('id, source_external_id');
+      if (error) throw error;
+      for (const row of (data || [])) apptUuid.set(String(row.source_external_id), String(row.id));
+      counts.appointments += c.length;
+    }
 
-          // ── APPOINTMENT (upsert via external_refs) ──
-          const apRef = await db.from('external_refs')
-            .select('crewlogic_id').eq('entity_type', 'appointment').eq('provider', 'vonigo').eq('external_id', woID).limit(1);
-          let apUuid = apRef.data && apRef.data[0]?.crewlogic_id as string | undefined;
-          const apBase: Record<string, unknown> = {
-            job_id: jobUuid, franchise_id: franchiseInternalID,
-            scheduled_date: serviceDate,
-            start_minutes: Number.isFinite(startMin) ? startMin : null,
-            duration_minutes: Number.isFinite(durationMin) && durationMin > 0 ? durationMin : null,
-            status: apptStatus(statusOptID, statusLabel),
-          };
-          if (apUuid) {
-            const upd = await db.from('job_appointments').update(apBase).eq('id', apUuid);
-            if (upd.error) throw upd.error;
-          } else {
-            const ins = await db.from('job_appointments').insert(apBase).select('id').single();
-            if (ins.error) throw ins.error;
-            apUuid = ins.data.id as string;
-            counts.appointments++;
-            const rref = await db.from('external_refs').upsert(
-              { entity_type: 'appointment', crewlogic_id: apUuid, franchise_id: franchiseInternalID, provider: 'vonigo', external_id: woID, last_synced_at: now },
-              { onConflict: 'entity_type,provider,external_id' });
-            if (rref.error) throw rref.error;
-          }
-
-          // ── SNAPSHOT (provider DR extras) ──
-          const snap = await db.from('job_source_snapshot').upsert({
-            appointment_id: apUuid, franchise_id: franchiseInternalID, provider: 'vonigo',
-            import_total: price,
-            crew_display: crew.length ? crew : null,
-            customer_display: { name: clientRel?.name || contactName || null, phone: contactInfo.phone || null, email: contactInfo.email || null },
-            route_name: routeRel?.name || null,
-            raw: wo, synced_at: now,
-          }, { onConflict: 'appointment_id' });
-          if (snap.error) throw snap.error;
-
-          // Keep external_refs.last_synced_at fresh on already-known rows too.
-          await db.from('external_refs').update({ last_synced_at: now })
-            .eq('provider', 'vonigo').in('entity_type', ['job', 'appointment'])
-            .in('external_id', [jobID, woID]);
-        } catch (e) {
-          counts.errors++;
-          console.error('[vonigo-import] WO ' + String(wo.objectID) + ' failed:', (e as Error).message);
-        }
+    // SNAPSHOTS — provider DR extras, keyed on appointment_id.
+    const snapRows = recs.map((r) => {
+      const apptId = apptUuid.get(r.woID);
+      if (!apptId) return null;
+      return {
+        appointment_id: apptId, franchise_id: franchiseInternalID, provider: 'vonigo',
+        import_total: r.price, crew_display: r.crew.length ? r.crew : null,
+        customer_display: { name: r.custName || null, phone: r.phone || null, email: r.email || null },
+        route_name: r.routeName || null, raw: r.raw, synced_at: now,
+      };
+    }).filter(Boolean) as Record<string, unknown>[];
+    for (const c of chunk(snapRows, CHUNK)) {
+      const { error } = await db.from('job_source_snapshot').upsert(c, { onConflict: 'appointment_id' });
+      if (error) throw error;
     }
 
     return json({ success: true, franchiseID, action, window: { dateStart, dateEnd }, counts });
