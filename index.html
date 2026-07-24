@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.86.1 | 2026-07-24">
+  <meta name="crewlogic-version" content="v5.86.2 | 2026-07-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10533,7 +10533,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const _jbFill = _jbUnder.isComplete ? '#5b6b7a' : mjLabelColor(_jbUnder.labelOpt);
         const _jbBorder = mjRouteColor(_jbUnder._routeShort || _jbUnder.route);
         const jobBadge = nearJobs.length
-          ? '<path d="M31 25.5 L37.5 31 L37.5 37.5 L24.5 37.5 L24.5 31 Z" fill="' + _jbFill + '" stroke="' + _jbBorder + '" stroke-width="4" stroke-linejoin="round"/>'
+          ? '<path d="M31 25.5 L37.5 31 L37.5 37.5 L24.5 37.5 L24.5 31 Z" fill="' + _jbFill + '" stroke="' + _jbBorder + '" stroke-width="3" stroke-linejoin="round"/>'
           : '';
         // Truck currently INSIDE a disposal/recycling/donation geofence (telematics, via geofence_alerts)
         // → badge its emoji (🗑️/♻️/🎁) bare, matching the standalone facility markers on the map.
@@ -10690,7 +10690,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             // Two stacked house paths: OUTER = route-color ring (which route) + INNER = Vonigo label fill with a
             // thin white edge (which status) — so one stop shows BOTH its route and its label at a glance.
             html: '<svg width="26" height="26" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.55));overflow:visible;">' +
-              '<path d="M12 3 L21 11 L21 21 L3 21 L3 11 Z" fill="' + color + '" stroke="' + routeBorder + '" stroke-width="6" stroke-linejoin="round"/>' +
+              '<path d="M12 3 L21 11 L21 21 L3 21 L3 11 Z" fill="' + color + '" stroke="' + routeBorder + '" stroke-width="4" stroke-linejoin="round"/>' +
               '<text x="12" y="18.5" text-anchor="middle" font-size="9.5" font-weight="800" fill="#fff" font-family="sans-serif">' + n + '</text></svg>',
             iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -14]
           });
@@ -11462,18 +11462,24 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // stable CrewLogic palette keyed deterministically to the zone id (consistent per franchise; flags a job
     // whose zone is unusual for its lane). Zone NAME is shown in the tooltip.
     function mjZoneColor(zoneID) { if (!zoneID) return 'transparent'; const P = ['#22c55e', '#eab308', '#ec4899', '#3b82f6', '#f97316', '#a855f7', '#06b6d4', '#ef4444', '#84cc16', '#14b8a6']; let n = 0; const s = String(zoneID); for (let i = 0; i < s.length; i++) n = (n * 31 + s.charCodeAt(i)) >>> 0; return P[n % P.length]; }
-    // Deterministic ROUTE color, keyed on the route CODE — so a given route is the SAME color on BOTH the map
-    // (house-icon border) and the schedule board (route-label cell), regardless of render order (owner 2026-07-24).
-    // Normalizes "Route 3 (MA3ALL)" / "MA3ALL" / "ma3all" to one key so both surfaces hash identically.
+    // ROUTE color for the map house-BORDER + the board route-label cell (owner 2026-07-24). Two goals:
+    //   1) OFF the Vonigo LABEL hues — labels already own sky-blue, navy, the greens, purple, gray-purple, red;
+    //      this palette leans WARM + teal so a route ring never reads like a label fill.
+    //   2) DISTINCT per route — assigned SEQUENTIALLY (not hashed), so no two routes collide to the same color
+    //      (the earlier hash put MA2FAR ~ RI4REG). A shared map keyed on the normalized route CODE keeps a
+    //      given route the SAME color on both surfaces regardless of which renders first.
+    // NOTE: >10 routes wraps the palette (colors would repeat) — widen the palette if a franchise needs more.
+    const _MJ_ROUTE_PALETTE = ['#ea580c', '#0d9488', '#db2777', '#ca8a04', '#0e7490', '#92400e', '#be123c', '#c026d3', '#a16207', '#7c2d12'];
+    const _mjRouteColors = {};   // normalized route code -> color (assigned once, shared by map + board)
+    let _mjRouteColorN = 0;
     function mjRouteColor(route) {
       let s = String(route == null ? '' : route).trim();
       const paren = s.match(/\(([^)]+)\)/);
       if (paren && paren[1].trim()) s = paren[1].trim();
       s = s.replace(/\s*\(.*\)\s*/, '').trim().toUpperCase();
       if (!s || s === '?' || s === 'UNROUTED') return '#8a9bb0'; // neutral slate for unrouted/unknown
-      const P = ['#3b82f6', '#a855f7', '#ef4444', '#14b8a6', '#f97316', '#ec4899', '#06b6d4', '#eab308', '#84cc16', '#8b5cf6'];
-      let n = 0; for (let i = 0; i < s.length; i++) n = (n * 31 + s.charCodeAt(i)) >>> 0;
-      return P[n % P.length];
+      if (!(s in _mjRouteColors)) { _mjRouteColors[s] = _MJ_ROUTE_PALETTE[_mjRouteColorN % _MJ_ROUTE_PALETTE.length]; _mjRouteColorN++; }
+      return _mjRouteColors[s];
     }
     let _mjBoardByID = {};
     let _mjBoardDayID = ''; // the day tab currently shown — passed as the voice/text command's default working day
