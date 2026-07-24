@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.86.2 | 2026-07-24">
+  <meta name="crewlogic-version" content="v5.87.0 | 2026-07-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10589,6 +10589,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + ((t.lat != null && t.lon != null) ? '<div style="margin-top:8px;"><button onclick="mtMeasureStart(' + i + ')" style="width:100%;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:#fff;font-weight:700;font-size:12px;padding:7px;border-radius:6px;cursor:pointer;">📏 Measure distance</button></div>' : '')
           + '</div>';
         const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: 1000 }).addTo(_truckLayer || _trucksMap); // trucks above job houses
+        // Desktop hover: lightweight tooltip with the truck name (the SVG <title> never fired inside Leaflet).
+        // Skipped on touch — mobile has no hover, and we don't want a tap to flash it.
+        if (!_mtIsTouch()) m.bindTooltip(_truckEsc(t.name || ('Truck ' + (i + 1))), { direction: 'top', offset: [0, -18], opacity: 0.95 });
         // Truck details show in the fixed in-map hover box (no popup → no clip/pan); disposal mode picks the truck.
         m.on('click', function () { if (_dispMode) { _dispTapTruck(i, t); } else { _clearMeasureLine(); _railShowInfo(pop); } });
         _truckMarkers.push(m);
@@ -10720,6 +10723,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + itemsHtml
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: done ? 0.6 : 1 }).addTo(_jobLayer || _trucksMap);
+          // Desktop hover: lightweight tooltip with just the route code (mobile has no hover — skip it, since
+          // the full detail-on-hover was the annoying thing we moved to click).
+          if (!_mtIsTouch()) m.bindTooltip(_truckEsc(rkey || 'Unrouted'), { direction: 'top', offset: [0, -13], opacity: 0.95 });
           // Job details show in the fixed in-map hover box (no marker popup → never clips/pans). Measuring +
           // disposal-pick still take priority on the first interaction.
           m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } });
