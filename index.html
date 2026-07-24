@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.84.0 | 2026-07-24">
+  <meta name="crewlogic-version" content="v5.85.0 | 2026-07-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4513,10 +4513,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!fid) { body.innerHTML = '<div style="color:var(--text-muted);">No franchise on this session.</div>'; return; }
       let rows;
       try {
-        rows = await _pagedFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) +
-          '&event_type=eq.geofence_exit&duration=not.is.null' +
-          '&select=geofence_name,category,duration,created_at' +
-          '&order=created_at.desc');
+        // Service-role edge fn (see crewlogic-geofence-alerts) — token-independent, so a dropped session
+        // no longer empties the report.
+        const resp = await edgeFunctionCall('crewlogic-geofence-alerts', { action: 'facilities', franchiseInternalID: fid });
+        if (!resp || !resp.success) throw new Error((resp && resp.error) || 'load failed');
+        rows = resp.rows;
       } catch (e) { body.innerHTML = '<div style="color:var(--text-muted);">Could not load the report.</div>'; return; }
       const MIN_SEC = 480; // a stop under 8 min at a fence = drive-through / false positive — excluded everywhere
       _alertsRows = (Array.isArray(rows) ? rows : []).filter(r => (parseFloat(r.duration) || 0) >= MIN_SEC);
@@ -4579,14 +4580,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         body.innerHTML = head + '<div style="color:var(--text-muted);font-size:14px;">Loading…</div>';
         const sinceIso = new Date(_alertsRangeStart(_alertsRange)).toISOString();
         try {
-          // Both paged: PostgREST's 1000-row cap applies here too, and "All time" now makes it
-          // reachable on both tables. A truncated fetch would silently drop customer visits.
-          const [alerts, jgs] = await Promise.all([
-            _pagedFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&wo_id=not.is.null&event_type=in.(job_arrive,job_leave)&created_at=gte.' + encodeURIComponent(sinceIso) + '&select=wo_id,job_id,geofence_name,vehicle_number,event_type,duration,start_time,created_at&order=created_at.asc'),
-            _pagedFetch('/rest/v1/job_geofences?franchise_id=eq.' + encodeURIComponent(fid) + '&route=not.is.null&select=wo_id,route&order=wo_id.asc')
-          ]);
-          _custRaw = Array.isArray(alerts) ? alerts : [];
-          _custRouteMap = {}; (Array.isArray(jgs) ? jgs : []).forEach(g => { if (g.wo_id && g.route) _custRouteMap[String(g.wo_id)] = g.route; });
+          // Service-role edge fn (see crewlogic-geofence-alerts): token-independent AND pages both tables
+          // past PostgREST's 1000-row cap server-side, so a dropped session OR a truncated fetch can't
+          // silently drop customer visits.
+          const resp = await edgeFunctionCall('crewlogic-geofence-alerts', { action: 'customers', franchiseInternalID: fid, sinceIso: sinceIso });
+          if (!resp || !resp.success) throw new Error((resp && resp.error) || 'load failed');
+          _custRaw = Array.isArray(resp.alerts) ? resp.alerts : [];
+          _custRouteMap = {}; (Array.isArray(resp.jobGeofences) ? resp.jobGeofences : []).forEach(g => { if (g.wo_id && g.route) _custRouteMap[String(g.wo_id)] = g.route; });
         } catch (e) { body.innerHTML = head + '<div style="color:var(--text-muted);">Could not load the customer report.</div>'; return; }
       }
       _custAggregate();
@@ -10761,8 +10761,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const fid = currentUser && currentUser.franchiseInternalID;
       if (!fid) { _renderGeofenceAlerts([]); return; } // fail closed — never surface another franchise's alerts
       try {
-        const rows = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&select=id,franchise_id,action,event_type,vehicle_number,geofence_id,geofence_name,category,start_time,created_at&order=created_at.desc&limit=50');
-        _renderGeofenceAlerts(Array.isArray(rows) ? rows : []);
+        // Service-role edge fn (scoped by franchiseInternalID), NOT a direct RLS read — so a dropped Supabase
+        // token (Google logins after a refresh) no longer blanks the rail. See crewlogic-geofence-alerts.
+        const resp = await edgeFunctionCall('crewlogic-geofence-alerts', { action: 'recent', franchiseInternalID: fid });
+        if (!resp || !resp.success) throw new Error((resp && resp.error) || 'load failed');
+        _renderGeofenceAlerts(Array.isArray(resp.rows) ? resp.rows : []);
       } catch (e) {
         lists.forEach(l => { l.innerHTML = '<div style="padding:12px;color:var(--text-muted,#6e8194);font-size:12px;">Could not load alerts.</div>'; });
       }
@@ -10826,8 +10829,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const fid = currentUser && currentUser.franchiseInternalID;
       if (!fid) return; // fail closed — never surface another franchise's alerts
       try {
-        const rows = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&select=id,franchise_id,action,event_type,vehicle_number,geofence_id,geofence_name,category,start_time,created_at&order=created_at.desc&limit=50');
-        if (!Array.isArray(rows)) return;
+        const resp = await edgeFunctionCall('crewlogic-geofence-alerts', { action: 'recent', franchiseInternalID: fid });
+        const rows = (resp && resp.success && Array.isArray(resp.rows)) ? resp.rows : null;
+        if (!rows) return;
         // Always re-render so the "Xm ago" ages refresh each cycle — feels live even with no NEW alert.
         const scrolls = Array.prototype.map.call(lists, l => l.scrollTop);
         _renderGeofenceAlerts(rows); // authoritative order, dedups, resets _shownAlertIds
