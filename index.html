@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.84.0 | 2026-07-24">
+  <meta name="crewlogic-version" content="v5.88.1 | 2026-07-24">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4513,10 +4513,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!fid) { body.innerHTML = '<div style="color:var(--text-muted);">No franchise on this session.</div>'; return; }
       let rows;
       try {
-        rows = await _pagedFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) +
-          '&event_type=eq.geofence_exit&duration=not.is.null' +
-          '&select=geofence_name,category,duration,created_at' +
-          '&order=created_at.desc');
+        // Service-role edge fn (see crewlogic-geofence-alerts) — token-independent, so a dropped session
+        // no longer empties the report.
+        const resp = await edgeFunctionCall('crewlogic-geofence-alerts', { action: 'facilities', franchiseInternalID: fid });
+        if (!resp || !resp.success) throw new Error((resp && resp.error) || 'load failed');
+        rows = resp.rows;
       } catch (e) { body.innerHTML = '<div style="color:var(--text-muted);">Could not load the report.</div>'; return; }
       const MIN_SEC = 480; // a stop under 8 min at a fence = drive-through / false positive — excluded everywhere
       _alertsRows = (Array.isArray(rows) ? rows : []).filter(r => (parseFloat(r.duration) || 0) >= MIN_SEC);
@@ -4579,14 +4580,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         body.innerHTML = head + '<div style="color:var(--text-muted);font-size:14px;">Loading…</div>';
         const sinceIso = new Date(_alertsRangeStart(_alertsRange)).toISOString();
         try {
-          // Both paged: PostgREST's 1000-row cap applies here too, and "All time" now makes it
-          // reachable on both tables. A truncated fetch would silently drop customer visits.
-          const [alerts, jgs] = await Promise.all([
-            _pagedFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&wo_id=not.is.null&event_type=in.(job_arrive,job_leave)&created_at=gte.' + encodeURIComponent(sinceIso) + '&select=wo_id,job_id,geofence_name,vehicle_number,event_type,duration,start_time,created_at&order=created_at.asc'),
-            _pagedFetch('/rest/v1/job_geofences?franchise_id=eq.' + encodeURIComponent(fid) + '&route=not.is.null&select=wo_id,route&order=wo_id.asc')
-          ]);
-          _custRaw = Array.isArray(alerts) ? alerts : [];
-          _custRouteMap = {}; (Array.isArray(jgs) ? jgs : []).forEach(g => { if (g.wo_id && g.route) _custRouteMap[String(g.wo_id)] = g.route; });
+          // Service-role edge fn (see crewlogic-geofence-alerts): token-independent AND pages both tables
+          // past PostgREST's 1000-row cap server-side, so a dropped session OR a truncated fetch can't
+          // silently drop customer visits.
+          const resp = await edgeFunctionCall('crewlogic-geofence-alerts', { action: 'customers', franchiseInternalID: fid, sinceIso: sinceIso });
+          if (!resp || !resp.success) throw new Error((resp && resp.error) || 'load failed');
+          _custRaw = Array.isArray(resp.alerts) ? resp.alerts : [];
+          _custRouteMap = {}; (Array.isArray(resp.jobGeofences) ? resp.jobGeofences : []).forEach(g => { if (g.wo_id && g.route) _custRouteMap[String(g.wo_id)] = g.route; });
         } catch (e) { body.innerHTML = head + '<div style="color:var(--text-muted);">Could not load the customer report.</div>'; return; }
       }
       _custAggregate();
@@ -10307,6 +10307,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (sub) sub.textContent = trucks.length + ' truck' + (trucks.length === 1 ? '' : 's') + ' · live from ' + provLabel + ' · auto-updating';
         renderTrucks(trucks, !isRefresh);  // fit the map only on first load, not on auto-refresh
         if (!isRefresh) loadJobMarkers();  // jobs are static this session — load once, don't re-pull every cycle
+        if (!isRefresh) _loadTruckCrew();  // Phase 1: infer likely crew per truck from today's job dwells
         if (!isRefresh && _trucksMapEl === 'dashMapPane') loadGeofenceAlerts();  // right-rail live geofence/ignition alerts (dispatch dashboard only)
       } catch (e) {
         if (isRefresh) { console.warn('trucks auto-refresh failed (non-fatal):', e); return; }
@@ -10527,7 +10528,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const nearJobs = (t.lat != null && t.lon != null)
           ? (_trucksJobsData || []).filter(j => j.lat != null && j.lon != null && _distM(t.lat, t.lon, j.lat, j.lon) <= 60)
           : [];
-        const jobBadge = nearJobs.length ? '<path d="M31 25.5 L37.5 31 L37.5 37.5 L24.5 37.5 L24.5 31 Z" fill="#F59E0B" stroke="#fff" stroke-width="1.3"/>' : '';
+        // The "job under truck" house badge matches the map's job icons: OUTER = route-color ring, INNER =
+        // Vonigo label fill (gray if paid+completed). Uses the closest job under the truck (nearJobs[0]).
+        const _jbUnder = nearJobs[0] || {};
+        const _jbFill = _jbUnder.isComplete ? '#5b6b7a' : mjLabelColor(_jbUnder.labelOpt);
+        const _jbBorder = mjRouteColor(_jbUnder._routeShort || _jbUnder.route);
+        const jobBadge = nearJobs.length
+          ? '<path d="M31 25.5 L37.5 31 L37.5 37.5 L24.5 37.5 L24.5 31 Z" fill="' + _jbFill + '" stroke="' + _jbBorder + '" stroke-width="3" stroke-linejoin="round"/>'
+          : '';
         // Truck currently INSIDE a disposal/recycling/donation geofence (telematics, via geofence_alerts)
         // → badge its emoji (🗑️/♻️/🎁) bare, matching the standalone facility markers on the map.
         const nearSite = _truckCurrentFacility[_normVeh(t.name)] || null;
@@ -10564,6 +10572,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         });
         const veh = [t.year, t.make, t.model].filter(Boolean).join(' ');
         const move = [(t.speed != null ? t.speed + ' mph' : ''), (t.heading || '')].filter(Boolean).join(' ');
+        // Phase-1 crew inference: likely crew + tip-split / no-crew warnings (docs/plan-truck-crew-inference.md).
+        const _cd = _truckCrew[_normVeh(t.name)]; let crewHtml = '';
+        if (_cd) {
+          const _jn = (a) => (a || []).join(' · ');
+          if (_cd.confidence === 'high' && _cd.crew.length) crewHtml += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;font-size:12px;"><span style="color:#9fb0c0;font-weight:700;">Crew (likely):</span> ' + _truckEsc(_jn(_cd.crew)) + '<span style="color:#6e8194;"> · ' + _cd.jobsWithCrew + ' jobs' + (_cd.routes.length === 1 ? ' · ' + _truckEsc(_cd.routes[0]) : '') + '</span></div>';
+          else if (_cd.confidence === 'low' && _cd.candidates.length) crewHtml += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;font-size:12px;"><span style="color:#9fb0c0;font-weight:700;">Crew (low confidence):</span> possibly ' + _truckEsc(_jn(_cd.candidates)) + '<span style="color:#6e8194;"> · ' + _cd.routes.length + ' routes today</span></div>';
+          else if (_cd.confidence === 'unknown') crewHtml += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;font-size:12px;color:#9fb0c0;">Crew: can\'t determine (no crew on today\'s jobs)</div>';
+          if (_cd.mismatches && _cd.mismatches.length) { const _who = [...new Set([].concat.apply([], _cd.mismatches.map(m => m.missing)))]; crewHtml += '<div style="margin-top:6px;padding:7px 9px;background:rgba(251,146,60,.13);border:1px solid #fb923c;border-radius:6px;font-size:11.5px;color:#fdba74;line-height:1.4;">⚠ <b>' + _truckEsc(_who.join(' · ')) + '</b> dwelled at ' + _cd.mismatches.length + ' job' + (_cd.mismatches.length > 1 ? 's' : '') + ' not assigned to them — add them in Vonigo so tips credit them: ' + _truckEsc(_cd.mismatches.map(m => m.client).filter(Boolean).join(', ')) + '</div>'; }
+          if (_cd.noCrew && _cd.noCrew.length) crewHtml += '<div style="margin-top:6px;padding:7px 9px;background:rgba(148,163,184,.13);border:1px solid #64748b;border-radius:6px;font-size:11.5px;color:#cbd5e1;line-height:1.4;">⚠ ' + _cd.noCrew.length + ' of this truck\'s jobs have no crew assigned in Vonigo: ' + _truckEsc(_cd.noCrew.join(', ')) + '</div>';
+        }
         const pop = '<div style="font-size:13px;line-height:1.5;min-width:150px;">'
           + '<b>' + (i + 1) + '. ' + _truckEsc(t.name) + '</b>'
           + (veh ? '<br>' + _truckEsc(veh) : '')
@@ -10571,6 +10589,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + '<br>' + _truckEsc([_truckStateLabel(t), move].filter(Boolean).join(' · '))
           + (t.lastUpdate ? '<br><span style="color:#6e8194;">' + _truckEsc(_truckTimeAgo(t.lastUpdate)) + '</span>' : '')
           + (t.vin ? '<br><span style="color:#6e8194;font-size:11px;">VIN ' + _truckEsc(t.vin) + '</span>' : '')
+          + crewHtml
           + (nearJobs.length ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;color:#F59E0B;font-weight:700;font-size:12px;">🏠 At ' + nearJobs.length + ' job' + (nearJobs.length > 1 ? 's' : '') + ' here</div>' + nearJobs.map(j => '<div style="font-size:12px;color:#cdd6df;">' + _truckEsc(j.clientName || 'Job') + (j._routeShort ? ' · ' + _truckEsc(j._routeShort) : '') + '</div>').join('') : '')
           + (nearSite ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;color:' + nearSite.color + ';font-weight:700;font-size:12px;">' + nearSite.emoji + ' At ' + _truckEsc(nearSite.name) + '</div>' : '')
           + (!nearSite && atYard ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;color:#93c5fd;font-weight:700;font-size:12px;">🏠 At ' + _truckEsc(curGf.name) + (gfSince ? ' since ' + _truckEsc(_alertClock(new Date(gfSince).toISOString())) : '') + '</div>' : '')
@@ -10582,6 +10601,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + ((t.lat != null && t.lon != null) ? '<div style="margin-top:8px;"><button onclick="mtMeasureStart(' + i + ')" style="width:100%;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:#fff;font-weight:700;font-size:12px;padding:7px;border-radius:6px;cursor:pointer;">📏 Measure distance</button></div>' : '')
           + '</div>';
         const m = L.marker([t.lat, t.lon], { icon, zIndexOffset: 1000 }).addTo(_truckLayer || _trucksMap); // trucks above job houses
+        // Desktop hover: lightweight tooltip with the truck name (the SVG <title> never fired inside Leaflet).
+        // Skipped on touch — mobile has no hover, and we don't want a tap to flash it.
+        if (!_mtIsTouch()) m.bindTooltip(_truckEsc(t.name || ('Truck ' + (i + 1))), { direction: 'top', offset: [0, -18], opacity: 0.95 });
         // Truck details show in the fixed in-map hover box (no popup → no clip/pan); disposal mode picks the truck.
         m.on('click', function () { if (_dispMode) { _dispTapTruck(i, t); } else { _clearMeasureLine(); _railShowInfo(pop); } });
         _truckMarkers.push(m);
@@ -10677,12 +10699,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           // red. Route is still conveyed by the stop NUMBER (and the popup), just no longer by pin color.
           const done = !!j.isComplete;         // paid + completed → gray + faded (the sole Vonigo-parity exception)
           const color = done ? '#5b6b7a' : mjLabelColor(j.labelOpt);
+          const routeBorder = mjRouteColor(rkey); // route color = the house BORDER (matches the board's route cell)
           const icon = L.divIcon({
             className: 'job-stop-marker',
-            html: '<svg width="22" height="22" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.5));">' +
-              '<path d="M12 3 L21 11 L21 21 L3 21 L3 11 Z" fill="' + color + '" stroke="#fff" stroke-width="1.8"/>' +
+            // Two stacked house paths: OUTER = route-color ring (which route) + INNER = Vonigo label fill with a
+            // thin white edge (which status) — so one stop shows BOTH its route and its label at a glance.
+            html: '<svg width="26" height="26" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.55));overflow:visible;">' +
+              '<path d="M12 3 L21 11 L21 21 L3 21 L3 11 Z" fill="' + color + '" stroke="' + routeBorder + '" stroke-width="4" stroke-linejoin="round"/>' +
               '<text x="12" y="18.5" text-anchor="middle" font-size="9.5" font-weight="800" fill="#fff" font-family="sans-serif">' + n + '</text></svg>',
-            iconSize: [22, 22], iconAnchor: [11, 11], popupAnchor: [0, -12]
+            iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -14]
           });
           const addr = j.address ? _truckProperAddr(String(j.address).replace(/\n/g, ', ').replace(/\s+/g, ' ').replace(/\s+,/g, ',').trim()) : '';
           const items = String(j.items || '').split('\n').map(s => s.trim()).filter(Boolean);
@@ -10710,6 +10735,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + itemsHtml
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: done ? 0.6 : 1 }).addTo(_jobLayer || _trucksMap);
+          // Desktop hover: lightweight tooltip with just the route code (mobile has no hover — skip it, since
+          // the full detail-on-hover was the annoying thing we moved to click).
+          if (!_mtIsTouch()) m.bindTooltip(_truckEsc(rkey || 'Unrouted'), { direction: 'top', offset: [0, -13], opacity: 0.95 });
           // Job details show in the fixed in-map hover box (no marker popup → never clips/pans). Measuring +
           // disposal-pick still take priority on the first interaction.
           m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } });
@@ -10761,8 +10789,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const fid = currentUser && currentUser.franchiseInternalID;
       if (!fid) { _renderGeofenceAlerts([]); return; } // fail closed — never surface another franchise's alerts
       try {
-        const rows = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&select=id,franchise_id,action,event_type,vehicle_number,geofence_id,geofence_name,category,start_time,created_at&order=created_at.desc&limit=50');
-        _renderGeofenceAlerts(Array.isArray(rows) ? rows : []);
+        // Service-role edge fn (scoped by franchiseInternalID), NOT a direct RLS read — so a dropped Supabase
+        // token (Google logins after a refresh) no longer blanks the rail. See crewlogic-geofence-alerts.
+        const resp = await edgeFunctionCall('crewlogic-geofence-alerts', { action: 'recent', franchiseInternalID: fid });
+        if (!resp || !resp.success) throw new Error((resp && resp.error) || 'load failed');
+        _renderGeofenceAlerts(Array.isArray(resp.rows) ? resp.rows : []);
       } catch (e) {
         lists.forEach(l => { l.innerHTML = '<div style="padding:12px;color:var(--text-muted,#6e8194);font-size:12px;">Could not load alerts.</div>'; });
       }
@@ -10773,6 +10804,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // Dispatch dashboard only: the alerts rail (#dashAlertsPanel) sits beside the dashboard trucks map.
     // Refresh the map size (the rail shares its flex row), then load into the shared list.
+    // Phase-1 truck crew inference (docs/plan-truck-crew-inference.md). Cache keyed by normalized vehicle name.
+    let _truckCrew = {};
+    // Preload today's per-truck crew (service-role edge fn — token-independent; job_arrive data is prod-only),
+    // then re-render trucks so the popups pick it up. Fire-and-forget; popups omit the crew line until it lands.
+    async function _loadTruckCrew() {
+      const fid = currentUser && currentUser.franchiseInternalID;
+      if (!fid) return;
+      const d = new Date(); d.setHours(0, 0, 0, 0); // franchise-local start of today (viewer TZ = franchise TZ for #90)
+      try {
+        const resp = await edgeFunctionCall('crewlogic-geofence-alerts', { action: 'crew-infer', franchiseInternalID: fid, sinceIso: d.toISOString() });
+        if (!resp || !resp.success || !Array.isArray(resp.trucks)) return;
+        const map = {};
+        resp.trucks.forEach(t => { if (t && t.vehicle_number) map[_normVeh(t.vehicle_number)] = t; });
+        _truckCrew = map;
+        if (_trucksData && _trucksData.length) renderTrucks(_trucksData, false); // refresh popups with crew
+      } catch (e) { /* non-fatal — popups just omit the crew line */ }
+    }
     async function loadGeofenceAlerts() {
       setTimeout(() => { try { if (_trucksMap) _trucksMap.invalidateSize(); } catch (e) {} }, 60);
       await _fetchAndRenderAlerts();
@@ -10826,8 +10874,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const fid = currentUser && currentUser.franchiseInternalID;
       if (!fid) return; // fail closed — never surface another franchise's alerts
       try {
-        const rows = await supabaseFetch('/rest/v1/geofence_alerts?franchise_id=eq.' + encodeURIComponent(fid) + '&select=id,franchise_id,action,event_type,vehicle_number,geofence_id,geofence_name,category,start_time,created_at&order=created_at.desc&limit=50');
-        if (!Array.isArray(rows)) return;
+        const resp = await edgeFunctionCall('crewlogic-geofence-alerts', { action: 'recent', franchiseInternalID: fid });
+        const rows = (resp && resp.success && Array.isArray(resp.rows)) ? resp.rows : null;
+        if (!rows) return;
         // Always re-render so the "Xm ago" ages refresh each cycle — feels live even with no NEW alert.
         const scrolls = Array.prototype.map.call(lists, l => l.scrollTop);
         _renderGeofenceAlerts(rows); // authoritative order, dedups, resets _shownAlertIds
@@ -11448,6 +11497,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // stable CrewLogic palette keyed deterministically to the zone id (consistent per franchise; flags a job
     // whose zone is unusual for its lane). Zone NAME is shown in the tooltip.
     function mjZoneColor(zoneID) { if (!zoneID) return 'transparent'; const P = ['#22c55e', '#eab308', '#ec4899', '#3b82f6', '#f97316', '#a855f7', '#06b6d4', '#ef4444', '#84cc16', '#14b8a6']; let n = 0; const s = String(zoneID); for (let i = 0; i < s.length; i++) n = (n * 31 + s.charCodeAt(i)) >>> 0; return P[n % P.length]; }
+    // ROUTE color for the map house-BORDER + the board route-label cell (owner 2026-07-24). Two goals:
+    //   1) OFF the Vonigo LABEL hues — labels already own sky-blue, navy, the greens, purple, gray-purple, red;
+    //      this palette leans WARM + teal so a route ring never reads like a label fill.
+    //   2) DISTINCT per route — assigned SEQUENTIALLY (not hashed), so no two routes collide to the same color
+    //      (the earlier hash put MA2FAR ~ RI4REG). A shared map keyed on the normalized route CODE keeps a
+    //      given route the SAME color on both surfaces regardless of which renders first.
+    // NOTE: >10 routes wraps the palette (colors would repeat) — widen the palette if a franchise needs more.
+    const _MJ_ROUTE_PALETTE = ['#ea580c', '#0d9488', '#db2777', '#ca8a04', '#0e7490', '#92400e', '#be123c', '#c026d3', '#a16207', '#7c2d12'];
+    const _mjRouteColors = {};   // normalized route code -> color (assigned once, shared by map + board)
+    let _mjRouteColorN = 0;
+    function mjRouteColor(route) {
+      let s = String(route == null ? '' : route).trim();
+      const paren = s.match(/\(([^)]+)\)/);
+      if (paren && paren[1].trim()) s = paren[1].trim();
+      s = s.replace(/\s*\(.*\)\s*/, '').trim().toUpperCase();
+      if (!s || s === '?' || s === 'UNROUTED') return '#8a9bb0'; // neutral slate for unrouted/unknown
+      if (!(s in _mjRouteColors)) { _mjRouteColors[s] = _MJ_ROUTE_PALETTE[_mjRouteColorN % _MJ_ROUTE_PALETTE.length]; _mjRouteColorN++; }
+      return _mjRouteColors[s];
+    }
     let _mjBoardByID = {};
     let _mjBoardDayID = ''; // the day tab currently shown — passed as the voice/text command's default working day
     let _mjMoveJob = null;       // set while in tap-to-place "move mode" on the mobile board
@@ -11524,7 +11592,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           ? ' class="mj-lane" data-day="' + mjEsc(String(data.dayID || '')) + '" data-routeid="' + mjEsc(String(rt.id || '')) + '" data-routecode="' + mjEsc(rc) + '" data-start="' + startMin + '" data-pxh="' + PXH + '" data-open="' + mjEsc(JSON.stringify(open.map(s => [s.startTime, s.label || '']))) + '" data-jobs="' + mjEsc(JSON.stringify(laneJobs.map(j => [j.timeMin, j.timeMin + (j.durationMin || 60)]))) + '" ondragover="dashDragOver(event)" ondrop="dashDrop(event)" ondblclick="boardSlotDblClick(event)"'
           : '';
         h += '<div style="display:flex;height:' + ROW + 'px;border-bottom:1px solid var(--border);">';
-        h += '<div style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:var(--text-secondary);border-right:1px solid var(--border);padding:0 2px;text-align:center;word-break:break-all;">' + mjEsc(rc) + '</div>';
+        const rColor = mjRouteColor(rc); // route color as a THIN LEFT BAR (matches the map house border + the pricing-zone stripe motif) — not a full fill (owner 2026-07-24: "Partridge Family bus")
+        h += '<div style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);box-shadow:inset 4px 0 0 0 ' + rColor + ';display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:var(--text-secondary);border-right:1px solid var(--border);padding:0 2px 0 6px;text-align:center;word-break:break-all;">' + mjEsc(rc) + '</div>';
         h += '<div' + dropAttrs + ' style="position:relative;width:' + trackW + 'px;">';
         // blocked-default base tint (whole lane not bookable unless an open band overrides) — light gray
         h += '<div style="position:absolute;inset:0;background:rgba(255,255,255,0.14);pointer-events:none;"></div>';
