@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.91.0 | 2026-07-24">
+  <meta name="crewlogic-version" content="v5.92.0 | 2026-07-25">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9675,7 +9675,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           if (!c) return;
           const costLine = (t.costSuffix && s.cost != null && s.cost !== '') ? '<br><span style="color:#6e8194;">$' + _truckEsc(String(s.cost)) + t.costSuffix + '</span>' : '';
           const label = t.emoji + ' ' + (s.name || t.label);
-          const siteHtml = '<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + _truckEsc(label) + '</b><br>' + _addrLink(_truckProperAddr(s.address), s.address, _truckEsc) + costLine + '</div>';
+          const siteHtml = '<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + _truckEsc(label) + '</b><br>' + _addrLink(_truckProperAddr(s.address), s.address, _truckEsc) + costLine + _measBtn(c.lat, c.lon, label) + '</div>';
           const m = L.marker([c.lat, c.lon], { icon: mkIcon(t.emoji, t.color, 20, true) }); // ~75% of the old size — bare emoji reads too big at full 26
           // Details show in the left rail on click; in measure mode attachMeasure's handler wins instead.
           m.on('click', function () { if (!_measureFrom) { _clearMeasureLine(); _railShowInfo(siteHtml); } });
@@ -9688,7 +9688,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const c = coordsByAddr[home];
         _franchiseHomeLL = { lat: c.lat, lng: c.lon }; // dispatch map's empty-state center = the franchise's own home
         const m = L.marker([c.lat, c.lon], { icon: mkIcon('🏠', '#f59e0b', 38), zIndexOffset: 900 })
-          .bindPopup('<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>🏠 Truck home</b><br>' + _addrLink(_truckProperAddr(home), home, _truckEsc) + '</div>', { autoPan: false });
+          .bindPopup('<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>🏠 Truck home</b><br>' + _addrLink(_truckProperAddr(home), home, _truckEsc) + _measBtn(c.lat, c.lon, '🏠 HQ') + '</div>', { autoPan: false });
         attachMeasure(m, c.lat, c.lon, '🏠 Truck home');
         m.addTo(_homeLayer);
       }
@@ -9747,14 +9747,27 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
       b.textContent = text; b.style.display = 'block';
     }
+    // Generic "measure from here" — start a measurement from ANY placed object (job, facility, truck, HQ).
+    // The measure-TO half already works for every marker (_measureToJob takes any lat/lon), so this makes it
+    // any-object → any-object.
+    function measureStartFrom(lat, lon, label) {
+      if (lat == null || lon == null) { alert('No location for this point.'); return; }
+      _measureFrom = { lat: Number(lat), lon: Number(lon), label: label || 'here' };
+      if (_trucksMap) _trucksMap.closePopup();
+      _clearMeasureLine();
+      _railShowInfo('<div style="font-size:13px;padding:8px;">Measuring… tap another job, facility, truck or HQ on the map.</div>');
+      _mtBanner('📏 Measuring from ' + _measureFrom.label + ' — tap a target  ·  tap here to cancel');
+    }
+    // Reusable "Measure from here" button HTML for job / facility / HQ popups. Escapes the label for the inline onclick.
+    function _measBtn(lat, lon, label) {
+      if (lat == null || lon == null) return '';
+      const esc = String(label == null ? '' : label).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+      return '<div style="margin-top:8px;"><button onclick="measureStartFrom(' + Number(lat) + ',' + Number(lon) + ',\'' + esc + '\')" style="width:100%;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:#fff;font-weight:700;font-size:12px;padding:7px;border-radius:6px;cursor:pointer;">📏 Measure from here</button></div>';
+    }
     function mtMeasureStart(i) {
       const t = (_trucksData || [])[i];
       if (!t || t.lat == null || t.lon == null) { alert('That truck has no current location.'); return; }
-      _measureFrom = { lat: t.lat, lon: t.lon, label: (i + 1) + '. ' + (t.name || 'Truck') };
-      if (_trucksMap) _trucksMap.closePopup();
-      _clearMeasureLine(); // clear any lingering measure line
-      _railShowInfo('<div style="font-size:13px;padding:8px;">Measuring… tap a job on the map.</div>');
-      _mtBanner('📏 Tap a job or facility to measure from ' + _measureFrom.label + '  ·  tap here to cancel');
+      measureStartFrom(t.lat, t.lon, (i + 1) + '. ' + (t.name || 'Truck'));
     }
     function mtMeasureCancel() {
       _measureFrom = null;
@@ -10614,7 +10627,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Skipped on touch — mobile has no hover, and we don't want a tap to flash it.
         if (!_mtIsTouch()) m.bindTooltip(_truckEsc(t.name || ('Truck ' + (i + 1))), { direction: 'top', offset: [0, -18], opacity: 0.95 });
         // Truck details show in the fixed in-map hover box (no popup → no clip/pan); disposal mode picks the truck.
-        m.on('click', function () { if (_dispMode) { _dispTapTruck(i, t); } else { _clearMeasureLine(); _railShowInfo(pop); } });
+        m.on('click', function () { if (_dispMode) { _dispTapTruck(i, t); } else if (_measureFrom) { _measureToJob({ lat: t.lat, lon: t.lon, clientName: (i + 1) + '. ' + (t.name || 'Truck') }); } else { _clearMeasureLine(); _railShowInfo(pop); } });
         _truckMarkers.push(m);
         pts.push([t.lat, t.lon]);
       });
@@ -10742,6 +10755,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (_trucksJobDay || 0) + '"></div>'
             + _crewLineHtml(j.crew)
             + itemsHtml
+            + _measBtn(j.lat, j.lon, (j.clientName || 'Job'))
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: done ? 0.6 : 1 }).addTo(_jobLayer || _trucksMap);
           // Desktop hover: lightweight tooltip with just the route code (mobile has no hover — skip it, since
