@@ -144,11 +144,13 @@ Three surfaces, each with a distinct job:
 - **Truck identity reconciliation:** the truck settings screen already aligns truck **number ↔ name** (`franchise_trucks`), so the dropdown label ↔ roster identity is handled. Remaining check: confirm `geofence_alerts.vehicle_number` resolves through that same identity so mismatch detection and auto-set compare the right truck. Small verification pass, Phase 1.
 - **Vonigo job deep-link:** confirm/reuse the existing Vonigo WorkOrder URL pattern for the clickable **[Job #]**; construct from `wo_id` if none exists.
 - **Customer phone source:** confirm the phone comes through on the job object (Vonigo contact) for the `tel:` link.
+- **Parking/yard origin:** day-start starts from the franchise **parking** location, which is **distinct from the office/HQ** (e.g. #90 parks at *2 County Road*; office of record is *11 Wagon Trail*). Verify whether a yard/depot field already exists before adding one; if not, add a franchise setting (address → geocoded lat/lon) with a small Settings input, falling back to office/HQ when unset. Seed: #90 = 2 County Road.
 
 ## 10. Component checklist (all additive)
 
 **Migrations**
 - `NNNN_route_truck_assignments.sql` — the table in §4.
+- Franchise **parking/yard location** (address + geocoded lat/lon) — a new `cost_settings` field (or reuse an existing depot field if one exists — verify per §9), distinct from office/HQ, with a small Settings input to enter + geocode it. Falls back to office/HQ when unset.
 
 **Edge function** — a **new `crewlogic-assignments`** (rationale in §13-Q3), service-role, scoped by franchise, actions:
 - `get` — assignments for (franchise, service_date), to render the dropdowns + status.
