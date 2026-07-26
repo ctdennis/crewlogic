@@ -108,6 +108,7 @@ Nothing is moving yet, so this walks the route on scheduled times + drive times.
 - **The real value is the sensitivity sweep, both ways.** Dial toward *faster*: a route still red at 60% has impossible *geometry* (drives alone don't fit the windows); one red at 100% but clear at 80% is just *tight*, doable if they hustle. Dial toward *slower*: a **stress test** — "if today runs heavy, which routes break?" — surfaced before anyone rolls.
 - **Global multiplier, not per-job** (round 1) — one dial for the day. Per-job / access-based durations are the Phase-2 learned model (§3), which will eventually pre-set this dial from measured dwell history.
 - Applies to **day-start only** — the live prediction (§6b) is GPS-anchored and needs no dial. Still **labeled a guesstimate**: a sanity check, not a promise.
+- **Runs for any date, from the parking origin, truck-agnostic.** The walk starts every route at the franchise yard/parking location (not live GPS) and doesn't need a truck assigned — so it works for a **future** `serviceDate` too ("how will tomorrow play out?"), and doubles as how we test the engine against real upcoming routes without waiting for a live day. A future board reflects only jobs booked so far, so it firms up as the day nears.
 - **Default / persistence:** default **100% (as scheduled)** on first use, then remember the franchise's last pick — *(confirm.)*
 
 ### 6b. Live prediction (during the day) — Phase 1, the accurate number

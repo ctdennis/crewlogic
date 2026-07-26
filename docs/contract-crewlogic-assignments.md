@@ -82,6 +82,8 @@ Enum — job/route ETA `status`: `within` · `early` · `late` · `pending` (not
 ```
 - `mode`: `"auto"` (default — day-start before roll-out, live once trucks move), `"daystart"`, or `"live"`.
 - `durationMultiplier`: day-start only, `0.6`–`1.4`, default `1.0` (the ops dial). Ignored in live mode.
+- `serviceDate`: **any** date — *past* (review a day that already ran), *today*, or *future* (preview how an upcoming day will play out). A future date forces day-start mode.
+- `origin`: the day-start start point for **every** route — `"yard"` (default: the franchise parking/HQ location) or `{ "lat": n, "lon": n }` to override. This is why day-start starts all trucks from a fixed parking origin, not live GPS. Live mode ignores `origin` (each truck uses its own live position).
 
 **Response 200**
 ```json
@@ -111,7 +113,7 @@ Enum — job/route ETA `status`: `within` · `early` · `late` · `pending` (not
 ```
 - `rollup` = worst remaining stop on the route (drives the board chip).
 - `window*` = `[timeMin, timeMin + durationMin]` (§7). `statement` is the pre-rendered §1 sentence; when `status` is `late`/`early` it appends the minutes and (outside only) the "please contact customer at …" line. `phone` (E.164, for `tel:`) and `vonigoUrl` support the clickable popup.
-- Day-start mode: `status` reflects the feasibility walk under `durationMultiplier`; response carries `"mode": "daystart"` and each route a `"guesstimate": true` flag.
+- Day-start mode is **truck-agnostic** — the feasibility walk is a property of the route (its jobs, windows, and geography from the parking origin), so it runs **with or without a truck assignment**. That's what makes future-date previews work: point `eta` at tomorrow's `serviceDate` and read each job's `predictedEta` + `status` to see how the day plays out. For an unassigned/future date, `truckKey`/`truckStatus` come back `null`. **Caveat:** a future board reflects only jobs booked **so far** (jobs keep booking up to same-day — ~30–40% land within 24h), so a preview firms up as the date approaches. Response carries `"mode": "daystart"` and each route a `"guesstimate": true` flag.
 
 ---
 
