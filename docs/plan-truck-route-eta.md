@@ -2,7 +2,7 @@
 
 **Status:** APPROVED 2026-07-26 — Phase 1 build authorized. Proceeding contract-first (gate order §11).
 **Owner:** Charles Dennis
-**Next action:** API contract drafted (`docs/contract-crewlogic-assignments.md`) → Owner approves contract → schema → migration → code, one gate at a time.
+**Next action:** Contract approved. Schema design drafted (`docs/schema-crewlogic-assignments.md`) → Owner approves schema → migration `0074` on dev → code, one gate at a time.
 **Related:** `docs/plan-truck-crew-inference.md` (crew-infer, reused here), `docs/vonigo-dispatch-map-notes.md` (board + Vonigo field reference).
 
 ---
@@ -51,6 +51,8 @@ The single missing edge is **truck ↔ route**. Because crew↔route is already 
 - **Richer duration / capacity model.** A learned service-time model: base ~1.5 hr to fill a *whole* truck empty→full (a capacity number, not a per-job duration), modified by access difficulty (garage / storage-unit / curbside faster; inside / third-floor / attic / basement slower), calibrated against real geofence dwell (arrive→leave). Feeds sharper down-the-line predictions and the **dump-detour** prediction (truck fills before the next job → unplanned facility stop, using the Vonigo-charged volume on the completed job + the next job's estimate item list). May borrow from the n8n route-optimization routines, but we intend to **avoid that level of complexity** — keep it lightweight. **Data gap:** access difficulty isn't a clean field today (buried in the estimate situation/item list) — encoding it needs a captured access signal.
 
 ## 4. Data model (one new table)
+
+> **Finalized design + rationale: `docs/schema-crewlogic-assignments.md` (authoritative).** The sketch below is superseded there — final shape is `uuid` PK, franchise-scoped (no `tenant_id`), unique on `(franchise_id, service_date, vonigo_route_id, truck_key)`.
 
 ```sql
 -- route_truck_assignments — authoritative truck↔route link per service day.
