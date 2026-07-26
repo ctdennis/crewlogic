@@ -83,7 +83,7 @@ Enum — job/route ETA `status`: `within` · `early` · `late` · `pending` (not
 - `mode`: `"auto"` (default — day-start before roll-out, live once trucks move), `"daystart"`, or `"live"`.
 - `durationMultiplier`: day-start only, `0.6`–`1.4`, default `1.0` (the ops dial). Ignored in live mode.
 - `serviceDate`: **any** date — *past* (review a day that already ran), *today*, or *future* (preview how an upcoming day will play out). A future date forces day-start mode.
-- `origin`: the day-start start point for **every** route — `"yard"` (default: the franchise's configured **parking/yard** location, which is **distinct from the office/HQ address on file** — e.g. #90 parks at *2 County Road*, not the office at *11 Wagon Trail*) or `{ "lat": n, "lon": n }` to override. Falls back to the office/HQ location if no yard is set. This is why day-start starts all trucks from a fixed parking origin, not live GPS. Live mode ignores `origin` (each truck uses its own live position).
+- `origin`: the day-start start point for **every** route — `"yard"` (default: the franchise's truck-base address = the existing `cost_settings.officeAddress`, geocoded — for #90 the **parking** address *2 County Road*, not the office-of-record) or `{ "lat": n, "lon": n }` to override. This is why day-start starts all trucks from a fixed base, not live GPS. Live mode ignores `origin` (each truck uses its own live position).
 
 **Response 200**
 ```json

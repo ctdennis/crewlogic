@@ -144,13 +144,13 @@ Three surfaces, each with a distinct job:
 - **Truck identity reconciliation:** the truck settings screen already aligns truck **number ↔ name** (`franchise_trucks`), so the dropdown label ↔ roster identity is handled. Remaining check: confirm `geofence_alerts.vehicle_number` resolves through that same identity so mismatch detection and auto-set compare the right truck. Small verification pass, Phase 1.
 - **Vonigo job deep-link:** confirm/reuse the existing Vonigo WorkOrder URL pattern for the clickable **[Job #]**; construct from `wo_id` if none exists.
 - **Customer phone source:** confirm the phone comes through on the job object (Vonigo contact) for the `tel:` link.
-- **Parking/yard origin:** day-start starts from the franchise **parking** location, which is **distinct from the office/HQ** (e.g. #90 parks at *2 County Road*; office of record is *11 Wagon Trail*). Verify whether a yard/depot field already exists before adding one; if not, add a franchise setting (address → geocoded lat/lon) with a small Settings input, falling back to office/HQ when unset. Seed: #90 = 2 County Road.
+- **Parking/yard origin — reuse the existing field, don't add one.** The address already exists: the **Office Address** input (`settingsOfficeAddress`, index.html:1886) stored as `cost_settings.officeAddress`, currently under **Settings → Costs**. This is the truck base/departure point — for #90 it should hold the **parking** address *2 County Road* (not the office-of-record *11 Wagon Trail*). Day-start geocodes it to lat/lon for the origin. **Phase-1 UX (owner):** relocate this input from Settings → Costs to the **main Account settings**. Gate-2 checks: confirm #90's stored value + geocode it; confirm the other `officeAddress` consumers (cost-analysis routing, index.html ~21283/21434) want this same truck-base origin (they should — trucks depart the yard, not the office of record).
 
 ## 10. Component checklist (all additive)
 
 **Migrations**
 - `NNNN_route_truck_assignments.sql` — the table in §4.
-- Franchise **parking/yard location** (address + geocoded lat/lon) — a new `cost_settings` field (or reuse an existing depot field if one exists — verify per §9), distinct from office/HQ, with a small Settings input to enter + geocode it. Falls back to office/HQ when unset.
+- **No new location field** — reuse the existing `cost_settings.officeAddress` (the Office Address input) as the truck-base/parking origin; geocode it to lat/lon. **UI-only change:** relocate that input from Settings → Costs to the main Account settings (owner). See §9.
 
 **Edge function** — a **new `crewlogic-assignments`** (rationale in §13-Q3), service-role, scoped by franchise, actions:
 - `get` — assignments for (franchise, service_date), to render the dropdowns + status.
