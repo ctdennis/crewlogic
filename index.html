@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.95.1 | 2026-07-27">
+  <meta name="crewlogic-version" content="v5.95.2 | 2026-07-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11563,7 +11563,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const s = e && e.rollup ? e.rollup.status : null;
       // OPAQUE composite (tint layered OVER bg-card) so job pills scrolling under the sticky cell don't bleed through.
       if (s === 'late') return 'linear-gradient(rgba(239,68,68,0.42),rgba(239,68,68,0.42)),var(--bg-card)';
-      if (s === 'within' || s === 'early') return 'linear-gradient(rgba(0,231,133,0.34),rgba(0,231,133,0.34)),var(--bg-card)';
+      if (s === 'window') return 'linear-gradient(rgba(234,179,8,0.40),rgba(234,179,8,0.40)),var(--bg-card)'; // within window, after start = yellow
+      if (s === 'ontime') return 'linear-gradient(rgba(0,231,133,0.34),rgba(0,231,133,0.34)),var(--bg-card)';
       return 'var(--bg-card)';
     }
     function _mjRepaintRouteCells() { document.querySelectorAll('[id^="mjRoute-"]').forEach(el => { el.style.background = _mjRouteBg(el.getAttribute('data-rcode') || '', el.getAttribute('data-day') || ''); }); }
@@ -11580,17 +11581,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const st = j.status, m = j.minutesEarlyLate || 0;
           let tag = 'no ETA', col = 'var(--text-muted)';
           if (st === 'late') { tag = '+' + m + ' min late'; col = '#ef4444'; }
-          else if (st === 'early') { tag = m + ' min early'; col = '#00E785'; }
-          else if (st === 'within') { tag = 'on time'; col = '#00E785'; }
+          else if (st === 'window') { tag = m + ' min after start'; col = '#eab308'; }
+          else if (st === 'ontime') { tag = 'on time'; col = '#00E785'; }
           return '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px;">'
             + '<div><b>' + (i + 1) + '. ' + mjEsc(j.customerName || ('Job ' + (j.jobNo || ''))) + '</b>' + (j.town ? ' <span style="color:var(--text-muted);">' + mjEsc(j.town) + '</span>' : '')
             + '<br><span style="color:var(--text-muted);">window ' + mjEsc(j.windowStart || '') + '–' + mjEsc(j.windowEnd || '') + '</span></div>'
             + '<div style="text-align:right;white-space:nowrap;"><b>' + mjEsc(j.predictedEta || '—') + '</b><br><span style="color:' + col + ';font-weight:700;">' + tag + '</span></div></div>';
         }).join('');
-        const late = e.rollup && e.rollup.status === 'late';
-        const verdict = late ? ('<span style="color:#ef4444;">Runs late by ' + (e.rollup.minutes || 0) + ' min</span>') : '<span style="color:#00E785;">Makes every window</span>';
+        const ws = e.rollup && e.rollup.status;
+        const verdict = ws === 'late' ? ('<span style="color:#ef4444;">Runs late by ' + (e.rollup.minutes || 0) + ' min</span>')
+          : ws === 'window' ? '<span style="color:#eab308;">Makes every window (some after the start)</span>'
+          : '<span style="color:#00E785;">On time — arrives by every start</span>';
         bodyHtml = '<p style="font-size:12.5px;color:var(--text-secondary);margin:0 0 8px;">Verdict: <b>' + verdict + '</b> at <b>' + pct + '% finish speed</b>. Leave the yard by <b>' + mjEsc(e.departYard || '—') + '</b> to make the first stop.</p>' + rows
-          + '<p style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.5;">How this is figured: start at your yard, drive to each stop in order (map drive times), and assume each job takes its scheduled time × the finish-speed dial. The route is red if any stop is predicted to arrive after its window closes. A day-start <b>guesstimate</b> — once trucks roll, live GPS takes over.</p>';
+          + '<p style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.5;">How this is figured: start at your yard, drive to each stop in order (map drive times), and assume each job takes its scheduled time × the finish-speed dial. <b style="color:#00E785;">Green</b> = arrives by the start time; <b style="color:#eab308;">yellow</b> = within the window but after the start; <b style="color:#ef4444;">red</b> = after the window closes. A day-start <b>guesstimate</b> — once trucks roll, live GPS takes over.</p>';
       }
       const ov = document.createElement('div');
       ov.id = '_mjExplainModal';
@@ -12717,14 +12720,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const truckStr = trucks.length ? trucks.join(', ').replace(/, ([^,]*)$/, ' & $1') : 'the assigned truck';
       let name = String(j.client || '').trim(); const cp = name.split(','); if (cp.length === 2) name = cp[1].trim() + ' ' + cp[0].trim();
       const town = mjAddrParts(j.address).city, townStr = town ? _titleCaseTown(town) : '';
-      const late = pj.status === 'late', m = pj.minutesEarlyLate || 0;
-      const winTxt = late ? ('<b>' + m + ' min past</b> the ' + mjEsc(pj.windowStart) + '–' + mjEsc(pj.windowEnd) + ' window') : ('within the ' + mjEsc(pj.windowStart) + '–' + mjEsc(pj.windowEnd) + ' window');
-      const bg = late ? 'rgba(239,68,68,0.16)' : 'rgba(0,231,133,0.14)', bd = late ? '#ef4444' : '#00E785';
+      const st = pj.status, m = pj.minutesEarlyLate || 0;
+      const win = mjEsc(pj.windowStart) + '–' + mjEsc(pj.windowEnd);
+      let winTxt, bg, bd;
+      if (st === 'late') { winTxt = '<b>' + m + ' min past</b> the ' + win + ' window'; bg = 'rgba(239,68,68,0.16)'; bd = '#ef4444'; }
+      else if (st === 'window') { winTxt = 'within the ' + win + ' window — <b>' + m + ' min after</b> the ' + mjEsc(pj.windowStart) + ' start'; bg = 'rgba(234,179,8,0.16)'; bd = '#eab308'; }
+      else { winTxt = 'on time — arriving by the ' + mjEsc(pj.windowStart) + ' start'; bg = 'rgba(0,231,133,0.14)'; bd = '#00E785'; }
       let h = '<div style="background:' + bg + ';border:1px solid ' + bd + ';border-radius:9px;padding:9px 11px;margin-bottom:9px;font-size:12.5px;line-height:1.5;color:var(--text-primary);">'
         + 'We anticipate <b>' + mjEsc(truckStr) + '</b> at <b>' + mjEsc(pj.predictedEta) + '</b>'
         + (name ? ' for <b>' + mjEsc(name) + '</b>' : '') + (townStr ? ' in ' + mjEsc(townStr) : '')
         + '. This is ' + winTxt + '.';
-      if (late) h += ' <span style="color:#ffd3d3;">Call the customer with your ETA (phone below).</span>';
+      if (st === 'late') h += ' <span style="color:#ffd3d3;">Call the customer with your ETA (phone below).</span>';
       h += ' <span style="color:var(--text-muted);font-size:11px;">Day-start guesstimate.</span></div>';
       return h;
     }

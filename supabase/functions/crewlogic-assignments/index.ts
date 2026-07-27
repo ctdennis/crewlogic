@@ -214,7 +214,9 @@ Deno.serve(async (req: Request) => {
       const yardAddr = [cs.officeAddress, cs.officeCity, cs.officeState, cs.officeZip].map(v => str(v)).filter(Boolean).join(', ');
       const yard = yardAddr ? await geocodeCached(db, yardAddr) : null;
 
-      const RANK: Record<string, number> = { late: 3, early: 2, unknown: 1, within: 0, done: 0 };
+      // Status tiers: ontime = arrives at/before the scheduled START (green); window = within the window but
+      // after the start (yellow); late = after the window closes (red). Rollup = the worst stop on the route.
+      const RANK: Record<string, number> = { late: 3, window: 2, unknown: 1, ontime: 0 };
 
       // Trucks by route CODE (assignments store route_name like "Route 1 (MA1REG)"; the board keys on the code).
       const { data: aRows } = await db.from('route_truck_assignments')
@@ -289,14 +291,14 @@ Deno.serve(async (req: Request) => {
           const j = jobs[i];
           const winStart = j.startMin, dur = j.durationMin || 0, winEnd = winStart + dur;
           let arrival: number | null, status: string, mel = 0;
-          if (i === 0) { arrival = winStart; status = 'within'; }
+          if (i === 0) { arrival = winStart; status = 'ontime'; } // job 1 assumed at its window start
           else {
             const leg = legs[i];
             arrival = leg == null ? null : cursor + leg;
             if (arrival == null) status = 'unknown';
-            else if (arrival > winEnd) { status = 'late'; mel = Math.round(arrival - winEnd); }
-            else if (arrival < winStart) { status = 'early'; mel = Math.round(winStart - arrival); }
-            else status = 'within';
+            else if (arrival > winEnd) { status = 'late'; mel = Math.round(arrival - winEnd); }        // past the window close
+            else if (arrival <= winStart) { status = 'ontime'; mel = Math.round(winStart - arrival); } // at/before the start
+            else { status = 'window'; mel = Math.round(arrival - winStart); }                          // within window, after start
           }
           outJobs.push({
             jobNo: j.jobNo || '', customerName: j.customerName || '', phone: j.phone || '', town: j.town || '',
