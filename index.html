@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.94.0 | 2026-07-27">
+  <meta name="crewlogic-version" content="v5.94.1 | 2026-07-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11493,7 +11493,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (_mjHistory.length > 8) _mjHistory = _mjHistory.slice(-8);
       await _mjLoadAssignData(dayID); // FW-59: roster + truck↔route assignments + live status, so the board renders with the Truck column filled
       mjRenderBoard({ dayID, dayLabel, routes: routesData, jobs, boardStartMin: data.boardStartMin, boardEndMin: data.boardEndMin });
-      _mjLoadEta(dayID); // FW-59: day-start feasibility pills (async; repaints the cells when it returns)
+      _mjLoadEta(dayID, routesData); // FW-59: day-start feasibility pills from the LIVE board jobs (async repaint)
     }
     // Schedule-board view (route lanes × time, colored job blocks) — CrewLogic take on the Vonigo
     // mobile day board. Built from the SAME listRouteJobs data; tapping a block opens its detail below.
@@ -11547,56 +11547,62 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _mjMoveJob = null;       // set while in tap-to-place "move mode" on the mobile board
     let _mjLastBoardData = null;  // last MJ board render data, so we can re-render when entering/exiting move mode
     // ── FW-59 Truck↔route assignment (multi-select per route) — wired to crewlogic-assignments ────────
-    let _mjRoster = [];        // [{truckKey,name,number,active}] from crewlogic-assignments get
-    let _mjAssign = {};        // routeId(string) -> [{truckKey,source}]
-    let _mjTruckLive = {};     // truck_key -> {color,label}
-    let _mjEta = {};           // routeCode -> { status, minutes } — day-start feasibility rollup
-    let _mjDial = 1.0;         // duration dial (0.6–1.4); 1.0 = as scheduled
-    let _mjEtaDay = '';        // dayID the current _mjEta is for (so the dial can re-fetch it)
-    let _mjAssignMenuRoute = null, _mjAssignMenuDay = null, _mjAssignMenuName = '';
+    let _mjRoster = [];             // [{truckKey,name,number,active}] — global roster (same across dates)
+    let _mjTruckLive = {};          // truck_key -> {color,label} — global live status
+    let _mjAssignByDate = {};       // serviceDate -> { routeId -> [{truckKey,source}] }
+    let _mjEtaByDate = {};          // serviceDate -> { routeCode -> {status,minutes} }
+    let _mjEtaRoutesByDate = {};    // serviceDate -> the board routes last sent to eta (so the dial can re-run)
+    let _mjDial = 1.0;              // duration dial (0.6–1.4); 1.0 = as scheduled
+    let _mjMenuDay = '', _mjMenuRid = '', _mjMenuName = '';
     function _mjSD(dayID) { const d = String(dayID || _mjBoardDayID || ''); return d.length === 8 ? d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6, 8) : ''; }
     function _mjTruckName(tk) { const r = _mjRoster.find(t => t.truckKey === tk); return r ? (r.name || tk.replace(/^(vin:|name:)/, '')) : tk.replace(/^(vin:|name:)/, ''); }
-    function _mjTruckChipLabel(tk) { const nm = _mjTruckName(tk); const m = nm.match(/(\d+)/); return m ? ('T' + m[1]) : (nm.length > 6 ? nm.slice(0, 6) : nm); } // "Truck 12" -> "T12"; keeps the cell compact for 6+ trucks
-    // Day-start feasibility pill (leads the truck cell): ✓ within / +N late / −N early / ? unknown. A GUESSTIMATE.
-    function _mjFeasPill(routeCode) {
-      const e = _mjEta[routeCode]; if (!e) return '';
+    function _mjTruckChipLabel(tk) { const nm = _mjTruckName(tk); const m = nm.match(/(\d+)/); return m ? ('T' + m[1]) : (nm.length > 6 ? nm.slice(0, 6) : nm); } // "Truck 12" -> "T12"
+    // Feasibility pill: green ✓ = will make its windows (on time OR early — early just means slack); red +N = N min late. Unknown → none.
+    function _mjFeasPill(routeCode, dayID) {
+      const e = (_mjEtaByDate[_mjSD(dayID)] || {})[routeCode]; if (!e) return '';
       const s = e.status, m = e.minutes || 0;
-      let bg = '#6e8194', fg = '#fff', txt = '?', tip = 'No prediction';
-      if (s === 'late') { bg = '#ef4444'; txt = '+' + m; tip = m + ' min late — outside the window'; }
-      else if (s === 'early') { bg = '#f59e0b'; fg = '#0a0f14'; txt = '−' + m; tip = m + ' min early'; }
-      else if (s === 'within') { bg = '#00E785'; fg = '#0a0f14'; txt = '✓'; tip = 'On time'; }
+      let bg, fg = '#0a0f14', txt, tip;
+      if (s === 'late') { bg = '#ef4444'; fg = '#fff'; txt = '+' + m; tip = m + ' min late — outside the window'; }
+      else if (s === 'within' || s === 'early') { bg = '#00E785'; txt = '✓'; tip = s === 'early' ? ('on time · ' + m + ' min of slack') : 'on time'; }
+      else return ''; // unknown — show nothing rather than a confusing '?'
       return '<span title="' + mjEsc(tip) + ' · day-start guesstimate" style="display:inline-flex;align-items:center;justify-content:center;min-width:15px;height:13px;padding:0 3px;border-radius:4px;background:' + bg + ';color:' + fg + ';font-size:9px;font-weight:800;flex:0 0 auto;">' + txt + '</span>';
     }
-    // Duration dial (60–140%) for the day-start feasibility sweep.
     function _mjDialControlHTML() {
       const opts = [60, 70, 80, 90, 100, 110, 120, 130, 140].map(p => '<option value="' + (p / 100) + '"' + (Math.round(_mjDial * 100) === p ? ' selected' : '') + '>' + p + '%</option>').join('');
-      return '<span title="Assume jobs finish this % of their scheduled time — sweep to see which routes are tight vs impossible (day-start guesstimate)" style="display:inline-flex;align-items:center;gap:4px;margin-left:auto;">Finish speed <select onchange="_mjSetDial(this.value)" style="background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:6px;font-size:10px;padding:1px 3px;">' + opts + '</select></span>';
+      return '<span title="Assume jobs finish this % of their scheduled time — sweep to see which routes go red (day-start guesstimate)" style="display:inline-flex;align-items:center;gap:4px;margin-left:auto;">Finish speed <select onchange="_mjSetDial(this.value)" style="background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:6px;font-size:10px;padding:1px 3px;">' + opts + '</select></span>';
     }
-    function _mjSetDial(v) { const n = Number(v); _mjDial = (isFinite(n) && n > 0) ? n : 1.0; _mjLoadEta(_mjEtaDay || _mjBoardDayID); }
-    // Day-start feasibility for the shown day (mirror-sourced), keyed by route CODE; repaints the chips.
-    async function _mjLoadEta(dayID) {
-      _mjEtaDay = String(dayID || '');
-      const sd = _mjSD(dayID);
-      if (!sd || !currentUser.franchiseInternalID) { _mjEta = {}; _mjRepaintAllTruckCells(); return; }
+    function _mjSetDial(v) { const n = Number(v); _mjDial = (isFinite(n) && n > 0) ? n : 1.0; Object.keys(_mjEtaRoutesByDate).forEach(sd => _mjLoadEta(sd, _mjEtaRoutesByDate[sd])); }
+    // Day-start feasibility for a day — computed from the LIVE board jobs (not the mirror). routes = the board's
+    // routes for that day: [{ id, code, name, jobs:[{timeMin,durationMin,address,jobID,client}] }].
+    async function _mjLoadEta(dayID, routes) {
+      const sd = _mjSD(dayID); if (!sd) return;
+      _mjEtaRoutesByDate[sd] = routes || [];
+      if (!currentUser.franchiseInternalID) { _mjEtaByDate[sd] = {}; _mjRepaintAllTruckCells(); return; }
+      const payload = (routes || []).filter(rt => (rt.jobs || []).length).map(rt => ({
+        routeCode: rt.code || rt.name || '', routeName: rt.name || rt.code || '',
+        jobs: (rt.jobs || []).map(j => ({ startMin: j.timeMin, durationMin: j.durationMin, address: j.address, jobNo: j.jobID, customerName: (String(j.client || '').split(',')[0] || j.client || '') }))
+      }));
       try {
-        const r = await edgeFunctionCall('crewlogic-assignments', { action: 'eta', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: sd, durationMultiplier: _mjDial });
-        _mjEta = {};
-        if (r && r.success) (r.routes || []).forEach(rt => { if (rt.routeCode) _mjEta[rt.routeCode] = rt.rollup || { status: 'unknown', minutes: 0 }; });
-      } catch (e) { console.error('[mj-eta] load', e); _mjEta = {}; }
+        const r = await edgeFunctionCall('crewlogic-assignments', { action: 'eta', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: sd, durationMultiplier: _mjDial, routes: payload });
+        const m = {};
+        if (r && r.success) (r.routes || []).forEach(rt => { if (rt.routeCode) m[rt.routeCode] = rt.rollup || { status: 'unknown', minutes: 0 }; });
+        _mjEtaByDate[sd] = m;
+      } catch (e) { console.error('[mj-eta] load', e); _mjEtaByDate[sd] = {}; }
       _mjRepaintAllTruckCells();
     }
-    // Load roster + assignments + live truck status for the shown day. Called from mjSelectDate BEFORE render.
+    // Roster + assignments + live status for one day. Roster/live are global; assignments go under the date.
     async function _mjLoadAssignData(dayID) {
-      const sd = _mjSD(dayID);
-      if (!sd || !currentUser.franchiseInternalID) { _mjRoster = []; _mjAssign = {}; _mjTruckLive = {}; return; }
+      const sd = _mjSD(dayID); if (!sd) return;
+      if (!currentUser.franchiseInternalID) { _mjRoster = []; _mjAssignByDate[sd] = {}; _mjTruckLive = {}; return; }
       try {
         const [a, trucks] = await Promise.all([
           edgeFunctionCall('crewlogic-assignments', { action: 'get', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: sd }),
           getTruckLocations().catch(() => [])
         ]);
-        _mjRoster = (a && a.success && a.trucks) || [];
-        _mjAssign = {};
-        if (a && a.success) (a.assignments || []).forEach(row => { _mjAssign[String(row.vonigoRouteId)] = row.trucks || []; });
+        _mjRoster = (a && a.success && a.trucks) || _mjRoster;
+        const byRoute = {};
+        if (a && a.success) (a.assignments || []).forEach(row => { byRoute[String(row.vonigoRouteId)] = row.trucks || []; });
+        _mjAssignByDate[sd] = byRoute;
         _mjTruckLive = {};
         (trucks || []).forEach(t => {
           const c = _truckStateColor(t), lbl = _truckStatusLabel(t);
@@ -11605,22 +11611,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         });
       } catch (e) { console.error('[mj-assign] load', e); }
     }
-    // Trucks on 2+ routes today (combined-then-split — plan §5.3): flag so the day-start ETA caveat is visible.
-    function _mjMultiRouteTrucks() {
-      const c = {}; Object.values(_mjAssign).forEach(list => (list || []).forEach(t => { c[t.truckKey] = (c[t.truckKey] || 0) + 1; }));
+    // Trucks on 2+ routes THAT DAY (combined-then-split — plan §5.3): flag so the day-start caveat is visible.
+    function _mjMultiRouteTrucks(dayID) {
+      const c = {}; Object.values(_mjAssignByDate[_mjSD(dayID)] || {}).forEach(list => (list || []).forEach(t => { c[t.truckKey] = (c[t.truckKey] || 0) + 1; }));
       return new Set(Object.keys(c).filter(k => c[k] > 1));
     }
-    function _mjTruckCellInner(routeId, routeCode) {
-      const rc = routeCode != null ? routeCode : (function () { const el = document.getElementById('mjTruck-' + String(routeId)); return el ? (el.getAttribute('data-rcode') || '') : ''; })();
-      const pill = _mjFeasPill(rc);
-      const list = _mjAssign[String(routeId)] || [];
+    function _mjTruckCellInner(dayID, routeId, routeCode) {
+      const sd = _mjSD(dayID);
+      const pill = _mjFeasPill(routeCode, dayID);
+      const list = (_mjAssignByDate[sd] || {})[String(routeId)] || [];
       if (!list.length) return pill + '<span style="color:var(--text-muted);font-size:10px;">+ truck</span>';
-      const multi = _mjMultiRouteTrucks();
-      // Compact chips (status dot + short label) that wrap — stays readable whether a route has 1 truck or 6.
+      const multi = _mjMultiRouteTrucks(dayID);
+      // Compact chips (status dot + short label) that wrap — readable whether a route has 1 truck or 6.
       const chips = list.map(t => {
         const live = _mjTruckLive[t.truckKey];
         const color = live ? live.color : '#6e8194';
-        const tip = _mjTruckName(t.truckKey) + (live ? ' · ' + live.label : '') + (multi.has(t.truckKey) ? ' · also on another route today' : '');
+        const tip = _mjTruckName(t.truckKey) + (live ? ' · ' + live.label : '') + (multi.has(t.truckKey) ? ' · also on another route that day' : '');
         const star = multi.has(t.truckKey) ? '<span style="color:#f59e0b;font-weight:700;">*</span>' : '';
         return '<span title="' + mjEsc(tip) + '" style="display:inline-flex;align-items:center;gap:2px;font-size:10px;color:var(--text-secondary);white-space:nowrap;">'
           + '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + color + ';flex:0 0 auto;"></span>'
@@ -11628,19 +11634,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }).join('');
       return pill + chips;
     }
-    function _mjRepaintTruckCell(routeId) { const el = document.getElementById('mjTruck-' + String(routeId)); if (el) el.innerHTML = _mjTruckCellInner(routeId, el.getAttribute('data-rcode') || ''); }
-    // Repaint every visible truck cell (works on the single board AND the dashboard source board) from current _mjAssign + _mjEta.
-    function _mjRepaintAllTruckCells() { document.querySelectorAll('[id^="mjTruck-"]').forEach(el => { el.innerHTML = _mjTruckCellInner(el.id.slice(8), el.getAttribute('data-rcode') || ''); }); }
-    function _mjCloseTruckMenu() { const m = document.getElementById('_mjTruckMenu'); if (m) m.remove(); _mjAssignMenuRoute = null; document.removeEventListener('click', _mjMenuOutside); }
+    // Repaint every visible truck cell in place (no board re-render) from data-day/data-rid/data-rcode on each cell.
+    function _mjRepaintAllTruckCells() { document.querySelectorAll('[id^="mjTruck-"]').forEach(el => { el.innerHTML = _mjTruckCellInner(el.getAttribute('data-day') || '', el.getAttribute('data-rid') || '', el.getAttribute('data-rcode') || ''); }); }
+    function _mjCloseTruckMenu() { const m = document.getElementById('_mjTruckMenu'); if (m) m.remove(); _mjMenuRid = ''; document.removeEventListener('click', _mjMenuOutside); }
     function _mjMenuOutside(e) { const m = document.getElementById('_mjTruckMenu'); if (m && !m.contains(e.target)) _mjCloseTruckMenu(); }
-    function _mjTruckMenu(routeId, ev) {
+    function _mjTruckMenu(cellEl, ev) {
       if (ev) ev.stopPropagation();
       _mjCloseTruckMenu();
-      _mjAssignMenuRoute = String(routeId);
-      const _c0 = document.getElementById('mjTruck-' + String(routeId)); // carry the cell's own date + route name (dashboard boards differ)
-      _mjAssignMenuDay = _c0 ? _c0.getAttribute('data-day') : '';
-      _mjAssignMenuName = _c0 ? _c0.getAttribute('data-rname') : '';
-      const cur = new Set((_mjAssign[String(routeId)] || []).map(t => t.truckKey));
+      _mjMenuDay = cellEl.getAttribute('data-day') || '';
+      _mjMenuRid = cellEl.getAttribute('data-rid') || '';
+      _mjMenuName = cellEl.getAttribute('data-rname') || '';
+      const cur = new Set(((_mjAssignByDate[_mjSD(_mjMenuDay)] || {})[_mjMenuRid] || []).map(t => t.truckKey));
       const rows = (_mjRoster || []).map(t =>
         '<label style="display:flex;align-items:center;gap:7px;padding:5px 8px;font-size:12.5px;color:var(--text-primary);cursor:pointer;">'
         + '<input type="checkbox" value="' + mjEsc(t.truckKey) + '"' + (cur.has(t.truckKey) ? ' checked' : '') + ' style="width:15px;height:15px;flex:0 0 auto;">'
@@ -11653,23 +11657,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + '<button onclick="_mjApplyTrucks()" style="flex:1;padding:6px;background:var(--accent-green,#00E785);border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;">Apply</button>'
         + '<button onclick="_mjCloseTruckMenu()" style="flex:0 0 auto;padding:6px 10px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:7px;font-size:12px;cursor:pointer;">Cancel</button></div>';
       document.body.appendChild(menu);
-      const cell = document.getElementById('mjTruck-' + String(routeId));
-      const rect = cell ? cell.getBoundingClientRect() : { left: 40, bottom: 120 };
+      const rect = cellEl.getBoundingClientRect();
       menu.style.left = Math.max(6, Math.min(rect.left, window.innerWidth - 192)) + 'px';
       menu.style.top = Math.min(rect.bottom + 4, window.innerHeight - 80) + 'px';
       setTimeout(() => document.addEventListener('click', _mjMenuOutside), 0);
     }
     async function _mjApplyTrucks() {
-      const routeId = _mjAssignMenuRoute; if (routeId == null) return;
+      const rid = _mjMenuRid; if (!rid) return;
       const menu = document.getElementById('_mjTruckMenu');
       const truckKeys = menu ? Array.from(menu.querySelectorAll('input:checked')).map(i => i.value) : [];
-      const routeName = _mjAssignMenuName || '';
-      const sd = _mjSD(_mjAssignMenuDay);
+      const routeName = _mjMenuName || '', sd = _mjSD(_mjMenuDay);
       _mjCloseTruckMenu();
-      const res = await edgeFunctionCall('crewlogic-assignments', { action: 'set', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: sd, vonigoRouteId: String(routeId), routeName, truckKeys, assignedBy: currentUser.email || '' });
+      const res = await edgeFunctionCall('crewlogic-assignments', { action: 'set', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: sd, vonigoRouteId: String(rid), routeName, truckKeys, assignedBy: currentUser.email || '' });
       if (res && res.success) {
-        _mjAssign[String(routeId)] = truckKeys.map(tk => ({ truckKey: tk, source: 'manual' }));
-        _mjRepaintAllTruckCells(); // multi-route flags can change across rows — repaint every cell in place, no board re-render
+        if (!_mjAssignByDate[sd]) _mjAssignByDate[sd] = {};
+        _mjAssignByDate[sd][String(rid)] = truckKeys.map(tk => ({ truckKey: tk, source: 'manual' }));
+        _mjRepaintAllTruckCells(); // multi-route flags can change across rows — repaint in place, no board re-render
       } else {
         alert('Could not save the truck assignment: ' + ((res && res.error) || 'unknown error'));
       }
@@ -11692,7 +11695,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // SHARE a jobID (each a distinct WorkOrder), so a jobID key would collide and resize/duration the wrong one.
       jobs.forEach(j => { const k = j.woID || j.jobID; if (k) { j._day = data.dayID; _mjBoardByID[String(k)] = j; } });
       const PXH = 66, LW = 52, TW = 76, ROW = 38; // TW = the FW-59 Truck-assignment sticky column
-      const showTruck = !container || container.id === 'dashSrcBoard'; const TWc = showTruck ? TW : 0; // Truck column: standalone board + the dashboard SOURCE board (the working day), not DEST
+      const showTruck = !container || container.id === 'dashSrcBoard' || container.id === 'dashDestBoard'; const TWc = showTruck ? TW : 0; // Truck column: standalone board + BOTH dashboard boards (each keyed by its own day)
       // Axis (originH/endH) precedence: (1) explicit axis param (two boards sharing ONE scale for cross-day
       // drag), (2) the franchise's route hours from the API (data.boardStartMin/EndMin — the bookable
       // window), (3) derive from this board's own jobs + open slots.
@@ -11751,8 +11754,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const rColor = mjRouteColor(rc); // route color as a THIN LEFT BAR (matches the map house border + the pricing-zone stripe motif) — not a full fill (owner 2026-07-24: "Partridge Family bus")
         h += '<div style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);box-shadow:inset 4px 0 0 0 ' + rColor + ';display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:var(--text-secondary);border-right:1px solid var(--border);padding:0 2px 0 6px;text-align:center;word-break:break-all;">' + mjEsc(rc) + '</div>';
         // FW-59 Truck-assignment cell (sticky, second left column) — tap to open the multi-select. Painted in place on set.
-        if (showTruck) { const _rkey = mjEsc(String(rt.id || ''));
-          h += '<div id="mjTruck-' + _rkey + '" data-day="' + mjEsc(String(data.dayID || '')) + '" data-rname="' + mjEsc(String(rt.name || rt.code || '')) + '" data-rcode="' + mjEsc(String(rt.code || '')) + '" onclick="_mjTruckMenu(\'' + _rkey + '\',event)" title="Assign truck(s) to this route" style="position:sticky;left:' + LW + 'px;z-index:2;width:' + TW + 'px;flex:0 0 ' + TW + 'px;background:var(--bg-card);border-right:1px solid var(--border);display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;align-content:center;justify-content:flex-start;gap:1px 5px;padding:0 5px;cursor:pointer;overflow:hidden;">' + _mjTruckCellInner(String(rt.id || ''), String(rt.code || '')) + '</div>'; }
+        if (showTruck) { const _rid = mjEsc(String(rt.id || '')), _rday = mjEsc(String(data.dayID || ''));
+          h += '<div id="mjTruck-' + _rday + '-' + _rid + '" data-day="' + _rday + '" data-rid="' + _rid + '" data-rname="' + mjEsc(String(rt.name || rt.code || '')) + '" data-rcode="' + mjEsc(String(rt.code || '')) + '" onclick="_mjTruckMenu(this,event)" title="Assign truck(s) to this route" style="position:sticky;left:' + LW + 'px;z-index:2;width:' + TW + 'px;flex:0 0 ' + TW + 'px;background:var(--bg-card);border-right:1px solid var(--border);display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;align-content:center;justify-content:flex-start;gap:1px 5px;padding:0 5px;cursor:pointer;overflow:hidden;">' + _mjTruckCellInner(String(data.dayID || ''), String(rt.id || ''), String(rt.code || '')) + '</div>'; }
         h += '<div' + dropAttrs + ' style="position:relative;width:' + trackW + 'px;">';
         // blocked-default base tint (whole lane not bookable unless an open band overrides) — light gray
         h += '<div style="position:absolute;inset:0;background:rgba(255,255,255,0.14);pointer-events:none;"></div>';
@@ -12089,9 +12092,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const routesData = data.routes || [];
       const axis = (Number.isFinite(data.boardStartMin) && Number.isFinite(data.boardEndMin))
         ? { originH: Math.floor(data.boardStartMin / 60), endH: Math.ceil(data.boardEndMin / 60) } : null;
-      if (side === 'src') await _mjLoadAssignData(dayID); // FW-59: refresh SOURCE-day assignments before re-rendering its column
+      await _mjLoadAssignData(dayID); // FW-59: refresh this day's assignments before re-rendering its column
       dashRenderBoard(dayID, routesData, container, axis);
-      if (side === 'src') _mjLoadEta(dayID); // FW-59: refresh feasibility pills on the SOURCE board
+      _mjLoadEta(dayID, routesData); // FW-59: refresh feasibility pills for this board
     }
     async function dashFetchDay(dayID) {
       const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'boardGrid', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, dayID });
@@ -12113,10 +12116,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const axis = (sMin.length && eMax.length)
         ? { originH: Math.floor(Math.min(...sMin) / 60), endH: Math.ceil(Math.max(...eMax) / 60) }
         : _dashSharedAxis([srcR, destR]);
-      await _mjLoadAssignData(_dashSrcDay); // FW-59: truck assignments for the SOURCE day before its Truck column renders
+      await Promise.all([_mjLoadAssignData(_dashSrcDay), _mjLoadAssignData(_dashDestDay)]); // FW-59: assignments for BOTH days before render
       dashRenderBoard(_dashSrcDay, srcR, srcC, axis);
       dashRenderBoard(_dashDestDay, destR, destC, axis);
-      _mjLoadEta(_dashSrcDay); // FW-59: day-start feasibility pills for the SOURCE board (async repaint)
+      _mjLoadEta(_dashSrcDay, srcR); _mjLoadEta(_dashDestDay, destR); // FW-59: feasibility pills for BOTH boards (async repaint)
     }
     // Shared time axis (originH/endH) across both days so both boards have identical columns + dimensions.
     function _dashSharedAxis(routeSets) {

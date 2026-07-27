@@ -214,64 +214,80 @@ Deno.serve(async (req: Request) => {
       const yardAddr = [cs.officeAddress, cs.officeCity, cs.officeState, cs.officeZip].map(v => str(v)).filter(Boolean).join(', ');
       const yard = yardAddr ? await geocodeCached(db, yardAddr) : null;
 
-      // Trucks by route (route_name is the join key to the mirror).
+      const RANK: Record<string, number> = { late: 3, early: 2, unknown: 1, within: 0, done: 0 };
+
+      // Trucks by route CODE (assignments store route_name like "Route 1 (MA1REG)"; the board keys on the code).
       const { data: aRows } = await db.from('route_truck_assignments')
         .select('route_name, truck_key').eq('franchise_id', franchiseInternalID).eq('service_date', serviceDate);
-      const trucksByRoute = new Map<string, string[]>();
+      const trucksByCode = new Map<string, string[]>();
       for (const r of aRows || []) {
-        const k = str(r.route_name); if (!trucksByRoute.has(k)) trucksByRoute.set(k, []);
-        trucksByRoute.get(k)!.push(r.truck_key as string);
+        const rn = str(r.route_name); const code = (rn.match(/\(([^)]+)\)/) || [])[1] || rn;
+        if (!trucksByCode.has(code)) trucksByCode.set(code, []);
+        trucksByCode.get(code)!.push(r.truck_key as string);
       }
 
-      // Mirror jobs for the date.
-      const { data: appts } = await db.from('job_appointments')
-        .select('id, start_minutes, duration_minutes, job:jobs!inner ( service_address, service_city, service_state, service_zip, service_lat, service_lng, job_number ), snapshot:job_source_snapshot ( route_name, customer_display )')
-        .eq('franchise_id', franchiseInternalID).eq('scheduled_date', serviceDate);
-
-      const routesMap = new Map<string, Record<string, unknown>[]>();
-      for (const a of (appts as Record<string, unknown>[]) || []) {
-        const snap = Array.isArray(a.snapshot) ? a.snapshot[0] : a.snapshot;
-        const jobj = Array.isArray(a.job) ? a.job[0] : a.job;
-        const rn = str((snap as Record<string, unknown>)?.route_name) || 'Unrouted';
-        if (!routesMap.has(rn)) routesMap.set(rn, []);
-        routesMap.get(rn)!.push({ ...a, _job: jobj, _snap: snap });
+      // Route list: PREFER the client's live board jobs (body.routes) so the pills match exactly what's on the
+      // board and cover every route; fall back to the mirror only for a standalone preview with no board loaded.
+      type NJob = { startMin: number; durationMin: number; lat?: number | null; lon?: number | null; address?: string; jobNo?: string; customerName?: string; phone?: string; town?: string };
+      const provided = Array.isArray(body.routes) ? body.routes as Record<string, unknown>[] : null;
+      let routeList: { routeCode: string; routeName: string; jobs: NJob[] }[] = [];
+      if (provided) {
+        routeList = provided.map(r => ({
+          routeCode: str(r.routeCode) || str(r.routeName),
+          routeName: str(r.routeName) || str(r.routeCode),
+          jobs: (Array.isArray(r.jobs) ? r.jobs as Record<string, unknown>[] : []).map(j => ({
+            startMin: Number(j.startMin), durationMin: Number(j.durationMin) || 0,
+            address: str(j.address), jobNo: str(j.jobNo), customerName: str(j.customerName), phone: str(j.phone), town: str(j.town),
+          })).filter(j => isFinite(j.startMin)),
+        }));
+      } else {
+        const { data: appts } = await db.from('job_appointments')
+          .select('id, start_minutes, duration_minutes, job:jobs!inner ( service_address, service_city, service_state, service_zip, service_lat, service_lng, job_number ), snapshot:job_source_snapshot ( route_name, customer_display )')
+          .eq('franchise_id', franchiseInternalID).eq('scheduled_date', serviceDate);
+        const rm = new Map<string, NJob[]>();
+        for (const a of (appts as Record<string, unknown>[]) || []) {
+          if (a.start_minutes == null) continue;
+          const snap = (Array.isArray(a.snapshot) ? a.snapshot[0] : a.snapshot) as Record<string, unknown> | null;
+          const jobj = (Array.isArray(a.job) ? a.job[0] : a.job) as Record<string, unknown>;
+          const rn = str(snap?.route_name) || 'Unrouted';
+          const cd = snap?.customer_display && typeof snap.customer_display === 'object' ? snap.customer_display as Record<string, unknown> : null;
+          if (!rm.has(rn)) rm.set(rn, []);
+          rm.get(rn)!.push({
+            startMin: a.start_minutes as number, durationMin: (a.duration_minutes as number) || 0,
+            lat: jobj?.service_lat as number, lon: jobj?.service_lng as number,
+            address: [jobj?.service_address, jobj?.service_city, jobj?.service_state, jobj?.service_zip].map(v => str(v)).filter(Boolean).join(', '),
+            jobNo: str(jobj?.job_number), customerName: cd ? str(cd.name) : '', phone: cd ? str(cd.phone) : '',
+            town: str(jobj?.service_city) || parseTown(str(jobj?.service_address)),
+          });
+        }
+        routeList = Array.from(rm.entries()).map(([rn, jobs]) => ({ routeCode: (rn.match(/\(([^)]+)\)/) || [])[1] || rn, routeName: rn, jobs }));
       }
 
-      const RANK: Record<string, number> = { late: 3, early: 2, unknown: 1, within: 0, done: 0 };
       const routes: Record<string, unknown>[] = [];
-      for (const [routeName, raw] of routesMap) {
-        const jobs = raw.filter(j => j.start_minutes != null).sort((x, y) => (x.start_minutes as number) - (y.start_minutes as number));
+      for (const rt of routeList) {
+        const jobs = rt.jobs.slice().sort((a, b) => a.startMin - b.startMin);
         if (!jobs.length) continue;
 
-        // Resolve a "lat,lon" token per job (mirror coords, else geocode the address).
+        // Resolve a "lat,lon" token per job (provided coords, else geocode the address, cache-first).
         const pts: (string | null)[] = [];
         for (const j of jobs) {
-          const jb = j._job as Record<string, unknown>;
-          let lat = jb?.service_lat as number | null, lon = jb?.service_lng as number | null;
-          if (lat == null || lon == null) {
-            const addr = [jb?.service_address, jb?.service_city, jb?.service_state, jb?.service_zip].map(v => str(v)).filter(Boolean).join(', ');
-            const g = addr ? await geocodeCached(db, addr) : null;
-            if (g) { lat = g.lat; lon = g.lon; }
-          }
+          let lat = j.lat, lon = j.lon;
+          if ((lat == null || lon == null) && j.address) { const g = await geocodeCached(db, j.address); if (g) { lat = g.lat; lon = g.lon; } }
           pts.push(lat != null && lon != null ? `${lat},${lon}` : null);
         }
 
         // Sequential legs: yard→job1, job1→job2, … via one Distance Matrix call (diagonal).
         const yardTok = yard ? `${yard.lat},${yard.lon}` : null;
         const seq = [yardTok, ...pts];
-        const origins = seq.slice(0, -1).map(p => p || '0,0');
-        const dests = seq.slice(1).map(p => p || '0,0');
-        const dm = await driveMinutes(origins, dests);
+        const dm = await driveMinutes(seq.slice(0, -1).map(p => p || '0,0'), seq.slice(1).map(p => p || '0,0'));
         const legs: (number | null)[] = seq.slice(0, -1).map((_, i) => (seq[i] && seq[i + 1]) ? dm[i][i] : null);
 
-        // Walk in local minutes. Job 1 is assumed on-time at its window start (yard→job1 leg → departYard).
+        // Walk in local minutes; job 1 assumed on-time at its window start (yard→job1 leg → departYard).
         const outJobs: Record<string, unknown>[] = [];
-        let cursor = jobs[0].start_minutes as number;
+        let cursor = jobs[0].startMin;
         for (let i = 0; i < jobs.length; i++) {
           const j = jobs[i];
-          const winStart = j.start_minutes as number;
-          const dur = (j.duration_minutes as number) || 0;
-          const winEnd = winStart + dur;
+          const winStart = j.startMin, dur = j.durationMin || 0, winEnd = winStart + dur;
           let arrival: number | null, status: string, mel = 0;
           if (i === 0) { arrival = winStart; status = 'within'; }
           else {
@@ -282,15 +298,8 @@ Deno.serve(async (req: Request) => {
             else if (arrival < winStart) { status = 'early'; mel = Math.round(winStart - arrival); }
             else status = 'within';
           }
-          const snapO = j._snap as Record<string, unknown> | null;
-          const cd = snapO && snapO.customer_display && typeof snapO.customer_display === 'object'
-            ? snapO.customer_display as Record<string, unknown> : null;
-          const jobO = j._job as Record<string, unknown>;
           outJobs.push({
-            jobNo: str(jobO?.job_number),
-            customerName: cd ? str(cd.name) : str(snapO?.customer_display),
-            phone: cd ? str(cd.phone) : '',
-            town: str(jobO?.service_city) || parseTown(str(jobO?.service_address)),
+            jobNo: j.jobNo || '', customerName: j.customerName || '', phone: j.phone || '', town: j.town || '',
             windowStart: minsToClock(winStart), windowEnd: minsToClock(winEnd),
             predictedEta: arrival == null ? null : minsToClock(arrival),
             status, minutesEarlyLate: mel,
@@ -301,17 +310,15 @@ Deno.serve(async (req: Request) => {
 
         const worst = outJobs.reduce((w, o) => (RANK[o.status as string] || 0) > (RANK[w.status as string] || 0) ? o : w, outJobs[0]);
         routes.push({
-          routeName,
-          routeCode: (routeName.match(/\(([^)]+)\)/) || [])[1] || routeName, // board matches on the code (mirror name = "Route 1 (MA1REG)" → "MA1REG")
-          trucks: (trucksByRoute.get(routeName) || []).map(tk => ({ truckKey: tk })),
+          routeName: rt.routeName, routeCode: rt.routeCode,
+          trucks: (trucksByCode.get(rt.routeCode) || []).map(tk => ({ truckKey: tk })),
           rollup: { status: worst.status, minutes: worst.minutesEarlyLate },
-          departYard: legs[0] != null ? minsToClock((jobs[0].start_minutes as number) - legs[0]!) : null,
-          guesstimate: true,
-          jobs: outJobs,
+          departYard: legs[0] != null ? minsToClock(jobs[0].startMin - legs[0]!) : null,
+          guesstimate: true, jobs: outJobs,
         });
       }
 
-      return json({ success: true, serviceDate, mode: 'daystart', durationMultiplier: mult, yardResolved: !!yard, routes });
+      return json({ success: true, serviceDate, mode: 'daystart', durationMultiplier: mult, source: provided ? 'board' : 'mirror', yardResolved: !!yard, routes });
     }
 
     // check lands in the next slice.
