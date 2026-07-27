@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.95.4 | 2026-07-27">
+  <meta name="crewlogic-version" content="v5.95.5 | 2026-07-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12101,7 +12101,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           _fitTrucksCentered(); _dashNeedsFit = false;
         }
       };
-      requestAnimationFrame(fix); setTimeout(fix, 250); setTimeout(fix, 700); setTimeout(fix, 1500);
+      // Markers load async; on a busy initial load they can land AFTER a fixed 1.5s window, leaving the map small
+      // until a day-switch re-fit. Keep resizing until they actually load + fit (bounded ~7s), not a few timers.
+      let _dashFixN = 0;
+      const retryFix = () => { fix(); if (_dashFixN++ < 24 && (_dashNeedsFit || _dashFixN < 8)) setTimeout(retryFix, 300); };
+      requestAnimationFrame(retryFix); setTimeout(retryFix, 200);
       if (window.ResizeObserver) {
         if (_dashMapRO) { try { _dashMapRO.disconnect(); } catch (e) {} }
         _dashMapRO = new ResizeObserver(fix); _dashMapRO.observe(pane);
