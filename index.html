@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.94.6 | 2026-07-27">
+  <meta name="crewlogic-version" content="v5.95.0 | 2026-07-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12705,6 +12705,28 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function _mjRow(k, v) { return '<div style="display:flex;gap:8px;margin-bottom:4px;"><span style="color:var(--text-muted);flex:0 0 54px;">' + mjEsc(k) + '</span><span style="color:var(--text-primary);word-break:break-word;">' + v + '</span></div>'; }
     function _mjBlock(k, v) { return '<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--border);"><div style="color:var(--text-muted);margin-bottom:2px;">' + mjEsc(k) + '</div><div style="color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:140px;overflow-y:auto;">' + v + '</div></div>'; }
+    // Part B — the anticipated-arrival statement for a job, from the day-start feasibility + truck assignment.
+    function _mjArrivalStatement(j) {
+      const sd = _mjSD(j._day || _mjBoardDayID);
+      const eta = (_mjEtaByDate[sd] || {})[j.routeCode];
+      if (!eta || !(eta.jobs || []).length) return '';
+      const pj = (eta.jobs || []).find(x => String(x.jobNo) === String(j.jobID || ''));
+      if (!pj || !pj.predictedEta) return '';
+      const trucks = ((_mjAssignByDate[sd] || {})[String(j.routeID || '')] || []).map(t => _mjTruckName(t.truckKey));
+      const truckStr = trucks.length ? trucks.join(', ').replace(/, ([^,]*)$/, ' & $1') : 'the assigned truck';
+      let name = String(j.client || '').trim(); const cp = name.split(','); if (cp.length === 2) name = cp[1].trim() + ' ' + cp[0].trim();
+      const town = mjAddrParts(j.address).city, townStr = town ? _titleCaseTown(town) : '';
+      const late = pj.status === 'late', m = pj.minutesEarlyLate || 0;
+      const winTxt = late ? ('<b>' + m + ' min past</b> the ' + mjEsc(pj.windowStart) + '–' + mjEsc(pj.windowEnd) + ' window') : ('within the ' + mjEsc(pj.windowStart) + '–' + mjEsc(pj.windowEnd) + ' window');
+      const bg = late ? 'rgba(239,68,68,0.16)' : 'rgba(0,231,133,0.14)', bd = late ? '#ef4444' : '#00E785';
+      let h = '<div style="background:' + bg + ';border:1px solid ' + bd + ';border-radius:9px;padding:9px 11px;margin-bottom:9px;font-size:12.5px;line-height:1.5;color:var(--text-primary);">'
+        + 'We anticipate <b>' + mjEsc(truckStr) + '</b> at <b>' + mjEsc(pj.predictedEta) + '</b>'
+        + (name ? ' for <b>' + mjEsc(name) + '</b>' : '') + (townStr ? ' in ' + mjEsc(townStr) : '')
+        + '. This is ' + winTxt + '.';
+      if (late) h += ' <span style="color:#ffd3d3;">Call the customer with your ETA (phone below).</span>';
+      h += ' <span style="color:var(--text-muted);font-size:11px;">Day-start guesstimate.</span></div>';
+      return h;
+    }
     function mjJobInfoHTML(j, sticky) {
       const p = mjAddrParts(j.address), jid = mjEsc(String(j.jobID || ''));
       const idLink = j.jobID ? '<a href="https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(j.jobID)) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#6db3ff;font-weight:600;text-decoration:none;">' + jid + ' 🔗</a>' : '—';
@@ -12713,6 +12735,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       let full = String(j.client || '').trim(); const _cp = full.split(','); if (_cp.length === 2) full = _cp[1].trim() + ' ' + _cp[0].trim();
       let h = '';
       if (sticky) h += '<div style="text-align:right;margin:-4px -4px 2px 0;"><span onclick="mjTipForceHide()" style="cursor:pointer;color:var(--text-muted);font-size:16px;line-height:1;">×</span></div>';
+      h += _mjArrivalStatement(j); // Part B: "We anticipate Truck X at TIME for NAME in TOWN — within/outside window"
       if (full) h += _mjRow('Name', mjEsc(full));
       h += _mjRow('Job', idLink);
       h += _mjRow('Street', p.street ? _addrLink(p.street, j.address || (p.street + ', ' + (p.city || '') + ' ' + (p.zip || j.zip || '')), mjEsc, '#6db3ff') : '—');
