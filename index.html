@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.94.5 | 2026-07-27">
+  <meta name="crewlogic-version" content="v5.94.6 | 2026-07-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9673,7 +9673,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         (t.sites || []).forEach(s => {
           const c = s && s.address && coordsByAddr[s.address];
           if (!c) return;
-          const costLine = (t.costSuffix && s.cost != null && s.cost !== '') ? '<br><span style="color:#6e8194;">$' + _truckEsc(String(s.cost)) + t.costSuffix + '</span>' : '';
+          const costLine = (t.costSuffix && s.cost != null && s.cost !== '') ? '<br><span style="color:var(--text-muted);">$' + _truckEsc(String(s.cost)) + t.costSuffix + '</span>' : '';
           const label = t.emoji + ' ' + (s.name || t.label);
           const siteHtml = '<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + _truckEsc(label) + '</b><br>' + _addrLink(_truckProperAddr(s.address), s.address, _truckEsc) + costLine + _measBtn(c.lat, c.lon, label) + '</div>';
           const m = L.marker([c.lat, c.lon], { icon: mkIcon(t.emoji, t.color, 20, true) }); // ~75% of the old size — bare emoji reads too big at full 26
@@ -9728,7 +9728,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function _mapHoverShow(html, jobID) {
       const box = _mapHoverBox(); if (!box) return;
-      box.innerHTML = '<div style="text-align:right;margin:-2px -6px 2px 0;"><span onclick="_mapHoverHide()" style="cursor:pointer;color:#6e8194;font-size:18px;line-height:1;">×</span></div>' + (html || '');
+      box.innerHTML = '<div style="text-align:right;margin:-2px -6px 2px 0;"><span onclick="_mapHoverHide()" style="cursor:pointer;color:var(--text-muted);font-size:18px;line-height:1;">×</span></div>' + (html || '');
       box.style.display = 'block'; box.scrollTop = 0;
       if (jobID) _prefetchJobPhone(jobID).then(ph => _renderJobPhoneSlot(jobID, ph)); // fill the phone slot like popupopen did
     }
@@ -9975,7 +9975,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             }
           }
           const html = (data && data.success)
-            ? '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(data.distanceText) + ' · ~' + _truckEsc(data.durationText) + ' drive' + arrHtml + (data.inTraffic ? '<br><span style="color:#9fb0c0;font-size:11px;">in current traffic</span>' : '')
+            ? '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(data.distanceText) + ' · ~' + _truckEsc(data.durationText) + ' drive' + arrHtml + (data.inTraffic ? '<br><span style="color:var(--text-muted);font-size:11px;">in current traffic</span>' : '')
             : 'Could not measure distance — try again.';
           _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
           if (data && data.success && info && info.late === true && j.jobID) {
@@ -10016,7 +10016,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const html = '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(distText)
             + ((distText && durText) ? ' · ' : '') + _truckEsc(durText)
             + arrHtml
-            + (traffic ? '<br><span style="color:#9fb0c0;font-size:11px;">in current traffic</span>' : '');
+            + (traffic ? '<br><span style="color:var(--text-muted);font-size:11px;">in current traffic</span>' : '');
           _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
           if (info && info.late === true && j.jobID) {
             _prefetchJobPhone(j.jobID).then(function (ph) { _renderJobPhoneSlot(j.jobID, ph); });
@@ -10045,10 +10045,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Mirrors the crew block: a "🚚 Truck N — <arrival>" header row, then indented bullets.
       // "mi away" is instant; the arrival (row 1) and drive-time (a bullet) fill async from
       // _fillJobEta once the card is in the rail, using the coords embedded on .job-eta-arrival.
-      return '<div style="margin-top:3px;color:#cdd6df;">🚚 ' + _truckEsc(nt.name)
+      return '<div style="margin-top:3px;color:var(--text-muted);">🚚 ' + _truckEsc(nt.name)
         + '<span class="job-eta-arrival" data-tlat="' + nt.lat + '" data-tlon="' + nt.lon + '" data-jlat="' + lat + '" data-jlon="' + lon + '" data-jtime="' + (jtime != null ? jtime : '') + '" data-jtlabel="' + _truckEsc(String(jtlabel || '')) + '" data-jdur="' + (jdur != null ? jdur : '') + '" data-joffset="' + (joffset != null ? joffset : 0) + '"></span></div>'
-        + '<div style="margin-left:16px;color:#cdd6df;">• ' + nt.mi.toFixed(1) + ' mi away</div>'
-        + '<div class="job-eta-drive" style="margin-left:16px;color:#cdd6df;"></div>';
+        + '<div style="margin-left:16px;color:var(--text-muted);">• ' + nt.mi.toFixed(1) + ' mi away</div>'
+        + '<div class="job-eta-drive" style="margin-left:16px;color:var(--text-muted);"></div>';
     }
     // Fill the .job-eta slot in the rail's Job-details card with the truck→job drive time (traffic-aware,
     // via crewlogic-estimate pointDistance = Google Distance Matrix). Fire-and-forget after the card renders.
@@ -10067,7 +10067,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const info = _arrivalInfo(data.minutes, jtime, jtlabel, jdur, joffset);
           let arrHtml = '';
           if (info) {
-            if (info.future) arrHtml = ' — <span style="color:#9fb0c0;">📅 ' + _truckEsc(info.text) + '</span>';
+            if (info.future) arrHtml = ' — <span style="color:var(--text-muted);">📅 ' + _truckEsc(info.text) + '</span>';
             else if (info.late === true) arrHtml = ' — <span style="color:#ef4444;font-weight:600;">⚠️ ' + _truckEsc(info.text) + ' — outside window, contact customer</span>';
             else if (info.late === false) arrHtml = ' — <span style="color:#22c55e;font-weight:600;">✅ ' + _truckEsc(info.text) + '</span>';
             else arrHtml = ' — ' + _truckEsc(info.text);
@@ -10103,7 +10103,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _crewLineHtml(crew) {
       const list = Array.isArray(crew) ? crew.filter(Boolean) : [];
       if (!list.length) {
-        return '<div style="margin-top:3px;color:#9fb0c0;">👷 <span style="color:#6e8194;">Crew not assigned yet</span></div>';
+        return '<div style="margin-top:3px;color:var(--text-muted);">👷 <span style="color:var(--text-muted);">Crew not assigned yet</span></div>';
       }
       // Entries are {name, title} objects (todays-workorders) or bare name strings (dispatch's
       // listRouteJobs, no title) — normalise both. Job Title (user field 166) is FREE TEXT set per
@@ -10123,10 +10123,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         ? ' <span title="No Driver, Please check titles in Vonigo" style="cursor:help;color:#fbbf24;font-weight:700;">⚠️</span>'
         : '';
       const bullets = norm.map(function (c) {
-        const t = c.title ? ' <span style="color:#6e8194;">(' + _truckEsc(c.title) + ')</span>' : '';
-        return '<div style="margin-left:16px;color:#cdd6df;">\u2022 ' + _truckEsc(c.name) + t + '</div>';
+        const t = c.title ? ' <span style="color:var(--text-muted);">(' + _truckEsc(c.title) + ')</span>' : '';
+        return '<div style="margin-left:16px;color:var(--text-muted);">\u2022 ' + _truckEsc(c.name) + t + '</div>';
       }).join('');
-      return '<div style="margin-top:3px;color:#9fb0c0;">👷 Assigned to:' + warn + '</div>' + bullets;
+      return '<div style="margin-top:3px;color:var(--text-muted);">👷 Assigned to:' + warn + '</div>' + bullets;
     }
     // Compact inline Vonigo job link for the card header — "Job 867753", clickable, opens Vonigo.
     // Replaces the separate "🔗 Open Job … in Vonigo" line so the number sits in the title row and
@@ -10278,9 +10278,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '<b>' + dayLabel + '</b>' + (j.timeLabel ? ' · ' + _truckEsc(j.timeLabel) : '') + (route ? ' · ' + _truckEsc(route) : '')
             + (j.jobID ? ' · ' + _vonigoJobInline(j.jobID) : '')
             + '<br>' + _truckEsc(j.clientName || 'Job')
-            + (Number(j.price) > 0 ? '<br><span style="color:#9fb0c0;">Job Total: </span><span style="font-weight:800;color:#00E785;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>' : '')
+            + (Number(j.price) > 0 ? '<br><span style="color:var(--text-muted);">Job Total: </span><span style="font-weight:800;color:#00E785;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>' : '')
             + (addr ? '<br>' + _addrLink(addr, addr, _truckEsc, '#6db3ff') : '')
-            + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
+            + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:var(--text-muted);">Loading phone…</div>'
             + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (base + k) + '"></div>'
             + _crewLineHtml(j.crew)
             + '</div>';
@@ -10598,9 +10598,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const _cd = _truckCrew[_normVeh(t.name)]; let crewHtml = '';
         if (_cd) {
           const _jn = (a) => (a || []).join(' · ');
-          if (_cd.confidence === 'high' && _cd.crew.length) crewHtml += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;font-size:12px;"><span style="color:#9fb0c0;font-weight:700;">Crew (likely):</span> ' + _truckEsc(_jn(_cd.crew)) + '<span style="color:#6e8194;"> · ' + _cd.jobsWithCrew + ' jobs' + (_cd.routes.length === 1 ? ' · ' + _truckEsc(_cd.routes[0]) : '') + '</span></div>';
-          else if (_cd.confidence === 'low' && _cd.candidates.length) crewHtml += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;font-size:12px;"><span style="color:#9fb0c0;font-weight:700;">Crew (low confidence):</span> possibly ' + _truckEsc(_jn(_cd.candidates)) + '<span style="color:#6e8194;"> · ' + _cd.routes.length + ' routes today</span></div>';
-          else if (_cd.confidence === 'unknown') crewHtml += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;font-size:12px;color:#9fb0c0;">Crew: can\'t determine (no crew on today\'s jobs)</div>';
+          if (_cd.confidence === 'high' && _cd.crew.length) crewHtml += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;font-size:12px;"><span style="color:var(--text-muted);font-weight:700;">Crew (likely):</span> ' + _truckEsc(_jn(_cd.crew)) + '<span style="color:var(--text-muted);"> · ' + _cd.jobsWithCrew + ' jobs' + (_cd.routes.length === 1 ? ' · ' + _truckEsc(_cd.routes[0]) : '') + '</span></div>';
+          else if (_cd.confidence === 'low' && _cd.candidates.length) crewHtml += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;font-size:12px;"><span style="color:var(--text-muted);font-weight:700;">Crew (low confidence):</span> possibly ' + _truckEsc(_jn(_cd.candidates)) + '<span style="color:var(--text-muted);"> · ' + _cd.routes.length + ' routes today</span></div>';
+          else if (_cd.confidence === 'unknown') crewHtml += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;font-size:12px;color:var(--text-muted);">Crew: can\'t determine (no crew on today\'s jobs)</div>';
           if (_cd.mismatches && _cd.mismatches.length) { const _who = [...new Set([].concat.apply([], _cd.mismatches.map(m => m.missing)))]; crewHtml += '<div style="margin-top:6px;padding:7px 9px;background:rgba(251,146,60,.13);border:1px solid #fb923c;border-radius:6px;font-size:11.5px;color:#fdba74;line-height:1.4;">⚠ <b>' + _truckEsc(_who.join(' · ')) + '</b> dwelled at ' + _cd.mismatches.length + ' job' + (_cd.mismatches.length > 1 ? 's' : '') + ' not assigned to them — add them in Vonigo so tips credit them: ' + _truckEsc(_cd.mismatches.map(m => m.client).filter(Boolean).join(', ')) + '</div>'; }
           if (_cd.noCrew && _cd.noCrew.length) crewHtml += '<div style="margin-top:6px;padding:7px 9px;background:rgba(148,163,184,.13);border:1px solid #64748b;border-radius:6px;font-size:11.5px;color:#cbd5e1;line-height:1.4;">⚠ ' + _cd.noCrew.length + ' of this truck\'s jobs have no crew assigned in Vonigo: ' + _truckEsc(_cd.noCrew.join(', ')) + '</div>';
         }
@@ -10609,10 +10609,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + (veh ? '<br>' + _truckEsc(veh) : '')
           + (t.desc ? '<br>' + _addrLink(t.desc, t.desc, _truckEsc, '#6db3ff') : '')
           + '<br>' + _truckEsc([_truckStateLabel(t), move].filter(Boolean).join(' · '))
-          + (t.lastUpdate ? '<br><span style="color:#6e8194;">' + _truckEsc(_truckTimeAgo(t.lastUpdate)) + '</span>' : '')
-          + (t.vin ? '<br><span style="color:#6e8194;font-size:11px;">VIN ' + _truckEsc(t.vin) + '</span>' : '')
+          + (t.lastUpdate ? '<br><span style="color:var(--text-muted);">' + _truckEsc(_truckTimeAgo(t.lastUpdate)) + '</span>' : '')
+          + (t.vin ? '<br><span style="color:var(--text-muted);font-size:11px;">VIN ' + _truckEsc(t.vin) + '</span>' : '')
           + crewHtml
-          + (nearJobs.length ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;color:#F59E0B;font-weight:700;font-size:12px;">🏠 At ' + nearJobs.length + ' job' + (nearJobs.length > 1 ? 's' : '') + ' here</div>' + nearJobs.map(j => '<div style="font-size:12px;color:#cdd6df;">' + _truckEsc(j.clientName || 'Job') + (j._routeShort ? ' · ' + _truckEsc(j._routeShort) : '') + '</div>').join('') : '')
+          + (nearJobs.length ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;color:#F59E0B;font-weight:700;font-size:12px;">🏠 At ' + nearJobs.length + ' job' + (nearJobs.length > 1 ? 's' : '') + ' here</div>' + nearJobs.map(j => '<div style="font-size:12px;color:var(--text-muted);">' + _truckEsc(j.clientName || 'Job') + (j._routeShort ? ' · ' + _truckEsc(j._routeShort) : '') + '</div>').join('') : '')
           + (nearSite ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;color:' + nearSite.color + ';font-weight:700;font-size:12px;">' + nearSite.emoji + ' At ' + _truckEsc(nearSite.name) + '</div>' : '')
           + (!nearSite && atYard ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2a3a49;color:#93c5fd;font-weight:700;font-size:12px;">🏠 At ' + _truckEsc(curGf.name) + (gfSince ? ' since ' + _truckEsc(_alertClock(new Date(gfSince).toISOString())) : '') + '</div>' : '')
           // Spell out WHY the dot and the badge disagree, so a stale pin reads as a known lag
@@ -10673,7 +10673,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       e.innerHTML = phone
         ? '📞 <a href="tel:' + digits + '" style="color:#6db3ff;font-weight:600;text-decoration:none;">' + _truckEsc(_fmtPhone(phone)) + '</a>'
           + ' &nbsp;·&nbsp; <a href="' + _smsHref(digits, buildSmsBody({ clientName: _jobClients[jobID] || '' })) + '" style="color:#6db3ff;font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>'
-        : '<span style="color:#9aa7b4;">No phone on file</span>';
+        : '<span style="color:var(--text-muted);">No phone on file</span>';
     }
     function _prefetchJobPhone(jobID) {
       if (_jobPhones[jobID]) return _jobPhones[jobID];
@@ -10734,8 +10734,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const addr = j.address ? _truckProperAddr(String(j.address).replace(/\n/g, ', ').replace(/\s+/g, ' ').replace(/\s+,/g, ',').trim()) : '';
           const items = String(j.items || '').split('\n').map(s => s.trim()).filter(Boolean);
           const itemsHtml = items.length
-            ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border,#22354a);font-size:11px;line-height:1.45;color:#cdd6df;max-height:108px;overflow-y:auto;">'
-              + '<div style="font-weight:700;color:#9fb0c0;margin-bottom:2px;">Items (' + items.length + ')</div>'
+            ? '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border,#22354a);font-size:11px;line-height:1.45;color:var(--text-muted);max-height:108px;overflow-y:auto;">'
+              + '<div style="font-weight:700;color:var(--text-muted);margin-bottom:2px;">Items (' + items.length + ')</div>'
               + items.map(it => _truckEsc(it)).join('<br>')
               + '</div>'
             : '';
@@ -10743,15 +10743,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             // Header row: Stop · route · Job link  |  time. Job number joins the title row.
             + '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;">'
               + '<div><b>Stop ' + n + ' · ' + _truckEsc(rkey) + '</b>' + (j.jobID ? ' · ' + _vonigoJobInline(j.jobID) : '') + '</div>'
-              + (j.timeLabel ? '<span style="color:#9fb0c0;white-space:nowrap;font-weight:600;">' + _truckEsc(j.timeLabel) + '</span>' : '')
+              + (j.timeLabel ? '<span style="color:var(--text-muted);white-space:nowrap;font-weight:600;">' + _truckEsc(j.timeLabel) + '</span>' : '')
             + '</div>'
-            + (done ? '<div style="color:#9fb0c0;font-weight:700;font-size:11px;margin-top:2px;">✓ Completed</div>' : '')
-            + (Number(j.price) > 0 ? '<div style="margin-top:2px;"><span style="color:#9fb0c0;">Job Total: </span><span style="font-weight:800;color:#00E785;font-size:13px;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span></div>' : '')
+            + (done ? '<div style="color:var(--text-muted);font-weight:700;font-size:11px;margin-top:2px;">✓ Completed</div>' : '')
+            + (Number(j.price) > 0 ? '<div style="margin-top:2px;"><span style="color:var(--text-muted);">Job Total: </span><span style="font-weight:800;color:#00E785;font-size:13px;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span></div>' : '')
             + '<div style="margin-top:3px;">🏠 ' + _truckEsc(j.clientName || 'Job') + '</div>'
             + (addr ? '<div>' + _addrLink(addr, addr, _truckEsc, '#6db3ff') + '</div>' : '')
             // Phone directly under the address, so address+phone read as one contact block, and
             // truck+crew group together below it.
-            + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:#6e8194;">Loading phone…</div>'
+            + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:var(--text-muted);">Loading phone…</div>'
             + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (_trucksJobDay || 0) + '"></div>'
             + _crewLineHtml(j.crew)
             + itemsHtml
@@ -11045,7 +11045,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return '<div style="display:flex;gap:8px;padding:' + (lifecycle ? '6px' : '8px') + ' 6px;border-bottom:1px solid var(--border,#22354a);align-items:flex-start;">'
         + '<span style="flex:0 0 auto;font-size:' + iconSize + ';line-height:1.3;">' + icon + '</span>'
         + '<div style="flex:1;min-width:0;"><div style="font-size:' + txtSize + ';color:' + txtColor + ';line-height:1.35;">' + text + '</div>'
-        + (jobDetail ? '<div style="font-size:11.5px;color:#9fb2c6;line-height:1.3;">' + jobDetail + '</div>' : '')
+        + (jobDetail ? '<div style="font-size:11.5px;color:var(--text-muted);line-height:1.3;">' + jobDetail + '</div>' : '')
         + lastLine + '</div></div>';
     }
     function _alertRelTime(iso) {
@@ -11983,7 +11983,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + '<div style="font-weight:800;color:' + col + ';">⚠️ ' + mjEsc(a.event) + '</div>'
           + (a.expires ? '<div style="color:var(--text-muted);font-size:12px;margin:2px 0 4px;">Until ' + mjEsc(_wxTime(a.expires)) + (a.areaDesc ? ' · ' + mjEsc(a.areaDesc) : '') + '</div>' : '')
           + (a.headline ? '<div style="font-size:12.5px;">' + mjEsc(a.headline) + '</div>' : '')
-          + (a.instruction ? '<div style="font-size:12px;color:#cdd6df;margin-top:6px;white-space:pre-wrap;">' + mjEsc(a.instruction) + '</div>' : '')
+          + (a.instruction ? '<div style="font-size:12px;color:var(--text-muted);margin-top:6px;white-space:pre-wrap;">' + mjEsc(a.instruction) + '</div>' : '')
           + '</div>';
       }).join('');
       ov.innerHTML = '<div style="background:var(--bg-card,#1e2f40);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.5);width:96%;max-width:520px;max-height:84vh;display:flex;flex-direction:column;font-size:13px;color:var(--text-primary);">'
@@ -12055,7 +12055,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // section, ensure that section is expanded, and wire the phone slot exactly as _mapHoverShow did.
     function _railShowJob(pop, jobID) {
       const body = document.getElementById('dashLeftJobBody'); if (!body) return;
-      body.innerHTML = '<div style="text-align:right;margin:-2px -2px 2px 0;"><span onclick="_railClearJob()" style="cursor:pointer;color:#6e8194;font-size:18px;line-height:1;">×</span></div>' + (pop || '');
+      body.innerHTML = '<div style="text-align:right;margin:-2px -2px 2px 0;"><span onclick="_railClearJob()" style="cursor:pointer;color:var(--text-muted);font-size:18px;line-height:1;">×</span></div>' + (pop || '');
       body.style.display = ''; // make sure the section is open
       const hdr = body.previousElementSibling, chev = hdr && hdr.querySelector('span'); if (chev) chev.textContent = '▾';
       body.scrollTop = 0;
@@ -12066,7 +12066,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Same visual wrapper as _railShowJob but NO phone-slot wiring (no jobID for non-job content).
     function _railShowInfo(html) {
       const body = document.getElementById('dashLeftJobBody'); if (!body) return;
-      body.innerHTML = '<div style="text-align:right;margin:-2px -2px 2px 0;"><span onclick="_railClearJob()" style="cursor:pointer;color:#6e8194;font-size:18px;line-height:1;">×</span></div>' + (html || '');
+      body.innerHTML = '<div style="text-align:right;margin:-2px -2px 2px 0;"><span onclick="_railClearJob()" style="cursor:pointer;color:var(--text-muted);font-size:18px;line-height:1;">×</span></div>' + (html || '');
       body.style.display = ''; // make sure the section is open
       const hdr = body.previousElementSibling, chev = hdr && hdr.querySelector('span'); if (chev) chev.textContent = '▾';
       body.scrollTop = 0;
@@ -13597,7 +13597,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const nm = String(r.routeName || '').replace(/[<>&"']/g, ''), sc = r.stopCount || 0, txt = String(r.plan || '').trim();
         html += '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px;background:var(--bg-input,#1e2f40);">'
           + '<div style="font-weight:800;margin-bottom:6px;">' + mjEsc(nm) + ' <span style="color:var(--text-muted);font-weight:600;">— ' + sc + ' stop' + (sc === 1 ? '' : 's') + '</span></div>'
-          + '<div style="white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.5;color:#cdd6df;">' + mjEsc(txt) + '</div></div>';
+          + '<div style="white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.5;color:var(--text-muted);">' + mjEsc(txt) + '</div></div>';
         copy += 'ROUTE ' + nm + ' — ' + sc + ' stop' + (sc === 1 ? '' : 's') + '\n' + txt + '\n\n';
       });
       const wxNote = _wxPlanNote(_dashWxAlerts); // flag active weather at the top of the plan (live alerts)
