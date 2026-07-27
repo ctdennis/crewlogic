@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.95.0 | 2026-07-27">
+  <meta name="crewlogic-version" content="v5.95.1 | 2026-07-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11561,8 +11561,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _mjRouteBg(routeCode, dayID) {
       const e = (_mjEtaByDate[_mjSD(dayID)] || {})[routeCode];
       const s = e && e.rollup ? e.rollup.status : null;
-      if (s === 'late') return 'rgba(239,68,68,0.42)';
-      if (s === 'within' || s === 'early') return 'rgba(0,231,133,0.34)';
+      // OPAQUE composite (tint layered OVER bg-card) so job pills scrolling under the sticky cell don't bleed through.
+      if (s === 'late') return 'linear-gradient(rgba(239,68,68,0.42),rgba(239,68,68,0.42)),var(--bg-card)';
+      if (s === 'within' || s === 'early') return 'linear-gradient(rgba(0,231,133,0.34),rgba(0,231,133,0.34)),var(--bg-card)';
       return 'var(--bg-card)';
     }
     function _mjRepaintRouteCells() { document.querySelectorAll('[id^="mjRoute-"]').forEach(el => { el.style.background = _mjRouteBg(el.getAttribute('data-rcode') || '', el.getAttribute('data-day') || ''); }); }
