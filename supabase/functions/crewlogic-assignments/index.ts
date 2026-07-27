@@ -302,6 +302,7 @@ Deno.serve(async (req: Request) => {
         const worst = outJobs.reduce((w, o) => (RANK[o.status as string] || 0) > (RANK[w.status as string] || 0) ? o : w, outJobs[0]);
         routes.push({
           routeName,
+          routeCode: (routeName.match(/\(([^)]+)\)/) || [])[1] || routeName, // board matches on the code (mirror name = "Route 1 (MA1REG)" → "MA1REG")
           trucks: (trucksByRoute.get(routeName) || []).map(tk => ({ truckKey: tk })),
           rollup: { status: worst.status, minutes: worst.minutesEarlyLate },
           departYard: legs[0] != null ? minsToClock((jobs[0].start_minutes as number) - legs[0]!) : null,
