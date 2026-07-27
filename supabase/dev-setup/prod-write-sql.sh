@@ -11,6 +11,7 @@
 # human gate for a prod mutation. Use ONLY for approved prod schema changes.
 #
 # Usage: bash supabase/dev-setup/prod-write-sql.sh "<sql>"
+#    or: bash supabase/dev-setup/prod-write-sql.sh -f supabase/migrations/NNNN_*.sql
 set -euo pipefail
 PROD_REF="ozfkpxyachigfpcmvekz"   # crewlogic-prod
 DEV_REF="bagkimfwmpwjfhfhmsrb"    # crewlogic-dev (safe resting state)
@@ -23,7 +24,7 @@ fi
 echo "[prod-write] linking to prod ($PROD_REF) + running write…" >&2
 supabase link --project-ref "$PROD_REF" >/dev/null 2>&1 || { echo "ERROR: could not link to prod ($PROD_REF)." >&2; exit 1; }
 set +e
-supabase db query --linked "$1"
+supabase db query --linked "$@"   # forward all args so both "<sql>" and -f file.sql work
 rc=$?
 set -e
 supabase link --project-ref "$DEV_REF" >/dev/null 2>&1 || true   # ALWAYS return to the dev resting state
