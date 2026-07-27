@@ -40,6 +40,69 @@ async function defaultServiceDate(db: ReturnType<typeof createClient>, franchise
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
+const GOOGLE_KEY = Deno.env.get('GOOGLE_GEOCODING_API_KEY') || Deno.env.get('GOOGLE_MAPS_API_KEY') || '';
+
+// Local minutes-from-midnight → "H:MM AM/PM".
+function minsToClock(min: number): string {
+  const r = Math.round(min);
+  let h = Math.floor(r / 60) % 24; if (h < 0) h += 24;
+  const m = ((r % 60) + 60) % 60;
+  const ap = h < 12 ? 'AM' : 'PM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${ap}`;
+}
+
+// Best-effort town from a Vonigo address blob ("STREET \n CITY, STATE ZIP"). Returns '' if unparseable.
+function parseTown(addr: string): string {
+  if (!addr) return '';
+  const lines = addr.split('\n').map(s => s.trim()).filter(Boolean);
+  const cityLine = lines.length > 1 ? lines[lines.length - 1] : lines[0];
+  const town = (cityLine.split(',')[0] || '').trim();
+  if (!town || /^\d/.test(town)) return '';                 // still looks like a street number → give up
+  return town.replace(/\b[a-z]+/gi, w => w[0].toUpperCase() + w.slice(1).toLowerCase());
+}
+
+// Address → {lat,lon}, cache-first (geocode_cache), Census then Google. Mirrors crewlogic-dispatch geocode().
+async function geocodeCached(db: ReturnType<typeof createClient>, addr: string): Promise<{ lat: number; lon: number } | null> {
+  const key = addr.replace(/\n/g, ', ').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!key) return null;
+  const { data: cached } = await db.from('geocode_cache').select('lat, lon, found, provider').eq('address_key', key).maybeSingle();
+  if (cached) {
+    if (cached.found) return { lat: cached.lat as number, lon: cached.lon as number };
+    if (cached.provider === 'google') return null;
+  }
+  let lat: number | null = null, lon: number | null = null, provider = 'census';
+  try {
+    const u = `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encodeURIComponent(addr)}&benchmark=Public_AR_Current&format=json`;
+    const j = await (await fetch(u)).json();
+    const m = j?.result?.addressMatches?.[0]?.coordinates;
+    if (m) { lat = m.y; lon = m.x; }
+  } catch (_) { /* fall through to Google */ }
+  if (lat == null && GOOGLE_KEY) {
+    try {
+      const u = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addr)}&key=${GOOGLE_KEY}`;
+      const j = await (await fetch(u)).json();
+      const loc = j?.results?.[0]?.geometry?.location;
+      if (loc) { lat = loc.lat; lon = loc.lng; provider = 'google'; }
+    } catch (_) { /* leave null */ }
+  }
+  const found = lat != null && lon != null;
+  await db.from('geocode_cache').upsert({ address_key: key, lat, lon, found, provider, updated_at: new Date().toISOString() });
+  return found ? { lat: lat!, lon: lon! } : null;
+}
+
+// Google Distance Matrix → minutes[origins][destinations] (free-flow; day-start is a future/planning walk).
+async function driveMinutes(origins: string[], destinations: string[]): Promise<(number | null)[][]> {
+  if (!GOOGLE_KEY || !origins.length || !destinations.length) return origins.map(() => destinations.map(() => null));
+  const u = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(origins.join('|'))}&destinations=${encodeURIComponent(destinations.join('|'))}&units=imperial&key=${GOOGLE_KEY}`;
+  const j = await (await fetch(u)).json();
+  const rows = j?.rows || [];
+  return origins.map((_, i) => destinations.map((__, k) => {
+    const el = rows[i]?.elements?.[k];
+    return el?.status === 'OK' ? el.duration.value / 60 : null;
+  }));
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ success: false, error: 'method_not_allowed' }, 405);
@@ -134,10 +197,124 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // eta / check land in the next slice.
-    if (action === 'eta' || action === 'check') {
-      return json({ success: false, error: 'not_implemented_yet', action }, 501);
+    // ── eta (day-start feasibility) ─────────────────────────────────────────
+    // Truck-agnostic walk of each route from the yard, in local minutes-from-midnight, checking each
+    // job's arrival against its scheduled window [start, start+duration]. The duration dial scales the
+    // per-stop SERVICE time used to advance the cursor (not the window). Flagged a guesstimate.
+    if (action === 'eta') {
+      const mode = str(body.mode) || 'auto';
+      if (mode === 'live') return json({ success: false, error: 'live_mode_not_implemented_yet' }, 501);
+      let mult = Number(body.durationMultiplier);
+      if (!isFinite(mult) || mult <= 0) mult = 1.0;
+      mult = Math.max(0.5, Math.min(1.5, mult)); // 60–140% dial (clamped)
+
+      // Yard origin: geocode cost_settings.officeAddress (cache-first).
+      const { data: fr } = await db.from('franchises').select('cost_settings').eq('id', franchiseInternalID).maybeSingle();
+      const cs = (fr?.cost_settings as Record<string, unknown>) || {};
+      const yardAddr = [cs.officeAddress, cs.officeCity, cs.officeState, cs.officeZip].map(v => str(v)).filter(Boolean).join(', ');
+      const yard = yardAddr ? await geocodeCached(db, yardAddr) : null;
+
+      // Trucks by route (route_name is the join key to the mirror).
+      const { data: aRows } = await db.from('route_truck_assignments')
+        .select('route_name, truck_key').eq('franchise_id', franchiseInternalID).eq('service_date', serviceDate);
+      const trucksByRoute = new Map<string, string[]>();
+      for (const r of aRows || []) {
+        const k = str(r.route_name); if (!trucksByRoute.has(k)) trucksByRoute.set(k, []);
+        trucksByRoute.get(k)!.push(r.truck_key as string);
+      }
+
+      // Mirror jobs for the date.
+      const { data: appts } = await db.from('job_appointments')
+        .select('id, start_minutes, duration_minutes, job:jobs!inner ( service_address, service_city, service_state, service_zip, service_lat, service_lng, job_number ), snapshot:job_source_snapshot ( route_name, customer_display )')
+        .eq('franchise_id', franchiseInternalID).eq('scheduled_date', serviceDate);
+
+      const routesMap = new Map<string, Record<string, unknown>[]>();
+      for (const a of (appts as Record<string, unknown>[]) || []) {
+        const snap = Array.isArray(a.snapshot) ? a.snapshot[0] : a.snapshot;
+        const jobj = Array.isArray(a.job) ? a.job[0] : a.job;
+        const rn = str((snap as Record<string, unknown>)?.route_name) || 'Unrouted';
+        if (!routesMap.has(rn)) routesMap.set(rn, []);
+        routesMap.get(rn)!.push({ ...a, _job: jobj, _snap: snap });
+      }
+
+      const RANK: Record<string, number> = { late: 3, early: 2, unknown: 1, within: 0, done: 0 };
+      const routes: Record<string, unknown>[] = [];
+      for (const [routeName, raw] of routesMap) {
+        const jobs = raw.filter(j => j.start_minutes != null).sort((x, y) => (x.start_minutes as number) - (y.start_minutes as number));
+        if (!jobs.length) continue;
+
+        // Resolve a "lat,lon" token per job (mirror coords, else geocode the address).
+        const pts: (string | null)[] = [];
+        for (const j of jobs) {
+          const jb = j._job as Record<string, unknown>;
+          let lat = jb?.service_lat as number | null, lon = jb?.service_lng as number | null;
+          if (lat == null || lon == null) {
+            const addr = [jb?.service_address, jb?.service_city, jb?.service_state, jb?.service_zip].map(v => str(v)).filter(Boolean).join(', ');
+            const g = addr ? await geocodeCached(db, addr) : null;
+            if (g) { lat = g.lat; lon = g.lon; }
+          }
+          pts.push(lat != null && lon != null ? `${lat},${lon}` : null);
+        }
+
+        // Sequential legs: yard→job1, job1→job2, … via one Distance Matrix call (diagonal).
+        const yardTok = yard ? `${yard.lat},${yard.lon}` : null;
+        const seq = [yardTok, ...pts];
+        const origins = seq.slice(0, -1).map(p => p || '0,0');
+        const dests = seq.slice(1).map(p => p || '0,0');
+        const dm = await driveMinutes(origins, dests);
+        const legs: (number | null)[] = seq.slice(0, -1).map((_, i) => (seq[i] && seq[i + 1]) ? dm[i][i] : null);
+
+        // Walk in local minutes. Job 1 is assumed on-time at its window start (yard→job1 leg → departYard).
+        const outJobs: Record<string, unknown>[] = [];
+        let cursor = jobs[0].start_minutes as number;
+        for (let i = 0; i < jobs.length; i++) {
+          const j = jobs[i];
+          const winStart = j.start_minutes as number;
+          const dur = (j.duration_minutes as number) || 0;
+          const winEnd = winStart + dur;
+          let arrival: number | null, status: string, mel = 0;
+          if (i === 0) { arrival = winStart; status = 'within'; }
+          else {
+            const leg = legs[i];
+            arrival = leg == null ? null : cursor + leg;
+            if (arrival == null) status = 'unknown';
+            else if (arrival > winEnd) { status = 'late'; mel = Math.round(arrival - winEnd); }
+            else if (arrival < winStart) { status = 'early'; mel = Math.round(winStart - arrival); }
+            else status = 'within';
+          }
+          const snapO = j._snap as Record<string, unknown> | null;
+          const cd = snapO && snapO.customer_display && typeof snapO.customer_display === 'object'
+            ? snapO.customer_display as Record<string, unknown> : null;
+          const jobO = j._job as Record<string, unknown>;
+          outJobs.push({
+            jobNo: str(jobO?.job_number),
+            customerName: cd ? str(cd.name) : str(snapO?.customer_display),
+            phone: cd ? str(cd.phone) : '',
+            town: str(jobO?.service_city) || parseTown(str(jobO?.service_address)),
+            windowStart: minsToClock(winStart), windowEnd: minsToClock(winEnd),
+            predictedEta: arrival == null ? null : minsToClock(arrival),
+            status, minutesEarlyLate: mel,
+          });
+          const base = i === 0 ? winStart : (arrival == null ? cursor : Math.max(arrival, winStart));
+          cursor = base + dur * mult;
+        }
+
+        const worst = outJobs.reduce((w, o) => (RANK[o.status as string] || 0) > (RANK[w.status as string] || 0) ? o : w, outJobs[0]);
+        routes.push({
+          routeName,
+          trucks: (trucksByRoute.get(routeName) || []).map(tk => ({ truckKey: tk })),
+          rollup: { status: worst.status, minutes: worst.minutesEarlyLate },
+          departYard: legs[0] != null ? minsToClock((jobs[0].start_minutes as number) - legs[0]!) : null,
+          guesstimate: true,
+          jobs: outJobs,
+        });
+      }
+
+      return json({ success: true, serviceDate, mode: 'daystart', durationMultiplier: mult, yardResolved: !!yard, routes });
     }
+
+    // check lands in the next slice.
+    if (action === 'check') return json({ success: false, error: 'not_implemented_yet', action }, 501);
 
     return json({ success: false, error: `unknown action: ${action}` }, 400);
   } catch (e) {
