@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.95.3 | 2026-07-27">
+  <meta name="crewlogic-version" content="v5.95.4 | 2026-07-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11569,40 +11569,43 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function _mjRepaintRouteCells() { document.querySelectorAll('[id^="mjRoute-"]').forEach(el => { el.style.background = _mjRouteBg(el.getAttribute('data-rcode') || '', el.getAttribute('data-day') || ''); }); }
     // Explain modal — how the green/red feasibility was determined (per-job breakdown), opened by clicking the route cell.
-    function _mjExplain(cellEl) {
-      const day = cellEl.getAttribute('data-day') || '', sd = _mjSD(day);
-      const rcode = cellEl.getAttribute('data-rcode') || '', rname = cellEl.getAttribute('data-rname') || rcode;
+    let _mjExplainCtx = null;
+    function _mjExplainBody(sd, rcode) {
       const e = (_mjEtaByDate[sd] || {})[rcode], pct = Math.round(_mjDial * 100);
-      let bodyHtml;
-      if (!e || !(e.jobs || []).length) {
-        bodyHtml = '<p style="color:var(--text-muted);font-size:13px;">No day-start prediction for this route — it has no jobs, or the stops could not be geocoded.</p>';
-      } else {
-        const rows = e.jobs.map((j, i) => {
-          const st = j.status, m = j.minutesEarlyLate || 0;
-          let tag = 'no ETA', col = 'var(--text-muted)';
-          if (st === 'late') { tag = '+' + m + ' min late'; col = '#ef4444'; }
-          else if (st === 'window') { tag = m + ' min after start'; col = '#eab308'; }
-          else if (st === 'ontime') { tag = 'on time'; col = '#00E785'; }
-          return '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px;">'
-            + '<div><b>' + (i + 1) + '. ' + mjEsc(j.customerName || ('Job ' + (j.jobNo || ''))) + '</b>' + (j.town ? ' <span style="color:var(--text-muted);">' + mjEsc(j.town) + '</span>' : '')
-            + '<br><span style="color:var(--text-muted);">window ' + mjEsc(j.windowStart || '') + '–' + mjEsc(j.windowEnd || '') + '</span></div>'
-            + '<div style="text-align:right;white-space:nowrap;"><b>' + mjEsc(j.predictedEta || '—') + '</b><br><span style="color:' + col + ';font-weight:700;">' + tag + '</span></div></div>';
-        }).join('');
-        const ws = e.rollup && e.rollup.status;
-        const verdict = ws === 'late' ? ('<span style="color:#ef4444;">Runs late by ' + (e.rollup.minutes || 0) + ' min</span>')
-          : ws === 'window' ? '<span style="color:#eab308;">Makes every window (some after the start)</span>'
-          : '<span style="color:#00E785;">On time — arrives by every start</span>';
-        bodyHtml = '<p style="font-size:12.5px;color:var(--text-secondary);margin:0 0 8px;">Verdict: <b>' + verdict + '</b> at <b>' + pct + '% finish speed</b>. Leave the yard by <b>' + mjEsc(e.departYard || '—') + '</b> to make the first stop.</p>' + rows
-          + '<p style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.5;">How this is figured: start at your yard, drive to each stop in order (map drive times), and assume each job takes its scheduled time × the finish-speed dial. <b style="color:#00E785;">Green</b> = arrives by the start time; <b style="color:#eab308;">yellow</b> = within the window but after the start; <b style="color:#ef4444;">red</b> = after the window closes. A day-start <b>guesstimate</b> — once trucks roll, live GPS takes over.</p>';
-      }
+      if (!e || !(e.jobs || []).length) return '<p style="color:var(--text-muted);font-size:13px;">No day-start prediction for this route — it has no jobs, or the stops could not be geocoded.</p>';
+      const rows = e.jobs.map((j, i) => {
+        const st = j.status, m = j.minutesEarlyLate || 0;
+        let tag = 'no ETA', col = 'var(--text-muted)';
+        if (st === 'late') { tag = '+' + m + ' min late'; col = '#ef4444'; }
+        else if (st === 'window') { tag = m + ' min after start'; col = '#eab308'; }
+        else if (st === 'ontime') { tag = 'on time'; col = '#00E785'; }
+        return '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px;">'
+          + '<div><b>' + (i + 1) + '. ' + mjEsc(j.customerName || ('Job ' + (j.jobNo || ''))) + '</b>' + (j.town ? ' <span style="color:var(--text-muted);">' + mjEsc(j.town) + '</span>' : '')
+          + '<br><span style="color:var(--text-muted);">window ' + mjEsc(j.windowStart || '') + '–' + mjEsc(j.windowEnd || '') + '</span></div>'
+          + '<div style="text-align:right;white-space:nowrap;"><b>' + mjEsc(j.predictedEta || '—') + '</b><br><span style="color:' + col + ';font-weight:700;">' + tag + '</span></div></div>';
+      }).join('');
+      const ws = e.rollup && e.rollup.status;
+      const verdict = ws === 'late' ? ('<span style="color:#ef4444;">Runs late by ' + (e.rollup.minutes || 0) + ' min</span>')
+        : ws === 'window' ? '<span style="color:#eab308;">Makes every window (some after the start)</span>'
+        : '<span style="color:#00E785;">On time — arrives by every start</span>';
+      return '<p style="font-size:12.5px;color:var(--text-secondary);margin:0 0 8px;">Verdict: <b>' + verdict + '</b> at <b>' + pct + '% finish speed</b>. Leave the yard by <b>' + mjEsc(e.departYard || '—') + '</b> to make the first stop.</p>' + rows
+        + '<p style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.5;">How this is figured: start at your yard, drive to each stop in order (map drive times), and assume each job takes its scheduled time × the finish-speed dial. Note: a stop that lands before its window OPENS just waits for the window, so upstream slack is absorbed there. <b style="color:#00E785;">Green</b> = arrives by the start time; <b style="color:#eab308;">yellow</b> = within the window but after the start; <b style="color:#ef4444;">red</b> = after the window closes. A day-start <b>guesstimate</b> — once trucks roll, live GPS takes over.</p>';
+    }
+    function _mjCloseExplain() { const m = document.getElementById('_mjExplainModal'); if (m) m.remove(); _mjExplainCtx = null; }
+    // Live-refresh the open explain modal when the dial re-computes its date (so the numbers move with the slider).
+    function _mjExplainMaybeRefresh(sd) { if (!_mjExplainCtx || _mjExplainCtx.sd !== sd) return; const bd = document.getElementById('_mjExplainBodyDiv'); if (bd) bd.innerHTML = _mjExplainBody(sd, _mjExplainCtx.rcode); }
+    function _mjExplain(cellEl) {
+      const sd = _mjSD(cellEl.getAttribute('data-day') || '');
+      const rcode = cellEl.getAttribute('data-rcode') || '', rname = cellEl.getAttribute('data-rname') || rcode;
+      _mjExplainCtx = { sd, rcode };
       const ov = document.createElement('div');
       ov.id = '_mjExplainModal';
       ov.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;padding:16px;';
-      ov.onclick = (ev) => { if (ev.target === ov) ov.remove(); };
+      ov.onclick = (ev) => { if (ev.target === ov) _mjCloseExplain(); };
       ov.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--btn-surface-border,#46596d);border-radius:14px;max-width:440px;width:100%;max-height:80vh;overflow:auto;padding:16px 18px;box-shadow:0 12px 40px rgba(0,0,0,.5);">'
         + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;"><h3 style="margin:0;font-size:16px;color:var(--text-primary);">' + mjEsc(rname) + ' — feasibility</h3>'
-        + '<button onclick="document.getElementById(\'_mjExplainModal\').remove()" style="flex:0 0 auto;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:15px;">×</button></div>'
-        + bodyHtml + '</div>';
+        + '<button onclick="_mjCloseExplain()" style="flex:0 0 auto;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:15px;">×</button></div>'
+        + '<div id="_mjExplainBodyDiv">' + _mjExplainBody(sd, rcode) + '</div></div>';
       document.body.appendChild(ov);
     }
     function _mjDialControlHTML() {
@@ -11627,6 +11630,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _mjEtaByDate[sd] = m;
       } catch (e) { console.error('[mj-eta] load', e); _mjEtaByDate[sd] = {}; }
       _mjRepaintRouteCells();
+      _mjExplainMaybeRefresh(sd); // if the explain modal is open for this date, update its numbers live with the dial
     }
     // Roster + assignments + live status for one day. Roster/live are global; assignments go under the date.
     async function _mjLoadAssignData(dayID) {
