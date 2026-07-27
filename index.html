@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.95.6 | 2026-07-27">
+  <meta name="crewlogic-version" content="v5.95.7 | 2026-07-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -23815,6 +23815,7 @@ RECYCLING & DONATION
         if (rec && rec.status === 'uploaded' && rec.supabasePath) {
           photoRoomPending[pendingIdx].driveUrl = rec.supabasePath;
           photoRoomPending[pendingIdx].uploadFailed = false;
+          photoRoomPending[pendingIdx].hiRes = null; // free the 1920px base64 — analyze now uses the signed URL (driveUrl); thumb falls back to base64(800)
           renderPhotoRoomThumbs();
           return;
         }
@@ -29526,7 +29527,7 @@ Please review the estimate below. If you have any questions or would like to adj
         const photoCount = area.photos.length;
         const thumbsHtml = area.photos.map((p, pi) =>
           '<div style="position:relative;flex-shrink:0;">' +
-            '<img src="' + p.base64 + '" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border);">' +
+            '<img src="' + (p.analysisBase64 || p.base64) + '" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border);">' +
             '<button onclick="vcRemovePhoto(' + idx + ',' + pi + ')" style="position:absolute;top:-4px;right:-4px;background:#ef4444;border:none;border-radius:50%;width:18px;height:18px;color:#fff;font-size:11px;cursor:pointer;line-height:18px;text-align:center;padding:0;">✕</button>' +
           '</div>'
         ).join('');
@@ -29584,10 +29585,11 @@ Please review the estimate below. If you have any questions or would like to adj
 
       for (const file of toProcess) {
         try {
-          const base64 = await ensureJpegBase64(file);
+          let base64 = await ensureJpegBase64(file);
           const compressed = await compressChargePhoto(base64);
-          const analysisImg = await compressForAnalysis(base64);
-          area.photos.push({ base64: compressed, hiRes: compressed, analysisBase64: analysisImg });
+          base64 = null; // free the full-res raw before the next photo (Android low-memory)
+          const analysisImg = await compressForAnalysis(compressed); // thumb from the 1920px compressed — no 2nd full-res decode of the original
+          area.photos.push({ hiRes: compressed, analysisBase64: analysisImg });
         } catch(e) {
           console.warn('Photo processing failed:', e);
         }
