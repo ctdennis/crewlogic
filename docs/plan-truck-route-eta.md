@@ -45,7 +45,7 @@ The single missing edge is **truck ↔ route**. Because crew↔route is already 
 6. **Display** the above in three surfaces (§8).
 
 **Explicitly deferred to a later phase (Owner decision #4):**
-- Multiple trucks on one route / one truck on multiple routes / a two-truck job. *(Schema below does not preclude it — join table — but no UI/logic for it in Phase 1.)*
+- *Splitting* one route's stops across trucks (each truck a different subset). **Co-located multi-truck — piggybacking + multi-truck jobs — is now Phase 1 (§5.2)** (schema already supports it — join table); only per-truck stop-splitting, which the Junkluggers patterns don't use, stays deferred. One truck on multiple routes is handled (each route is its own row).
 - Automated proactive **customer** comms (auto-text/email). Phase 1 shows a human the phone to call; it does not send.
 - Customer-facing live truck-tracking page.
 - **Richer duration / capacity model.** A learned service-time model: base ~1.5 hr to fill a *whole* truck empty→full (a capacity number, not a per-job duration), modified by access difficulty (garage / storage-unit / curbside faster; inside / third-floor / attic / basement slower), calibrated against real geofence dwell (arrive→leave). Feeds sharper down-the-line predictions and the **dump-detour** prediction (truck fills before the next job → unplanned facility stop, using the Vonigo-charged volume on the completed job + the next job's estimate item list). May borrow from the n8n route-optimization routines, but we intend to **avoid that level of complexity** — keep it lightweight. **Data gap:** access difficulty isn't a clean field today (buried in the estimate situation/item list) — encoding it needs a captured access signal.
@@ -98,6 +98,16 @@ Crew is entered in Vonigo the night before at some franchises, the morning-of at
 - Vonigo crew populated in advance **+** truck hard-set → truck↔crew known **before roll-out**.
 - Vonigo crew not in yet, or no truck set → resolves at **first arrival**: the geofence event sets/confirms the truck, and the job's Vonigo crew (whenever entered) completes the link.
 - No crew-on-truck roster in Phase 1 (deferred) — this is pure derivation.
+
+### 5.2 Multi-truck routes — co-located, one shared timeline (Phase 1)
+
+Two real patterns, both **co-located** (the trucks travel and arrive **together**), so neither splits a route's stops across trucks:
+- **Piggybacking** — two trucks, two drivers (one each, e.g. Carter in Truck 1 + Adyn in Truck 2) run the **same** route together. When one fills they keep collecting into the other, so they skip the transfer-station trip until **both** are full — more jobs, less unloading time. The route's crew still reads as the two drivers; they just have two trucks.
+- **Multi-truck job** — a large crew + multiple trucks sent to one route / big job (e.g. **sfrazza**).
+
+Handling: a route may carry **N trucks**, all sharing **one prediction timeline** — predict the route once (§6) and attach every assigned truck to it; **do not split stops across trucks.** Live ETA anchors on the **trailing** truck (most conservative). Assignment (§5) lets ops put more than one truck on a route; the geofence check is **set-based** (an arriving truck in the assigned set = match; one not in it = mismatch warning; none assigned = auto-set the arriving truck(s)).
+
+**Still deferred:** *splitting* one route's stops across trucks (each truck a different subset) — the Junkluggers patterns above don't do this. **Phase-2 capacity note:** piggybacked trucks are **pooled capacity** — the dump-detour model must treat them as combined volume before a transfer-station trip is needed (that's the whole point of piggybacking).
 
 **UI-state-preservation guardrail (mandatory, per house rule):** the board re-renders via `innerHTML`. The dropdown write must **not** blow away scroll position or an open dropdown. Update the one row/cell in place by stable id (reuse the known-good `_paintFacSave` / surgical-repaint patterns), never re-render the whole board on save.
 

@@ -46,12 +46,15 @@ Enum — job/route ETA `status`: `within` · `early` · `late` · `pending` (not
   ],
   "routes": [
     { "vonigoRouteId": "5982", "routeName": "Route 3 (MA3ALL)",
-      "assignment": { "truckKey": "name:Truck 3", "source": "manual", "assignedBy": "charles.dennis@junkluggers.com", "updatedAt": "2026-07-26T11:02:00Z" } }
+      "assignments": [
+        { "truckKey": "name:Truck 1", "source": "manual", "assignedBy": "charles.dennis@junkluggers.com", "updatedAt": "2026-07-26T11:02:00Z" },
+        { "truckKey": "name:Truck 2", "source": "manual", "assignedBy": "charles.dennis@junkluggers.com", "updatedAt": "2026-07-26T11:02:00Z" }
+      ] }
   ]
 }
 ```
 - `trucks` = the franchise roster (`franchise_trucks`, active first); `status` = live telematics state (`moving`/`parked`/`stale`/`offline`/`unknown`) for the live dot.
-- `routes` = today's routes from the dispatch board; `assignment` is `null` when nothing is set yet. A route with no row but a prior-day assignment returns that as `source: "default"` (pre-fill).
+- `routes` = today's routes from the dispatch board; `assignments` is an **array** — `[]` when nothing is set, one entry for a normal route, two-plus for a **piggyback / multi-truck job** (plan §5.2). A route with no rows but a prior-day assignment returns those as `source: "default"` (pre-fill).
 
 ---
 
@@ -61,14 +64,17 @@ Enum — job/route ETA `status`: `within` · `early` · `late` · `pending` (not
 ```json
 { "action": "set", "franchiseInternalID": "uuid", "serviceDate": "2026-07-26",
   "vonigoRouteId": "5982", "routeName": "Route 3 (MA3ALL)",
-  "truckKey": "name:Truck 3", "assignedBy": "charles.dennis@junkluggers.com" }
+  "truckKeys": ["name:Truck 1", "name:Truck 2"], "assignedBy": "charles.dennis@junkluggers.com" }
 ```
-- `truckKey: null` **clears** the assignment for that route+date.
-- Upserts one `route_truck_assignments` row, `source: "manual"`.
+- `truckKeys` is the **full set** of trucks for that route+date — one entry for a normal route, two-plus for a **piggyback / multi-truck job**. `truckKeys: []` **clears** the route.
+- **Replace-set** (one transaction): delete `route_truck_assignments` rows for `(franchise, date, route)` not in `truckKeys`, insert the new ones, `source: "manual"`. Idempotent.
 
 **Response 200**
 ```json
-{ "ok": true, "assignment": { "vonigoRouteId": "5982", "truckKey": "name:Truck 3", "source": "manual", "updatedAt": "2026-07-26T11:02:00Z" } }
+{ "ok": true, "assignments": [
+  { "vonigoRouteId": "5982", "truckKey": "name:Truck 1", "source": "manual", "updatedAt": "2026-07-26T11:02:00Z" },
+  { "vonigoRouteId": "5982", "truckKey": "name:Truck 2", "source": "manual", "updatedAt": "2026-07-26T11:02:00Z" }
+] }
 ```
 
 ---
@@ -93,7 +99,7 @@ Enum — job/route ETA `status`: `within` · `early` · `late` · `pending` (not
   "routes": [
     {
       "vonigoRouteId": "5982", "routeName": "Route 3 (MA3ALL)",
-      "truckKey": "name:Truck 3", "truckStatus": "moving",
+      "trucks": [ { "truckKey": "name:Truck 1", "status": "moving" }, { "truckKey": "name:Truck 2", "status": "moving" } ],
       "rollup": { "status": "late", "minutes": 18 },
       "jobs": [
         {
@@ -103,7 +109,7 @@ Enum — job/route ETA `status`: `within` · `early` · `late` · `pending` (not
           "windowStart": "2026-07-26T10:00:00Z", "windowEnd": "2026-07-26T12:00:00Z",
           "predictedEta": "2026-07-26T10:42:00Z",
           "status": "within", "minutesEarlyLate": 0,
-          "statement": "We anticipate Truck 3 to arrive at Job #12345 for Helen DiSilvia in Norwalk at 10:42 AM. This is within the scheduled appointment window.",
+          "statement": "We anticipate Trucks 1 & 2 to arrive at Job #12345 for Helen DiSilvia in Norwalk at 10:42 AM. This is within the scheduled appointment window.",
           "vonigoUrl": "https://.../workorder/12345"
         }
       ]
@@ -112,6 +118,7 @@ Enum — job/route ETA `status`: `within` · `early` · `late` · `pending` (not
 }
 ```
 - `rollup` = worst remaining stop on the route (drives the board chip).
+- **Co-located multi-truck** (piggyback / multi-truck job, plan §5.2): `trucks` carries all of them; the route has **one shared timeline** (stops are not split). The live prediction anchors on the **trailing** truck (most conservative); `statement` names the route's truck(s) ("Trucks 1 & 2 …").
 - `window*` = `[timeMin, timeMin + durationMin]` (§7). `statement` is the pre-rendered §1 sentence; when `status` is `late`/`early` it appends the minutes and (outside only) the "please contact customer at …" line. `phone` (E.164, for `tel:`) and `vonigoUrl` support the clickable popup.
 - Day-start mode is **truck-agnostic** — the feasibility walk is a property of the route (its jobs, windows, and geography from the parking origin), so it runs **with or without a truck assignment**. That's what makes future-date previews work: point `eta` at tomorrow's `serviceDate` and read each job's `predictedEta` + `status` to see how the day plays out. For an unassigned/future date, `truckKey`/`truckStatus` come back `null`. **Caveat:** a future board reflects only jobs booked **so far** (jobs keep booking up to same-day — ~30–40% land within 24h), so a preview firms up as the date approaches. Response carries `"mode": "daystart"` and each route a `"guesstimate": true` flag.
 
@@ -132,13 +139,13 @@ Called on a geofence arrival event (or polled). For each route with a first `job
   "serviceDate": "2026-07-26",
   "results": [
     { "vonigoRouteId": "5982", "routeName": "Route 3 (MA3ALL)",
-      "arrivedTruckKey": "name:Truck 1", "assignedTruckKey": "name:Truck 3",
-      "outcome": "mismatch", "warning": "Truck 1 arrived first on Route 3, but Truck 3 was assigned." }
+      "arrivedTruckKeys": ["name:Truck 5"], "assignedTruckKeys": ["name:Truck 1", "name:Truck 2"],
+      "outcome": "mismatch", "warning": "Truck 5 arrived first on Route 3, but Trucks 1 & 2 were assigned." }
   ]
 }
 ```
-- `outcome`: `match` (arrived == assigned, no-op) · `mismatch` (assignment exists & differs → **warning only, no write**) · `autoset` (no assignment existed → wrote `source: "inferred"` + warning to notify) · `noarrival` (no first arrival yet).
-- Reads `geofence_alerts` (`event_type='job_arrive'`, `vehicle_number` → `truckKey`). Never writes over a `manual`/`default` row.
+- `outcome` (**set-based**): `match` (every arrived truck is in the assigned set → no-op) · `mismatch` (a truck arrived that is **not** in the assigned set → **warning only, no write**) · `autoset` (no assignment existed → wrote the arrived truck(s), `source: "inferred"`, + notify) · `noarrival` (no first arrival yet).
+- Reads `geofence_alerts` (`event_type='job_arrive'`, `vehicle_number` → `truckKey`). Never writes over a `manual`/`default` row. A piggyback route where both assigned trucks arrive → `match`.
 
 ---
 
