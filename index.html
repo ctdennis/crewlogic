@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.93.1 | 2026-07-27">
+  <meta name="crewlogic-version" content="v5.93.2 | 2026-07-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11552,6 +11552,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _mjAssignMenuRoute = null, _mjAssignMenuDay = null, _mjAssignMenuName = '';
     function _mjSD(dayID) { const d = String(dayID || _mjBoardDayID || ''); return d.length === 8 ? d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6, 8) : ''; }
     function _mjTruckName(tk) { const r = _mjRoster.find(t => t.truckKey === tk); return r ? (r.name || tk.replace(/^(vin:|name:)/, '')) : tk.replace(/^(vin:|name:)/, ''); }
+    function _mjTruckChipLabel(tk) { const nm = _mjTruckName(tk); const m = nm.match(/(\d+)/); return m ? ('T' + m[1]) : (nm.length > 6 ? nm.slice(0, 6) : nm); } // "Truck 12" -> "T12"; keeps the cell compact for 6+ trucks
     // Load roster + assignments + live truck status for the shown day. Called from mjSelectDate BEFORE render.
     async function _mjLoadAssignData(dayID) {
       const sd = _mjSD(dayID);
@@ -11581,11 +11582,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const list = _mjAssign[String(routeId)] || [];
       if (!list.length) return '<span style="color:var(--text-muted);font-size:10px;">+ truck</span>';
       const multi = _mjMultiRouteTrucks();
+      // Compact chips (status dot + short label) that wrap — stays readable whether a route has 1 truck or 6.
       return list.map(t => {
         const live = _mjTruckLive[t.truckKey];
-        const dot = '<span title="' + (live ? mjEsc(live.label) : 'no live signal') + '" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + (live ? live.color : '#6e8194') + ';margin-right:3px;flex:0 0 auto;"></span>';
-        const star = multi.has(t.truckKey) ? '<span title="Also on another route today — day-start ETA assumes a fresh start">*</span>' : '';
-        return '<span style="display:flex;align-items:center;font-size:10px;color:var(--text-secondary);white-space:nowrap;line-height:1.25;">' + dot + mjEsc(_mjTruckName(t.truckKey)) + star + '</span>';
+        const color = live ? live.color : '#6e8194';
+        const tip = _mjTruckName(t.truckKey) + (live ? ' · ' + live.label : '') + (multi.has(t.truckKey) ? ' · also on another route today' : '');
+        const star = multi.has(t.truckKey) ? '<span style="color:#f59e0b;font-weight:700;">*</span>' : '';
+        return '<span title="' + mjEsc(tip) + '" style="display:inline-flex;align-items:center;gap:2px;font-size:10px;color:var(--text-secondary);white-space:nowrap;">'
+          + '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + color + ';flex:0 0 auto;"></span>'
+          + mjEsc(_mjTruckChipLabel(t.truckKey)) + star + '</span>';
       }).join('');
     }
     function _mjRepaintTruckCell(routeId) { const el = document.getElementById('mjTruck-' + String(routeId)); if (el) el.innerHTML = _mjTruckCellInner(routeId); }
@@ -11712,7 +11717,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         h += '<div style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);box-shadow:inset 4px 0 0 0 ' + rColor + ';display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:var(--text-secondary);border-right:1px solid var(--border);padding:0 2px 0 6px;text-align:center;word-break:break-all;">' + mjEsc(rc) + '</div>';
         // FW-59 Truck-assignment cell (sticky, second left column) — tap to open the multi-select. Painted in place on set.
         if (showTruck) { const _rkey = mjEsc(String(rt.id || ''));
-          h += '<div id="mjTruck-' + _rkey + '" data-day="' + mjEsc(String(data.dayID || '')) + '" data-rname="' + mjEsc(String(rt.name || rt.code || '')) + '" onclick="_mjTruckMenu(\'' + _rkey + '\',event)" title="Assign truck(s) to this route" style="position:sticky;left:' + LW + 'px;z-index:2;width:' + TW + 'px;flex:0 0 ' + TW + 'px;background:var(--bg-card);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:1px;padding:0 5px;cursor:pointer;overflow:hidden;">' + _mjTruckCellInner(String(rt.id || '')) + '</div>'; }
+          h += '<div id="mjTruck-' + _rkey + '" data-day="' + mjEsc(String(data.dayID || '')) + '" data-rname="' + mjEsc(String(rt.name || rt.code || '')) + '" onclick="_mjTruckMenu(\'' + _rkey + '\',event)" title="Assign truck(s) to this route" style="position:sticky;left:' + LW + 'px;z-index:2;width:' + TW + 'px;flex:0 0 ' + TW + 'px;background:var(--bg-card);border-right:1px solid var(--border);display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;align-content:center;justify-content:flex-start;gap:1px 5px;padding:0 5px;cursor:pointer;overflow:hidden;">' + _mjTruckCellInner(String(rt.id || '')) + '</div>'; }
         h += '<div' + dropAttrs + ' style="position:relative;width:' + trackW + 'px;">';
         // blocked-default base tint (whole lane not bookable unless an open band overrides) — light gray
         h += '<div style="position:absolute;inset:0;background:rgba(255,255,255,0.14);pointer-events:none;"></div>';
