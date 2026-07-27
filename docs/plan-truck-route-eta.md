@@ -109,6 +109,15 @@ Handling: a route may carry **N trucks**, all sharing **one prediction timeline*
 
 **Still deferred:** *splitting* one route's stops across trucks (each truck a different subset) — the Junkluggers patterns above don't do this. **Phase-2 capacity note:** piggybacked trucks are **pooled capacity** — the dump-detour model must treat them as combined volume before a transfer-station trip is needed (that's the whole point of piggybacking).
 
+### 5.3 One truck across sequential routes (combined-then-split)
+
+A truck can run more than one route in a day. Real case: a large crew + two trucks share a big first job on **Route A** (~4 h), then split — **Truck 1 → Route B**, **Truck 2 → Route C** — for the afternoon. In Vonigo these are distinct routes (A/B/C); the trucks map Truck 1→A+B, Truck 2→A+C.
+
+- **Storage + assignment already handle it.** The per-route replace-set (§5) is independent per route, so the same truck belongs to multiple routes' sets (Truck 1 on A and on B are separate rows). The multi-select must therefore **NOT** lock a truck to a single route.
+- **Day-start prediction (Phase 1) flags it, doesn't chain it.** The per-route walk from the yard is right for a truck's *first* route but optimistic for its *second* (Route B doesn't start fresh from the yard — Truck 1 is coming off A's 4-hour job). Phase 1 **detects a truck assigned to 2+ routes and flags the affected routes** ("Truck 1 also on Route A — assumes a fresh start") rather than silently mispredicting.
+- **Live prediction handles it for free.** GPS-anchored, so Truck 1's afternoon Route-B ETA already reflects it still being at Route A. The gap is only in the pre-roll day-start view.
+- **Phase-2 refinement — per-truck DUTY chaining:** model the prediction unit as each truck's *ordered job list across all its routes* (yard → Route A's jobs → Route B's jobs). This unifies every case — single, piggyback (shared duty), sequential (chained duty) — and predicts the afternoon routes from where the morning actually finished.
+
 **UI-state-preservation guardrail (mandatory, per house rule):** the board re-renders via `innerHTML`. The dropdown write must **not** blow away scroll position or an open dropdown. Update the one row/cell in place by stable id (reuse the known-good `_paintFacSave` / surgical-repaint patterns), never re-render the whole board on save.
 
 ## 6. Prediction engine — two modes (Owner decision #2 — time + late)
