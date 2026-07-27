@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.94.1 | 2026-07-27">
+  <meta name="crewlogic-version" content="v5.94.2 | 2026-07-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11557,15 +11557,49 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _mjSD(dayID) { const d = String(dayID || _mjBoardDayID || ''); return d.length === 8 ? d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6, 8) : ''; }
     function _mjTruckName(tk) { const r = _mjRoster.find(t => t.truckKey === tk); return r ? (r.name || tk.replace(/^(vin:|name:)/, '')) : tk.replace(/^(vin:|name:)/, ''); }
     function _mjTruckChipLabel(tk) { const nm = _mjTruckName(tk); const m = nm.match(/(\d+)/); return m ? ('T' + m[1]) : (nm.length > 6 ? nm.slice(0, 6) : nm); } // "Truck 12" -> "T12"
-    // Feasibility pill: green ✓ = will make its windows (on time OR early — early just means slack); red +N = N min late. Unknown → none.
-    function _mjFeasPill(routeCode, dayID) {
-      const e = (_mjEtaByDate[_mjSD(dayID)] || {})[routeCode]; if (!e) return '';
-      const s = e.status, m = e.minutes || 0;
-      let bg, fg = '#0a0f14', txt, tip;
-      if (s === 'late') { bg = '#ef4444'; fg = '#fff'; txt = '+' + m; tip = m + ' min late — outside the window'; }
-      else if (s === 'within' || s === 'early') { bg = '#00E785'; txt = '✓'; tip = s === 'early' ? ('on time · ' + m + ' min of slack') : 'on time'; }
-      else return ''; // unknown — show nothing rather than a confusing '?'
-      return '<span title="' + mjEsc(tip) + ' · day-start guesstimate" style="display:inline-flex;align-items:center;justify-content:center;min-width:15px;height:13px;padding:0 3px;border-radius:4px;background:' + bg + ';color:' + fg + ';font-size:9px;font-weight:800;flex:0 0 auto;">' + txt + '</span>';
+    // Day-start feasibility colors the ROUTE-CODE cell background: green = makes its windows, red = runs late.
+    function _mjRouteBg(routeCode, dayID) {
+      const e = (_mjEtaByDate[_mjSD(dayID)] || {})[routeCode];
+      const s = e && e.rollup ? e.rollup.status : null;
+      if (s === 'late') return 'rgba(239,68,68,0.42)';
+      if (s === 'within' || s === 'early') return 'rgba(0,231,133,0.34)';
+      return 'var(--bg-card)';
+    }
+    function _mjRepaintRouteCells() { document.querySelectorAll('[id^="mjRoute-"]').forEach(el => { el.style.background = _mjRouteBg(el.getAttribute('data-rcode') || '', el.getAttribute('data-day') || ''); }); }
+    // Explain modal — how the green/red feasibility was determined (per-job breakdown), opened by clicking the route cell.
+    function _mjExplain(cellEl) {
+      const day = cellEl.getAttribute('data-day') || '', sd = _mjSD(day);
+      const rcode = cellEl.getAttribute('data-rcode') || '', rname = cellEl.getAttribute('data-rname') || rcode;
+      const e = (_mjEtaByDate[sd] || {})[rcode], pct = Math.round(_mjDial * 100);
+      let bodyHtml;
+      if (!e || !(e.jobs || []).length) {
+        bodyHtml = '<p style="color:var(--text-muted);font-size:13px;">No day-start prediction for this route — it has no jobs, or the stops could not be geocoded.</p>';
+      } else {
+        const rows = e.jobs.map((j, i) => {
+          const st = j.status, m = j.minutesEarlyLate || 0;
+          let tag = 'no ETA', col = 'var(--text-muted)';
+          if (st === 'late') { tag = '+' + m + ' min late'; col = '#ef4444'; }
+          else if (st === 'early') { tag = m + ' min early'; col = '#00E785'; }
+          else if (st === 'within') { tag = 'on time'; col = '#00E785'; }
+          return '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px;">'
+            + '<div><b>' + (i + 1) + '. ' + mjEsc(j.customerName || ('Job ' + (j.jobNo || ''))) + '</b>' + (j.town ? ' <span style="color:var(--text-muted);">' + mjEsc(j.town) + '</span>' : '')
+            + '<br><span style="color:var(--text-muted);">window ' + mjEsc(j.windowStart || '') + '–' + mjEsc(j.windowEnd || '') + '</span></div>'
+            + '<div style="text-align:right;white-space:nowrap;"><b>' + mjEsc(j.predictedEta || '—') + '</b><br><span style="color:' + col + ';font-weight:700;">' + tag + '</span></div></div>';
+        }).join('');
+        const late = e.rollup && e.rollup.status === 'late';
+        const verdict = late ? ('<span style="color:#ef4444;">Runs late by ' + (e.rollup.minutes || 0) + ' min</span>') : '<span style="color:#00E785;">Makes every window</span>';
+        bodyHtml = '<p style="font-size:12.5px;color:var(--text-secondary);margin:0 0 8px;">Verdict: <b>' + verdict + '</b> at <b>' + pct + '% finish speed</b>. Leave the yard by <b>' + mjEsc(e.departYard || '—') + '</b> to make the first stop.</p>' + rows
+          + '<p style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.5;">How this is figured: start at your yard, drive to each stop in order (map drive times), and assume each job takes its scheduled time × the finish-speed dial. The route is red if any stop is predicted to arrive after its window closes. A day-start <b>guesstimate</b> — once trucks roll, live GPS takes over.</p>';
+      }
+      const ov = document.createElement('div');
+      ov.id = '_mjExplainModal';
+      ov.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;padding:16px;';
+      ov.onclick = (ev) => { if (ev.target === ov) ov.remove(); };
+      ov.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--btn-surface-border,#46596d);border-radius:14px;max-width:440px;width:100%;max-height:80vh;overflow:auto;padding:16px 18px;box-shadow:0 12px 40px rgba(0,0,0,.5);">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;"><h3 style="margin:0;font-size:16px;color:var(--text-primary);">' + mjEsc(rname) + ' — feasibility</h3>'
+        + '<button onclick="document.getElementById(\'_mjExplainModal\').remove()" style="flex:0 0 auto;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:15px;">×</button></div>'
+        + bodyHtml + '</div>';
+      document.body.appendChild(ov);
     }
     function _mjDialControlHTML() {
       const opts = [60, 70, 80, 90, 100, 110, 120, 130, 140].map(p => '<option value="' + (p / 100) + '"' + (Math.round(_mjDial * 100) === p ? ' selected' : '') + '>' + p + '%</option>').join('');
@@ -11585,10 +11619,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       try {
         const r = await edgeFunctionCall('crewlogic-assignments', { action: 'eta', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: sd, durationMultiplier: _mjDial, routes: payload });
         const m = {};
-        if (r && r.success) (r.routes || []).forEach(rt => { if (rt.routeCode) m[rt.routeCode] = rt.rollup || { status: 'unknown', minutes: 0 }; });
+        if (r && r.success) (r.routes || []).forEach(rt => { if (rt.routeCode) m[rt.routeCode] = { rollup: rt.rollup || { status: 'unknown', minutes: 0 }, jobs: rt.jobs || [], departYard: rt.departYard || '', routeName: rt.routeName || rt.routeCode }; });
         _mjEtaByDate[sd] = m;
       } catch (e) { console.error('[mj-eta] load', e); _mjEtaByDate[sd] = {}; }
-      _mjRepaintAllTruckCells();
+      _mjRepaintRouteCells();
     }
     // Roster + assignments + live status for one day. Roster/live are global; assignments go under the date.
     async function _mjLoadAssignData(dayID) {
@@ -11618,12 +11652,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function _mjTruckCellInner(dayID, routeId, routeCode) {
       const sd = _mjSD(dayID);
-      const pill = _mjFeasPill(routeCode, dayID);
       const list = (_mjAssignByDate[sd] || {})[String(routeId)] || [];
-      if (!list.length) return pill + '<span style="color:var(--text-muted);font-size:10px;">+ truck</span>';
+      if (!list.length) return '<span style="color:var(--text-muted);font-size:10px;">+ truck</span>';
       const multi = _mjMultiRouteTrucks(dayID);
       // Compact chips (status dot + short label) that wrap — readable whether a route has 1 truck or 6.
-      const chips = list.map(t => {
+      return list.map(t => {
         const live = _mjTruckLive[t.truckKey];
         const color = live ? live.color : '#6e8194';
         const tip = _mjTruckName(t.truckKey) + (live ? ' · ' + live.label : '') + (multi.has(t.truckKey) ? ' · also on another route that day' : '');
@@ -11632,7 +11665,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + color + ';flex:0 0 auto;"></span>'
           + mjEsc(_mjTruckChipLabel(t.truckKey)) + star + '</span>';
       }).join('');
-      return pill + chips;
     }
     // Repaint every visible truck cell in place (no board re-render) from data-day/data-rid/data-rcode on each cell.
     function _mjRepaintAllTruckCells() { document.querySelectorAll('[id^="mjTruck-"]').forEach(el => { el.innerHTML = _mjTruckCellInner(el.getAttribute('data-day') || '', el.getAttribute('data-rid') || '', el.getAttribute('data-rcode') || ''); }); }
@@ -11752,7 +11784,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           : '';
         h += '<div style="display:flex;height:' + ROW + 'px;border-bottom:1px solid var(--border);">';
         const rColor = mjRouteColor(rc); // route color as a THIN LEFT BAR (matches the map house border + the pricing-zone stripe motif) — not a full fill (owner 2026-07-24: "Partridge Family bus")
-        h += '<div style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);box-shadow:inset 4px 0 0 0 ' + rColor + ';display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:var(--text-secondary);border-right:1px solid var(--border);padding:0 2px 0 6px;text-align:center;word-break:break-all;">' + mjEsc(rc) + '</div>';
+        const _rcDay = String(data.dayID || ''), _rcId = String(rt.id || '');
+        const _rcAttrs = showTruck ? (' id="mjRoute-' + mjEsc(_rcDay) + '-' + mjEsc(_rcId) + '" data-day="' + mjEsc(_rcDay) + '" data-rid="' + mjEsc(_rcId) + '" data-rcode="' + mjEsc(String(rt.code || '')) + '" data-rname="' + mjEsc(String(rt.name || rt.code || '')) + '" onclick="_mjExplain(this)"') : '';
+        const _rcBg = showTruck ? _mjRouteBg(String(rt.code || ''), _rcDay) : 'var(--bg-card)';
+        h += '<div' + _rcAttrs + ' title="' + (showTruck ? 'Tap for the day-start feasibility breakdown' : '') + '" style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:' + _rcBg + ';box-shadow:inset 4px 0 0 0 ' + rColor + ';display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:var(--text-secondary);border-right:1px solid var(--border);padding:0 2px 0 6px;text-align:center;word-break:break-all;' + (showTruck ? 'cursor:pointer;' : '') + '">' + mjEsc(rc) + '</div>';
         // FW-59 Truck-assignment cell (sticky, second left column) — tap to open the multi-select. Painted in place on set.
         if (showTruck) { const _rid = mjEsc(String(rt.id || '')), _rday = mjEsc(String(data.dayID || ''));
           h += '<div id="mjTruck-' + _rday + '-' + _rid + '" data-day="' + _rday + '" data-rid="' + _rid + '" data-rname="' + mjEsc(String(rt.name || rt.code || '')) + '" data-rcode="' + mjEsc(String(rt.code || '')) + '" onclick="_mjTruckMenu(this,event)" title="Assign truck(s) to this route" style="position:sticky;left:' + LW + 'px;z-index:2;width:' + TW + 'px;flex:0 0 ' + TW + 'px;background:var(--bg-card);border-right:1px solid var(--border);display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;align-content:center;justify-content:flex-start;gap:1px 5px;padding:0 5px;cursor:pointer;overflow:hidden;">' + _mjTruckCellInner(String(data.dayID || ''), String(rt.id || ''), String(rt.code || '')) + '</div>'; }
