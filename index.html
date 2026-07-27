@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.95.5 | 2026-07-27">
+  <meta name="crewlogic-version" content="v5.95.6 | 2026-07-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -17894,6 +17894,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // consumer — capture thumb, stored upload, AI analysis — sees the same upright image.
     // Falls back to a plain <img> (browsers apply EXIF orientation to <img> by spec default).
     async function compressOriented(base64, maxW, maxH, quality) {
+      _photoMemLog('compress→' + maxW + 'w in=' + Math.round((base64 && base64.length || 0) / 1024) + 'KB'); // TEMP OOM instrumentation
       const toCanvas = (srcW, srcH, paint) => {
         let w = srcW, h = srcH;
         const scale = Math.min(1, maxW / w, maxH / h);
@@ -17913,6 +17914,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image', resizeWidth: maxW, resizeQuality: 'high' });
         const out = toCanvas(bitmap.width, bitmap.height, (ctx, dw, dh) => ctx.drawImage(bitmap, 0, 0, dw, dh));
         if (bitmap.close) bitmap.close();
+        _photoMemLog('compressed ' + maxW + 'w out=' + Math.round((out && out.length || 0) / 1024) + 'KB'); // TEMP OOM instrumentation
         return out;
       } catch (e) {
         return new Promise((resolve) => {
@@ -17932,6 +17934,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     async function compressChargePhoto(base64) {
       return compressOriented(base64, 1920, 1440, 0.85);
+    }
+
+    // ── TEMP memory instrumentation for the Android photo-OOM investigation (remove once resolved) ──────
+    // Logs the JS heap (Chrome/Android expose performance.memory) + a tiny on-screen readout a tester can
+    // screenshot. NOTE: only sees the JS heap; native image/decode memory is invisible here.
+    function _photoMemLog(label) {
+      let heapTxt = '';
+      try { const m = performance.memory; if (m) heapTxt = Math.round(m.usedJSHeapSize / 1048576) + '/' + Math.round(m.jsHeapSizeLimit / 1048576) + 'MB'; } catch (e) {}
+      try { console.log('[photomem] ' + label + (heapTxt ? ' · heap ' + heapTxt : '')); } catch (e) {}
+      try {
+        let el = document.getElementById('_photoMemHud');
+        if (!el) { el = document.createElement('div'); el.id = '_photoMemHud'; el.style.cssText = 'position:fixed;bottom:6px;left:6px;z-index:100000;background:rgba(0,0,0,.72);color:#7fe3c0;padding:3px 8px;border-radius:6px;font:10px/1.3 monospace;pointer-events:none;max-width:78vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'; document.body.appendChild(el); }
+        el.textContent = '📷 ' + label + (heapTxt ? ' · ' + heapTxt : '');
+        clearTimeout(el._hideT); el._hideT = setTimeout(() => { if (el.parentNode) el.remove(); }, 20000);
+      } catch (e) {}
     }
 
     // Legacy entry point — now delegates to IndexedDB queue
