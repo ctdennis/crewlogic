@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.92.0 | 2026-07-25">
+  <meta name="crewlogic-version" content="v5.93.0 | 2026-07-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11491,6 +11491,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _mjHistory.push({ role: 'user', text: 'Show all jobs on ' + dayLabel });
       _mjHistory.push({ role: 'assistant', text: 'Jobs on ' + dayLabel + ' by route — ' + (memParts.join(' | ') || 'none') });
       if (_mjHistory.length > 8) _mjHistory = _mjHistory.slice(-8);
+      await _mjLoadAssignData(); // FW-59: roster + truck↔route assignments + live status, so the board renders with the Truck column filled
       mjRenderBoard({ dayID, dayLabel, routes: routesData, jobs, boardStartMin: data.boardStartMin, boardEndMin: data.boardEndMin });
     }
     // Schedule-board view (route lanes × time, colored job blocks) — CrewLogic take on the Vonigo
@@ -11544,6 +11545,91 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _mjBoardDayID = ''; // the day tab currently shown — passed as the voice/text command's default working day
     let _mjMoveJob = null;       // set while in tap-to-place "move mode" on the mobile board
     let _mjLastBoardData = null;  // last MJ board render data, so we can re-render when entering/exiting move mode
+    // ── FW-59 Truck↔route assignment (multi-select per route) — wired to crewlogic-assignments ────────
+    let _mjRoster = [];        // [{truckKey,name,number,active}] from crewlogic-assignments get
+    let _mjAssign = {};        // routeId(string) -> [{truckKey,source}]
+    let _mjTruckLive = {};     // truck_key -> {color,label}
+    let _mjAssignMenuRoute = null;
+    function _mjServiceDate() { const d = _mjBoardDayID || ''; return d.length === 8 ? d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6, 8) : ''; }
+    function _mjTruckName(tk) { const r = _mjRoster.find(t => t.truckKey === tk); return r ? (r.name || tk.replace(/^(vin:|name:)/, '')) : tk.replace(/^(vin:|name:)/, ''); }
+    // Load roster + assignments + live truck status for the shown day. Called from mjSelectDate BEFORE render.
+    async function _mjLoadAssignData() {
+      const sd = _mjServiceDate();
+      if (!sd || !currentUser.franchiseInternalID) { _mjRoster = []; _mjAssign = {}; _mjTruckLive = {}; return; }
+      try {
+        const [a, trucks] = await Promise.all([
+          edgeFunctionCall('crewlogic-assignments', { action: 'get', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: sd }),
+          getTruckLocations().catch(() => [])
+        ]);
+        _mjRoster = (a && a.success && a.trucks) || [];
+        _mjAssign = {};
+        if (a && a.success) (a.assignments || []).forEach(row => { _mjAssign[String(row.vonigoRouteId)] = row.trucks || []; });
+        _mjTruckLive = {};
+        (trucks || []).forEach(t => {
+          const c = _truckStateColor(t), lbl = _truckStatusLabel(t);
+          if (t.vin) _mjTruckLive['vin:' + t.vin] = { color: c, label: lbl };
+          if (t.name) _mjTruckLive['name:' + t.name] = { color: c, label: lbl };
+        });
+      } catch (e) { console.error('[mj-assign] load', e); }
+    }
+    // Trucks on 2+ routes today (combined-then-split — plan §5.3): flag so the day-start ETA caveat is visible.
+    function _mjMultiRouteTrucks() {
+      const c = {}; Object.values(_mjAssign).forEach(list => (list || []).forEach(t => { c[t.truckKey] = (c[t.truckKey] || 0) + 1; }));
+      return new Set(Object.keys(c).filter(k => c[k] > 1));
+    }
+    function _mjTruckCellInner(routeId) {
+      const list = _mjAssign[String(routeId)] || [];
+      if (!list.length) return '<span style="color:var(--text-muted);font-size:10px;">+ truck</span>';
+      const multi = _mjMultiRouteTrucks();
+      return list.map(t => {
+        const live = _mjTruckLive[t.truckKey];
+        const dot = '<span title="' + (live ? mjEsc(live.label) : 'no live signal') + '" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + (live ? live.color : '#6e8194') + ';margin-right:3px;flex:0 0 auto;"></span>';
+        const star = multi.has(t.truckKey) ? '<span title="Also on another route today — day-start ETA assumes a fresh start">*</span>' : '';
+        return '<span style="display:flex;align-items:center;font-size:10px;color:var(--text-secondary);white-space:nowrap;line-height:1.25;">' + dot + mjEsc(_mjTruckName(t.truckKey)) + star + '</span>';
+      }).join('');
+    }
+    function _mjRepaintTruckCell(routeId) { const el = document.getElementById('mjTruck-' + String(routeId)); if (el) el.innerHTML = _mjTruckCellInner(routeId); }
+    function _mjRepaintAllTruckCells() { (_mjLastBoardData && (_mjLastBoardData.routes || [])).forEach(r => _mjRepaintTruckCell(r.id || '')); }
+    function _mjCloseTruckMenu() { const m = document.getElementById('_mjTruckMenu'); if (m) m.remove(); _mjAssignMenuRoute = null; document.removeEventListener('click', _mjMenuOutside); }
+    function _mjMenuOutside(e) { const m = document.getElementById('_mjTruckMenu'); if (m && !m.contains(e.target)) _mjCloseTruckMenu(); }
+    function _mjTruckMenu(routeId, ev) {
+      if (ev) ev.stopPropagation();
+      _mjCloseTruckMenu();
+      _mjAssignMenuRoute = String(routeId);
+      const cur = new Set((_mjAssign[String(routeId)] || []).map(t => t.truckKey));
+      const rows = (_mjRoster || []).map(t =>
+        '<label style="display:flex;align-items:center;gap:7px;padding:5px 8px;font-size:12.5px;color:var(--text-primary);cursor:pointer;">'
+        + '<input type="checkbox" value="' + mjEsc(t.truckKey) + '"' + (cur.has(t.truckKey) ? ' checked' : '') + ' style="width:15px;height:15px;flex:0 0 auto;">'
+        + mjEsc(t.name || t.truckKey) + '</label>').join('');
+      const menu = document.createElement('div');
+      menu.id = '_mjTruckMenu';
+      menu.style.cssText = 'position:fixed;z-index:9999;background:var(--bg-card);border:1px solid var(--btn-surface-border,#46596d);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.45);padding:6px;min-width:180px;max-height:60vh;overflow:auto;';
+      menu.innerHTML = (rows || '<div style="padding:8px;font-size:12px;color:var(--text-muted);">No trucks in the roster.</div>')
+        + '<div style="display:flex;gap:6px;padding:7px 6px 3px;border-top:1px solid var(--border);margin-top:4px;">'
+        + '<button onclick="_mjApplyTrucks()" style="flex:1;padding:6px;background:var(--accent-green,#00E785);border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;">Apply</button>'
+        + '<button onclick="_mjCloseTruckMenu()" style="flex:0 0 auto;padding:6px 10px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:7px;font-size:12px;cursor:pointer;">Cancel</button></div>';
+      document.body.appendChild(menu);
+      const cell = document.getElementById('mjTruck-' + String(routeId));
+      const rect = cell ? cell.getBoundingClientRect() : { left: 40, bottom: 120 };
+      menu.style.left = Math.max(6, Math.min(rect.left, window.innerWidth - 192)) + 'px';
+      menu.style.top = Math.min(rect.bottom + 4, window.innerHeight - 80) + 'px';
+      setTimeout(() => document.addEventListener('click', _mjMenuOutside), 0);
+    }
+    async function _mjApplyTrucks() {
+      const routeId = _mjAssignMenuRoute; if (routeId == null) return;
+      const menu = document.getElementById('_mjTruckMenu');
+      const truckKeys = menu ? Array.from(menu.querySelectorAll('input:checked')).map(i => i.value) : [];
+      const rt = (_mjLastBoardData && (_mjLastBoardData.routes || []).find(r => String(r.id || '') === String(routeId))) || null;
+      const routeName = rt ? (rt.name || rt.code || '') : '';
+      _mjCloseTruckMenu();
+      const res = await edgeFunctionCall('crewlogic-assignments', { action: 'set', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: _mjServiceDate(), vonigoRouteId: String(routeId), routeName, truckKeys, assignedBy: currentUser.email || '' });
+      if (res && res.success) {
+        _mjAssign[String(routeId)] = truckKeys.map(tk => ({ truckKey: tk, source: 'manual' }));
+        _mjRepaintAllTruckCells(); // multi-route flags can change across rows — repaint every cell in place, no board re-render
+      } else {
+        alert('Could not save the truck assignment: ' + ((res && res.error) || 'unknown error'));
+      }
+    }
     function mjRenderBoard(data, container, axis) {
       const r = container || document.getElementById('mjResult'); const jobs = data.jobs || [];
       if (!container) _mjLastBoardData = data; // remember for move-mode re-render (enter/exit tap-to-place)
@@ -11561,7 +11647,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Key by woID — UNIQUE per appointment. Vonigo "copy to another day" makes several appointments that
       // SHARE a jobID (each a distinct WorkOrder), so a jobID key would collide and resize/duration the wrong one.
       jobs.forEach(j => { const k = j.woID || j.jobID; if (k) { j._day = data.dayID; _mjBoardByID[String(k)] = j; } });
-      const PXH = 66, LW = 52, ROW = 38;
+      const PXH = 66, LW = 52, TW = 76, ROW = 38; // TW = the FW-59 Truck-assignment sticky column
+      const showTruck = !dnd, TWc = showTruck ? TW : 0; // Truck column: single Manage Jobs board only, not the two-board drag dashboard
       // Axis (originH/endH) precedence: (1) explicit axis param (two boards sharing ONE scale for cross-day
       // drag), (2) the franchise's route hours from the API (data.boardStartMin/EndMin — the bookable
       // window), (3) derive from this board's own jobs + open slots.
@@ -11598,10 +11685,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:rgba(255,255,255,0.14);"></span>Blocked / closed</span>'
         + '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:#45b6e6;"></span>Job</span></div>';
       h += '<div class="mj-scroll" style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);-webkit-overflow-scrolling:touch;">';
-      h += '<div style="position:relative;min-width:' + (LW + trackW) + 'px;">';
+      h += '<div style="position:relative;min-width:' + (LW + TWc + trackW) + 'px;">';
       // time header
       h += '<div style="display:flex;height:20px;border-bottom:1px solid var(--border);">';
       h += '<div style="position:sticky;left:0;z-index:3;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);"></div>';
+      if (showTruck) h += '<div style="position:sticky;left:' + LW + 'px;z-index:3;width:' + TW + 'px;flex:0 0 ' + TW + 'px;background:var(--bg-card);border-right:1px solid var(--border);display:flex;align-items:center;padding:0 5px;font-size:9px;font-weight:700;color:var(--text-muted);letter-spacing:.3px;">TRUCK</div>';
       h += '<div style="position:relative;width:' + trackW + 'px;background:' + grid + ';">';
       for (let hh = originH; hh < endH; hh++) h += '<div style="position:absolute;left:' + ((hh - originH) * PXH) + 'px;top:4px;font-size:9.5px;color:var(--text-muted);background:var(--bg-card);padding:0 3px;">' + mjEsc(mjHourLabel(hh)) + '</div>';
       h += '</div></div>';
@@ -11618,6 +11706,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         h += '<div style="display:flex;height:' + ROW + 'px;border-bottom:1px solid var(--border);">';
         const rColor = mjRouteColor(rc); // route color as a THIN LEFT BAR (matches the map house border + the pricing-zone stripe motif) — not a full fill (owner 2026-07-24: "Partridge Family bus")
         h += '<div style="position:sticky;left:0;z-index:2;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);box-shadow:inset 4px 0 0 0 ' + rColor + ';display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:var(--text-secondary);border-right:1px solid var(--border);padding:0 2px 0 6px;text-align:center;word-break:break-all;">' + mjEsc(rc) + '</div>';
+        // FW-59 Truck-assignment cell (sticky, second left column) — tap to open the multi-select. Painted in place on set.
+        if (showTruck) { const _rkey = mjEsc(String(rt.id || ''));
+          h += '<div id="mjTruck-' + _rkey + '" onclick="_mjTruckMenu(\'' + _rkey + '\',event)" title="Assign truck(s) to this route" style="position:sticky;left:' + LW + 'px;z-index:2;width:' + TW + 'px;flex:0 0 ' + TW + 'px;background:var(--bg-card);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:1px;padding:0 5px;cursor:pointer;overflow:hidden;">' + _mjTruckCellInner(String(rt.id || '')) + '</div>'; }
         h += '<div' + dropAttrs + ' style="position:relative;width:' + trackW + 'px;">';
         // blocked-default base tint (whole lane not bookable unless an open band overrides) — light gray
         h += '<div style="position:absolute;inset:0;background:rgba(255,255,255,0.14);pointer-events:none;"></div>';
@@ -11664,7 +11755,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (data.dayID && String(data.dayID) === _np.dayID) {
         const nowMin = _np.minutesOfDay;
         if (nowMin >= startMin && nowMin <= endH * 60) {
-          const nx = LW + ((nowMin - startMin) / 60) * PXH, laneH = ROW * routesData.length;
+          const nx = LW + TWc + ((nowMin - startMin) / 60) * PXH, laneH = ROW * routesData.length;
           nowX = nx;
           h += '<div title="Now" style="position:absolute;left:' + (nx - 3) + 'px;top:12px;width:8px;height:8px;border-radius:50%;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
           h += '<div title="Now" style="position:absolute;left:' + nx + 'px;top:20px;width:2px;height:' + laneH + 'px;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
