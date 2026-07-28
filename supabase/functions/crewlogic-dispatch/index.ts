@@ -154,7 +154,7 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
   const ds = dayEpoch(dayID), de = ds + 86400;
   const r = await vpost(token, '/data/WorkOrders/', { franchiseID, pageNo: '1', pageSize: '200', isCompleteObject: 'true', dateMode: '3', dateStart: String(ds), dateEnd: String(de) });
   const gf = (f: any[], id: number) => (f.find((x: any) => x.fieldID === id) || {});
-  let jobs = (r.WorkOrders || []).map((w: any) => {
+  const jobsAll = (r.WorkOrders || []).map((w: any) => {
     const f = w.Fields || [], rel = w.Relations || [];
     const jobRel = rel.find((x: any) => x.relationType === 'job'); const routeRel = rel.find((x: any) => x.relationType === 'route');
     const addr = gf(f, F.address).fieldValue || '';
@@ -172,7 +172,12 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
     // crew-member record, so the card can't distinguish them yet.
     const crew = rel.filter((x: any) => x.relationType === 'crew').map((c: any) => String(c.name || '').trim()).filter(Boolean);
     return { jobID: jobRel ? String(jobRel.objectID) : null, crew, woID: String(w.objectID), route: rname, routeCode: shortRoute(rname), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: (clientRel && clientRel.name) || gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), labelDone, labelOpt: gf(f, F.label).optionID || 0, apptCount: parseInt(String(w.countWorkOrders ?? '0'), 10) || 0, bookedOnline: /online booking/i.test(gf(f, F.summary).fieldValue || ''), dateCreated: String(w.dateCreated || ''), dateService: String(w.dateService || ''), zoneID: zoneRel ? String(zoneRel.objectID) : '', zoneName: zoneRel ? zoneRel.name : '', lat: null as number | null, lon: null as number | null };
-  }).filter((j: any) => j.jobID
+  });
+  // Day-wide CANCELLED count — these jobs are hidden from the board (below), but the dispatch header
+  // surfaces "how many cancelled today". Same predicate as the hide filter: optionID 162 OR text "cancel".
+  const cancelledCount = jobsAll.filter((j: any) => j.jobID && !/URGENTCB/i.test(j.route)
+    && (j.statusOptionID === 162 || /cancel/i.test(String(j.status || '')))).length;
+  let jobs = jobsAll.filter((j: any) => j.jobID
     // hide CANCELLED only — plain "Cancelled" (optionID 162) AND same-day "Cancelled - Today" (different
     // optionID, caught by the text test). COMPLETED/ARCHIVED jobs are KEPT (flagged completed → grayed on
     // the board so a finished job stays visible on the schedule). URGENTCB lane excluded.
@@ -181,6 +186,9 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
   if (route) { const rc = route.toUpperCase(); jobs = jobs.filter((j: any) => j.routeCode.toUpperCase() === rc || j.route.toUpperCase().includes(rc)); }
   jobs.sort((a: any, b: any) => a.timeMin - b.timeMin);
   if (withCoords) await Promise.all(jobs.map(async (j: any) => { if (j.address) { const g = await geocode(j.address); if (g) { j.lat = g.lat; j.lon = g.lon; } } }));
+  // Attach the day-wide cancelled count (harmless extra prop; only boardGrid — route=undefined,
+  // withCoords=false — reads it, so `jobs` here is the exact array we tagged).
+  (jobs as any).cancelledCount = cancelledCount;
   return jobs;
 }
 
@@ -428,7 +436,7 @@ Deno.serve(async (req: Request) => {
       const ends = routes.map((r: any) => r.timeEnd).filter((n: number) => Number.isFinite(n));
       const boardStartMin = starts.length ? Math.min(...starts) : null;
       const boardEndMin = ends.length ? Math.max(...ends) : null;
-      return json({ success: true, dayID, durationMin, routes: ordered, boardStartMin, boardEndMin });
+      return json({ success: true, dayID, durationMin, routes: ordered, boardStartMin, boardEndMin, cancelledCount: (jobs as any).cancelledCount || 0 });
     }
 
 

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.99.6 | 2026-07-28">
+  <meta name="crewlogic-version" content="v5.99.7 | 2026-07-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11642,7 +11642,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _mjHistory.push({ role: 'assistant', text: 'Jobs on ' + dayLabel + ' by route — ' + (memParts.join(' | ') || 'none') });
       if (_mjHistory.length > 8) _mjHistory = _mjHistory.slice(-8);
       await _mjLoadAssignData(dayID); // FW-59: roster + truck↔route assignments + live status, so the board renders with the Truck column filled
-      mjRenderBoard({ dayID, dayLabel, routes: routesData, jobs, boardStartMin: data.boardStartMin, boardEndMin: data.boardEndMin });
+      mjRenderBoard({ dayID, dayLabel, routes: routesData, jobs, boardStartMin: data.boardStartMin, boardEndMin: data.boardEndMin, cancelledCount: data.cancelledCount });
       _mjLoadEta(dayID, routesData); // FW-59: day-start feasibility pills from the LIVE board jobs (async repaint)
     }
     // Schedule-board view (route lanes × time, colored job blocks) — CrewLogic take on the Vonigo
@@ -11983,9 +11983,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + '<button onclick="mjExitMoveMode()" style="flex:0 0 auto;padding:6px 12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">Cancel</button></div>';
       }
       // Completed-jobs $ total for the shown day — right side of the legend row.
-      const _mjDone = (data.jobs || []).filter(j => j.completed);
+      // Header stats: completed count + $ + average job size, and today's cancelled count.
+      // ESTIMATES are excluded from BOTH the completed set and the average divisor (owner: "the average
+      // job size should not include anything we didn't complete, so estimates shouldn't be in the divisor")
+      // — so Completed N · $X · avg $X/N all describe finished REMOVAL work only. Estimate signal = EST route
+      // or an est-only label (9973 Est Only, 9996 Est Completed Est.Only). Cancelled count is day-wide from
+      // the backend (those jobs are hidden from the board, so they aren't in data.jobs).
+      const _mjIsEst = j => { const rc = String(j.routeCode || '').toUpperCase(); const lo = Number(j.labelOpt) || 0; return rc === 'EST' || /estimate/i.test(String(j.route || '')) || lo === 9973 || lo === 9996; };
+      const _mjMoney = n => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+      const _mjDone = (data.jobs || []).filter(j => j.completed && !_mjIsEst(j));
       const _mjDoneTot = _mjDone.reduce((s, j) => s + (parseFloat(String(j.price || '').replace(/[^0-9.]/g, '')) || 0), 0);
-      const _mjDoneHtml = _mjDone.length ? '<span style="white-space:nowrap;color:var(--text-secondary);">✓ Completed <b style="color:var(--text-muted);">' + _mjDone.length + '</b> · <b style="color:#00E785;font-family:\'Space Mono\',monospace;">$' + _mjDoneTot.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + '</b></span>' : '';
+      const _mjAvg = _mjDone.length ? _mjDoneTot / _mjDone.length : 0;
+      const _mjCanc = Number(data.cancelledCount) || 0;
+      const _mjStatBits = [];
+      if (_mjDone.length) _mjStatBits.push('<span style="white-space:nowrap;color:var(--text-secondary);">✓ Completed <b style="color:var(--text-muted);">' + _mjDone.length + '</b> · <b style="color:#00E785;font-family:\'Space Mono\',monospace;">' + _mjMoney(_mjDoneTot) + '</b> · avg <b style="color:var(--text-muted);font-family:\'Space Mono\',monospace;">' + _mjMoney(_mjAvg) + '</b></span>');
+      if (_mjCanc) _mjStatBits.push('<span style="white-space:nowrap;color:var(--text-secondary);">✕ Cancelled <b style="color:#f0a6a6;">' + _mjCanc + '</b></span>');
+      const _mjDoneHtml = _mjStatBits.join('<span style="color:var(--text-muted);opacity:.4;margin:0 2px;">|</span>');
       // legend: open (bookable) vs blocked/closed vs job
       h += '<div style="display:flex;gap:14px;align-items:center;margin-bottom:6px;font-size:10.5px;color:var(--text-muted);flex-wrap:wrap;">'
         + '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:rgba(255,255,255,0.92);border:1px solid var(--border);"></span>Open to book</span>'
