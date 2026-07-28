@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.99.8 | 2026-07-28">
+  <meta name="crewlogic-version" content="v5.99.9 | 2026-07-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11719,6 +11719,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function _mjRepaintRouteCells() { document.querySelectorAll('[id^="mjRoute-"]').forEach(el => { const rc = el.getAttribute('data-rcode') || '', day = el.getAttribute('data-day') || ''; el.style.background = _mjRouteBg(rc, day); const e = (_mjEtaByDate[_mjSD(day)] || {})[rc]; el.style.boxShadow = 'inset 4px 0 0 0 ' + mjRouteColor(rc) + ((e && e.live) ? ', inset -3px 0 0 0 #00E785' : ''); }); } // preserve the route-color left bar; add a green RIGHT edge when the route is LIVE GPS-anchored
     // Explain modal — how the green/red feasibility was determined (per-job breakdown), opened by clicking the route cell.
+    // Pretty duration for the early/ahead readout: "45 min", "1h", "4h 1m". Minutes under an hour stay
+    // "X min"; 60+ rolls to "Hh Mm" (owner: hours+minutes when > 60).
+    function _mjEarlyStr(m) { m = Math.round(m || 0); if (m < 60) return m + ' min'; const h = Math.floor(m / 60), mm = m % 60; return h + 'h' + (mm ? ' ' + mm + 'm' : ''); }
     let _mjExplainCtx = null;
     function _mjExplainBody(sd, rcode) {
       const e = (_mjEtaByDate[sd] || {})[rcode], pct = Math.round(_mjDial * 100);
@@ -11729,7 +11732,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (st === 'arrived') { tag = 'arrived — on site'; col = '#00E785'; }
         else if (st === 'late') { tag = '+' + m + ' min late'; col = '#ef4444'; }
         else if (st === 'window') { tag = m + ' min after start'; col = '#eab308'; }
-        else if (st === 'ontime') { tag = 'on time'; col = '#00E785'; }
+        else if (st === 'ontime') { tag = m > 0 ? ('early by ' + _mjEarlyStr(m)) : 'on time'; col = '#00E785'; }
         return '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px;">'
           + '<div><b>' + (i + 1) + '. ' + mjEsc(j.customerName || ('Job ' + (j.jobNo || ''))) + '</b>' + (j.town ? ' <span style="color:var(--text-muted);">' + mjEsc(j.town) + '</span>' : '')
           + '<br><span style="color:var(--text-muted);">window ' + mjEsc(j.windowStart || '') + '–' + mjEsc(j.windowEnd || '') + '</span></div>'
@@ -13025,7 +13028,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       let winTxt, bg, bd;
       if (st === 'late') { winTxt = '<b>' + m + ' min past</b> the ' + win + ' window'; bg = 'rgba(239,68,68,0.16)'; bd = '#ef4444'; }
       else if (st === 'window') { winTxt = 'within the ' + win + ' window — <b>' + m + ' min after</b> the ' + mjEsc(pj.windowStart) + ' start'; bg = 'rgba(234,179,8,0.16)'; bd = '#eab308'; }
-      else { winTxt = 'on time — arriving by the ' + mjEsc(pj.windowStart) + ' start'; bg = 'rgba(0,231,133,0.14)'; bd = '#00E785'; }
+      else { winTxt = m > 0 ? ('<b>early by ' + _mjEarlyStr(m) + '</b> — before the ' + mjEsc(pj.windowStart) + ' start') : ('on time — arriving by the ' + mjEsc(pj.windowStart) + ' start'); bg = 'rgba(0,231,133,0.14)'; bd = '#00E785'; }
       let h = '<div style="background:' + bg + ';border:1px solid ' + bd + ';border-radius:9px;padding:9px 11px;margin-bottom:9px;font-size:12.5px;line-height:1.5;color:var(--text-primary);">'
         + 'We anticipate <b>' + mjEsc(truckStr) + '</b> at <b>' + mjEsc(pj.predictedEta) + '</b>'
         + (name ? ' for <b>' + mjEsc(name) + '</b>' : '') + (townStr ? ' in ' + mjEsc(townStr) : '')
