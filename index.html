@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.99.2 | 2026-07-28">
+  <meta name="crewlogic-version" content="v5.99.3 | 2026-07-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10974,6 +10974,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _shownAlertIds = new Set(rows.map(r => r.id));
       const cnt = rows.length ? (rows.length + (rows.length >= 50 ? '+' : '')) : '';
       document.querySelectorAll('.gf-alerts-count').forEach(c => { c.textContent = cnt; });
+      _geoAlertRows = rows || []; // remembered so the job popup can flip to 'arrived' once the truck is on site
       _mjGeofenceCheck(rows).catch(function () {}); // FW-59 task 6: auto-assign truck on first arrival + wrong-truck warning
     }
     // ── FW-59 task 6: geofence auto-assign + wrong-truck warning ─────────────────────────────────────────
@@ -10983,6 +10984,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // the loaded board (_mjEtaRoutesByDate), vehicle_number→truck_key from the roster. NEVER overwrites an existing
     // assignment (only fills an empty route), so a manual hard-set always wins.
     let _mjGeoAutoSet = {}; // routeId → truckKey already auto-set this session (guards against duplicate writes)
+    let _geoAlertRows = []; // last geofence alert rows — so the job popup can show 'arrived' instead of a predicted ETA
     async function _mjGeofenceCheck(rows) {
       if (!currentUser || !currentUser.franchiseInternalID || typeof mjNowParts !== 'function') return;
       const sd = _mjSD(mjNowParts().dayID);                               // today only — arrivals are live
@@ -12943,7 +12945,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _mjRow(k, v) { return '<div style="display:flex;gap:8px;margin-bottom:4px;"><span style="color:var(--text-muted);flex:0 0 54px;">' + mjEsc(k) + '</span><span style="color:var(--text-primary);word-break:break-word;">' + v + '</span></div>'; }
     function _mjBlock(k, v) { return '<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--border);"><div style="color:var(--text-muted);margin-bottom:2px;">' + mjEsc(k) + '</div><div style="color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:140px;overflow-y:auto;">' + v + '</div></div>'; }
     // Part B — the anticipated-arrival statement for a job, from the day-start feasibility + truck assignment.
+    // Has the truck already ARRIVED at this job (per the geofence event log)? → {arrivedAt, leftAt, vehicle}.
+    function _mjJobArrival(woid) {
+      if (!woid || !_geoAlertRows || !_geoAlertRows.length) return null;
+      let arrive = null, leave = null;
+      _geoAlertRows.forEach(function (a) {
+        if (!a || String(a.wo_id) !== String(woid)) return;
+        const t = String(a.start_time || a.created_at || '');
+        if (a.event_type === 'job_arrive') { if (!arrive || t > arrive.t) arrive = { t: t, vehicle: a.vehicle_number }; }
+        else if (a.event_type === 'job_leave') { if (!leave || t > leave.t) leave = { t: t }; }
+      });
+      if (!arrive) return null;
+      const fmt = function (iso) { try { return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; } };
+      return { arrivedAt: fmt(arrive.t), leftAt: (leave && leave.t > arrive.t) ? fmt(leave.t) : null, vehicle: arrive.vehicle };
+    }
     function _mjArrivalStatement(j) {
+      // Once the truck has physically arrived (geofence), show that instead of a predicted ETA — the prediction
+      // is moot once the crew is on site.
+      const arr = _mjJobArrival(String(j.woID || ''));
+      if (arr) {
+        const veh = arr.vehicle ? mjEsc(arr.vehicle) : 'The crew';
+        if (arr.leftAt) return '<div style="background:rgba(148,163,180,0.16);border:1px solid #94a3b4;border-radius:9px;padding:9px 11px;margin-bottom:9px;font-size:12.5px;line-height:1.5;color:var(--text-primary);">✓ <b>' + veh + '</b> was on site <b>' + mjEsc(arr.arrivedAt) + '</b>–<b>' + mjEsc(arr.leftAt) + '</b> — departed.</div>';
+        return '<div style="background:rgba(0,231,133,0.16);border:1px solid #00E785;border-radius:9px;padding:9px 11px;margin-bottom:9px;font-size:12.5px;line-height:1.5;color:var(--text-primary);">🚚 <b>' + veh + '</b> arrived at <b>' + mjEsc(arr.arrivedAt) + '</b> — on site now.</div>';
+      }
       const sd = _mjSD(j._day || _mjBoardDayID);
       const eta = (_mjEtaByDate[sd] || {})[j.routeCode];
       if (!eta || !(eta.jobs || []).length) return '';
@@ -12964,7 +12988,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + (name ? ' for <b>' + mjEsc(name) + '</b>' : '') + (townStr ? ' in ' + mjEsc(townStr) : '')
         + '. This is ' + winTxt + '.';
       if (st === 'late') h += ' <span style="color:#ffd3d3;">Call the customer with your ETA (phone below).</span>';
-      h += ' <span style="color:var(--text-muted);font-size:11px;">Day-start guesstimate.</span></div>';
+      h += ' <span style="color:var(--text-muted);font-size:11px;">' + (eta.live ? '● Live — from the truck\'s current position.' : 'Day-start guesstimate.') + '</span></div>';
       return h;
     }
     function mjJobInfoHTML(j, sticky) {
