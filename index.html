@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.99.3 | 2026-07-28">
+  <meta name="crewlogic-version" content="v5.99.4 | 2026-07-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12770,7 +12770,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (open.length) { let best = open[0]; open.forEach(o => { if (Math.abs(o[0] - rawMin) < Math.abs(best[0] - rawMin)) best = o; }); toMin = best[0]; toLabel = best[1] || _minLabel(best[0]); isOpen = true; }
       if (!toLabel) toLabel = _minLabel(toMin);
       const dur = _dragMove.dur || 90;
-      const conflict = jobsR.some(r => toMin < r[1] && (toMin + dur) > r[0]);
+      // Exclude the job being MOVED from the conflict check — moving it earlier by less than its length overlaps
+      // its OWN current slot, which shouldn't count as occupied (the move vacates it).
+      const _selfLane = (_dragMove.fromRoute === d.routecode && _dragMove.fromDay === d.day);
+      const conflict = jobsR.some(r => !(_selfLane && r[0] === _dragMove.fromTmin) && toMin < r[1] && (toMin + dur) > r[0]);
       // no-op: dropped on its own current slot
       if (_dragMove.fromDay === d.day && _dragMove.fromRoute === d.routecode && _dragMove.fromTmin === toMin) { dashClearDragGhost(); return; }
       dashMoveModal(Object.assign({}, _dragMove, { toDay: d.day, toRouteCode: d.routecode, toRouteID: d.routeid, toMin, toLabel, open: isOpen && !conflict, conflict }));
@@ -12812,7 +12815,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const spec = _dragMove; if (!spec) return;
       const btn = document.getElementById('dashMoveConfirmBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Moving…'; }
       // voice path carries the full runCommand plan (_plan); drag path builds the plan from the resolved spec
-      const plan = spec._plan || { kind: 'move', woID: spec.woID, dayID: spec.toDay, startTime: spec.toMin, durationMin: spec.dur, zip: spec.zip || '', toRouteCode: spec.toRouteCode, serviceTypeID: '11', startLabel: spec.toLabel };
+      const plan = spec._plan || { kind: 'move', woID: spec.woID, dayID: spec.toDay, startTime: spec.toMin, durationMin: spec.dur, zip: spec.zip || '', toRouteCode: spec.toRouteCode, serviceTypeID: '11', startLabel: spec.toLabel, fromStartTime: spec.fromTmin, fromRouteCode: spec.fromRoute };
       let res = null;
       try { res = await edgeFunctionCall('crewlogic-dispatch', { action: 'execute', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, plan, commandText: spec._plan ? 'voice move' : 'drag move', actorEmail: currentUser.email }); } catch (e) { res = { success: false, error: 'Network error — try again.' }; }
       if (res && res.success) {

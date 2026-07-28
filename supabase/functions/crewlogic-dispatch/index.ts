@@ -595,8 +595,45 @@ Deno.serve(async (req: Request) => {
         const duration = String(plan.durationMin || 90), zip = String(plan.zip || ''), serviceTypeID = String(plan.serviceTypeID || '11');
         const toRouteID = await resolveRouteID(token, String(dayID), String(plan.toRouteCode || plan.toRouteID || ''));
         if (!woID || !toRouteID || !dayID || startTime == null) return json({ success: false, error: 'move plan missing woID / resolvable toRouteCode / dayID / startTime', toRouteID }, 400);
+        // Direct attempt: reserve the target slot. Covers every different-route + non-overlapping move.
         const lock = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID: String(toRouteID), zip, serviceTypeID, duration, startTime: String(startTime) });
-        const lockID = lock.Ids && (lock.Ids.lockID || lock.Ids.LockID);
+        let lockID = lock.Ids && (lock.Ids.lockID || lock.Ids.LockID);
+        // SELF-OVERLAP: moving a job EARLIER within its OWN route by less than its length → the target overlaps the
+        // job's OWN current booking, so the lock fails ("slot occupied", forever). Vonigo has no exclude-this-job
+        // flag, so we free it with a staging move (method 16 vacates the old slot), then re-lock the now-clear
+        // target. If the target still won't take it (something ELSE is booked), move the job BACK to its original
+        // slot so it's never stranded at staging. Mirrors the proven two-step in the `duration` block.
+        if (!lockID && String(plan.fromRouteCode || '') && String(plan.fromRouteCode) === String(plan.toRouteCode || '') && plan.fromStartTime != null) {
+          const fromStart = String(plan.fromStartTime);
+          const ds = dayEpoch(String(dayID)), de = ds + 79200;
+          const av = await vpost(token, '/resources/availability/', { method: '0', dateStart: String(ds), dateEnd: String(de), duration, locationID: '1', serviceTypeID, routeID: String(toRouteID), pageNo: '1', pageSize: '400' });
+          const stagingSlots = (av.Availability || []).filter((s: any) => String(s.dayID) === String(dayID) && String(parseInt(s.startTime, 10)) !== String(startTime) && String(parseInt(s.startTime, 10)) !== fromStart).map((s: any) => parseInt(s.startTime, 10)).sort((a: number, b: number) => b - a);
+          if (stagingSlots.length) {
+            const staging = String(stagingSlots[0]);
+            const lkA = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID: String(toRouteID), zip, serviceTypeID, duration, startTime: staging });
+            const lockA = lkA.Ids && (lkA.Ids.lockID || lkA.Ids.LockID);
+            if (lockA) {
+              const mvA = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockA) });
+              if (mvA.errNo === 0) {
+                const lkB = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID: String(toRouteID), zip, serviceTypeID, duration, startTime: String(startTime) });
+                lockID = lkB.Ids && (lkB.Ids.lockID || lkB.Ids.LockID);
+                if (!lockID) {
+                  // Target genuinely occupied by something ELSE → restore the job to its original slot.
+                  let restored = false;
+                  try {
+                    const lkR = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID: String(toRouteID), zip, serviceTypeID, duration, startTime: fromStart });
+                    const lockR = lkR.Ids && (lkR.Ids.lockID || lkR.Ids.LockID);
+                    if (lockR) { const mvR = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockR) }); restored = mvR.errNo === 0; }
+                  } catch (_e) { /* fall through to the 409 below */ }
+                  console.error('[dispatch] move staging: target still occupied', JSON.stringify({ staging, restored }));
+                  return json({ success: false, error: restored
+                    ? `Can’t move to ${plan.startLabel || timeLabel(+startTime)} on ${plan.toRouteCode || 'that route'} — something else is booked there. Pick another slot.`
+                    : `Can’t move to ${plan.startLabel || timeLabel(+startTime)} on ${plan.toRouteCode || 'that route'} — something else is booked there. (The job is temporarily at ${timeLabel(+staging)} — adjust in Vonigo.)` }, 409);
+                }
+              }
+            }
+          }
+        }
         if (!lockID) { console.error('[dispatch] move lock failed:', JSON.stringify({ errNo: lock.errNo, errors: lock.Errors || null })); return json({ success: false, error: `That time isn’t open for the full ${durLabel(duration)} on ${plan.toRouteCode || 'that route'} — pick another slot, or shorten the job to fit.` }, 409); }
         const mv = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockID) });
         const ok = mv.errNo === 0;
