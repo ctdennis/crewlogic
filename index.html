@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.98.5 | 2026-07-28">
+  <meta name="crewlogic-version" content="v5.98.6 | 2026-07-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -6980,6 +6980,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         .from('estimate-photos')
         .upload(path, blob, { contentType: mime, upsert: false });
       if (error) throw new Error('Supabase upload failed: ' + error.message);
+      // Usage: a STORED photo is a billable storage unit — count it on UPLOAD (not on analyze), so photos added
+      // for manual costing still count. Fire-and-forget: the strip bump is instant feedback, the server
+      // photo.upload event is the durable count. (Volume-check photos aren't stored → not counted here.)
+      try {
+        if (typeof bumpUsage === 'function') bumpUsage({ photos: 1 });
+        edgeFunctionCall('crewlogic-ai', { action: 'logPhotoUpload', franchiseID: currentUser.franchiseInternalID, tenantID: currentUser.tenantID, count: 1 }).catch(function () {});
+      } catch (e) {}
       return path;
     }
     const STREET_VIEW_KEY = 'AIzaSyDZGtQKeH8LKs_rpO2zti8oAkJNkgfhCgM';
@@ -17734,7 +17741,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
         const data = await callAnalyzeVoice({ transcript, areas: availableAreas, photos: resolvedPhotos });
         if (data.success) {
-          bumpUsage({ aiCalls: 1, photos: (resolvedPhotos && resolvedPhotos.length) || 0 }); // Phase 4: tick usage on a successful per-room analyze
+          bumpUsage({ aiCalls: 1 }); // Phase 4: tick AI calls on a successful per-room analyze (photos count on upload, not here)
           const results = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
           const vol = results.find(c => c.type === 'volume');
           if (vol) {
@@ -24229,7 +24236,7 @@ RECYCLING & DONATION
         const data = res;
 
         if (data.success) {
-          bumpUsage({ aiCalls: 1, photos: (photosToAnalyze && photosToAnalyze.length) || 0 }); // Phase 4: tick usage on a successful room-capture analyze
+          bumpUsage({ aiCalls: 1 }); // Phase 4: tick AI calls on a successful room-capture analyze (photos count on upload, not here)
           const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
           let addedCount = 0;
           // Build durable photo references: prefer Supabase path if already uploaded,
@@ -29808,7 +29815,7 @@ Please review the estimate below. If you have any questions or would like to adj
             source: 'volume_check'
           });
           if (data && data.success) {
-            bumpUsage({ aiCalls: 1, photos: (area.photos && area.photos.length) || 0 }); // Phase 4: tick usage per volume-check area analyzed
+            bumpUsage({ aiCalls: 1 }); // Phase 4: tick AI calls per volume-check area analyzed (VC photos aren't stored → not a photo count)
             const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result].filter(Boolean);
             areaResults.push({ area: area, charges: charges, hazmat: data.hazmat || null });
           } else {

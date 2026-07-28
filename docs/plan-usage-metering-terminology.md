@@ -28,7 +28,7 @@ charge) but wrong for the *label* and wrong as the customer-facing "estimate" co
 |---|---|---|
 | **Estimate** | One saved customer estimate (`estimates` row, not deleted) | 1 → many AI calls |
 | **AI call** | One AI analysis of **one room**. "Analyze All" on N un-analyzed rooms = **N calls** (3 in parallel); already-analyzed rooms are **skipped** (not re-billed); a manual per-room re-analyze = **+1** each. Volume Check = +1. | the cost unit |
-| **Photo** | One image sent to the AI | many per AI call |
+| **Photo** | One image UPLOADED to storage — counted on upload, not on analyze (a stored photo is a billable storage unit; volume-check photos aren't stored, so they don't count) | many per AI call |
 
 Rename rule: **"estimate" never again means "AI call"** — in marketing, the pricing card,
 the usage banner, tooltips, and error messages. The pricing card's "25 AI estimates/month"
@@ -41,8 +41,10 @@ becomes three lines: estimates / AI calls / photos.
   does NOT increment it. Deleting an estimate DOES decrement it (soft-delete excluded).
 - **AI calls** = COUNT of `ai.analyze_estimate` events in-period (today's mislabeled
   "estimates"). Owner decision §9-b: do Volume Checks count as AI calls?
-- **Photos** = Σ `metadata.images` over `ai.analyze_estimate` (+ `ai.volume_check` per the
-  same §9-b decision). Unchanged from today.
+- **Photos** = Σ `metadata.count` over `photo.upload` events — logged on each `estimate-photos`
+  storage upload (`uploadPhotoToSupabase` → `crewlogic-ai` `logPhotoUpload`). Counted on UPLOAD
+  (a stored photo is a billable storage unit), NOT per analyzed image; volume-check photos aren't
+  stored so they don't count. (Owner 2026-07-28: photos are a storage charge, count on add.)
 
 `_shared/usage.ts::countUsage` returns `{ estimates, aiCalls, photos }`; `usageSummary` +
 `usageStatus` return all three with their caps.

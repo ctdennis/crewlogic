@@ -1159,6 +1159,22 @@ async function handleUsageSummary(payload: Record<string, unknown>): Promise<unk
   return { usage: await getUsageStatus(franchiseId) };
 }
 
+// Frontend-facing: record photos UPLOADED to storage (the billable storage unit). The client calls this on each
+// successful estimate-photos upload; countUsage tallies photo.upload events for the period. Fire-and-forget.
+async function handleLogPhotoUpload(payload: Record<string, unknown>): Promise<unknown> {
+  const franchiseId = (payload.franchiseID ?? payload.franchiseInternalID) as string | undefined;
+  const count = Math.max(0, Math.floor(Number(payload.count) || 0));
+  if (!franchiseId || !count) return { ok: false };
+  await logUsage(_usageClient, {
+    franchiseId,
+    tenantId: (payload.tenantID as string) || null,
+    eventType: 'photo.upload',
+    units: count,
+    metadata: { count },
+  });
+  return { ok: true };
+}
+
 const ACTION_HANDLERS: Record<string, (payload: Record<string, unknown>) => Promise<unknown>> = {
   analyzeEstimate: handleAnalyzeEstimate,
   generateJobSummary: handleGenerateJobSummary,
@@ -1167,6 +1183,7 @@ const ACTION_HANDLERS: Record<string, (payload: Record<string, unknown>) => Prom
   reverseGeocode: handleReverseGeocode,
   issueReward: handleIssueReward,
   usageSummary: handleUsageSummary,
+  logPhotoUpload: handleLogPhotoUpload,
 };
 
 

@@ -37,7 +37,8 @@ export interface UsageCounts { estimates: number; aiCalls: number; photos: numbe
 //   aiCalls   = # of ai.analyze_estimate + ai.volume_check events. Each is one Anthropic call — the
 //               COST unit. One estimate is 1-to-many with AI calls (one per room analyzed + each
 //               manual re-analyze; a volume check = 1). This is the enforced dimension.
-//   photos    = SUM(metadata.images) over those same events (also enforced).
+//   photos    = # of photos UPLOADED to storage (photo.upload events, Σ metadata.count) — counted on UPLOAD, not
+//               per analyzed image, since a stored photo is a billable storage unit (also enforced).
 //   estimates = # of DISTINCT saved estimates created in-period (estimates table, deleted_at IS NULL).
 //               A re-run does NOT add one; a delete removes one. Advisory only (never blocks) — it's
 //               the human-facing "how many jobs did I estimate" number, not the cost driver.
@@ -56,14 +57,19 @@ export async function countUsage(
       .eq('franchise_id', franchiseId)
       .gte('created_at', startIso)
       .lt('created_at', endIso)
-      .in('event_type', ['ai.analyze_estimate', 'ai.volume_check']);
-    if (error) { console.error('[usage] ai-call count failed:', error.message || error); }
+      .in('event_type', ['ai.analyze_estimate', 'ai.volume_check', 'photo.upload']);
+    if (error) { console.error('[usage] event count failed:', error.message || error); }
     else for (const r of (data || [])) {
-      aiCalls++; // both a per-room analyze and a volume check are AI calls (same Anthropic cost)
-      const img = r.metadata && (r.metadata as { images?: unknown }).images;
-      if (typeof img === 'number' && img > 0) photos += img;
+      if (r.event_type === 'photo.upload') {
+        // photos are counted on UPLOAD (each stored photo is a billable storage unit), NOT per analyzed image —
+        // so photos added for manual costing still count; volume-check photos aren't stored so they never land here.
+        const c = r.metadata && (r.metadata as { count?: unknown }).count;
+        if (typeof c === 'number' && c > 0) photos += c;
+      } else {
+        aiCalls++; // a per-room analyze and a volume check are each one AI call (same Anthropic cost)
+      }
     }
-  } catch (e) { console.error('[usage] ai-call count failed:', e); }
+  } catch (e) { console.error('[usage] event count failed:', e); }
   try {
     const { count, error } = await sb.from('estimates')
       .select('id', { count: 'exact', head: true })
