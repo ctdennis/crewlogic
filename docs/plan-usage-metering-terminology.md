@@ -1,0 +1,127 @@
+# Plan — Usage Metering + Terminology (Estimates vs AI Calls vs Photos)
+
+Status: DRAFT — awaiting Owner decisions (see §9). No code until approved.
+Owner: ctdennis · Drafted: 2026-07-27
+
+## 1. Problem
+
+The app meters **one** number and mislabels it. The home banner + pricing card say
+"Estimates 60/25", but that 60 is actually **AI analyze calls** — one per room, plus every
+re-run. An estimate is **1-to-many** with AI calls.
+
+Evidence (franchise #116 / Meghan, July 2026, real prod data):
+
+| Metric | Count |
+|---|---|
+| Estimates saved (distinct, `estimates` table, 0 deleted) | **9** |
+| AI analyze calls (`ai.analyze_estimate` events) | **60** |
+| Photos analyzed (Σ `metadata.images`) | **228** |
+| Volume checks (`ai.volume_check`) | 2 |
+
+→ **~7 AI calls per estimate.** A 20-room estimate alone can be ~20 calls. "60 estimates"
+is a lie; she made **9**. The metering unit is right for *cost* (each call = one Anthropic
+charge) but wrong for the *label* and wrong as the customer-facing "estimate" count.
+
+## 2. The model (three separate metered dimensions, renamed honestly everywhere)
+
+| Term | Definition | Notes |
+|---|---|---|
+| **Estimate** | One saved customer estimate (`estimates` row, not deleted) | 1 → many AI calls |
+| **AI call** | One AI analysis of **one room**. "Analyze All" on N un-analyzed rooms = **N calls** (3 in parallel); already-analyzed rooms are **skipped** (not re-billed); a manual per-room re-analyze = **+1** each. Volume Check = +1. | the cost unit |
+| **Photo** | One image sent to the AI | many per AI call |
+
+Rename rule: **"estimate" never again means "AI call"** — in marketing, the pricing card,
+the usage banner, tooltips, and error messages. The pricing card's "25 AI estimates/month"
+becomes three lines: estimates / AI calls / photos.
+
+## 3. Metering changes (how each dimension is counted, per period = calendar month)
+
+- **Estimates** = COUNT of `estimates` rows for the franchise created in-period with
+  `deleted_at IS NULL`. (New — today this number is not surfaced.) Re-analyzing an estimate
+  does NOT increment it. Deleting an estimate DOES decrement it (soft-delete excluded).
+- **AI calls** = COUNT of `ai.analyze_estimate` events in-period (today's mislabeled
+  "estimates"). Owner decision §9-b: do Volume Checks count as AI calls?
+- **Photos** = Σ `metadata.images` over `ai.analyze_estimate` (+ `ai.volume_check` per the
+  same §9-b decision). Unchanged from today.
+
+`_shared/usage.ts::countUsage` returns `{ estimates, aiCalls, photos }`; `usageSummary` +
+`usageStatus` return all three with their caps.
+
+## 4. Display — live, event-driven (NEW, from Owner 2026-07-27 screenshots)
+
+Show all three counters (used / cap), live-ticking, in **two** places:
+
+1. **Estimates list page** — a compact usage strip at the **top** (below the header).
+2. **Estimate editor page** — the same strip at the **top** of each estimate.
+
+"Ticks down on each event": the remaining count updates the instant an event fires, not only
+on page load.
+- **New estimate saved** → estimates −1.
+- **AI call** (per-room analyze, or each room inside "Analyze All") → AI calls −1 each; e.g.
+  Analyze-All on a 4-room estimate = −4 AI calls + the photos in those rooms.
+- **Photo analyzed** → photos −N.
+
+Mechanism: fetch the baseline from `usageSummary` on entry, then **optimistically decrement**
+a shared client counter on each event for instant feedback, and re-sync with the server on a
+light cadence + on screen enter (so the display is never wrong for long). One shared usage
+module feeds both surfaces (reuse, not two copies).
+
+## 5. Tiers + numbers (DB-driven — `tier_limits`, never in code)
+
+`tier_limits` gains `included_ai_calls`. Owner fills the grid (§9-a). Current state for
+reference (est cap is really the AI-call cap today):
+
+| Tier | Estimates/mo | AI calls/mo | Photos/mo |
+|---|---|---|---|
+| Starter | 25 (Owner: 25) | ? (Owner floated 75 — but see ratio note) | 500 |
+| Pro | ? | ? | 1,500 |
+| Enterprise | ? | ? | 5,000 |
+
+Ratio caveat: at ~7 calls/estimate, "25 estimates" ≈ ~175 AI calls, so an AI-call cap of 75
+would bite at ~11 estimates. Set the two numbers consistently (or intend AI calls as the real
+ceiling).
+
+## 6. Increase / overage (Owner: "franchisee OR me on the backend")
+
+- **Franchisee self-serve** — top up in-app. Owner decision §9-c: per-dimension top-ups
+  (+estimates / +AI calls / +photos, priced each) or one combined block? Extends today's
+  "Add credits" ($10 → +25 est/+50 photos).
+- **Owner backend grant** — extend the super-admin **Subscription Management** console (today
+  it only sets the trial clock) to grant extra of any dimension to a specific franchise, and
+  to show each account's current usage vs cap (today it shows neither).
+
+## 7. Enforcement
+
+Stays OFF (`ENFORCE_USAGE_CAPS` unset) until Owner flips it. Owner decision §9-d: when on,
+which dimension(s) hard-block — AI calls only (cost), or all three? Others stay advisory.
+
+## 8. Build phases (after approval; dev-first, prod gated)
+
+1. **Contract** — usageSummary/usageStatus response shape (3 dims + caps + overage), the
+   billing/overage action shape, the admin-grant action shape.
+2. **Schema/migration** — `tier_limits.included_ai_calls`; per-franchise overage columns for
+   the new dims; backfill.
+3. **Metering** — `countUsage` → 3 dims (distinct estimates from `estimates`; AI calls;
+   photos); `usageSummary`/`usageStatus`.
+4. **Display** — shared usage module + strip on the estimates list + estimate editor, live
+   tick-down on each event.
+5. **Overage** — franchisee top-up per §9-c; wire the buttons.
+6. **Admin** — Subscription Management: show usage, grant extra per dimension.
+7. **Terminology rename sweep** — pricing card, banner, tooltips, error messages, marketing.
+8. **Enforcement** — behind the flag per §9-d; keep OFF until Owner says.
+
+## 9. Decisions — RESOLVED (Owner 2026-07-27)
+
+- **a. Numbers** — proceed with Owner's Starter (25 est / 75 AI calls / 500 photos); Pro/Ent
+  seeded proportionally (see §5 grid) as DB values, tunable anytime. Not blocking (enforcement off).
+- **b. Volume Checks count as AI calls** — YES. A volume check = 1 AI call + its photos; never an estimate.
+- **c. Overage** — YES, per-dimension top-ups (buy +estimates / +AI calls / +photos separately).
+- **d. Enforcement** — hard-block on **AI calls + photos** (the cost). **Estimates = advisory only.**
+
+## 10. Related
+
+- Rules: pricing-never-in-code (numbers in DB), contract-before-code (this doc first),
+  actionable-docs-require-tracking (tracked in `.HUB/Hub.md`).
+- Code: `_shared/usage.ts`, `crewlogic-ai` (`usageSummary`/`usageStatus`/`logUsage`),
+  `tier_limits` table, `index.html` (`checkUsageWarnings`, estimates list, estimate editor,
+  `showSubscriptionAdmin`), the pricing/marketing card.
