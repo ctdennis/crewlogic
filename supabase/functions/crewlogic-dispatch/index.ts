@@ -154,7 +154,7 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
   const ds = dayEpoch(dayID), de = ds + 86400;
   const r = await vpost(token, '/data/WorkOrders/', { franchiseID, pageNo: '1', pageSize: '200', isCompleteObject: 'true', dateMode: '3', dateStart: String(ds), dateEnd: String(de) });
   const gf = (f: any[], id: number) => (f.find((x: any) => x.fieldID === id) || {});
-  let jobs = (r.WorkOrders || []).map((w: any) => {
+  const jobsAll = (r.WorkOrders || []).map((w: any) => {
     const f = w.Fields || [], rel = w.Relations || [];
     const jobRel = rel.find((x: any) => x.relationType === 'job'); const routeRel = rel.find((x: any) => x.relationType === 'route');
     const addr = gf(f, F.address).fieldValue || '';
@@ -172,7 +172,12 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
     // crew-member record, so the card can't distinguish them yet.
     const crew = rel.filter((x: any) => x.relationType === 'crew').map((c: any) => String(c.name || '').trim()).filter(Boolean);
     return { jobID: jobRel ? String(jobRel.objectID) : null, crew, woID: String(w.objectID), route: rname, routeCode: shortRoute(rname), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: (clientRel && clientRel.name) || gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), labelDone, labelOpt: gf(f, F.label).optionID || 0, apptCount: parseInt(String(w.countWorkOrders ?? '0'), 10) || 0, bookedOnline: /online booking/i.test(gf(f, F.summary).fieldValue || ''), dateCreated: String(w.dateCreated || ''), dateService: String(w.dateService || ''), zoneID: zoneRel ? String(zoneRel.objectID) : '', zoneName: zoneRel ? zoneRel.name : '', lat: null as number | null, lon: null as number | null };
-  }).filter((j: any) => j.jobID
+  });
+  // Day-wide CANCELLED count — these jobs are hidden from the board (below), but the dispatch header
+  // surfaces "how many cancelled today". Same predicate as the hide filter: optionID 162 OR text "cancel".
+  const cancelledCount = jobsAll.filter((j: any) => j.jobID && !/URGENTCB/i.test(j.route)
+    && (j.statusOptionID === 162 || /cancel/i.test(String(j.status || '')))).length;
+  let jobs = jobsAll.filter((j: any) => j.jobID
     // hide CANCELLED only — plain "Cancelled" (optionID 162) AND same-day "Cancelled - Today" (different
     // optionID, caught by the text test). COMPLETED/ARCHIVED jobs are KEPT (flagged completed → grayed on
     // the board so a finished job stays visible on the schedule). URGENTCB lane excluded.
@@ -181,6 +186,9 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
   if (route) { const rc = route.toUpperCase(); jobs = jobs.filter((j: any) => j.routeCode.toUpperCase() === rc || j.route.toUpperCase().includes(rc)); }
   jobs.sort((a: any, b: any) => a.timeMin - b.timeMin);
   if (withCoords) await Promise.all(jobs.map(async (j: any) => { if (j.address) { const g = await geocode(j.address); if (g) { j.lat = g.lat; j.lon = g.lon; } } }));
+  // Attach the day-wide cancelled count (harmless extra prop; only boardGrid — route=undefined,
+  // withCoords=false — reads it, so `jobs` here is the exact array we tagged).
+  (jobs as any).cancelledCount = cancelledCount;
   return jobs;
 }
 
@@ -428,7 +436,7 @@ Deno.serve(async (req: Request) => {
       const ends = routes.map((r: any) => r.timeEnd).filter((n: number) => Number.isFinite(n));
       const boardStartMin = starts.length ? Math.min(...starts) : null;
       const boardEndMin = ends.length ? Math.max(...ends) : null;
-      return json({ success: true, dayID, durationMin, routes: ordered, boardStartMin, boardEndMin });
+      return json({ success: true, dayID, durationMin, routes: ordered, boardStartMin, boardEndMin, cancelledCount: (jobs as any).cancelledCount || 0 });
     }
 
 
@@ -595,9 +603,56 @@ Deno.serve(async (req: Request) => {
         const duration = String(plan.durationMin || 90), zip = String(plan.zip || ''), serviceTypeID = String(plan.serviceTypeID || '11');
         const toRouteID = await resolveRouteID(token, String(dayID), String(plan.toRouteCode || plan.toRouteID || ''));
         if (!woID || !toRouteID || !dayID || startTime == null) return json({ success: false, error: 'move plan missing woID / resolvable toRouteCode / dayID / startTime', toRouteID }, 400);
-        const lock = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID: String(toRouteID), zip, serviceTypeID, duration, startTime: String(startTime) });
-        const lockID = lock.Ids && (lock.Ids.lockID || lock.Ids.LockID);
-        if (!lockID) { console.error('[dispatch] move lock failed:', JSON.stringify({ errNo: lock.errNo, errors: lock.Errors || null })); return json({ success: false, error: `That time isn’t open for the full ${durLabel(duration)} on ${plan.toRouteCode || 'that route'} — pick another slot, or shorten the job to fit.` }, 409); }
+        // SELF-OVERLAP (same route, target within the job's OWN length of its current start): Vonigo's method-2
+        // lock is UNRELIABLE here — moving a job BACKWARD by < its length refuses the lock (!lockID), but moving
+        // it FORWARD by < its length returns a PERMISSIVE lock on the still-occupied slot, so the direct method-16
+        // move then fails ("couldn't be completed"). Owner-reported asymmetry: move-back worked, move-forward
+        // didn't. The ONLY safe path in both directions is the two-step STAGING move — vacate the own slot first
+        // (method 16 frees it), then re-lock the now-clear target — so for a self-overlap we SKIP the direct
+        // attempt and go straight to staging. Non-overlapping / cross-route moves keep the direct path.
+        const sameRoute = !!String(plan.fromRouteCode || '') && String(plan.fromRouteCode) === String(plan.toRouteCode || '') && plan.fromStartTime != null;
+        const selfOverlap = sameRoute && Math.abs(Number(startTime) - Number(plan.fromStartTime)) < Number(duration);
+        let lock: any = null, lockID: any = null;
+        if (!selfOverlap) {
+          // Direct attempt: reserve the target slot. Covers every different-route + non-overlapping move.
+          lock = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID: String(toRouteID), zip, serviceTypeID, duration, startTime: String(startTime) });
+          lockID = lock.Ids && (lock.Ids.lockID || lock.Ids.LockID);
+        }
+        // Staging two-step: fire for a self-overlap (ALWAYS — the direct lock is untrustworthy) OR a same-route
+        // direct-lock failure. Frees the old slot (method 16), then re-locks the now-clear target; if the target
+        // is occupied by something ELSE, restores the job to its original slot so it's never stranded.
+        if (sameRoute && (selfOverlap || !lockID)) {
+          const fromStart = String(plan.fromStartTime);
+          const ds = dayEpoch(String(dayID)), de = ds + 79200;
+          const av = await vpost(token, '/resources/availability/', { method: '0', dateStart: String(ds), dateEnd: String(de), duration, locationID: '1', serviceTypeID, routeID: String(toRouteID), pageNo: '1', pageSize: '400' });
+          const stagingSlots = (av.Availability || []).filter((s: any) => String(s.dayID) === String(dayID) && String(parseInt(s.startTime, 10)) !== String(startTime) && String(parseInt(s.startTime, 10)) !== fromStart).map((s: any) => parseInt(s.startTime, 10)).sort((a: number, b: number) => b - a);
+          if (stagingSlots.length) {
+            const staging = String(stagingSlots[0]);
+            const lkA = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID: String(toRouteID), zip, serviceTypeID, duration, startTime: staging });
+            const lockA = lkA.Ids && (lkA.Ids.lockID || lkA.Ids.LockID);
+            if (lockA) {
+              const mvA = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockA) });
+              if (mvA.errNo === 0) {
+                const lkB = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID: String(toRouteID), zip, serviceTypeID, duration, startTime: String(startTime) });
+                lockID = lkB.Ids && (lkB.Ids.lockID || lkB.Ids.LockID);
+                if (!lockID) {
+                  // Target genuinely occupied by something ELSE → restore the job to its original slot.
+                  let restored = false;
+                  try {
+                    const lkR = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID: String(toRouteID), zip, serviceTypeID, duration, startTime: fromStart });
+                    const lockR = lkR.Ids && (lkR.Ids.lockID || lkR.Ids.LockID);
+                    if (lockR) { const mvR = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockR) }); restored = mvR.errNo === 0; }
+                  } catch (_e) { /* fall through to the 409 below */ }
+                  console.error('[dispatch] move staging: target still occupied', JSON.stringify({ staging, restored }));
+                  return json({ success: false, error: restored
+                    ? `Can’t move to ${plan.startLabel || timeLabel(+startTime)} on ${plan.toRouteCode || 'that route'} — something else is booked there. Pick another slot.`
+                    : `Can’t move to ${plan.startLabel || timeLabel(+startTime)} on ${plan.toRouteCode || 'that route'} — something else is booked there. (The job is temporarily at ${timeLabel(+staging)} — adjust in Vonigo.)` }, 409);
+                }
+              }
+            }
+          }
+        }
+        if (!lockID) { console.error('[dispatch] move lock failed:', JSON.stringify({ errNo: lock ? lock.errNo : null, errors: lock ? (lock.Errors || null) : null, selfOverlap })); return json({ success: false, error: `That time isn’t open for the full ${durLabel(duration)} on ${plan.toRouteCode || 'that route'} — pick another slot, or shorten the job to fit.` }, 409); }
         const mv = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockID) });
         const ok = mv.errNo === 0;
         console.log(`[dispatch][AUDIT] execute move wo=${woID} route=${toRouteID} ${plan.startLabel} ${dayID} lock=${lockID} errNo=${mv.errNo}`);

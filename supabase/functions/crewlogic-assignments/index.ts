@@ -215,8 +215,8 @@ Deno.serve(async (req: Request) => {
         if (!isFinite(nowMin)) return json({ success: false, error: 'nowMin_required_for_live' }, 400);
         const provided = Array.isArray(body.routes) ? body.routes as Record<string, unknown>[] : null;
         if (!provided) return json({ success: false, error: 'routes_required_for_live' }, 400);
-        const RANK: Record<string, number> = { late: 3, window: 2, unknown: 1, ontime: 0 };
-        type LJob = { startMin: number; durationMin: number; lat?: number | null; lon?: number | null; address?: string; jobNo?: string; customerName?: string; phone?: string; town?: string; done?: boolean };
+        const RANK: Record<string, number> = { late: 3, window: 2, unknown: 1, ontime: 0, arrived: 0 };
+        type LJob = { startMin: number; durationMin: number; lat?: number | null; lon?: number | null; address?: string; jobNo?: string; customerName?: string; phone?: string; town?: string; done?: boolean; arrivedAtMin?: number | null };
         const routes: Record<string, unknown>[] = [];
         for (const r of provided) {
           const routeCode = str(r.routeCode) || str(r.routeName);
@@ -227,6 +227,7 @@ Deno.serve(async (req: Request) => {
             startMin: Number(j.startMin), durationMin: Number(j.durationMin) || 0,
             lat: j.lat as number, lon: j.lon as number, address: str(j.address),
             jobNo: str(j.jobNo), customerName: str(j.customerName), phone: str(j.phone), town: str(j.town) || parseTown(str(j.address)), done: !!j.done,
+            arrivedAtMin: (j.arrivedAtMin != null && isFinite(Number(j.arrivedAtMin))) ? Number(j.arrivedAtMin) : null,
           })).filter(j => isFinite(j.startMin));
           const remaining = allJobs.filter(j => !j.done).sort((a, b) => a.startMin - b.startMin);
           if (!hasTruck) { routes.push({ routeName, routeCode, live: false, reason: 'no_truck_position', jobs: [] }); continue; }
@@ -264,6 +265,21 @@ Deno.serve(async (req: Request) => {
           for (let i = 0; i < remaining.length; i++) {
             const j = remaining[i];
             const winStart = j.startMin, dur = j.durationMin || 0, winEnd = winStart + dur;
+            // ARRIVED anchor: the truck is physically ON SITE at this stop (geofence job_arrive, not yet
+            // left). Do NOT re-predict a drive to it — a live-arrived stop cannot be "late", it's here.
+            // Use its ACTUAL arrival time, mark it 'arrived', and depart after the on-site duration (or
+            // now, if that's already past) so the NEXT stop's drive starts from the right moment. This is
+            // the owner's "stop predicting once inside the geofence" fix.
+            if (j.arrivedAtMin != null && isFinite(j.arrivedAtMin as number)) {
+              const arr = Number(j.arrivedAtMin);
+              outJobs.push({
+                jobNo: j.jobNo || '', customerName: j.customerName || '', phone: j.phone || '', town: j.town || '',
+                windowStart: minsToClock(winStart), windowEnd: minsToClock(winEnd),
+                predictedEta: minsToClock(arr), status: 'arrived', minutesEarlyLate: 0, arrived: true,
+              });
+              cursor = Math.max(nowMin, arr + dur * mult);
+              continue;
+            }
             const leg = legs[i];
             const arrival = leg == null ? null : cursor + leg;
             let status: string, mel = 0;
