@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.99.7 | 2026-07-28">
+  <meta name="crewlogic-version" content="v5.99.8 | 2026-07-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11714,7 +11714,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // OPAQUE composite (tint layered OVER bg-card) so job pills scrolling under the sticky cell don't bleed through.
       if (s === 'late') return 'linear-gradient(rgba(239,68,68,0.42),rgba(239,68,68,0.42)),var(--bg-card)';
       if (s === 'window') return 'linear-gradient(rgba(234,179,8,0.40),rgba(234,179,8,0.40)),var(--bg-card)'; // within window, after start = yellow
-      if (s === 'ontime') return 'linear-gradient(rgba(0,231,133,0.34),rgba(0,231,133,0.34)),var(--bg-card)';
+      if (s === 'ontime' || s === 'arrived') return 'linear-gradient(rgba(0,231,133,0.34),rgba(0,231,133,0.34)),var(--bg-card)';
       return 'var(--bg-card)';
     }
     function _mjRepaintRouteCells() { document.querySelectorAll('[id^="mjRoute-"]').forEach(el => { const rc = el.getAttribute('data-rcode') || '', day = el.getAttribute('data-day') || ''; el.style.background = _mjRouteBg(rc, day); const e = (_mjEtaByDate[_mjSD(day)] || {})[rc]; el.style.boxShadow = 'inset 4px 0 0 0 ' + mjRouteColor(rc) + ((e && e.live) ? ', inset -3px 0 0 0 #00E785' : ''); }); } // preserve the route-color left bar; add a green RIGHT edge when the route is LIVE GPS-anchored
@@ -11726,7 +11726,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const rows = e.jobs.map((j, i) => {
         const st = j.status, m = j.minutesEarlyLate || 0;
         let tag = 'no ETA', col = 'var(--text-muted)';
-        if (st === 'late') { tag = '+' + m + ' min late'; col = '#ef4444'; }
+        if (st === 'arrived') { tag = 'arrived — on site'; col = '#00E785'; }
+        else if (st === 'late') { tag = '+' + m + ' min late'; col = '#ef4444'; }
         else if (st === 'window') { tag = m + ' min after start'; col = '#eab308'; }
         else if (st === 'ontime') { tag = 'on time'; col = '#00E785'; }
         return '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px;">'
@@ -11737,6 +11738,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const ws = e.rollup && e.rollup.status;
       const verdict = ws === 'late' ? ('<span style="color:#ef4444;">Runs late by ' + (e.rollup.minutes || 0) + ' min</span>')
         : ws === 'window' ? '<span style="color:#eab308;">Makes every window (some after the start)</span>'
+        : ws === 'arrived' ? '<span style="color:#00E785;">Crew on site</span>'
         : '<span style="color:#00E785;">On time — arrives by every start</span>';
       const lead = e.live
         ? 'Verdict: <b>' + verdict + '</b> at <b>' + pct + '% finish speed</b>, from the assigned truck&rsquo;s <b style="color:#00E785;">current GPS position</b>, right now.'
@@ -11811,6 +11813,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (t.vin) posByKey['vin:' + t.vin] = { lat: t.lat, lon: t.lon };
         if (t.name) posByKey['name:' + t.name] = { lat: t.lat, lon: t.lon };
       });
+      // Which WOs is the truck CURRENTLY on site at? Latest geofence event per WO — a job_arrive with no
+      // later job_leave means the crew is there right now. Feed the ACTUAL arrival time (franchise-local
+      // minutes-of-day, derived from elapsed ms so it stays consistent with nowMin) to the ETA, so an
+      // on-site stop is anchored to reality instead of re-driven to. Owner: once the truck is inside the
+      // geofence, stop predicting a (late) arrival to a stop it already reached.
+      const _nowMin = mjNowParts().minutesOfDay, _nowMs = Date.now();
+      const arrivedByWo = {};
+      (_geoAlertRows || []).forEach(a => {
+        if (!a || a.wo_id == null || (a.event_type !== 'job_arrive' && a.event_type !== 'job_leave')) return;
+        const wo = String(a.wo_id), ts = Date.parse(a.start_time || a.created_at || '');
+        if (!isFinite(ts)) return;
+        const prev = arrivedByWo[wo];
+        if (!prev || ts > prev.ts) arrivedByWo[wo] = { ts: ts, on: a.event_type === 'job_arrive' };
+      });
       const liveRoutes = [];
       (routes || []).forEach(rt => {
         const jobs = rt.jobs || []; if (!jobs.length) return;
@@ -11821,12 +11837,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         liveRoutes.push({
           routeCode: rt.code || rt.name || '', routeName: rt.name || rt.code || '',
           truckLat: truckPositions[0].lat, truckLon: truckPositions[0].lon, truckPositions: truckPositions, // server anchors on the one nearest the next stop
-          jobs: jobs.map(j => ({ startMin: j.timeMin, durationMin: j.durationMin, address: j.address, jobNo: j.jobID, customerName: (String(j.client || '').split(',')[0] || j.client || ''), done: !!(j.completed || j.labelDone) }))
+          jobs: jobs.map(j => {
+            const o = { startMin: j.timeMin, durationMin: j.durationMin, address: j.address, jobNo: j.jobID, customerName: (String(j.client || '').split(',')[0] || j.client || ''), done: !!(j.completed || j.labelDone) };
+            const arr = arrivedByWo[String(j.woID != null ? j.woID : '')];
+            if (arr && arr.on && !o.done) o.arrivedAtMin = Math.max(0, _nowMin - Math.round((_nowMs - arr.ts) / 60000)); // truck on site → anchor to actual arrival
+            return o;
+          })
         });
       });
       if (!liveRoutes.length) return;
       try {
-        const r = await edgeFunctionCall('crewlogic-assignments', { action: 'eta', mode: 'live', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: sd, durationMultiplier: _mjDial, nowMin: mjNowParts().minutesOfDay, routes: liveRoutes });
+        const r = await edgeFunctionCall('crewlogic-assignments', { action: 'eta', mode: 'live', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: sd, durationMultiplier: _mjDial, nowMin: _nowMin, routes: liveRoutes });
         if (!r || !r.success) return;
         const m = _mjEtaByDate[sd] || (_mjEtaByDate[sd] = {});
         (r.routes || []).forEach(rt => {
@@ -12999,6 +13020,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       let name = String(j.client || '').trim(); const cp = name.split(','); if (cp.length === 2) name = cp[1].trim() + ' ' + cp[0].trim();
       const town = mjAddrParts(j.address).city, townStr = town ? _titleCaseTown(town) : '';
       const st = pj.status, m = pj.minutesEarlyLate || 0;
+      if (st === 'arrived') return '<div style="background:rgba(0,231,133,0.16);border:1px solid #00E785;border-radius:9px;padding:9px 11px;margin-bottom:9px;font-size:12.5px;line-height:1.5;color:var(--text-primary);">🚚 <b>' + mjEsc(truckStr) + '</b> on site now' + (name ? ' at <b>' + mjEsc(name) + '</b>' : '') + (townStr ? ' in ' + mjEsc(townStr) : '') + ' — arrived <b>' + mjEsc(pj.predictedEta) + '</b>.</div>';
       const win = mjEsc(pj.windowStart) + '–' + mjEsc(pj.windowEnd);
       let winTxt, bg, bd;
       if (st === 'late') { winTxt = '<b>' + m + ' min past</b> the ' + win + ' window'; bg = 'rgba(239,68,68,0.16)'; bd = '#ef4444'; }
