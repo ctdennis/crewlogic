@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.99.0 | 2026-07-28">
+  <meta name="crewlogic-version" content="v5.99.1 | 2026-07-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -16403,6 +16403,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Row 2: client · address
         html += '<div class="estimate-card-meta" style="margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (est.clientName || '&mdash;') + (est.address ? ' &middot; ' + est.address : '') + '</div>';
 
+        // Row 2.5: Vonigo route + estimate-only flag (captured at job-lookup; shows only on estimates saved with a job)
+        if (est.route || Number(est.labelOpt) === 9973) {
+          html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:11px;">';
+          if (est.route) html += '<span style="color:var(--text-muted);">🗺 ' + String(est.route).replace(/[<>&"']/g, '') + '</span>';
+          if (Number(est.labelOpt) === 9973) html += '<span style="font-weight:700;color:#AA4CB3;letter-spacing:0.3px;">● EST ONLY</span>';
+          html += '</div>';
+        }
+
         // Row 3: trucks, price, updated, vonigo
         html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">';
         html += '<span style="font-size:12px;color:var(--text-secondary);">🚛 <strong style="color:var(--accent-green);font-family:\'Space Mono\',monospace;">' + trucks.toFixed(2) + '</strong></span>';
@@ -19857,9 +19865,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
     }
 
+    let _schedulePickerWOs = [];
     function renderSchedulePicker(workOrders) {
       const listEl = document.getElementById('scheduleList');
       if (!listEl) return;
+      _schedulePickerWOs = workOrders || []; // remembered so pickScheduleRow can capture route + label onto the estimate
       if (!workOrders || workOrders.length === 0) {
         listEl.innerHTML = '<div style="padding:24px 16px;text-align:center;color:var(--text-muted);font-size:12px;">No work orders scheduled.</div>';
         return;
@@ -19867,14 +19877,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       let html = '';
       workOrders.forEach(function(wo) {
         const isComplete = !!wo.isComplete;
-        const statusColor = isComplete ? 'var(--text-muted)' : 'var(--accent-green)';
+        const isEstOnly = Number(wo.labelOpt) === 9973; // Vonigo "Est Only" label → purple badge
+        const statusColor = isEstOnly ? mjLabelColor(9973) : (isComplete ? 'var(--text-muted)' : 'var(--accent-green)');
         const rowOpacity = isComplete ? '0.6' : '1';
         const safeJobID = String(wo.jobID || '').replace(/[^0-9]/g, '');
         const escClient = String(wo.clientName || '').replace(/[<>&"']/g, '');
         const escAddress = String(wo.address || '').replace(/\n/g, ' · ').replace(/[<>&"']/g, '');
         const escRoute = String(wo.route || '').replace(/[<>&"']/g, '');
         const escTime = String(wo.timeLabel || '').replace(/[<>&"']/g, '');
-        const escStatus = String(wo.status || '').replace(/[<>&"']/g, '');
+        const escStatus = isEstOnly ? 'EST ONLY' : String(wo.status || '').replace(/[<>&"']/g, '');
         // Items list — truncate at ~140 chars, allow wrap to 2 lines via CSS.
         // We use line-clamp so wrap is hard-capped no matter how long the text.
         let itemsRaw = String(wo.items || '').replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -19905,6 +19916,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       hideInlineJobPicker();
       const input = document.getElementById('estJobIDStep1');
       if (input) input.value = jobID;
+      // Capture the route + Vonigo label from the picked work order so the saved estimate can show them later.
+      const wo = (_schedulePickerWOs || []).find(function (w) { return String(w.jobID) === String(jobID); });
+      if (wo && currentEstimate) { currentEstimate.route = wo.route || ''; currentEstimate.labelOpt = (wo.labelOpt != null ? wo.labelOpt : null); }
       // Trigger existing lookup flow
       lookupEstimateJobStep1();
     }
@@ -19931,6 +19945,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           currentEstimate.locationID = data.locationID;
           currentEstimate.clientName = data.clientName || '';
           currentEstimate.address = data.address || '';
+          if (data.route) currentEstimate.route = data.route;                   // manual lookup may return the route
+          if (data.labelOpt != null) currentEstimate.labelOpt = data.labelOpt;   // …and the Vonigo label (for the purple est-only flag)
           // Job loaded — hide the inline picker, the editor is now in use
           hideInlineJobPicker();
           // Refresh toolbar — buttons activate now that we have a job
