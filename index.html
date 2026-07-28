@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.99.11 | 2026-07-28">
+  <meta name="crewlogic-version" content="v5.99.12 | 2026-07-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9701,6 +9701,31 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _trucksMapEl = 'trucksMap'; // which container the trucks map mounts into ('trucksMap' screen | 'dashMapPane' dashboard)
     let _dashMapRO = null; // ResizeObserver that keeps the dashboard map sized to its pane (fixes the half-width race)
     let _dashNeedsFit = false; // request a one-time coverage-fit once the dashboard map's layout + markers are ready
+    let _dashTrucksLoaded = false, _dashJobsLoaded = false, _dashFitTimer = null, _dashFitTries = 0;
+    // Deterministic dashboard coverage-fit. The trucks load AND the jobs load each call this when they finish
+    // painting (not a timer heuristic); it fits once the pane is actually SIZED, re-fits as each wave lands, and
+    // LOCKS (_dashNeedsFit=false) only after BOTH waves are in — so the final fit always covers trucks+jobs and
+    // auto-refreshes never re-zoom. Replaces the old three-way race (renderTrucks' trucks-only fit vs
+    // loadJobMarkers' full fit vs a marker-stability poll) that fit whichever set won the timing → the
+    // "sometimes zoomed in / sometimes out / sometimes right" flakiness.
+    function _dashScheduleCoverFit() {
+      if (!_dashNeedsFit || _trucksMapEl !== 'dashMapPane' || _dashFitTimer) return; // one pending attempt at a time
+      _dashFitTries = 0;
+      const attempt = () => {
+        _dashFitTimer = null;
+        if (!_dashNeedsFit || !_trucksMap || _trucksMapEl !== 'dashMapPane') return;
+        const p = document.getElementById('dashMapPane');
+        const sized = p && p.offsetWidth > 150 && p.offsetHeight > 150;
+        if (sized) {
+          try { _trucksMap.invalidateSize(false); } catch (e) {}
+          _fitTrucksCentered();
+          if (_dashTrucksLoaded && _dashJobsLoaded) _dashNeedsFit = false; // both waves in → lock the view
+          return;
+        }
+        if (_dashFitTries++ < 140) _dashFitTimer = setTimeout(attempt, 200); // wait for the pane to reflow (bounded ~28s)
+      };
+      _dashFitTimer = setTimeout(attempt, 60);
+    }
     // Drop + rebuild the trucks map if it's stale (container detached, e.g. dashboard re-rendered) or the
     // target container changed — so the same map machinery (markers, layers, measure) serves both contexts.
     function _ensureTrucksMapFresh(elId) {
@@ -10722,7 +10747,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         pts.push([t.lat, t.lon]);
       });
       if (fit !== false) {
-        if (pts.length === 1) _trucksMap.setView(pts[0], 14);
+        if (_trucksMapEl === 'dashMapPane' && _dashNeedsFit) { _dashTrucksLoaded = true; _dashScheduleCoverFit(); } // dashboard: ONE coverage-fit covers trucks+jobs — don't fit trucks-only (races the jobs wave)
+        else if (pts.length === 1) _trucksMap.setView(pts[0], 14);
         else if (pts.length > 1) _trucksMap.fitBounds(pts, { padding: [40, 40], maxZoom: 15 });
       }
       // Leaflet sizes wrong in a just-revealed (was display:none) container — fix after a tick.
@@ -10873,7 +10899,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Trucks centered, all jobs (+ any look-ahead dots) visible — shared helper. Only on the initial
         // load / explicit day change (refit=true); the periodic color-refresh + after-move pass refit=false
         // so they update markers WITHOUT snapping the map back to the fit (owner-reported re-zoom).
-        if (refit) _fitTrucksCentered();
+        if (refit) {
+          if (_trucksMapEl === 'dashMapPane' && _dashNeedsFit) { _dashJobsLoaded = true; _dashScheduleCoverFit(); } // dashboard initial load: coverage-fit after BOTH waves
+          else _fitTrucksCentered(); // standalone trucks screen, or a post-lock day-change → fit now
+        }
         // Legend: one colored chip per route, with its open-stop count.
         const legend = document.getElementById('trucksLegend');
         if (legend) legend.style.display = 'flex';
@@ -12351,34 +12380,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // too-low zoom that nothing corrects. invalidateSize keeps the size current; and once the layout has
       // settled AND markers exist, we re-fit the coverage area ONCE. _dashNeedsFit guards it so divider drags
       // / auto-refreshes never re-zoom after the user has the view they want.
-      _dashNeedsFit = true;
-      // Fit the coverage area ONCE, but only after BOTH the layout AND the markers stop moving — the fit is
-      // timing-sensitive (why it looked fine on dev but zoomed wrong on prod). Two independent async things settle
-      // on load: (a) the flex row reflows the pane 0 → full width (fit mid-reflow → too-narrow container → all-of-
-      // New-England zoom-out); (b) markers arrive in WAVES — trucks paint first, jobs later (fit on the trucks-only
-      // wave → zoomed into the yard cluster; fit during a clear/repush → 0 markers → home fallback). So we stamp the
-      // last resize AND the last marker-count change, and fit only once the pane has been QUIET (no resize 300ms)
-      // AND the marker set STABLE (count unchanged 600ms → all waves in, not mid-clear). _dashNeedsFit then locks it.
-      let _dashLastResize = Date.now(), _dashMarkerCnt = -1, _dashMarkerStableAt = Date.now(), _dashFitTries = 0;
-      const onDashResize = () => { _dashLastResize = Date.now(); if (_trucksMap && _trucksMapEl === 'dashMapPane') { try { _trucksMap.invalidateSize(); } catch (e) {} } };
+      // Deterministic coverage-fit: the trucks load and the jobs load each call _dashScheduleCoverFit when they
+      // finish painting (see renderTrucks / loadJobMarkers), which fits once the pane is SIZED and locks only after
+      // BOTH waves are in. Replaces the old resize-quiet + marker-count-stability poll, whose "guess when the waves
+      // are done" heuristic raced the loads and fit the wrong set on some loads (the hit-or-miss zoom). The
+      // ResizeObserver stays, but ONLY to keep the map sized on divider drags — it no longer drives the fit.
+      _dashNeedsFit = true; _dashTrucksLoaded = false; _dashJobsLoaded = false;
+      if (_dashFitTimer) { try { clearTimeout(_dashFitTimer); } catch (e) {} _dashFitTimer = null; }
       if (window.ResizeObserver) {
         if (_dashMapRO) { try { _dashMapRO.disconnect(); } catch (e) {} }
-        _dashMapRO = new ResizeObserver(onDashResize); _dashMapRO.observe(pane);
+        _dashMapRO = new ResizeObserver(() => { if (_trucksMap && _trucksMapEl === 'dashMapPane') { try { _trucksMap.invalidateSize(); } catch (e) {} } });
+        _dashMapRO.observe(pane);
       }
-      const _dashMkCount = () => (_truckMarkers ? _truckMarkers.length : 0) + (_jobMarkers ? _jobMarkers.length : 0);
-      const tryDashFit = () => {
-        if (!_trucksMap || _trucksMapEl !== 'dashMapPane' || !_dashNeedsFit) return;
-        const p = document.getElementById('dashMapPane');
-        const sized = p && p.offsetWidth > 150 && p.offsetHeight > 150;
-        const now = Date.now();
-        const cnt = _dashMkCount();
-        if (cnt !== _dashMarkerCnt) { _dashMarkerCnt = cnt; _dashMarkerStableAt = now; } // a load wave (or clear/repush) → restart the stability window
-        const quiet = (now - _dashLastResize) > 300;                 // reflow done
-        const markersStable = cnt > 0 && (now - _dashMarkerStableAt) > 600; // all waves in, not mid-clear
-        if (sized && quiet && markersStable) { try { _trucksMap.invalidateSize(false); } catch (e) {} _fitTrucksCentered(); _dashNeedsFit = false; return; }
-        if (_dashFitTries++ < 140) setTimeout(tryDashFit, 200); // wait for layout + all markers to settle (bounded ~28s)
-      };
-      setTimeout(tryDashFit, 250);
+      _dashScheduleCoverFit(); // kick off in case a wave already landed before this ran
     }
     // Apply a specific dayID to a board: state + label + calendar-input value + in-place reload. Shared by the
     // ◀/▶ steppers and the calendar drop-down so all three stay in sync.
