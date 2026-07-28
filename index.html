@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.99.9 | 2026-07-28">
+  <meta name="crewlogic-version" content="v5.99.10 | 2026-07-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12807,15 +12807,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const rawMin = Math.round((start + ((ev.clientX - rect.left) / pxh) * 60) / 30) * 30; // 30-min granularity
       let open = []; try { open = JSON.parse(d.open || '[]'); } catch (e) {}
       let jobsR = []; try { jobsR = JSON.parse(d.jobs || '[]'); } catch (e) {}
-      // snap to the nearest OPEN slot start; if none, keep the rounded drop time (flagged not-open)
-      let toMin = rawMin, toLabel = '', isOpen = false;
-      if (open.length) { let best = open[0]; open.forEach(o => { if (Math.abs(o[0] - rawMin) < Math.abs(best[0] - rawMin)) best = o; }); toMin = best[0]; toLabel = best[1] || _minLabel(best[0]); isOpen = true; }
-      if (!toLabel) toLabel = _minLabel(toMin);
-      const dur = _dragMove.dur || 90;
-      // Exclude the job being MOVED from the conflict check — moving it earlier by less than its length overlaps
-      // its OWN current slot, which shouldn't count as occupied (the move vacates it).
       const _selfLane = (_dragMove.fromRoute === d.routecode && _dragMove.fromDay === d.day);
+      const dur = _dragMove.dur || 90;
+      // Land the drop. CROSS-lane: snap to the nearest OPEN availability slot (helps land on a real slot).
+      // SAME-lane (self-move): keep the 30-min grid time you dropped on — the job's OWN booking makes its
+      // neighbouring times ABSENT from `open`, so snapping jumps PAST the intended slot (drop 8:30 → snaps to
+      // the 9:00 the job clears into). The server's staging move vacates the old slot and books the exact target.
+      let toMin = rawMin, toLabel = '', isOpen = false;
+      if (open.length && !_selfLane) { let best = open[0]; open.forEach(o => { if (Math.abs(o[0] - rawMin) < Math.abs(best[0] - rawMin)) best = o; }); toMin = best[0]; toLabel = best[1] || _minLabel(best[0]); isOpen = true; }
+      if (!toLabel) toLabel = _minLabel(toMin);
+      // Conflict = overlaps ANOTHER job; the job's OWN current slot is excluded (the move vacates it).
       const conflict = jobsR.some(r => !(_selfLane && r[0] === _dragMove.fromTmin) && toMin < r[1] && (toMin + dur) > r[0]);
+      if (_selfLane) isOpen = !conflict; // self-move to a time no OTHER job occupies reads as valid; staging books the exact target
       // no-op: dropped on its own current slot
       if (_dragMove.fromDay === d.day && _dragMove.fromRoute === d.routecode && _dragMove.fromTmin === toMin) { dashClearDragGhost(); return; }
       dashMoveModal(Object.assign({}, _dragMove, { toDay: d.day, toRouteCode: d.routecode, toRouteID: d.routeid, toMin, toLabel, open: isOpen && !conflict, conflict }));
