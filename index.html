@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.99.5 | 2026-07-28">
+  <meta name="crewlogic-version" content="v5.99.6 | 2026-07-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11768,7 +11768,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function _mjDialControlHTML() {
       const opts = [60, 70, 80, 90, 100, 110, 120, 130, 140].map(p => '<option value="' + (p / 100) + '"' + (Math.round(_mjDial * 100) === p ? ' selected' : '') + '>' + p + '%</option>').join('');
-      return '<span title="Assume jobs finish this % of their scheduled time — sweep to see which routes go red (day-start guesstimate)" style="display:inline-flex;align-items:center;gap:4px;margin-left:auto;">Finish speed <select onchange="_mjSetDial(this.value)" style="background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:6px;font-size:10px;padding:1px 3px;">' + opts + '</select></span>';
+      return '<span title="Assume jobs finish this % of their scheduled time — sweep to see which routes go red (day-start guesstimate)" style="display:inline-flex;align-items:center;gap:4px;">Finish speed <select onchange="_mjSetDial(this.value)" style="background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:6px;font-size:10px;padding:1px 3px;">' + opts + '</select></span>';
     }
     function _mjSetDial(v) { const n = Number(v); _mjDial = (isFinite(n) && n > 0) ? n : 1.0; Object.keys(_mjEtaRoutesByDate).forEach(sd => _mjLoadEta(sd, _mjEtaRoutesByDate[sd])); }
     // Day-start feasibility for a day — computed from the LIVE board jobs (not the mirror). routes = the board's
@@ -11982,11 +11982,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           + '<span>Moving <b>' + _mvn + '</b> — tap a green open slot (any route; switch days with the chips above).</span>'
           + '<button onclick="mjExitMoveMode()" style="flex:0 0 auto;padding:6px 12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">Cancel</button></div>';
       }
+      // Completed-jobs $ total for the shown day — right side of the legend row.
+      const _mjDone = (data.jobs || []).filter(j => j.completed);
+      const _mjDoneTot = _mjDone.reduce((s, j) => s + (parseFloat(String(j.price || '').replace(/[^0-9.]/g, '')) || 0), 0);
+      const _mjDoneHtml = _mjDone.length ? '<span style="white-space:nowrap;color:var(--text-secondary);">✓ Completed <b style="color:var(--text-muted);">' + _mjDone.length + '</b> · <b style="color:#00E785;font-family:\'Space Mono\',monospace;">$' + _mjDoneTot.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + '</b></span>' : '';
       // legend: open (bookable) vs blocked/closed vs job
       h += '<div style="display:flex;gap:14px;align-items:center;margin-bottom:6px;font-size:10.5px;color:var(--text-muted);flex-wrap:wrap;">'
         + '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:rgba(255,255,255,0.92);border:1px solid var(--border);"></span>Open to book</span>'
         + '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:rgba(255,255,255,0.14);"></span>Blocked / closed</span>'
-        + '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:#45b6e6;"></span>Job</span>' + (showTruck ? _mjDialControlHTML() : '') + '</div>';
+        + '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:11px;height:11px;border-radius:2px;background:#45b6e6;"></span>Job</span>'
+        + '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:14px;">' + _mjDoneHtml + (showTruck ? _mjDialControlHTML() : '') + '</span></div>';
       h += '<div class="mj-scroll" style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);-webkit-overflow-scrolling:touch;">';
       h += '<div style="position:relative;min-width:' + (LW + TWc + trackW) + 'px;">';
       // time header
