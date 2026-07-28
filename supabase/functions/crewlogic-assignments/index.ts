@@ -226,7 +226,7 @@ Deno.serve(async (req: Request) => {
           const allJobs: LJob[] = (Array.isArray(r.jobs) ? r.jobs as Record<string, unknown>[] : []).map(j => ({
             startMin: Number(j.startMin), durationMin: Number(j.durationMin) || 0,
             lat: j.lat as number, lon: j.lon as number, address: str(j.address),
-            jobNo: str(j.jobNo), customerName: str(j.customerName), phone: str(j.phone), town: str(j.town), done: !!j.done,
+            jobNo: str(j.jobNo), customerName: str(j.customerName), phone: str(j.phone), town: str(j.town) || parseTown(str(j.address)), done: !!j.done,
           })).filter(j => isFinite(j.startMin));
           const remaining = allJobs.filter(j => !j.done).sort((a, b) => a.startMin - b.startMin);
           if (!hasTruck) { routes.push({ routeName, routeCode, live: false, reason: 'no_truck_position', jobs: [] }); continue; }
@@ -323,7 +323,7 @@ Deno.serve(async (req: Request) => {
           routeName: str(r.routeName) || str(r.routeCode),
           jobs: (Array.isArray(r.jobs) ? r.jobs as Record<string, unknown>[] : []).map(j => ({
             startMin: Number(j.startMin), durationMin: Number(j.durationMin) || 0,
-            address: str(j.address), jobNo: str(j.jobNo), customerName: str(j.customerName), phone: str(j.phone), town: str(j.town),
+            address: str(j.address), jobNo: str(j.jobNo), customerName: str(j.customerName), phone: str(j.phone), town: str(j.town) || parseTown(str(j.address)),
           })).filter(j => isFinite(j.startMin)),
         }));
       } else {
