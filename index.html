@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.99.1 | 2026-07-28">
+  <meta name="crewlogic-version" content="v5.99.2 | 2026-07-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11813,12 +11813,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       (routes || []).forEach(rt => {
         const jobs = rt.jobs || []; if (!jobs.length) return;
         const assigned = assign[String(rt.id)] || [];
-        let pos = null;
-        for (const a of assigned) { if (posByKey[a.truckKey]) { pos = posByKey[a.truckKey]; break; } } // first assigned truck that's reporting GPS
-        if (!pos) return;                                            // no positioned truck → this route stays day-start
+        const truckPositions = [];
+        for (const a of assigned) { const p = posByKey[a.truckKey]; if (p) truckPositions.push({ lat: p.lat, lon: p.lon }); } // ALL assigned trucks reporting GPS
+        if (!truckPositions.length) return;                          // no positioned truck → this route stays day-start
         liveRoutes.push({
           routeCode: rt.code || rt.name || '', routeName: rt.name || rt.code || '',
-          truckLat: pos.lat, truckLon: pos.lon,
+          truckLat: truckPositions[0].lat, truckLon: truckPositions[0].lon, truckPositions: truckPositions, // server anchors on the one nearest the next stop
           jobs: jobs.map(j => ({ startMin: j.timeMin, durationMin: j.durationMin, address: j.address, jobNo: j.jobID, customerName: (String(j.client || '').split(',')[0] || j.client || ''), done: !!(j.completed || j.labelDone) }))
         });
       });
