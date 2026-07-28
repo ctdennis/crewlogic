@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.96.0 | 2026-07-27">
+  <meta name="crewlogic-version" content="v5.97.0 | 2026-07-27">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -2520,11 +2520,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       <!-- ESTIMATES LIST -->
       <div class="estimates-section" id="estimatesScreen">
+        <div id="estUsageStripList"></div>
         <div id="estimatesList"></div>
       </div>
 
       <!-- ESTIMATE EDITOR -->
       <div class="estimate-editor-section" id="estimateEditorScreen">
+        <div id="estUsageStripEditor"></div>
 
         <!-- JOB LOOKUP — first thing, compact inline row -->
         <div id="estStepZip" style="margin-bottom:8px;">
@@ -8553,6 +8555,55 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         }).catch(function (e) { console.error('[tileToggles] fetch failed', e); });
     }
 
+    // ── Usage strip (Phase 4): live 3-dimension usage — estimates / AI calls / photos — at the top of the
+    // estimates list AND each estimate editor, ticking on every analyze / volume-check event. One shared
+    // state + render feeds both mounts (#estUsageStripList / #estUsageStripEditor). Optimistic bump gives
+    // instant feedback; a short re-sync reconciles with the authoritative server count. estimates is
+    // advisory (muted); AI calls + photos are the enforced dimensions.
+    let _usageState = null;      // { tier, estimates:{used,cap}, aiCalls:{used,cap}, photos:{used,cap} }
+    let _usageFetchedAt = 0, _usageResyncTimer = null;
+    function _usageChip(label, dim, advisory) {
+      if (!dim || dim.cap == null) return '';
+      const used = dim.used || 0, cap = dim.cap, pct = cap > 0 ? (used / cap) * 100 : 0;
+      const col = pct >= 100 ? '#ef4444' : pct >= 80 ? '#f59e0b' : (advisory ? 'var(--text-muted)' : 'var(--text-secondary)');
+      return '<span style="white-space:nowrap;">' + label + ' <b style="color:' + col + ';">' + used + '</b><span style="color:var(--text-muted);">/' + cap + '</span></span>';
+    }
+    function _usageStripHTML() {
+      if (!_usageState) return '';
+      const u = _usageState;
+      return '<div style="display:flex;gap:6px 16px;flex-wrap:wrap;align-items:center;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:7px 12px;margin-bottom:12px;font-size:12px;color:var(--text-secondary);">'
+        + '<span style="color:var(--text-muted);font-size:10px;font-weight:700;letter-spacing:.5px;">THIS MONTH</span>'
+        + _usageChip('Estimates', u.estimates, true)
+        + _usageChip('AI calls', u.aiCalls, false)
+        + _usageChip('Photos', u.photos, false)
+        + '</div>';
+    }
+    function renderUsageStrips() {
+      const html = _usageStripHTML();
+      const a = document.getElementById('estUsageStripList'); if (a) a.innerHTML = html;
+      const b = document.getElementById('estUsageStripEditor'); if (b) b.innerHTML = html;
+    }
+    async function loadUsageStrip(force) {
+      renderUsageStrips(); // paint current cache first (no flash)
+      if (!currentUser || !currentUser.franchiseInternalID) { _usageState = null; renderUsageStrips(); return; }
+      if (!force && _usageState && (Date.now() - _usageFetchedAt) < 15000) return; // fresh enough — don't re-fetch on every list re-render
+      try {
+        const data = await edgeFunctionCall('crewlogic-ai', { action: 'usageSummary', franchiseID: currentUser.franchiseInternalID });
+        if (data && data.usage) { _usageState = data.usage; _usageFetchedAt = Date.now(); renderUsageStrips(); }
+      } catch (e) { console.error('[usage-strip] load', e); }
+    }
+    // Optimistic tick on an event (e.g. { aiCalls: 1, photos: 4 }); a short re-sync corrects to the server count.
+    function bumpUsage(deltas) {
+      if (!_usageState) return;
+      let changed = false;
+      Object.keys(deltas || {}).forEach(dim => { if (_usageState[dim]) { _usageState[dim].used = (_usageState[dim].used || 0) + (deltas[dim] || 0); changed = true; } });
+      if (!changed) return;
+      renderUsageStrips();
+      if (_usageResyncTimer) clearTimeout(_usageResyncTimer);
+      _usageResyncTimer = setTimeout(() => loadUsageStrip(true), 6000);
+    }
+    window.loadUsageStrip = loadUsageStrip;
+
     // Usage warnings (Epic D) — home banner at 80/90/95% of the estimate OR photo allowance. Reads the
     // server-side usageSummary (period-scoped). Non-blocking; hidden under 80% or on error. Includes the
     // transparency note (volume-check photos count toward photos; a volume check isn't an estimate).
@@ -8565,7 +8616,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const u = data && data.usage;
         if (!u) { el.style.display = 'none'; return; }
         const pct = (used, cap) => (cap && cap > 0) ? (used / cap) * 100 : 0;
-        const top = Math.max(pct(u.estimates.used, u.estimates.cap), pct(u.photos.used, u.photos.cap));
+        const top = Math.max(pct(u.aiCalls.used, u.aiCalls.cap), pct(u.photos.used, u.photos.cap)); // warn on the ENFORCED dims (AI calls + photos); estimates is advisory only
         if (top < 80) { el.style.display = 'none'; return; }
         const t = top >= 95 ? { bg: 'rgba(239,68,68,.12)', bd: '#ef4444', tx: '#ef4444', word: 'reached' }
           : top >= 90 ? { bg: 'rgba(249,115,22,.12)', bd: '#f97316', tx: '#f97316', word: 'almost at' }
@@ -8573,7 +8624,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const line = (label, used, cap) => cap ? '<span style="white-space:nowrap;">' + label + ' <b>' + used + '</b>/' + cap + '</span>' : '';
         el.innerHTML = '<div style="background:' + t.bg + ';border:1px solid ' + t.bd + ';border-radius:12px;padding:12px 14px;margin-bottom:14px;">'
           + '<div style="font-weight:800;color:' + t.tx + ';font-size:13px;margin-bottom:5px;">You\'re ' + t.word + ' your monthly allowance</div>'
-          + '<div style="display:flex;gap:16px;flex-wrap:wrap;color:var(--text-secondary);font-size:12.5px;margin-bottom:6px;">' + line('Estimates', u.estimates.used, u.estimates.cap) + line('Photos', u.photos.used, u.photos.cap) + '</div>'
+          + '<div style="display:flex;gap:16px;flex-wrap:wrap;color:var(--text-secondary);font-size:12.5px;margin-bottom:6px;">' + line('Estimates', u.estimates.used, u.estimates.cap) + line('AI calls', u.aiCalls.used, u.aiCalls.cap) + line('Photos', u.photos.used, u.photos.cap) + '</div>'
           + '<div style="font-size:11px;color:var(--text-muted);line-height:1.5;margin-bottom:9px;">Volume-check photos count toward your photo allowance; a volume check isn\'t an estimate.</div>'
           + (BILLING_ENABLED ? '<button onclick="openAddCredits()" style="background:var(--accent-green);color:var(--accent-text);border:none;font-weight:800;font-size:12.5px;padding:8px 15px;border-radius:8px;cursor:pointer;">＋ Add credits</button>' : '')
           + '</div>';
@@ -11567,7 +11618,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (s === 'ontime') return 'linear-gradient(rgba(0,231,133,0.34),rgba(0,231,133,0.34)),var(--bg-card)';
       return 'var(--bg-card)';
     }
-    function _mjRepaintRouteCells() { document.querySelectorAll('[id^="mjRoute-"]').forEach(el => { const rc = el.getAttribute('data-rcode') || '', day = el.getAttribute('data-day') || ''; el.style.background = _mjRouteBg(rc, day); const e = (_mjEtaByDate[_mjSD(day)] || {})[rc]; el.style.boxShadow = (e && e.live) ? 'inset 3px 0 0 #00E785' : ''; }); } // green left edge = LIVE GPS-anchored (not a day-start guess)
+    function _mjRepaintRouteCells() { document.querySelectorAll('[id^="mjRoute-"]').forEach(el => { const rc = el.getAttribute('data-rcode') || '', day = el.getAttribute('data-day') || ''; el.style.background = _mjRouteBg(rc, day); const e = (_mjEtaByDate[_mjSD(day)] || {})[rc]; el.style.boxShadow = 'inset 4px 0 0 0 ' + mjRouteColor(rc) + ((e && e.live) ? ', inset -3px 0 0 0 #00E785' : ''); }); } // preserve the route-color left bar; add a green RIGHT edge when the route is LIVE GPS-anchored
     // Explain modal — how the green/red feasibility was determined (per-job breakdown), opened by clicking the route cell.
     let _mjExplainCtx = null;
     function _mjExplainBody(sd, rcode) {
@@ -16179,6 +16230,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     function renderEstimatesList(estimates) {
       window._cachedEstimates = estimates; // cache for filter toggle
+      loadUsageStrip(); // Phase 4: refresh the usage strip when the estimates list renders (throttled)
       const listEl = document.getElementById('estimatesList');
       // Always filter out deleted estimates from normal list views
       const nonDeleted = estimates.filter(e => e.status !== 'deleted');
@@ -16659,6 +16711,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.getElementById('backBtn').classList.add('visible');
       // Show editor toolbar (Photo / Describe / Manual / More / Save Draft)
       showSecondaryToolbar('editor');
+      loadUsageStrip(); // Phase 4: live usage at the top of the estimate
 
       // Populate fields
       document.getElementById('estLabel').value = currentEstimate.label || '';
@@ -17643,6 +17696,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
         const data = await callAnalyzeVoice({ transcript, areas: availableAreas, photos: resolvedPhotos });
         if (data.success) {
+          bumpUsage({ aiCalls: 1, photos: (resolvedPhotos && resolvedPhotos.length) || 0 }); // Phase 4: tick usage on a successful per-room analyze
           const results = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
           const vol = results.find(c => c.type === 'volume');
           if (vol) {
@@ -24137,6 +24191,7 @@ RECYCLING & DONATION
         const data = res;
 
         if (data.success) {
+          bumpUsage({ aiCalls: 1, photos: (photosToAnalyze && photosToAnalyze.length) || 0 }); // Phase 4: tick usage on a successful room-capture analyze
           const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
           let addedCount = 0;
           // Build durable photo references: prefer Supabase path if already uploaded,
@@ -29715,6 +29770,7 @@ Please review the estimate below. If you have any questions or would like to adj
             source: 'volume_check'
           });
           if (data && data.success) {
+            bumpUsage({ aiCalls: 1, photos: (area.photos && area.photos.length) || 0 }); // Phase 4: tick usage per volume-check area analyzed
             const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result].filter(Boolean);
             areaResults.push({ area: area, charges: charges, hazmat: data.hazmat || null });
           } else {
