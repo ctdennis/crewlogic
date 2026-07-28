@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.98.3 | 2026-07-28">
+  <meta name="crewlogic-version" content="v5.98.4 | 2026-07-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12240,17 +12240,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // settled AND markers exist, we re-fit the coverage area ONCE. _dashNeedsFit guards it so divider drags
       // / auto-refreshes never re-zoom after the user has the view they want.
       _dashNeedsFit = true;
+      let _dashLastW = -1, _dashFixN = 0;
       const fix = () => {
         if (!_trucksMap || _trucksMapEl !== 'dashMapPane') return;
         _trucksMap.invalidateSize();
-        if (_dashNeedsFit && ((_truckMarkers && _truckMarkers.length) || (_jobMarkers && _jobMarkers.length))) {
+        // Fit ONLY once the pane's width has SETTLED. On first paint the flex row reflows from near-zero to full
+        // width; fitting mid-reflow picks a too-low (all-of-New-England) zoom into the narrow container, and
+        // clearing _dashNeedsFit then locks it in — the ResizeObserver's later calls invalidateSize but never
+        // re-fit. Requiring two consecutive equal widths waits for the layout to stop moving before the fit.
+        const p = document.getElementById('dashMapPane');
+        const w = p ? p.offsetWidth : 0, h = p ? p.offsetHeight : 0;
+        const settled = w > 150 && h > 150 && w === _dashLastW;
+        _dashLastW = w;
+        if (_dashNeedsFit && settled && ((_truckMarkers && _truckMarkers.length) || (_jobMarkers && _jobMarkers.length))) {
           _fitTrucksCentered(); _dashNeedsFit = false;
         }
       };
-      // Markers load async; on a busy initial load they can land AFTER a fixed 1.5s window, leaving the map small
-      // until a day-switch re-fit. Keep resizing until they actually load + fit (bounded ~7s), not a few timers.
-      let _dashFixN = 0;
-      const retryFix = () => { fix(); if (_dashFixN++ < 24 && (_dashNeedsFit || _dashFixN < 8)) setTimeout(retryFix, 300); };
+      // Markers load async; on a busy initial load they can land after a fixed window, leaving the map small until
+      // a day-switch re-fit. Keep resizing until the layout settles + markers load + we fit once (bounded ~12s).
+      const retryFix = () => { fix(); if (_dashFixN++ < 40 && (_dashNeedsFit || _dashFixN < 8)) setTimeout(retryFix, 300); };
       requestAnimationFrame(retryFix); setTimeout(retryFix, 200);
       if (window.ResizeObserver) {
         if (_dashMapRO) { try { _dashMapRO.disconnect(); } catch (e) {} }
