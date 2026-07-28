@@ -95,20 +95,26 @@ ceiling).
 Stays OFF (`ENFORCE_USAGE_CAPS` unset) until Owner flips it. Owner decision §9-d: when on,
 which dimension(s) hard-block — AI calls only (cost), or all three? Others stay advisory.
 
-## 8. Build phases (after approval; dev-first, prod gated)
+## 8. Build phases (dev-first, prod gated) — STATUS
 
-1. **Contract** — usageSummary/usageStatus response shape (3 dims + caps + overage), the
-   billing/overage action shape, the admin-grant action shape.
-2. **Schema/migration** — `tier_limits.included_ai_calls`; per-franchise overage columns for
-   the new dims; backfill.
-3. **Metering** — `countUsage` → 3 dims (distinct estimates from `estimates`; AI calls;
-   photos); `usageSummary`/`usageStatus`.
-4. **Display** — shared usage module + strip on the estimates list + estimate editor, live
-   tick-down on each event.
-5. **Overage** — franchisee top-up per §9-c; wire the buttons.
-6. **Admin** — Subscription Management: show usage, grant extra per dimension.
-7. **Terminology rename sweep** — pricing card, banner, tooltips, error messages, marketing.
-8. **Enforcement** — behind the flag per §9-d; keep OFF until Owner says.
+1. ✅ **Contract** — captured in this doc (§3 metering shape, §6 overage/grant).
+2. ✅ **Schema/migration** — migration 0075: `tier_limits.included_ai_calls` (75/225/750) +
+   `franchises.overage_call_credit`. Applied dev.
+3. ✅ **Metering** — `countUsage` → 3 dims (distinct estimates from `estimates`; AI calls =
+   analyze + volume-check; photos); `usageSummary`/`usageStatus`. Deployed + smoked dev.
+4. ✅ **Display** — shared usage module + strip on estimates list + editor, live tick-down on
+   each analyze/volume-check (optimistic + 6s re-sync); home banner shows all 3, warns on
+   AI calls + photos. v5.97.0.
+5. ⏳ **Overage (franchisee self-serve)** — per §9-c per-dimension top-ups. NOT built — needs
+   Owner overage pricing (per-dimension prices, or keep the current $10 combined block). The
+   admin grant lever (phase 6) already covers "increase" in the meantime.
+6. ✅ **Admin** — Subscription Management shows per-account usage + a Grant lever (est/AI calls/
+   photos) → `grantUsage` op. v5.98.x.
+7. ✅ **Terminology sweep** — marketing pricing cards now list estimates + AI calls + photos
+   (was "AI estimates"); overage/fineprint relabeled. App side already correct (phase 4 labels;
+   plan cards use feature names, not counts). Error copy is generic ("this month's allowance").
+8. ⏳ **Enforcement** — behind `ENFORCE_USAGE_CAPS` (unset = OFF); targets AI calls + photos.
+   Keep OFF until Owner flips it.
 
 ## 9. Decisions — RESOLVED (Owner 2026-07-27)
 
