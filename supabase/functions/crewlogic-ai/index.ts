@@ -294,15 +294,15 @@ async function handleAnalyzeEstimate(payload: Record<string, unknown>): Promise<
 
   // Usage-cap enforcement (Epic D). Gated by ENFORCE_USAGE_CAPS — OFF at launch, so this whole block
   // is skipped (no added latency, never blocks). When ON, hard-blocks at 100% with a safe envelope
-  // (no internals leaked). The estimate cap ignores volume checks; the photo cap applies to both.
+  // (no internals leaked). Blocks on the COST dimensions — AI calls + photos (a volume check counts as
+  // an AI call). The estimates dimension is ADVISORY ONLY and never blocks (Owner 2026-07-27).
   if (ENFORCE_USAGE_CAPS) {
     const fId = (payload.franchiseID ?? payload.franchiseInternalID) as string | undefined;
     const status = fId ? await getUsageStatus(fId) : null;
     if (status) {
-      const isVolumeCheck = (payload.source as string | undefined) === 'volume_check';
-      const overEstimates = !isVolumeCheck && status.estimates.cap != null && status.estimates.used >= status.estimates.cap;
+      const overCalls = status.aiCalls.cap != null && status.aiCalls.used >= status.aiCalls.cap;
       const overPhotos = status.photos.cap != null && status.photos.used >= status.photos.cap;
-      if (overEstimates || overPhotos) {
+      if (overCalls || overPhotos) {
         return {
           blocked: true,
           code: 'allowance_reached',
@@ -1117,29 +1117,33 @@ async function handleIssueReward(payload: Record<string, unknown>): Promise<unkn
 async function getUsageStatus(franchiseId: string): Promise<{
   tier: string;
   estimates: { used: number; cap: number | null };
+  aiCalls: { used: number; cap: number | null };
   photos: { used: number; cap: number | null };
 } | null> {
   try {
     if (!franchiseId) return null;
-    const { data: fr } = await _usageClient.from('franchises').select('subscription_tier, overage_period, overage_est_credit, overage_photo_credit').eq('id', franchiseId).maybeSingle();
-    const frr = fr as { subscription_tier?: string; overage_period?: string; overage_est_credit?: number; overage_photo_credit?: number } | null;
+    const { data: fr } = await _usageClient.from('franchises').select('subscription_tier, overage_period, overage_est_credit, overage_call_credit, overage_photo_credit').eq('id', franchiseId).maybeSingle();
+    const frr = fr as { subscription_tier?: string; overage_period?: string; overage_est_credit?: number; overage_call_credit?: number; overage_photo_credit?: number } | null;
     const rawTier = (frr && frr.subscription_tier) || 'free';
     // Trials/free/tester have no plan row → show the Starter allowance (entry tier) for warnings.
     const capTier = ['starter', 'pro', 'enterprise'].indexOf(rawTier) !== -1 ? rawTier : 'starter';
-    const { data: tl } = await _usageClient.from('tier_limits').select('included_estimates, included_photos').eq('tier', capTier).maybeSingle();
+    const { data: tl } = await _usageClient.from('tier_limits').select('included_estimates, included_ai_calls, included_photos').eq('tier', capTier).maybeSingle();
     const period = calendarMonthPeriod(Date.now());
     const counts = await countUsage(_usageClient, franchiseId, period.startIso, period.endIso);
-    const t = tl as { included_estimates?: number; included_photos?: number } | null;
+    const t = tl as { included_estimates?: number; included_ai_calls?: number; included_photos?: number } | null;
     // One-time overage credits count only while overage_period matches the current month (YYYY-MM).
     const periodKey = new Date().toISOString().slice(0, 7);
     const active = frr && frr.overage_period === periodKey;
     const overEst = active ? (frr!.overage_est_credit || 0) : 0;
+    const overCall = active ? (frr!.overage_call_credit || 0) : 0;
     const overPhoto = active ? (frr!.overage_photo_credit || 0) : 0;
     const estCap = t ? (t.included_estimates ?? null) : null;
+    const callCap = t ? (t.included_ai_calls ?? null) : null;
     const photoCap = t ? (t.included_photos ?? null) : null;
     return {
       tier: rawTier,
       estimates: { used: counts.estimates, cap: estCap != null ? estCap + overEst : null },
+      aiCalls: { used: counts.aiCalls, cap: callCap != null ? callCap + overCall : null },
       photos: { used: counts.photos, cap: photoCap != null ? photoCap + overPhoto : null },
     };
   } catch (e) {
@@ -1155,6 +1159,22 @@ async function handleUsageSummary(payload: Record<string, unknown>): Promise<unk
   return { usage: await getUsageStatus(franchiseId) };
 }
 
+// Frontend-facing: record photos UPLOADED to storage (the billable storage unit). The client calls this on each
+// successful estimate-photos upload; countUsage tallies photo.upload events for the period. Fire-and-forget.
+async function handleLogPhotoUpload(payload: Record<string, unknown>): Promise<unknown> {
+  const franchiseId = (payload.franchiseID ?? payload.franchiseInternalID) as string | undefined;
+  const count = Math.max(0, Math.floor(Number(payload.count) || 0));
+  if (!franchiseId || !count) return { ok: false };
+  await logUsage(_usageClient, {
+    franchiseId,
+    tenantId: (payload.tenantID as string) || null,
+    eventType: 'photo.upload',
+    units: count,
+    metadata: { count },
+  });
+  return { ok: true };
+}
+
 const ACTION_HANDLERS: Record<string, (payload: Record<string, unknown>) => Promise<unknown>> = {
   analyzeEstimate: handleAnalyzeEstimate,
   generateJobSummary: handleGenerateJobSummary,
@@ -1163,6 +1183,7 @@ const ACTION_HANDLERS: Record<string, (payload: Record<string, unknown>) => Prom
   reverseGeocode: handleReverseGeocode,
   issueReward: handleIssueReward,
   usageSummary: handleUsageSummary,
+  logPhotoUpload: handleLogPhotoUpload,
 };
 
 

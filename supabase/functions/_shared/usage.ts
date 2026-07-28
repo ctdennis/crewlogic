@@ -31,37 +31,56 @@ function uuidOrNull(v: unknown): string | null {
   return typeof v === 'string' && UUID_RE.test(v.trim()) ? v.trim() : null;
 }
 
-export interface UsageCounts { estimates: number; photos: number; }
+export interface UsageCounts { estimates: number; aiCalls: number; photos: number; }
 
-// Count a franchise's billable usage in [startIso, endIso): estimates = # of ai.analyze_estimate
-// events; photos = SUM(metadata.images) over ai.analyze_estimate + ai.volume_check (volume-check
-// photos count — same cost — but a volume check is NOT an estimate). Never throws — a counting
-// failure returns zeros so the caller can fail-open (never block a customer on a metering hiccup).
+// Count a franchise's billable usage in [startIso, endIso), as THREE distinct dimensions:
+//   aiCalls   = # of ai.analyze_estimate + ai.volume_check events. Each is one Anthropic call — the
+//               COST unit. One estimate is 1-to-many with AI calls (one per room analyzed + each
+//               manual re-analyze; a volume check = 1). This is the enforced dimension.
+//   photos    = # of photos UPLOADED to storage (photo.upload events, Σ metadata.count) — counted on UPLOAD, not
+//               per analyzed image, since a stored photo is a billable storage unit (also enforced).
+//   estimates = # of DISTINCT saved estimates created in-period (estimates table, deleted_at IS NULL).
+//               A re-run does NOT add one; a delete removes one. Advisory only (never blocks) — it's
+//               the human-facing "how many jobs did I estimate" number, not the cost driver.
+// Never throws — a counting failure returns zeros so the caller can fail-open (never block a customer
+// on a metering hiccup). The two queries are independent; either failing zeroes only its own dimension.
 export async function countUsage(
   sb: SupabaseClient,
   franchiseId: string,
   startIso: string,
   endIso: string,
 ): Promise<UsageCounts> {
+  let aiCalls = 0, photos = 0, estimates = 0;
   try {
     const { data, error } = await sb.from('usage_events')
       .select('event_type, metadata')
       .eq('franchise_id', franchiseId)
       .gte('created_at', startIso)
       .lt('created_at', endIso)
-      .in('event_type', ['ai.analyze_estimate', 'ai.volume_check']);
-    if (error) { console.error('[usage] count failed:', error.message || error); return { estimates: 0, photos: 0 }; }
-    let estimates = 0, photos = 0;
-    for (const r of (data || [])) {
-      if (r.event_type === 'ai.analyze_estimate') estimates++;
-      const img = r.metadata && (r.metadata as { images?: unknown }).images;
-      if (typeof img === 'number' && img > 0) photos += img;
+      .in('event_type', ['ai.analyze_estimate', 'ai.volume_check', 'photo.upload']);
+    if (error) { console.error('[usage] event count failed:', error.message || error); }
+    else for (const r of (data || [])) {
+      if (r.event_type === 'photo.upload') {
+        // photos are counted on UPLOAD (each stored photo is a billable storage unit), NOT per analyzed image —
+        // so photos added for manual costing still count; volume-check photos aren't stored so they never land here.
+        const c = r.metadata && (r.metadata as { count?: unknown }).count;
+        if (typeof c === 'number' && c > 0) photos += c;
+      } else {
+        aiCalls++; // a per-room analyze and a volume check are each one AI call (same Anthropic cost)
+      }
     }
-    return { estimates, photos };
-  } catch (e) {
-    console.error('[usage] count failed:', e);
-    return { estimates: 0, photos: 0 };
-  }
+  } catch (e) { console.error('[usage] event count failed:', e); }
+  try {
+    const { count, error } = await sb.from('estimates')
+      .select('id', { count: 'exact', head: true })
+      .eq('franchise_id', franchiseId)
+      .gte('created_at', startIso)
+      .lt('created_at', endIso)
+      .is('deleted_at', null);
+    if (error) console.error('[usage] estimate count failed:', error.message || error);
+    else estimates = count || 0;
+  } catch (e) { console.error('[usage] estimate count failed:', e); }
+  return { estimates, aiCalls, photos };
 }
 
 // Current usage window. Launch: calendar month (no subscribers yet). When a franchise is subscribed,

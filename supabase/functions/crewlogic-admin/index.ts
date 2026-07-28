@@ -5,6 +5,7 @@
 // an audit row to subscription_audit. The caller's JWT is verified against SUPER_ADMIN_EMAIL
 // BEFORE any action — never trust the client.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { countUsage, calendarMonthPeriod } from "../_shared/usage.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -56,14 +57,27 @@ Deno.serve(async (req: Request) => {
         .from("profiles")
         .select(
           "id,email,name,role,franchise_id,pending_trial_ends_at," +
-          "franchises(id,external_id,franchise_name,subscription_status,subscription_tier,trial_ends_at,tenant_id,vonigo_configured," +
+          "franchises(id,external_id,franchise_name,subscription_status,subscription_tier,trial_ends_at,tenant_id,vonigo_configured,overage_period,overage_est_credit,overage_call_credit,overage_photo_credit," +
           "tenants(id,crm_type,subscription_status,trial_ends_at))"
         );
       if (q) qb = qb.or(`name.ilike.%${q}%,email.ilike.%${q}%`);
       const { data: rows, error } = await qb.order("name", { ascending: true }).limit(200);
       if (error) return json({ success: false, error: error.message }, 500);
 
-      const accounts = (rows || []).map((r: Record<string, unknown>) => {
+      // Tier caps (one query, reused for every account's usage line).
+      const { data: tlRows } = await sb.from("tier_limits").select("tier,included_estimates,included_ai_calls,included_photos");
+      const capByTier: Record<string, { est: number | null; calls: number | null; photos: number | null }> = {};
+      for (const tl of (tlRows || []) as Record<string, unknown>[]) {
+        capByTier[String(tl.tier)] = {
+          est: (tl.included_estimates as number) ?? null,
+          calls: (tl.included_ai_calls as number) ?? null,
+          photos: (tl.included_photos as number) ?? null,
+        };
+      }
+      const period = calendarMonthPeriod(Date.now());
+      const periodKey = new Date().toISOString().slice(0, 7);
+
+      const accounts = await Promise.all((rows || []).map(async (r: Record<string, unknown>) => {
         const f = (r.franchises || {}) as Record<string, unknown>;
         const t = (f.tenants || {}) as Record<string, unknown>;
         const track = t.crm_type === "vonigo" ? "Vonigo" : "native";
@@ -76,6 +90,24 @@ Deno.serve(async (req: Request) => {
         else effectiveStatus = "trialing";
         const effectiveTrialEndsAt =
           (f.trial_ends_at as string) || (r.pending_trial_ends_at as string) || (t.trial_ends_at as string) || null;
+        // This month's usage vs cap (3 dims). free/tester/trial fall back to Starter caps for display.
+        // Overage credits count only while overage_period === the current month.
+        let usage: null | Record<string, { used: number; cap: number | null }> = null;
+        if (f.id) {
+          const rawTier = String(f.subscription_tier || "free");
+          const capTier = ["starter", "pro", "enterprise"].indexOf(rawTier) !== -1 ? rawTier : "starter";
+          const caps = capByTier[capTier] || { est: null, calls: null, photos: null };
+          const active = f.overage_period === periodKey;
+          const oEst = active ? ((f.overage_est_credit as number) || 0) : 0;
+          const oCall = active ? ((f.overage_call_credit as number) || 0) : 0;
+          const oPhoto = active ? ((f.overage_photo_credit as number) || 0) : 0;
+          const c = await countUsage(sb, String(f.id), period.startIso, period.endIso);
+          usage = {
+            estimates: { used: c.estimates, cap: caps.est != null ? caps.est + oEst : null },
+            aiCalls: { used: c.aiCalls, cap: caps.calls != null ? caps.calls + oCall : null },
+            photos: { used: c.photos, cap: caps.photos != null ? caps.photos + oPhoto : null },
+          };
+        }
         return {
           email: r.email,
           name: r.name,
@@ -86,8 +118,9 @@ Deno.serve(async (req: Request) => {
           track,
           effectiveStatus,
           effectiveTrialEndsAt,
+          usage,
         };
-      });
+      }));
       return json({ success: true, accounts });
     }
 
@@ -168,6 +201,56 @@ Deno.serve(async (req: Request) => {
       if (auditErr) console.error("crewlogic-admin: audit insert failed:", auditErr);
 
       return json({ success: true, franchiseId, newStatus, newTrialEndsAt: newTrial });
+    }
+
+    // ===== grantUsage — the super-admin "increase this franchise's allowance" lever =====
+    // Adds one-time overage credits (estimates / AI calls / photos) for the CURRENT month. Credits from a
+    // prior month are stale — reset to 0 before adding — and overage_period is stamped to this month, which
+    // is the same gate getUsageStatus / searchAccounts use to decide the credits still count.
+    if (action === "grantUsage") {
+      const franchiseId = String(body.franchiseId || "");
+      if (!franchiseId) return json({ success: false, error: "franchiseId required" }, 400);
+      const addEst = Math.max(0, Math.floor(Number(body.estimates) || 0));
+      const addCalls = Math.max(0, Math.floor(Number(body.aiCalls) || 0));
+      const addPhotos = Math.max(0, Math.floor(Number(body.photos) || 0));
+      if (!addEst && !addCalls && !addPhotos) return json({ success: false, error: "nothing to grant" }, 400);
+
+      const { data: fr, error: frErr } = await sb
+        .from("franchises")
+        .select("id,tenant_id,overage_period,overage_est_credit,overage_call_credit,overage_photo_credit")
+        .eq("id", franchiseId)
+        .maybeSingle();
+      if (frErr) return json({ success: false, error: frErr.message }, 500);
+      if (!fr) return json({ success: false, error: "Franchise not found" }, 404);
+
+      const periodKey = new Date().toISOString().slice(0, 7);
+      const stale = fr.overage_period !== periodKey; // a prior month's credits don't carry — reset first
+      const newEst = (stale ? 0 : (fr.overage_est_credit || 0)) + addEst;
+      const newCalls = (stale ? 0 : (fr.overage_call_credit || 0)) + addCalls;
+      const newPhotos = (stale ? 0 : (fr.overage_photo_credit || 0)) + addPhotos;
+
+      const { error: updErr } = await sb
+        .from("franchises")
+        .update({ overage_period: periodKey, overage_est_credit: newEst, overage_call_credit: newCalls, overage_photo_credit: newPhotos })
+        .eq("id", franchiseId);
+      if (updErr) return json({ success: false, error: updErr.message }, 500);
+
+      // Audit (best-effort — never fail the grant on a logging hiccup).
+      const { data: prof } = await sb.from("profiles").select("email").eq("franchise_id", franchiseId).limit(1).maybeSingle();
+      const { error: auditErr } = await sb.from("subscription_audit").insert({
+        admin_email: adminEmail,
+        target_email: (prof && prof.email) || null,
+        target_franchise_id: franchiseId,
+        target_tenant_id: fr.tenant_id || null,
+        action: "grant_usage",
+        old_status: `est${fr.overage_est_credit || 0}/calls${fr.overage_call_credit || 0}/photos${fr.overage_photo_credit || 0}`,
+        new_status: `est${newEst}/calls${newCalls}/photos${newPhotos} (${periodKey})`,
+        old_trial_ends_at: null,
+        new_trial_ends_at: null,
+      });
+      if (auditErr) console.error("crewlogic-admin: grant audit insert failed:", auditErr);
+
+      return json({ success: true, franchiseId, overage: { estimates: newEst, aiCalls: newCalls, photos: newPhotos, period: periodKey } });
     }
 
     // ===== usageSummary =====

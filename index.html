@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.95.7 | 2026-07-27">
+  <meta name="crewlogic-version" content="v5.98.6 | 2026-07-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -400,6 +400,7 @@
 
     .form-input:focus { border-color: var(--accent-green); }
     .form-input::placeholder { color: var(--text-muted); }
+    input::placeholder, textarea::placeholder { color: var(--text-muted); } /* app-wide placeholder minimum — bare inputs (e.g. admin grant/filter boxes) otherwise use the dark browser default, below our minimum font color */
 
     .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
@@ -2520,11 +2521,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       <!-- ESTIMATES LIST -->
       <div class="estimates-section" id="estimatesScreen">
+        <div id="estUsageStripList"></div>
         <div id="estimatesList"></div>
       </div>
 
       <!-- ESTIMATE EDITOR -->
       <div class="estimate-editor-section" id="estimateEditorScreen">
+        <div id="estUsageStripEditor"></div>
 
         <!-- JOB LOOKUP — first thing, compact inline row -->
         <div id="estStepZip" style="margin-bottom:8px;">
@@ -5533,6 +5536,36 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Back-compat: Enter / Refresh re-pulls from the server.
     function searchSubscriptionAccounts() { return loadSubscriptionAccounts(); }
 
+    // Phase 6 grant lever — three wider inputs (est / AI calls / photos), each with its current used/cap
+    // shown directly beneath. Type an amount to grant, tap Grant. No extra labels.
+    function _subUsageGrantHTML(a, fid) {
+      const u = a.usage;
+      const col = function (placeholder, id, dim) {
+        const cap = dim ? (dim.cap == null ? '∞' : dim.cap) : '—';
+        const used = dim ? (dim.used || 0) : '—';
+        const over = dim && dim.cap != null && (dim.used || 0) >= dim.cap;
+        return '<div style="display:flex;flex-direction:column;gap:3px;align-items:center;">'
+          + '<input id="' + id + '-' + fid + '" type="number" min="0" placeholder="' + placeholder + '" style="width:104px;background:var(--bg-input);border:1px solid var(--btn-surface-border,#46596d);border-radius:6px;color:var(--text-primary);font-size:12px;padding:6px 8px;text-align:center;">'
+          + '<span style="font-size:11.5px;color:' + (over ? '#f59e0b' : 'var(--text-muted)') + ';">' + used + '/' + cap + '</span></div>';
+      };
+      return '<div style="display:flex;gap:9px;flex-wrap:wrap;align-items:flex-start;margin-top:10px;">'
+        + col('Estimates', 'grantEst', u && u.estimates)
+        + col('AI Calls', 'grantCalls', u && u.aiCalls)
+        + col('Photos', 'grantPhotos', u && u.photos)
+        + '<button onclick="applyGrantUsage(\'' + fid + '\')" style="padding:7px 16px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;margin-top:1px;">Grant</button></div>';
+    }
+    async function applyGrantUsage(fid) {
+      const est = Number((document.getElementById('grantEst-' + fid) || {}).value) || 0;
+      const calls = Number((document.getElementById('grantCalls-' + fid) || {}).value) || 0;
+      const photos = Number((document.getElementById('grantPhotos-' + fid) || {}).value) || 0;
+      if (!est && !calls && !photos) return;
+      const fb = document.querySelector('.sub-admin-feedback[data-fid="' + fid + '"]');
+      if (fb) { fb.style.color = 'var(--text-muted)'; fb.textContent = 'Granting…'; }
+      const data = await adminEdgeCall('grantUsage', { franchiseId: fid, estimates: est, aiCalls: calls, photos: photos });
+      if (!data || !data.success) { if (fb) { fb.style.color = '#ff7676'; fb.textContent = (data && data.error) || 'Grant failed'; } return; }
+      await searchSubscriptionAccounts(); // refresh — the caps now reflect the grant
+    }
+    window.applyGrantUsage = applyGrantUsage;
     function _renderSubAdminList(accounts, totalCount) {
       const results = document.getElementById('subAdminResults');
       if (!results) return;
@@ -5572,6 +5605,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             '<input type="date" id="subend-' + fid + '" onchange="if(this.value)applySubAction(\'' + fid + '\',\'set_end_date\',{endDate:this.value})" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;color-scheme:dark;">' +
             '<button onclick="applySubAction(\'' + fid + '\',\'cancel\')" style="padding:6px 10px;font-size:12px;background:rgba(255,118,118,0.12);color:#ff7676;border:1px solid rgba(255,118,118,0.3);border-radius:var(--radius-sm);cursor:pointer;">Cancel</button>' +
           '</div>' +
+          _subUsageGrantHTML(a, fid) +
           '<div class="sub-admin-feedback" data-fid="' + fid + '" style="font-size:12px;margin-top:8px;"></div>' +
         '</div>';
       }).join('');
@@ -6946,6 +6980,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         .from('estimate-photos')
         .upload(path, blob, { contentType: mime, upsert: false });
       if (error) throw new Error('Supabase upload failed: ' + error.message);
+      // Usage: a STORED photo is a billable storage unit — count it on UPLOAD (not on analyze), so photos added
+      // for manual costing still count. Fire-and-forget: the strip bump is instant feedback, the server
+      // photo.upload event is the durable count. (Volume-check photos aren't stored → not counted here.)
+      try {
+        if (typeof bumpUsage === 'function') bumpUsage({ photos: 1 });
+        edgeFunctionCall('crewlogic-ai', { action: 'logPhotoUpload', franchiseID: currentUser.franchiseInternalID, tenantID: currentUser.tenantID, count: 1 }).catch(function () {});
+      } catch (e) {}
       return path;
     }
     const STREET_VIEW_KEY = 'AIzaSyDZGtQKeH8LKs_rpO2zti8oAkJNkgfhCgM';
@@ -8553,6 +8594,55 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         }).catch(function (e) { console.error('[tileToggles] fetch failed', e); });
     }
 
+    // ── Usage strip (Phase 4): live 3-dimension usage — estimates / AI calls / photos — at the top of the
+    // estimates list AND each estimate editor, ticking on every analyze / volume-check event. One shared
+    // state + render feeds both mounts (#estUsageStripList / #estUsageStripEditor). Optimistic bump gives
+    // instant feedback; a short re-sync reconciles with the authoritative server count. estimates is
+    // advisory (muted); AI calls + photos are the enforced dimensions.
+    let _usageState = null;      // { tier, estimates:{used,cap}, aiCalls:{used,cap}, photos:{used,cap} }
+    let _usageFetchedAt = 0, _usageResyncTimer = null;
+    function _usageChip(label, dim, advisory) {
+      if (!dim || dim.cap == null) return '';
+      const used = dim.used || 0, cap = dim.cap, pct = cap > 0 ? (used / cap) * 100 : 0;
+      const col = pct >= 100 ? '#ef4444' : pct >= 80 ? '#f59e0b' : (advisory ? 'var(--text-muted)' : 'var(--text-secondary)');
+      return '<span style="white-space:nowrap;">' + label + ' <b style="color:' + col + ';">' + used + '</b><span style="color:var(--text-muted);">/' + cap + '</span></span>';
+    }
+    function _usageStripHTML() {
+      if (!_usageState) return '';
+      const u = _usageState;
+      return '<div style="display:flex;gap:6px 16px;flex-wrap:wrap;align-items:center;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:7px 12px;margin-bottom:12px;font-size:12px;color:var(--text-secondary);">'
+        + '<span style="color:var(--text-muted);font-size:10px;font-weight:700;letter-spacing:.5px;">THIS MONTH</span>'
+        + _usageChip('Estimates', u.estimates, true)
+        + _usageChip('AI calls', u.aiCalls, false)
+        + _usageChip('Photos', u.photos, false)
+        + '</div>';
+    }
+    function renderUsageStrips() {
+      const html = _usageStripHTML();
+      const a = document.getElementById('estUsageStripList'); if (a) a.innerHTML = html;
+      const b = document.getElementById('estUsageStripEditor'); if (b) b.innerHTML = html;
+    }
+    async function loadUsageStrip(force) {
+      renderUsageStrips(); // paint current cache first (no flash)
+      if (!currentUser || !currentUser.franchiseInternalID) { _usageState = null; renderUsageStrips(); return; }
+      if (!force && _usageState && (Date.now() - _usageFetchedAt) < 15000) return; // fresh enough — don't re-fetch on every list re-render
+      try {
+        const data = await edgeFunctionCall('crewlogic-ai', { action: 'usageSummary', franchiseID: currentUser.franchiseInternalID });
+        if (data && data.usage) { _usageState = data.usage; _usageFetchedAt = Date.now(); renderUsageStrips(); }
+      } catch (e) { console.error('[usage-strip] load', e); }
+    }
+    // Optimistic tick on an event (e.g. { aiCalls: 1, photos: 4 }); a short re-sync corrects to the server count.
+    function bumpUsage(deltas) {
+      if (!_usageState) return;
+      let changed = false;
+      Object.keys(deltas || {}).forEach(dim => { if (_usageState[dim]) { _usageState[dim].used = (_usageState[dim].used || 0) + (deltas[dim] || 0); changed = true; } });
+      if (!changed) return;
+      renderUsageStrips();
+      if (_usageResyncTimer) clearTimeout(_usageResyncTimer);
+      _usageResyncTimer = setTimeout(() => loadUsageStrip(true), 6000);
+    }
+    window.loadUsageStrip = loadUsageStrip;
+
     // Usage warnings (Epic D) — home banner at 80/90/95% of the estimate OR photo allowance. Reads the
     // server-side usageSummary (period-scoped). Non-blocking; hidden under 80% or on error. Includes the
     // transparency note (volume-check photos count toward photos; a volume check isn't an estimate).
@@ -8565,7 +8655,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const u = data && data.usage;
         if (!u) { el.style.display = 'none'; return; }
         const pct = (used, cap) => (cap && cap > 0) ? (used / cap) * 100 : 0;
-        const top = Math.max(pct(u.estimates.used, u.estimates.cap), pct(u.photos.used, u.photos.cap));
+        const top = Math.max(pct(u.aiCalls.used, u.aiCalls.cap), pct(u.photos.used, u.photos.cap)); // warn on the ENFORCED dims (AI calls + photos); estimates is advisory only
         if (top < 80) { el.style.display = 'none'; return; }
         const t = top >= 95 ? { bg: 'rgba(239,68,68,.12)', bd: '#ef4444', tx: '#ef4444', word: 'reached' }
           : top >= 90 ? { bg: 'rgba(249,115,22,.12)', bd: '#f97316', tx: '#f97316', word: 'almost at' }
@@ -8573,7 +8663,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const line = (label, used, cap) => cap ? '<span style="white-space:nowrap;">' + label + ' <b>' + used + '</b>/' + cap + '</span>' : '';
         el.innerHTML = '<div style="background:' + t.bg + ';border:1px solid ' + t.bd + ';border-radius:12px;padding:12px 14px;margin-bottom:14px;">'
           + '<div style="font-weight:800;color:' + t.tx + ';font-size:13px;margin-bottom:5px;">You\'re ' + t.word + ' your monthly allowance</div>'
-          + '<div style="display:flex;gap:16px;flex-wrap:wrap;color:var(--text-secondary);font-size:12.5px;margin-bottom:6px;">' + line('Estimates', u.estimates.used, u.estimates.cap) + line('Photos', u.photos.used, u.photos.cap) + '</div>'
+          + '<div style="display:flex;gap:16px;flex-wrap:wrap;color:var(--text-secondary);font-size:12.5px;margin-bottom:6px;">' + line('Estimates', u.estimates.used, u.estimates.cap) + line('AI calls', u.aiCalls.used, u.aiCalls.cap) + line('Photos', u.photos.used, u.photos.cap) + '</div>'
           + '<div style="font-size:11px;color:var(--text-muted);line-height:1.5;margin-bottom:9px;">Volume-check photos count toward your photo allowance; a volume check isn\'t an estimate.</div>'
           + (BILLING_ENABLED ? '<button onclick="openAddCredits()" style="background:var(--accent-green);color:var(--accent-text);border:none;font-weight:800;font-size:12.5px;padding:8px 15px;border-radius:8px;cursor:pointer;">＋ Add credits</button>' : '')
           + '</div>';
@@ -11567,7 +11657,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (s === 'ontime') return 'linear-gradient(rgba(0,231,133,0.34),rgba(0,231,133,0.34)),var(--bg-card)';
       return 'var(--bg-card)';
     }
-    function _mjRepaintRouteCells() { document.querySelectorAll('[id^="mjRoute-"]').forEach(el => { el.style.background = _mjRouteBg(el.getAttribute('data-rcode') || '', el.getAttribute('data-day') || ''); }); }
+    function _mjRepaintRouteCells() { document.querySelectorAll('[id^="mjRoute-"]').forEach(el => { const rc = el.getAttribute('data-rcode') || '', day = el.getAttribute('data-day') || ''; el.style.background = _mjRouteBg(rc, day); const e = (_mjEtaByDate[_mjSD(day)] || {})[rc]; el.style.boxShadow = 'inset 4px 0 0 0 ' + mjRouteColor(rc) + ((e && e.live) ? ', inset -3px 0 0 0 #00E785' : ''); }); } // preserve the route-color left bar; add a green RIGHT edge when the route is LIVE GPS-anchored
     // Explain modal — how the green/red feasibility was determined (per-job breakdown), opened by clicking the route cell.
     let _mjExplainCtx = null;
     function _mjExplainBody(sd, rcode) {
@@ -11588,8 +11678,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const verdict = ws === 'late' ? ('<span style="color:#ef4444;">Runs late by ' + (e.rollup.minutes || 0) + ' min</span>')
         : ws === 'window' ? '<span style="color:#eab308;">Makes every window (some after the start)</span>'
         : '<span style="color:#00E785;">On time — arrives by every start</span>';
-      return '<p style="font-size:12.5px;color:var(--text-secondary);margin:0 0 8px;">Verdict: <b>' + verdict + '</b> at <b>' + pct + '% finish speed</b>. Leave the yard by <b>' + mjEsc(e.departYard || '—') + '</b> to make the first stop.</p>' + rows
-        + '<p style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.5;">How this is figured: start at your yard, drive to each stop in order (map drive times), and assume each job takes its scheduled time × the finish-speed dial. Note: a stop that lands before its window OPENS just waits for the window, so upstream slack is absorbed there. <b style="color:#00E785;">Green</b> = arrives by the start time; <b style="color:#eab308;">yellow</b> = within the window but after the start; <b style="color:#ef4444;">red</b> = after the window closes. A day-start <b>guesstimate</b> — once trucks roll, live GPS takes over.</p>';
+      const lead = e.live
+        ? 'Verdict: <b>' + verdict + '</b> at <b>' + pct + '% finish speed</b>, from the assigned truck&rsquo;s <b style="color:#00E785;">current GPS position</b>, right now.'
+        : 'Verdict: <b>' + verdict + '</b> at <b>' + pct + '% finish speed</b>. Leave the yard by <b>' + mjEsc(e.departYard || '—') + '</b> to make the first stop.';
+      const method = e.live
+        ? 'How this is figured: start from the assigned truck&rsquo;s <b style="color:#00E785;">live GPS position</b> and the current time, drive to each REMAINING stop in order (map drive times), and assume each job takes its scheduled time × the finish-speed dial. A stop reached before its window opens waits for it. <b style="color:#00E785;">Green</b> = arrives by the start; <b style="color:#eab308;">yellow</b> = within the window, after the start; <b style="color:#ef4444;">red</b> = after it closes. <b style="color:#00E785;">● Live</b> — recomputes as the truck moves.'
+        : 'How this is figured: start at your yard, drive to each stop in order (map drive times), and assume each job takes its scheduled time × the finish-speed dial. Note: a stop that lands before its window OPENS just waits for the window, so upstream slack is absorbed there. <b style="color:#00E785;">Green</b> = arrives by the start time; <b style="color:#eab308;">yellow</b> = within the window but after the start; <b style="color:#ef4444;">red</b> = after the window closes. A day-start <b>guesstimate</b> — once trucks roll, live GPS takes over.';
+      return '<p style="font-size:12.5px;color:var(--text-secondary);margin:0 0 8px;">' + lead + '</p>' + rows
+        + '<p style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.5;">' + method + '</p>';
     }
     function _mjCloseExplain() { const m = document.getElementById('_mjExplainModal'); if (m) m.remove(); _mjExplainCtx = null; }
     // Live-refresh the open explain modal when the dial re-computes its date (so the numbers move with the slider).
@@ -11598,12 +11694,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const sd = _mjSD(cellEl.getAttribute('data-day') || '');
       const rcode = cellEl.getAttribute('data-rcode') || '', rname = cellEl.getAttribute('data-rname') || rcode;
       _mjExplainCtx = { sd, rcode };
+      const _eLive = ((_mjEtaByDate[sd] || {})[rcode] || {}).live;
+      const _liveTag = _eLive ? ' <span style="color:#00E785;font-size:11px;font-weight:700;white-space:nowrap;">● live</span>' : '';
       const ov = document.createElement('div');
       ov.id = '_mjExplainModal';
       ov.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;padding:16px;';
       ov.onclick = (ev) => { if (ev.target === ov) _mjCloseExplain(); };
       ov.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--btn-surface-border,#46596d);border-radius:14px;max-width:440px;width:100%;max-height:80vh;overflow:auto;padding:16px 18px;box-shadow:0 12px 40px rgba(0,0,0,.5);">'
-        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;"><h3 style="margin:0;font-size:16px;color:var(--text-primary);">' + mjEsc(rname) + ' — feasibility</h3>'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;"><h3 style="margin:0;font-size:16px;color:var(--text-primary);">' + mjEsc(rname) + ' — feasibility' + _liveTag + '</h3>'
         + '<button onclick="_mjCloseExplain()" style="flex:0 0 auto;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:15px;">×</button></div>'
         + '<div id="_mjExplainBodyDiv">' + _mjExplainBody(sd, rcode) + '</div></div>';
       document.body.appendChild(ov);
@@ -11631,6 +11729,61 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       } catch (e) { console.error('[mj-eta] load', e); _mjEtaByDate[sd] = {}; }
       _mjRepaintRouteCells();
       _mjExplainMaybeRefresh(sd); // if the explain modal is open for this date, update its numbers live with the dial
+      _mjApplyLiveEta(sd, routes); // FW-59: for TODAY, re-anchor each route on its assigned truck's live GPS (overrides the day-start pill)
+      _mjStartLiveTimer();         // keep today's live ETAs self-correcting (~2.5 min) while the board is on screen
+    }
+    // LIVE ETA (today only): re-anchor each route on its assigned truck's CURRENT GPS position + now, over the
+    // REMAINING (not-done) jobs — this overrides the day-start guess. Live data only (fresh truck positions + the
+    // board jobs); a route whose assigned truck isn't reporting GPS keeps its day-start pill. Merges into
+    // _mjEtaByDate[sd] in place so the feasibility color + explain modal both pick it up.
+    async function _mjApplyLiveEta(sd, routes) {
+      if (!currentUser.franchiseInternalID || !sd) return;
+      if (_mjSD(mjNowParts().dayID) !== sd) return;                  // live only for TODAY (future days have no trucks rolling)
+      const assign = _mjAssignByDate[sd] || {};
+      let trucks = [];
+      try { trucks = await getTruckLocations(); } catch (e) { trucks = []; } // fresh positions each run
+      const posByKey = {};
+      (trucks || []).forEach(t => {
+        if (t.lat == null || t.lon == null) return;
+        if (t.vin) posByKey['vin:' + t.vin] = { lat: t.lat, lon: t.lon };
+        if (t.name) posByKey['name:' + t.name] = { lat: t.lat, lon: t.lon };
+      });
+      const liveRoutes = [];
+      (routes || []).forEach(rt => {
+        const jobs = rt.jobs || []; if (!jobs.length) return;
+        const assigned = assign[String(rt.id)] || [];
+        let pos = null;
+        for (const a of assigned) { if (posByKey[a.truckKey]) { pos = posByKey[a.truckKey]; break; } } // first assigned truck that's reporting GPS
+        if (!pos) return;                                            // no positioned truck → this route stays day-start
+        liveRoutes.push({
+          routeCode: rt.code || rt.name || '', routeName: rt.name || rt.code || '',
+          truckLat: pos.lat, truckLon: pos.lon,
+          jobs: jobs.map(j => ({ startMin: j.timeMin, durationMin: j.durationMin, address: j.address, jobNo: j.jobID, customerName: (String(j.client || '').split(',')[0] || j.client || ''), done: !!(j.completed || j.labelDone) }))
+        });
+      });
+      if (!liveRoutes.length) return;
+      try {
+        const r = await edgeFunctionCall('crewlogic-assignments', { action: 'eta', mode: 'live', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: sd, durationMultiplier: _mjDial, nowMin: mjNowParts().minutesOfDay, routes: liveRoutes });
+        if (!r || !r.success) return;
+        const m = _mjEtaByDate[sd] || (_mjEtaByDate[sd] = {});
+        (r.routes || []).forEach(rt => {
+          if (!rt.routeCode || rt.live !== true) return;
+          m[rt.routeCode] = { rollup: rt.rollup || { status: 'unknown', minutes: 0 }, jobs: rt.jobs || [], departYard: '', routeName: rt.routeName || rt.routeCode, live: true };
+        });
+        _mjRepaintRouteCells();
+        _mjExplainMaybeRefresh(sd);
+      } catch (e) { console.error('[mj-live-eta]', e); }
+    }
+    let _mjLiveTimer = null;
+    function _mjStartLiveTimer() {
+      if (_mjLiveTimer) return;
+      _mjLiveTimer = setInterval(() => {
+        const todaySd = _mjSD(mjNowParts().dayID);
+        const cell = document.querySelector('[id^="mjRoute-"]');
+        if (!cell || cell.offsetParent === null) return;             // board not on screen → skip (no truck fetch)
+        const routes = _mjEtaRoutesByDate[todaySd];
+        if (routes && routes.length) _mjApplyLiveEta(todaySd, routes);
+      }, 150000);                                                     // ~2.5 min — trucks move, the ETA self-corrects
     }
     // Roster + assignments + live status for one day. Roster/live are global; assignments go under the date.
     async function _mjLoadAssignData(dayID) {
@@ -12094,22 +12247,28 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // settled AND markers exist, we re-fit the coverage area ONCE. _dashNeedsFit guards it so divider drags
       // / auto-refreshes never re-zoom after the user has the view they want.
       _dashNeedsFit = true;
-      const fix = () => {
-        if (!_trucksMap || _trucksMapEl !== 'dashMapPane') return;
-        _trucksMap.invalidateSize();
-        if (_dashNeedsFit && ((_truckMarkers && _truckMarkers.length) || (_jobMarkers && _jobMarkers.length))) {
-          _fitTrucksCentered(); _dashNeedsFit = false;
-        }
-      };
-      // Markers load async; on a busy initial load they can land AFTER a fixed 1.5s window, leaving the map small
-      // until a day-switch re-fit. Keep resizing until they actually load + fit (bounded ~7s), not a few timers.
-      let _dashFixN = 0;
-      const retryFix = () => { fix(); if (_dashFixN++ < 24 && (_dashNeedsFit || _dashFixN < 8)) setTimeout(retryFix, 300); };
-      requestAnimationFrame(retryFix); setTimeout(retryFix, 200);
+      // Fit the coverage area ONCE, but only after the flex row has FINISHED reflowing. On first paint the pane
+      // widens in stages (0 → intermediate → full); fitting mid-reflow measures a too-narrow container and picks a
+      // too-low (all-of-New-England) zoom, then clearing _dashNeedsFit locks it in. A "two equal reads" check
+      // wasn't enough — an intermediate width can hold stable for a beat. Instead we stamp the LAST resize (every
+      // reflow step fires the ResizeObserver, incl. the final widen) and only fit once the pane has been QUIET —
+      // no resize for 300ms — AND markers exist. So the fit always lands after the layout truly stops moving.
+      let _dashLastResize = Date.now(), _dashFitTries = 0;
+      const onDashResize = () => { _dashLastResize = Date.now(); if (_trucksMap && _trucksMapEl === 'dashMapPane') { try { _trucksMap.invalidateSize(); } catch (e) {} } };
       if (window.ResizeObserver) {
         if (_dashMapRO) { try { _dashMapRO.disconnect(); } catch (e) {} }
-        _dashMapRO = new ResizeObserver(fix); _dashMapRO.observe(pane);
+        _dashMapRO = new ResizeObserver(onDashResize); _dashMapRO.observe(pane);
       }
+      const tryDashFit = () => {
+        if (!_trucksMap || _trucksMapEl !== 'dashMapPane' || !_dashNeedsFit) return;
+        const p = document.getElementById('dashMapPane');
+        const sized = p && p.offsetWidth > 150 && p.offsetHeight > 150;
+        const quiet = (Date.now() - _dashLastResize) > 300; // no resize for 300ms → the reflow has settled at its final size
+        const haveMarkers = (_truckMarkers && _truckMarkers.length) || (_jobMarkers && _jobMarkers.length);
+        if (sized && quiet && haveMarkers) { try { _trucksMap.invalidateSize(false); } catch (e) {} _fitTrucksCentered(); _dashNeedsFit = false; return; }
+        if (_dashFitTries++ < 100) setTimeout(tryDashFit, 200); // keep waiting for a settled layout + loaded markers (bounded ~20s)
+      };
+      setTimeout(tryDashFit, 250);
     }
     // Apply a specific dayID to a board: state + label + calendar-input value + in-place reload. Shared by the
     // ◀/▶ steppers and the calendar drop-down so all three stay in sync.
@@ -16116,6 +16275,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     function renderEstimatesList(estimates) {
       window._cachedEstimates = estimates; // cache for filter toggle
+      loadUsageStrip(); // Phase 4: refresh the usage strip when the estimates list renders (throttled)
       const listEl = document.getElementById('estimatesList');
       // Always filter out deleted estimates from normal list views
       const nonDeleted = estimates.filter(e => e.status !== 'deleted');
@@ -16596,6 +16756,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.getElementById('backBtn').classList.add('visible');
       // Show editor toolbar (Photo / Describe / Manual / More / Save Draft)
       showSecondaryToolbar('editor');
+      loadUsageStrip(); // Phase 4: live usage at the top of the estimate
 
       // Populate fields
       document.getElementById('estLabel').value = currentEstimate.label || '';
@@ -17580,6 +17741,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
         const data = await callAnalyzeVoice({ transcript, areas: availableAreas, photos: resolvedPhotos });
         if (data.success) {
+          bumpUsage({ aiCalls: 1 }); // Phase 4: tick AI calls on a successful per-room analyze (photos count on upload, not here)
           const results = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
           const vol = results.find(c => c.type === 'volume');
           if (vol) {
@@ -24074,6 +24236,7 @@ RECYCLING & DONATION
         const data = res;
 
         if (data.success) {
+          bumpUsage({ aiCalls: 1 }); // Phase 4: tick AI calls on a successful room-capture analyze (photos count on upload, not here)
           const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result];
           let addedCount = 0;
           // Build durable photo references: prefer Supabase path if already uploaded,
@@ -29652,6 +29815,7 @@ Please review the estimate below. If you have any questions or would like to adj
             source: 'volume_check'
           });
           if (data && data.success) {
+            bumpUsage({ aiCalls: 1 }); // Phase 4: tick AI calls per volume-check area analyzed (VC photos aren't stored → not a photo count)
             const charges = Array.isArray(data.charges) ? data.charges : [data.charges || data.result].filter(Boolean);
             areaResults.push({ area: area, charges: charges, hazmat: data.hazmat || null });
           } else {

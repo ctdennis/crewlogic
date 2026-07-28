@@ -203,7 +203,77 @@ Deno.serve(async (req: Request) => {
     // per-stop SERVICE time used to advance the cursor (not the window). Flagged a guesstimate.
     if (action === 'eta') {
       const mode = str(body.mode) || 'auto';
-      if (mode === 'live') return json({ success: false, error: 'live_mode_not_implemented_yet' }, 501);
+      if (mode === 'live') {
+        // LIVE mode: anchor each route on its assigned truck's CURRENT GPS position + now, then walk the
+        // REMAINING (not-done) jobs from there. Live data only — the client sends board jobs + truck positions +
+        // nowMin (franchise-local minutes-from-midnight); no mirror, no yard. This is the real-time "will this
+        // truck still make its remaining windows" that self-corrects as the truck moves.
+        let mult = Number(body.durationMultiplier);
+        if (!isFinite(mult) || mult <= 0) mult = 1.0;
+        mult = Math.max(0.5, Math.min(1.5, mult));
+        const nowMin = Number(body.nowMin);
+        if (!isFinite(nowMin)) return json({ success: false, error: 'nowMin_required_for_live' }, 400);
+        const provided = Array.isArray(body.routes) ? body.routes as Record<string, unknown>[] : null;
+        if (!provided) return json({ success: false, error: 'routes_required_for_live' }, 400);
+        const RANK: Record<string, number> = { late: 3, window: 2, unknown: 1, ontime: 0 };
+        type LJob = { startMin: number; durationMin: number; lat?: number | null; lon?: number | null; address?: string; jobNo?: string; customerName?: string; phone?: string; town?: string; done?: boolean };
+        const routes: Record<string, unknown>[] = [];
+        for (const r of provided) {
+          const routeCode = str(r.routeCode) || str(r.routeName);
+          const routeName = str(r.routeName) || routeCode;
+          const tLat = Number(r.truckLat), tLon = Number(r.truckLon);
+          const hasTruck = isFinite(tLat) && isFinite(tLon);
+          const allJobs: LJob[] = (Array.isArray(r.jobs) ? r.jobs as Record<string, unknown>[] : []).map(j => ({
+            startMin: Number(j.startMin), durationMin: Number(j.durationMin) || 0,
+            lat: j.lat as number, lon: j.lon as number, address: str(j.address),
+            jobNo: str(j.jobNo), customerName: str(j.customerName), phone: str(j.phone), town: str(j.town), done: !!j.done,
+          })).filter(j => isFinite(j.startMin));
+          const remaining = allJobs.filter(j => !j.done).sort((a, b) => a.startMin - b.startMin);
+          if (!hasTruck) { routes.push({ routeName, routeCode, live: false, reason: 'no_truck_position', jobs: [] }); continue; }
+          if (!remaining.length) { routes.push({ routeName, routeCode, live: true, allDone: true, rollup: { status: 'ontime', minutes: 0 }, jobs: [] }); continue; }
+          // Resolve a "lat,lon" token per remaining job (provided coords, else geocode the address, cache-first).
+          const pts: (string | null)[] = [];
+          for (const j of remaining) {
+            let lat = j.lat, lon = j.lon;
+            if ((lat == null || lon == null) && j.address) { const g = await geocodeCached(db, j.address); if (g) { lat = g.lat; lon = g.lon; } }
+            pts.push(lat != null && lon != null ? `${lat},${lon}` : null);
+          }
+          // Legs: truckNow→job1, job1→job2, … via one Distance Matrix diagonal call.
+          const truckTok = `${tLat},${tLon}`;
+          const seq = [truckTok, ...pts];
+          const dm = await driveMinutes(seq.slice(0, -1).map(p => p || '0,0'), seq.slice(1).map(p => p || '0,0'));
+          const legs: (number | null)[] = seq.slice(0, -1).map((_, i) => (seq[i] && seq[i + 1]) ? dm[i][i] : null);
+          // Walk from NOW at the truck's current position. Job 1's arrival = now + drive-from-truck (NO
+          // window-start assumption — that's the whole point of going live). Arrive early → wait for the window.
+          const outJobs: Record<string, unknown>[] = [];
+          let cursor = nowMin;
+          for (let i = 0; i < remaining.length; i++) {
+            const j = remaining[i];
+            const winStart = j.startMin, dur = j.durationMin || 0, winEnd = winStart + dur;
+            const leg = legs[i];
+            const arrival = leg == null ? null : cursor + leg;
+            let status: string, mel = 0;
+            if (arrival == null) status = 'unknown';
+            else if (arrival > winEnd) { status = 'late'; mel = Math.round(arrival - winEnd); }        // past the window close
+            else if (arrival <= winStart) { status = 'ontime'; mel = Math.round(winStart - arrival); } // at/before the start
+            else { status = 'window'; mel = Math.round(arrival - winStart); }                          // within window, after start
+            outJobs.push({
+              jobNo: j.jobNo || '', customerName: j.customerName || '', phone: j.phone || '', town: j.town || '',
+              windowStart: minsToClock(winStart), windowEnd: minsToClock(winEnd),
+              predictedEta: arrival == null ? null : minsToClock(arrival),
+              status, minutesEarlyLate: mel,
+            });
+            const base = arrival == null ? cursor : Math.max(arrival, winStart);
+            cursor = base + dur * mult;
+          }
+          const worst = outJobs.reduce((w, o) => (RANK[o.status as string] || 0) > (RANK[w.status as string] || 0) ? o : w, outJobs[0]);
+          routes.push({
+            routeName, routeCode, live: true, truckPos: { lat: tLat, lon: tLon },
+            rollup: { status: worst.status, minutes: worst.minutesEarlyLate }, jobs: outJobs,
+          });
+        }
+        return json({ success: true, serviceDate, mode: 'live', durationMultiplier: mult, nowMin, routes });
+      }
       let mult = Number(body.durationMultiplier);
       if (!isFinite(mult) || mult <= 0) mult = 1.0;
       mult = Math.max(0.5, Math.min(1.5, mult)); // 60–140% dial (clamped)
