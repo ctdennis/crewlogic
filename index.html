@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.98.6 | 2026-07-28">
+  <meta name="crewlogic-version" content="v5.99.0 | 2026-07-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10974,6 +10974,64 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _shownAlertIds = new Set(rows.map(r => r.id));
       const cnt = rows.length ? (rows.length + (rows.length >= 50 ? '+' : '')) : '';
       document.querySelectorAll('.gf-alerts-count').forEach(c => { c.textContent = cnt; });
+      _mjGeofenceCheck(rows).catch(function () {}); // FW-59 task 6: auto-assign truck on first arrival + wrong-truck warning
+    }
+    // ── FW-59 task 6: geofence auto-assign + wrong-truck warning ─────────────────────────────────────────
+    // On a job_arrive event: if the arrived truck's route has NO truck set yet, auto-assign it (the first crew to
+    // show up defines the truck for the day, source 'inferred'); if a DIFFERENT truck than the hard-set one arrives,
+    // warn in the Live Alerts rail. Client-side on LIVE data — arrivals from the alerts feed (rows), wo→route from
+    // the loaded board (_mjEtaRoutesByDate), vehicle_number→truck_key from the roster. NEVER overwrites an existing
+    // assignment (only fills an empty route), so a manual hard-set always wins.
+    let _mjGeoAutoSet = {}; // routeId → truckKey already auto-set this session (guards against duplicate writes)
+    async function _mjGeofenceCheck(rows) {
+      if (!currentUser || !currentUser.franchiseInternalID || typeof mjNowParts !== 'function') return;
+      const sd = _mjSD(mjNowParts().dayID);                               // today only — arrivals are live
+      const boardRoutes = _mjEtaRoutesByDate[sd];
+      if (!boardRoutes || !boardRoutes.length) return;                    // today's board not loaded → can't map wo→route
+      const woToRoute = {};
+      boardRoutes.forEach(function (rt) {
+        (rt.jobs || []).forEach(function (j) {
+          const wo = (j.woID != null ? j.woID : j.wo_id);
+          if (wo != null) woToRoute[String(wo)] = { id: String(rt.id), code: rt.code || rt.name || '', name: rt.name || rt.code || '' };
+        });
+      });
+      const nameToKey = {};
+      (_mjRoster || []).forEach(function (t) { if (t.name) nameToKey[String(t.name)] = t.truckKey; });
+      // Earliest job_arrive per route = the first truck to physically show up on it.
+      const byRoute = {};
+      (rows || []).forEach(function (a) {
+        if (!a || a.event_type !== 'job_arrive' || a.wo_id == null || !a.vehicle_number) return;
+        const route = woToRoute[String(a.wo_id)]; if (!route) return;
+        const tk = nameToKey[String(a.vehicle_number)]; if (!tk) return;
+        const t = String(a.start_time || a.created_at || '');
+        if (!byRoute[route.id] || t < byRoute[route.id].t) byRoute[route.id] = { route: route, tk: tk, vehicle: a.vehicle_number, t: t };
+      });
+      const assign = _mjAssignByDate[sd] || (_mjAssignByDate[sd] = {});
+      const notes = [];
+      const rids = Object.keys(byRoute);
+      for (let i = 0; i < rids.length; i++) {
+        const rid = rids[i], hit = byRoute[rid];
+        const assigned = (assign[rid] || []).map(function (x) { return x.truckKey; });
+        if (!assigned.length) {
+          if (_mjGeoAutoSet[rid]) continue;                               // already auto-set this session
+          _mjGeoAutoSet[rid] = hit.tk;
+          try {
+            const res = await edgeFunctionCall('crewlogic-assignments', { action: 'set', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: sd, vonigoRouteId: String(rid), routeName: hit.route.name, truckKeys: [hit.tk], assignedBy: 'geofence-auto', source: 'inferred' });
+            if (res && res.success) { assign[rid] = [{ truckKey: hit.tk, source: 'inferred' }]; _mjRepaintAllTruckCells(); notes.push({ kind: 'auto', route: hit.route.code, vehicle: hit.vehicle }); }
+            else { delete _mjGeoAutoSet[rid]; }                           // failed → let it retry next cycle
+          } catch (e) { delete _mjGeoAutoSet[rid]; console.error('[mj-geo] auto-set failed', e); }
+        } else if (assigned.indexOf(hit.tk) === -1) {
+          notes.push({ kind: 'mismatch', route: hit.route.code, vehicle: hit.vehicle, assigned: assigned.map(_mjTruckName).join(', ') });
+        }
+      }
+      if (notes.length) _mjRenderGeoNotes(notes);
+    }
+    function _mjRenderGeoNotes(notes) {
+      const html = notes.map(function (n) {
+        if (n.kind === 'auto') return '<div style="padding:9px 12px;border-bottom:1px solid var(--border);background:rgba(0,231,133,0.10);font-size:12px;color:var(--text-primary);">🚚 <b>Auto-assigned</b> ' + mjEsc(n.vehicle) + ' → <b>' + mjEsc(n.route) + '</b> (first crew to arrive)</div>';
+        return '<div style="padding:9px 12px;border-bottom:1px solid var(--border);background:rgba(245,158,11,0.14);font-size:12px;color:var(--text-primary);">⚠️ <b>' + mjEsc(n.vehicle) + '</b> arrived on <b>' + mjEsc(n.route) + '</b> — but <b>' + mjEsc(n.assigned) + '</b> is assigned</div>';
+      }).join('');
+      document.querySelectorAll('.gf-alerts-list').forEach(function (l) { l.insertAdjacentHTML('afterbegin', html); });
     }
     // 30s refresh: re-fetch the authoritative newest-first list and ALWAYS re-render so the relative
     // "Xm ago" ages stay current (the panel feels live even when no NEW alert arrived) and anything
@@ -11730,6 +11788,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _mjRepaintRouteCells();
       _mjExplainMaybeRefresh(sd); // if the explain modal is open for this date, update its numbers live with the dial
       _mjApplyLiveEta(sd, routes); // FW-59: for TODAY, re-anchor each route on its assigned truck's live GPS (overrides the day-start pill)
+      // First load can race truck-GPS / assignment readiness, so the live green edge may miss the first pass and
+      // only appear after a manual refresh. Two early re-runs land it within seconds without waiting for the timer.
+      if (_mjSD(mjNowParts().dayID) === sd) { setTimeout(function () { _mjApplyLiveEta(sd, routes); }, 3000); setTimeout(function () { _mjApplyLiveEta(sd, routes); }, 9000); }
       _mjStartLiveTimer();         // keep today's live ETAs self-correcting (~2.5 min) while the board is on screen
     }
     // LIVE ETA (today only): re-anchor each route on its assigned truck's CURRENT GPS position + now, over the
@@ -12247,26 +12308,31 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // settled AND markers exist, we re-fit the coverage area ONCE. _dashNeedsFit guards it so divider drags
       // / auto-refreshes never re-zoom after the user has the view they want.
       _dashNeedsFit = true;
-      // Fit the coverage area ONCE, but only after the flex row has FINISHED reflowing. On first paint the pane
-      // widens in stages (0 → intermediate → full); fitting mid-reflow measures a too-narrow container and picks a
-      // too-low (all-of-New-England) zoom, then clearing _dashNeedsFit locks it in. A "two equal reads" check
-      // wasn't enough — an intermediate width can hold stable for a beat. Instead we stamp the LAST resize (every
-      // reflow step fires the ResizeObserver, incl. the final widen) and only fit once the pane has been QUIET —
-      // no resize for 300ms — AND markers exist. So the fit always lands after the layout truly stops moving.
-      let _dashLastResize = Date.now(), _dashFitTries = 0;
+      // Fit the coverage area ONCE, but only after BOTH the layout AND the markers stop moving — the fit is
+      // timing-sensitive (why it looked fine on dev but zoomed wrong on prod). Two independent async things settle
+      // on load: (a) the flex row reflows the pane 0 → full width (fit mid-reflow → too-narrow container → all-of-
+      // New-England zoom-out); (b) markers arrive in WAVES — trucks paint first, jobs later (fit on the trucks-only
+      // wave → zoomed into the yard cluster; fit during a clear/repush → 0 markers → home fallback). So we stamp the
+      // last resize AND the last marker-count change, and fit only once the pane has been QUIET (no resize 300ms)
+      // AND the marker set STABLE (count unchanged 600ms → all waves in, not mid-clear). _dashNeedsFit then locks it.
+      let _dashLastResize = Date.now(), _dashMarkerCnt = -1, _dashMarkerStableAt = Date.now(), _dashFitTries = 0;
       const onDashResize = () => { _dashLastResize = Date.now(); if (_trucksMap && _trucksMapEl === 'dashMapPane') { try { _trucksMap.invalidateSize(); } catch (e) {} } };
       if (window.ResizeObserver) {
         if (_dashMapRO) { try { _dashMapRO.disconnect(); } catch (e) {} }
         _dashMapRO = new ResizeObserver(onDashResize); _dashMapRO.observe(pane);
       }
+      const _dashMkCount = () => (_truckMarkers ? _truckMarkers.length : 0) + (_jobMarkers ? _jobMarkers.length : 0);
       const tryDashFit = () => {
         if (!_trucksMap || _trucksMapEl !== 'dashMapPane' || !_dashNeedsFit) return;
         const p = document.getElementById('dashMapPane');
         const sized = p && p.offsetWidth > 150 && p.offsetHeight > 150;
-        const quiet = (Date.now() - _dashLastResize) > 300; // no resize for 300ms → the reflow has settled at its final size
-        const haveMarkers = (_truckMarkers && _truckMarkers.length) || (_jobMarkers && _jobMarkers.length);
-        if (sized && quiet && haveMarkers) { try { _trucksMap.invalidateSize(false); } catch (e) {} _fitTrucksCentered(); _dashNeedsFit = false; return; }
-        if (_dashFitTries++ < 100) setTimeout(tryDashFit, 200); // keep waiting for a settled layout + loaded markers (bounded ~20s)
+        const now = Date.now();
+        const cnt = _dashMkCount();
+        if (cnt !== _dashMarkerCnt) { _dashMarkerCnt = cnt; _dashMarkerStableAt = now; } // a load wave (or clear/repush) → restart the stability window
+        const quiet = (now - _dashLastResize) > 300;                 // reflow done
+        const markersStable = cnt > 0 && (now - _dashMarkerStableAt) > 600; // all waves in, not mid-clear
+        if (sized && quiet && markersStable) { try { _trucksMap.invalidateSize(false); } catch (e) {} _fitTrucksCentered(); _dashNeedsFit = false; return; }
+        if (_dashFitTries++ < 140) setTimeout(tryDashFit, 200); // wait for layout + all markers to settle (bounded ~28s)
       };
       setTimeout(tryDashFit, 250);
     }
