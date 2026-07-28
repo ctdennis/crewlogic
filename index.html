@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.97.0 | 2026-07-27">
+  <meta name="crewlogic-version" content="v5.98.0 | 2026-07-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -5535,6 +5535,39 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Back-compat: Enter / Refresh re-pulls from the server.
     function searchSubscriptionAccounts() { return loadSubscriptionAccounts(); }
 
+    // Phase 6: per-account usage line + the super-admin "grant extra allowance" lever.
+    function _subUsageChip(label, dim) {
+      if (!dim) return '<b style="color:var(--text-secondary);">' + label + '</b> —';
+      const cap = dim.cap == null ? '∞' : dim.cap;
+      const over = dim.cap != null && (dim.used || 0) >= dim.cap;
+      return '<b style="color:var(--text-secondary);">' + label + '</b> <span style="color:' + (over ? '#f59e0b' : 'var(--text-muted)') + ';">' + (dim.used || 0) + '/' + cap + '</span>';
+    }
+    function _subUsageGrantHTML(a, fid) {
+      const u = a.usage;
+      const usageLine = u
+        ? '<div style="font-size:11.5px;color:var(--text-muted);margin-top:9px;">This month — ' + _subUsageChip('Estimates', u.estimates) + ' &middot; ' + _subUsageChip('AI calls', u.aiCalls) + ' &middot; ' + _subUsageChip('Photos', u.photos) + '</div>'
+        : '<div style="font-size:11.5px;color:var(--text-muted);margin-top:9px;">No usage data.</div>';
+      const inp = 'type="number" min="0" style="width:58px;background:var(--bg-input);border:1px solid var(--btn-surface-border,#46596d);border-radius:6px;color:var(--text-primary);font-size:11px;padding:3px 5px;"';
+      const grant = '<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:6px;font-size:11px;color:var(--text-muted);">Grant +'
+        + '<input id="grantEst-' + fid + '" placeholder="est" ' + inp + '>'
+        + '<input id="grantCalls-' + fid + '" placeholder="AI calls" ' + inp + '>'
+        + '<input id="grantPhotos-' + fid + '" placeholder="photos" ' + inp + '>'
+        + '<button onclick="applyGrantUsage(\'' + fid + '\')" style="padding:4px 11px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;">Grant</button>'
+        + '<span style="color:var(--text-muted);font-size:10px;">(this month)</span></div>';
+      return usageLine + grant;
+    }
+    async function applyGrantUsage(fid) {
+      const est = Number((document.getElementById('grantEst-' + fid) || {}).value) || 0;
+      const calls = Number((document.getElementById('grantCalls-' + fid) || {}).value) || 0;
+      const photos = Number((document.getElementById('grantPhotos-' + fid) || {}).value) || 0;
+      if (!est && !calls && !photos) return;
+      const fb = document.querySelector('.sub-admin-feedback[data-fid="' + fid + '"]');
+      if (fb) { fb.style.color = 'var(--text-muted)'; fb.textContent = 'Granting…'; }
+      const data = await adminEdgeCall('grantUsage', { franchiseId: fid, estimates: est, aiCalls: calls, photos: photos });
+      if (!data || !data.success) { if (fb) { fb.style.color = '#ff7676'; fb.textContent = (data && data.error) || 'Grant failed'; } return; }
+      await searchSubscriptionAccounts(); // refresh — the caps now reflect the grant
+    }
+    window.applyGrantUsage = applyGrantUsage;
     function _renderSubAdminList(accounts, totalCount) {
       const results = document.getElementById('subAdminResults');
       if (!results) return;
@@ -5574,6 +5607,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             '<input type="date" id="subend-' + fid + '" onchange="if(this.value)applySubAction(\'' + fid + '\',\'set_end_date\',{endDate:this.value})" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;color-scheme:dark;">' +
             '<button onclick="applySubAction(\'' + fid + '\',\'cancel\')" style="padding:6px 10px;font-size:12px;background:rgba(255,118,118,0.12);color:#ff7676;border:1px solid rgba(255,118,118,0.3);border-radius:var(--radius-sm);cursor:pointer;">Cancel</button>' +
           '</div>' +
+          _subUsageGrantHTML(a, fid) +
           '<div class="sub-admin-feedback" data-fid="' + fid + '" style="font-size:12px;margin-top:8px;"></div>' +
         '</div>';
       }).join('');
