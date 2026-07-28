@@ -603,15 +603,25 @@ Deno.serve(async (req: Request) => {
         const duration = String(plan.durationMin || 90), zip = String(plan.zip || ''), serviceTypeID = String(plan.serviceTypeID || '11');
         const toRouteID = await resolveRouteID(token, String(dayID), String(plan.toRouteCode || plan.toRouteID || ''));
         if (!woID || !toRouteID || !dayID || startTime == null) return json({ success: false, error: 'move plan missing woID / resolvable toRouteCode / dayID / startTime', toRouteID }, 400);
-        // Direct attempt: reserve the target slot. Covers every different-route + non-overlapping move.
-        const lock = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID: String(toRouteID), zip, serviceTypeID, duration, startTime: String(startTime) });
-        let lockID = lock.Ids && (lock.Ids.lockID || lock.Ids.LockID);
-        // SELF-OVERLAP: moving a job EARLIER within its OWN route by less than its length → the target overlaps the
-        // job's OWN current booking, so the lock fails ("slot occupied", forever). Vonigo has no exclude-this-job
-        // flag, so we free it with a staging move (method 16 vacates the old slot), then re-lock the now-clear
-        // target. If the target still won't take it (something ELSE is booked), move the job BACK to its original
-        // slot so it's never stranded at staging. Mirrors the proven two-step in the `duration` block.
-        if (!lockID && String(plan.fromRouteCode || '') && String(plan.fromRouteCode) === String(plan.toRouteCode || '') && plan.fromStartTime != null) {
+        // SELF-OVERLAP (same route, target within the job's OWN length of its current start): Vonigo's method-2
+        // lock is UNRELIABLE here — moving a job BACKWARD by < its length refuses the lock (!lockID), but moving
+        // it FORWARD by < its length returns a PERMISSIVE lock on the still-occupied slot, so the direct method-16
+        // move then fails ("couldn't be completed"). Owner-reported asymmetry: move-back worked, move-forward
+        // didn't. The ONLY safe path in both directions is the two-step STAGING move — vacate the own slot first
+        // (method 16 frees it), then re-lock the now-clear target — so for a self-overlap we SKIP the direct
+        // attempt and go straight to staging. Non-overlapping / cross-route moves keep the direct path.
+        const sameRoute = !!String(plan.fromRouteCode || '') && String(plan.fromRouteCode) === String(plan.toRouteCode || '') && plan.fromStartTime != null;
+        const selfOverlap = sameRoute && Math.abs(Number(startTime) - Number(plan.fromStartTime)) < Number(duration);
+        let lock: any = null, lockID: any = null;
+        if (!selfOverlap) {
+          // Direct attempt: reserve the target slot. Covers every different-route + non-overlapping move.
+          lock = await vpost(token, '/resources/availability/', { method: '2', dayID: String(dayID), routeID: String(toRouteID), zip, serviceTypeID, duration, startTime: String(startTime) });
+          lockID = lock.Ids && (lock.Ids.lockID || lock.Ids.LockID);
+        }
+        // Staging two-step: fire for a self-overlap (ALWAYS — the direct lock is untrustworthy) OR a same-route
+        // direct-lock failure. Frees the old slot (method 16), then re-locks the now-clear target; if the target
+        // is occupied by something ELSE, restores the job to its original slot so it's never stranded.
+        if (sameRoute && (selfOverlap || !lockID)) {
           const fromStart = String(plan.fromStartTime);
           const ds = dayEpoch(String(dayID)), de = ds + 79200;
           const av = await vpost(token, '/resources/availability/', { method: '0', dateStart: String(ds), dateEnd: String(de), duration, locationID: '1', serviceTypeID, routeID: String(toRouteID), pageNo: '1', pageSize: '400' });
@@ -642,7 +652,7 @@ Deno.serve(async (req: Request) => {
             }
           }
         }
-        if (!lockID) { console.error('[dispatch] move lock failed:', JSON.stringify({ errNo: lock.errNo, errors: lock.Errors || null })); return json({ success: false, error: `That time isn’t open for the full ${durLabel(duration)} on ${plan.toRouteCode || 'that route'} — pick another slot, or shorten the job to fit.` }, 409); }
+        if (!lockID) { console.error('[dispatch] move lock failed:', JSON.stringify({ errNo: lock ? lock.errNo : null, errors: lock ? (lock.Errors || null) : null, selfOverlap })); return json({ success: false, error: `That time isn’t open for the full ${durLabel(duration)} on ${plan.toRouteCode || 'that route'} — pick another slot, or shorten the job to fit.` }, 409); }
         const mv = await vpost(token, '/data/WorkOrders/', { method: '16', objectID: String(woID), lockID: String(lockID) });
         const ok = mv.errNo === 0;
         console.log(`[dispatch][AUDIT] execute move wo=${woID} route=${toRouteID} ${plan.startLabel} ${dayID} lock=${lockID} errNo=${mv.errNo}`);
