@@ -238,8 +238,22 @@ Deno.serve(async (req: Request) => {
             if ((lat == null || lon == null) && j.address) { const g = await geocodeCached(db, j.address); if (g) { lat = g.lat; lon = g.lon; } }
             pts.push(lat != null && lon != null ? `${lat},${lon}` : null);
           }
+          // Origin = the assigned truck CLOSEST to the first remaining stop (handles multi-truck routes + mid-day
+          // truck swaps): pick the nearest of the provided truck positions to pts[0]; fall back to the single one.
+          let originLat = tLat, originLon = tLon;
+          const tps = Array.isArray(r.truckPositions) ? (r.truckPositions as Record<string, unknown>[]) : null;
+          if (tps && tps.length > 1 && pts[0]) {
+            const parts = (pts[0] as string).split(','); const slat = Number(parts[0]), slon = Number(parts[1]);
+            let bestD = Infinity;
+            for (const tp of tps) {
+              const la = Number(tp.lat), lo = Number(tp.lon);
+              if (!isFinite(la) || !isFinite(lo)) continue;
+              const d = (la - slat) * (la - slat) + (lo - slon) * (lo - slon); // squared distance — fine for "nearest"
+              if (d < bestD) { bestD = d; originLat = la; originLon = lo; }
+            }
+          }
           // Legs: truckNow→job1, job1→job2, … via one Distance Matrix diagonal call.
-          const truckTok = `${tLat},${tLon}`;
+          const truckTok = `${originLat},${originLon}`;
           const seq = [truckTok, ...pts];
           const dm = await driveMinutes(seq.slice(0, -1).map(p => p || '0,0'), seq.slice(1).map(p => p || '0,0'));
           const legs: (number | null)[] = seq.slice(0, -1).map((_, i) => (seq[i] && seq[i + 1]) ? dm[i][i] : null);
@@ -268,7 +282,7 @@ Deno.serve(async (req: Request) => {
           }
           const worst = outJobs.reduce((w, o) => (RANK[o.status as string] || 0) > (RANK[w.status as string] || 0) ? o : w, outJobs[0]);
           routes.push({
-            routeName, routeCode, live: true, truckPos: { lat: tLat, lon: tLon },
+            routeName, routeCode, live: true, truckPos: { lat: originLat, lon: originLon },
             rollup: { status: worst.status, minutes: worst.minutesEarlyLate }, jobs: outJobs,
           });
         }
