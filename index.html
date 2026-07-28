@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.98.1 | 2026-07-28">
+  <meta name="crewlogic-version" content="v5.98.2 | 2026-07-28">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -5536,26 +5536,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Back-compat: Enter / Refresh re-pulls from the server.
     function searchSubscriptionAccounts() { return loadSubscriptionAccounts(); }
 
-    // Phase 6: per-account usage line + the super-admin "grant extra allowance" lever.
-    function _subUsageChip(label, dim) {
-      if (!dim) return '<b style="color:var(--text-secondary);">' + label + '</b> —';
-      const cap = dim.cap == null ? '∞' : dim.cap;
-      const over = dim.cap != null && (dim.used || 0) >= dim.cap;
-      return '<b style="color:var(--text-secondary);">' + label + '</b> <span style="color:' + (over ? '#f59e0b' : 'var(--text-muted)') + ';">' + (dim.used || 0) + '/' + cap + '</span>';
-    }
+    // Phase 6 grant lever — three wider inputs (est / AI calls / photos), each with its current used/cap
+    // shown directly beneath. Type an amount to grant, tap Grant. No extra labels.
     function _subUsageGrantHTML(a, fid) {
       const u = a.usage;
-      const usageLine = u
-        ? '<div style="font-size:11.5px;color:var(--text-muted);margin-top:9px;">This month — ' + _subUsageChip('Estimates', u.estimates) + ' &middot; ' + _subUsageChip('AI calls', u.aiCalls) + ' &middot; ' + _subUsageChip('Photos', u.photos) + '</div>'
-        : '<div style="font-size:11.5px;color:var(--text-muted);margin-top:9px;">No usage data.</div>';
-      const inp = 'type="number" min="0" style="width:58px;background:var(--bg-input);border:1px solid var(--btn-surface-border,#46596d);border-radius:6px;color:var(--text-primary);font-size:11px;padding:3px 5px;"';
-      const grant = '<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:6px;font-size:11px;color:var(--text-muted);">Grant +'
-        + '<input id="grantEst-' + fid + '" placeholder="est" ' + inp + '>'
-        + '<input id="grantCalls-' + fid + '" placeholder="AI calls" ' + inp + '>'
-        + '<input id="grantPhotos-' + fid + '" placeholder="photos" ' + inp + '>'
-        + '<button onclick="applyGrantUsage(\'' + fid + '\')" style="padding:4px 11px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;">Grant</button>'
-        + '<span style="color:var(--text-muted);font-size:10px;">(this month)</span></div>';
-      return usageLine + grant;
+      const col = function (placeholder, id, dim) {
+        const cap = dim ? (dim.cap == null ? '∞' : dim.cap) : '—';
+        const used = dim ? (dim.used || 0) : '—';
+        const over = dim && dim.cap != null && (dim.used || 0) >= dim.cap;
+        return '<div style="display:flex;flex-direction:column;gap:3px;align-items:center;">'
+          + '<input id="' + id + '-' + fid + '" type="number" min="0" placeholder="' + placeholder + '" style="width:84px;background:var(--bg-input);border:1px solid var(--btn-surface-border,#46596d);border-radius:6px;color:var(--text-primary);font-size:12px;padding:6px 8px;text-align:center;">'
+          + '<span style="font-size:11.5px;color:' + (over ? '#f59e0b' : 'var(--text-muted)') + ';">' + used + '/' + cap + '</span></div>';
+      };
+      return '<div style="display:flex;gap:9px;flex-wrap:wrap;align-items:flex-start;margin-top:10px;">'
+        + col('est', 'grantEst', u && u.estimates)
+        + col('AI calls', 'grantCalls', u && u.aiCalls)
+        + col('photos', 'grantPhotos', u && u.photos)
+        + '<button onclick="applyGrantUsage(\'' + fid + '\')" style="padding:7px 16px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;margin-top:1px;">Grant</button></div>';
     }
     async function applyGrantUsage(fid) {
       const est = Number((document.getElementById('grantEst-' + fid) || {}).value) || 0;
