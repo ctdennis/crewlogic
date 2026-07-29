@@ -93,14 +93,26 @@ re-colors the route's feasibility (this is where the *volume* layer feeds back i
 The **return-to-parking** branch also consumes time (drive to the yard + a can-swap) — its timing basis is
 an open item (§15).
 
-### 6a. Disposal wait — geofence history, gated at 3 months
+### 6a. Dwell from geofence history — daytime window, gated at 3 months
 
-- If the franchise has **more than 3 months** of geofence history for that facility, the average wait is
-  computed from real arrive→leave dwells (the same facility-dwell data already tracked in the
-  recycling/disposal flow).
-- If **less than 3 months**, the wait falls back to a **default set in Truck Setup** (a new
-  default-disposal-wait setting).
-- Drive time is *always* computed live; only the **wait** needs the history-or-default path.
+Both stop types get their **wait / swap** time from geofence arrive→leave dwells:
+
+- **Disposal facility** → average dwell at that facility.
+- **Return to parking** → average **mid-day** dwell at the yard / truck-parking geofence (the drop-and-swap).
+
+**Critical filter — exclude the overnight park.** The truck sits in the yard overnight, so raw yard
+dwells are dominated by a ~14-hour overnight sit that wrecks the average. The average therefore uses
+**only dwells that fall inside the operating window** (default **7 AM – 6 PM, franchise-local**): a real
+mid-day swap (arrive 1:00, leave 1:20) counts; the overnight pair (arrive ~6 PM, leave next morning) is
+dropped because it crosses the window boundary. Likewise the morning "leave for the day" and evening
+"return to park" are not swaps and fall out naturally. (Applying the same daytime filter to facility
+dwells is harmless and guards against stray events.)
+
+- **> 3 months** of qualifying (in-window) dwells → use the computed average.
+- **< 3 months** → fall back to the **Truck-Setup default** (disposal wait / parking swap).
+- **Drive time is always computed live;** only the dwell needs the history-or-default path.
+- **The operating window should derive from the franchise's route hours (or a per-franchise setting) and
+  resolve in the franchise's timezone — not be hardcoded** (multi-tenant TZ discipline). #90 = 7 AM–6 PM.
 
 ## 7. AI cost governance — you only pay for new eyes
 
@@ -166,8 +178,10 @@ which defaults to the AI value:
 
 - **Truck capacity — default 16 cu yd,** editable in **Settings → Cost Analysis.** Single global number
   for v1 (per-truck sizes later).
-- **Default disposal wait — a new setting in Truck Setup,** used for the disposal-row time when the
-  franchise has < 3 months of geofence history at a facility (§6a).
+- **Default disposal wait + default parking-swap — new settings in Truck Setup,** used for the
+  disposal-row time when the franchise has < 3 months of in-window geofence history (§6a).
+- **Operating window** for the dwell filter (default 7 AM–6 PM) — derived from route hours or a
+  per-franchise setting, resolved in the franchise timezone (§6a).
 
 ## 12. Data model (sketch)
 
@@ -221,14 +235,19 @@ data to allow it; ship without it.
   overlays per-segment estimates.
 - **Adjustment + crew actual** → **one per-segment slider** that defaults to the AI value.
 - **Cache storage** → **relational table** (standing "ask before JSON-blob / default relational" rule).
+- **Return-to-parking timing** → drive to the yard (live) + average **in-window** yard dwell (geofence
+  history, daytime-filtered to drop the overnight park; §6a), > 3 mo else Truck-Setup default. Symmetric
+  with the facility branch.
+- **Overnight distortion** → the dwell average uses **only 7 AM–6 PM (operating-window) dwells**, so the
+  overnight park never pollutes the yard/parking average (owner, 2026-07-29).
 
 **Still open:**
-1. **Return-to-parking timing** — drive to the yard (already geocoded) + a can-swap time; where is the
-   swap time set (Truck Setup default)?
-2. **Facility selection** — does the user pick the facility, or does it auto-default to nearest/cheapest
+1. **Facility selection** — does the user pick the facility, or does it auto-default to nearest/cheapest
    (the existing disposal-finder) with an override?
-3. **History-gate specifics** — is the 3-month window **per facility** (vs franchise-wide)? If a facility
+2. **History-gate specifics** — is the 3-month window **per facility** (vs franchise-wide)? If a facility
    has < 3 mo but others have more, per-facility default fallback?
+3. **Operating window source** — derive from the franchise's route hours, or an explicit per-franchise
+   setting (default 7 AM–6 PM)? Either way TZ-resolved, not hardcoded.
 4. **Billing unit** — per-job-read *(recommended)* vs flat per-refresh.
 5. **Pac-Man check** — per-segment sliders + disposal-row choices are richer than "one slider + one pin."
    The common path stays low-touch (press AI, defaults fill in, only touch a slider on an exception), but
