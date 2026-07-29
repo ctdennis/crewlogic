@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.99.12 | 2026-07-28">
+  <meta name="crewlogic-version" content="v5.99.13 | 2026-07-29">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10995,6 +10995,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             name: r.geofence_name, category: String(r.category || ''),
             sinceMs: isFinite(_since) ? _since : null
           };
+        } else if (et === 'geofence_exit' || et === 'job_leave') {
+          // Most-recent event is an EXIT → the truck is NO LONGER inside that geofence. _truckCurrentGeofence
+          // is set on entry but (unlike _truckCurrentFacility, rebuilt each render) persists, so without this
+          // it keeps showing the truck parked where it LEFT — e.g. a truck that left the yard for a disposal
+          // run whose own entry event hasn't fired yet. Since _seenVeh means we only see each truck's latest
+          // event, clearing here is correct. (Prod 2026-07-29: Truck 2 stuck "At Truck Parking" after exiting.)
+          delete _truckCurrentGeofence[_normVeh(veh)];
         }
       });
       const offlineHtml = _offlineTruckAlertRows();  // bold-red UNPLUGGED banner pinned to the top
