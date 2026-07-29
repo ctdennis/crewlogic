@@ -108,11 +108,34 @@ dropped because it crosses the window boundary. Likewise the morning "leave for 
 "return to park" are not swaps and fall out naturally. (Applying the same daytime filter to facility
 dwells is harmless and guards against stray events.)
 
-- **> 3 months** of qualifying (in-window) dwells → use the computed average.
-- **< 3 months** → fall back to the **Truck-Setup default** (disposal wait / parking swap).
+**Dwell hygiene — clean the sample before averaging:**
+
+- **In-window only** (7 AM–6 PM) — excludes the overnight park (above). The **operating window is derived
+  from the franchise's route hours** (TZ-resolved; 7 AM–6 PM only as a fallback default) — *resolved,* not
+  hardcoded.
+- **Pair arrive→leave per VEHICLE, and keep only clean same-truck round-trips.** A crew that comes in on
+  **truck 1 and leaves on truck 3** must NOT be mis-paired (truck-1 "in" with truck-3 "out"): truck 1 then
+  sits parked and truck 3 had been parked since overnight, so neither is a real swap. Averaging only
+  **unambiguous same-truck in/out pairs** edits those cross-truck swaps out (owner 2026-07-29).
+- **Cap absurd dwells** — a missed exit ("arrived, never left") reads as a giant dwell; discard anything
+  beyond a sane max so one bad event can't skew the average.
+- **Minimum sample size** — require enough qualifying visits (not just 3 months elapsed) before trusting
+  the computed average.
+
+Then:
+
+- **> 3 months AND enough clean visits** → use the computed average.
+- **Otherwise** → fall back to the **Cost-settings default** — a "can-swap / disposal dwell" default
+  (minutes), in the same Cost settings area as truck capacity + facilities.
 - **Drive time is always computed live;** only the dwell needs the history-or-default path.
-- **The operating window should derive from the franchise's route hours (or a per-franchise setting) and
-  resolve in the franchise's timezone — not be hardcoded** (multi-tenant TZ discipline). #90 = 7 AM–6 PM.
+
+### 6b. Live geofence closes the loop (IN SCOPE — owner promoted from "later")
+
+Because a disposal stop is a real geofence event, once a truck actually **arrives at a facility** its
+geofence `arrive` **auto-confirms the planned disposal row** and feeds the **live ETA** (FW-59): the
+planned stop becomes an actual, the real drive + dwell replace the estimate, and downstream stops re-time
+from ground truth. Planning view and live view reinforce each other — the morning plan is a forecast; the
+live geofence makes it fact. Layers on the existing live-ETA engine.
 
 ## 7. AI cost governance — you only pay for new eyes
 
@@ -178,10 +201,11 @@ which defaults to the AI value:
 
 - **Truck capacity — default 16 cu yd,** editable in **Settings → Cost Analysis.** Single global number
   for v1 (per-truck sizes later).
-- **Default disposal wait + default parking-swap — new settings in Truck Setup,** used for the
-  disposal-row time when the franchise has < 3 months of in-window geofence history (§6a).
-- **Operating window** for the dwell filter (default 7 AM–6 PM) — derived from route hours or a
-  per-franchise setting, resolved in the franchise timezone (§6a).
+- **Default can-swap / disposal dwell — a new setting in Cost settings** (same area as capacity +
+  facilities), used for the disposal-row time when the franchise has < 3 months of clean in-window
+  geofence history (§6a).
+- **Operating window** for the dwell filter is **derived from the franchise's route hours** (7 AM–6 PM
+  fallback), TZ-resolved (§6a) — no separate setting needed.
 
 ## 12. Data model (sketch)
 
@@ -214,11 +238,14 @@ data to allow it; ship without it.
 - **AI button** → per-segment AI estimate (`summary + items` → `{low, high}`), cached by `woID + descHash`
 - **Per-segment slider** (default = AI, adjust more/less) — the one adjustment + actual mechanism
 - Inserted **"truck full — disposal" row** at each capacity crossing, with **parking vs facility** choice
-- Facility branch: **live drive time + geofence-history avg wait (>3 mo) or Truck-Setup default (<3 mo)**,
-  pushing downstream feasibility
+- Facility branch: **live drive time + geofence-history avg dwell (>3 mo, clean sample) or Cost-settings
+  default (<3 mo)**, pushing downstream feasibility; return-to-parking derives its swap time the same way
+- **Dwell hygiene:** in-window (route hours), per-vehicle same-truck pairing (edit out truck-1-in /
+  truck-3-out swaps), missed-exit cap, minimum sample size (§6a)
+- **Live geofence auto-confirms** a disposal stop and feeds the live ETA (§6b) — planning ↔ live loop
 - EO default-out + "convert" (segment slider off 0)
 - Description-hash staleness + Refresh (pay only for new/changed jobs)
-- **Truck capacity** (16 cu yd, Cost Analysis) + **default disposal wait** (Truck Setup)
+- **Truck capacity** (16 cu yd) + **default can-swap/disposal dwell** — both in Cost settings
 
 **LATER:**
 - Per-truck capacity
@@ -236,20 +263,24 @@ data to allow it; ship without it.
 - **Adjustment + crew actual** → **one per-segment slider** that defaults to the AI value.
 - **Cache storage** → **relational table** (standing "ask before JSON-blob / default relational" rule).
 - **Return-to-parking timing** → drive to the yard (live) + average **in-window** yard dwell (geofence
-  history, daytime-filtered to drop the overnight park; §6a), > 3 mo else Truck-Setup default. Symmetric
-  with the facility branch.
-- **Overnight distortion** → the dwell average uses **only 7 AM–6 PM (operating-window) dwells**, so the
-  overnight park never pollutes the yard/parking average (owner, 2026-07-29).
+  history; §6a), > 3 mo + clean sample else Cost-settings default. Symmetric with the facility branch.
+- **Overnight distortion + truck-swaps** → dwell averages use **only in-window (route-hours) dwells** and
+  **only clean same-truck in/out pairs**, so the overnight park and truck-1-in/truck-3-out swaps never
+  pollute the average (owner, 2026-07-29).
+- **Operating window** → **derived from the franchise's route hours** (7 AM–6 PM fallback), TZ-resolved —
+  no separate setting.
+- **Default location** → the < 3-mo fallback ("can-swap / disposal dwell" default) lives in **Cost
+  settings**, alongside truck capacity + facilities (not Truck Setup).
+- **Live geofence auto-confirm** → **IN SCOPE** for v1: a truck's real facility arrival confirms the
+  planned disposal row and feeds the live ETA (§6b).
 
 **Still open:**
 1. **Facility selection** — does the user pick the facility, or does it auto-default to nearest/cheapest
    (the existing disposal-finder) with an override?
 2. **History-gate specifics** — is the 3-month window **per facility** (vs franchise-wide)? If a facility
    has < 3 mo but others have more, per-facility default fallback?
-3. **Operating window source** — derive from the franchise's route hours, or an explicit per-franchise
-   setting (default 7 AM–6 PM)? Either way TZ-resolved, not hardcoded.
-4. **Billing unit** — per-job-read *(recommended)* vs flat per-refresh.
-5. **Pac-Man check** — per-segment sliders + disposal-row choices are richer than "one slider + one pin."
+3. **Billing unit** — per-job-read *(recommended)* vs flat per-refresh.
+4. **Pac-Man check** — per-segment sliders + disposal-row choices are richer than "one slider + one pin."
    The common path stays low-touch (press AI, defaults fill in, only touch a slider on an exception), but
    confirm you're happy with the added depth — or we trim (e.g., collapse each segment slider to 3
    presets: Light / AI / Heavy).
