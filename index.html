@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.100.5 | 2026-07-30">
+  <meta name="crewlogic-version" content="v5.100.6 | 2026-07-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10281,6 +10281,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _stopTrucksAutoRefresh() {
       if (_trucksRefreshTimer) { clearInterval(_trucksRefreshTimer); _trucksRefreshTimer = null; }
     }
+    // Periodically re-fetch the dispatch BOARDS so Vonigo changes (new / moved / edited / cancelled jobs)
+    // appear without a manual date-toggle. The 45s trucks refresh only moves the map dots and the live-ETA
+    // timer only recomputes from already-loaded jobs — neither re-pulls the job list. Quiet reload (no blank
+    // flash) and skipped mid drag/resize so it never yanks a job the user is moving.
+    let _dashBoardRefreshTimer = null;
+    function _startDashBoardRefresh() {
+      if (_dashBoardRefreshTimer) return;
+      _dashBoardRefreshTimer = setInterval(() => {
+        if (currentScreen !== 'dashboard' || !document.getElementById('dashMapPane')) { _stopDashBoardRefresh(); return; }
+        if (_dragMove || _resize) return;                 // mid-interaction — don't re-render under the user
+        try { dashReloadOne('src', true); dashReloadOne('dest', true); } catch (e) { console.warn('[dash] board auto-refresh failed (non-fatal):', e); }
+      }, 90000);                                          // ~90s — keep the board current with Vonigo
+    }
+    function _stopDashBoardRefresh() {
+      if (_dashBoardRefreshTimer) { clearInterval(_dashBoardRefreshTimer); _dashBoardRefreshTimer = null; }
+    }
     // Map JOB-day picker — any day (offset from the franchise's today). Trucks stay live; +3-day
     // look-ahead extends from the SELECTED day. Date picker on the trucks screen + the dashboard map.
     function _trucksTodayDayID() { return mjNowParts().dayID; } // YYYYMMDD in the franchise TZ
@@ -12554,6 +12570,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _updateTrucksDayToggle();              // initialize the date picker to today
       showTrucks();
       _startTrucksAutoRefresh();
+      _startDashBoardRefresh();               // re-pull the boards from Vonigo every ~90s (new/moved/edited/cancelled jobs)
       // Fix the "half-width tiles" + "zoomed-out on load" races: the map is created before the dashboard's
       // wide layout finishes reflowing, so Leaflet measures a too-narrow container AND any early fit picks a
       // too-low zoom that nothing corrects. invalidateSize keeps the size current; and once the layout has
