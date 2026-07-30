@@ -331,9 +331,12 @@ with ≥1 truck of headroom past the cap (no practical ceiling), reads out in **
 when a route's total exceeds the whole fleet it flags **"dump & return"** with the overflow amount — the
 truck empties mid-route and comes back for the rest (Bibee's 2⅛ trucks on a 2-truck route).
 
-**Build order:** (1) multi-truck capacity + slider + dump-and-return — **done, on dev v5.101.0**;
-(2) charge-volume read (Charges query → primary source over AI, by label + timing); (3) EO-convert + the
-disposal-row time cost (§6). The AI + persistence backbone from Phase 1 is already live.
+**Build order:** (1) multi-truck capacity + slider + dump-and-return — **done, dev v5.101.0**;
+(2) charge-volume read (primary source over AI) — **done, dev v5.102.0**: `crewlogic-dispatch routeCharges`
+reads `/data/Charges/` per WO (charge `name` = truckload item, field 9288 = qty), the client seeds sliders
+on panel open in the order crew/actual > charges > AI > 0 with a source chip; (3) EO-convert + the
+disposal-row time cost (§6). The AI + persistence backbone from Phase 1 is already live. Prod promotion of
+steps 1–2 still pending (deploy `crewlogic-dispatch` to the prod ref + merge dev→main).
 
 ---
 
