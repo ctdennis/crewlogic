@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.100.6 | 2026-07-30">
+  <meta name="crewlogic-version" content="v5.102.0 | 2026-07-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11782,7 +11782,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // (owner: a multi-truck job must not vanish when it starts). ETA feasibility is overlaid per stop.
       const stops = _mjVolStops(sd, rcode);
       if (!stops.length) return '<p style="color:var(--text-muted);font-size:13px;">No stops on this route — or they could not be geocoded.</p>';
-      const st = _mjVolState(sd, rcode), cap = truckCapacityCY() || 16;
+      const st = _mjVolState(sd, rcode), truckCY = truckCapacityCY() || 16, trucks = _mjRouteTruckCount(sd, rcode), cap = trucks * truckCY;
       let cum = 0, crossWo = null, rows = '';
       stops.forEach((s, i) => {
         const bj = s.bj, ej = s.ej, wo = s.wo;
@@ -11805,20 +11805,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const est = st.est[wo] || null, val = st.slider[wo] != null ? Number(st.slider[wo]) : 0;
         cum += val;
         if (crossWo == null && val > 0 && cum >= cap) crossWo = wo;
-        const smax = Math.max(cap, Math.ceil(est && est.high != null ? est.high : cap));
+        const smax = Math.max(cap + truckCY, Math.ceil(est && est.high != null ? est.high : 0), val + truckCY); // always ≥1 truck of headroom past cap/current → no practical ceiling
         const win = (winStart && winEnd) ? (' <span style="color:var(--text-muted);font-size:10px;">· ' + mjEsc(winStart) + '–' + mjEsc(winEnd) + '</span>') : (winStart ? ' <span style="color:var(--text-muted);font-size:10px;">· ' + mjEsc(winStart) + '</span>' : '');
-        const aiTip = est ? ('AI ' + (est.low != null ? est.low : '?') + '–' + (est.high != null ? est.high : '?') + ' cy, ' + (est.confidence || '') + (est.actual != null ? ', set' : '')) : 'drag to set, or use AI to estimate';
+        const ch = st.charges[wo];
+        const chTip = ch && ch.cy > 0 ? ('Charges ' + ch.cy.toFixed(1) + ' cy ($' + ch.total + ')') : '';
+        const aiTip = [chTip, est ? ('AI ' + (est.low != null ? est.low : '?') + '–' + (est.high != null ? est.high : '?') + ' cy, ' + (est.confidence || '')) : ''].filter(Boolean).join(' · ') || 'drag to set, or use AI to estimate';
         rows += '<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;">'
           + '<div style="display:flex;justify-content:space-between;gap:8px;line-height:1.2;">'
           +   '<div style="min-width:0;"><b>' + (i + 1) + '.</b> ' + _mjJobDot(bj, rcode) + '<b>' + mjEsc(name) + '</b>' + (town ? ' <span style="color:var(--text-muted);">' + mjEsc(town) + '</span>' : '') + win + '</div>'
           +   '<div style="text-align:right;white-space:nowrap;flex:0 0 auto;"><b>' + mjEsc(eta) + '</b> <span style="color:' + col + ';font-weight:700;">' + tag + '</span></div>'
           + '</div>'
           + '<div style="display:flex;align-items:center;gap:6px;margin-top:3px;" title="' + mjEsc(aiTip) + '">'
-          +   '<input type="range" min="0" max="' + smax + '" step="0.25" value="' + val + '" oninput="_mjVolSlide(\'' + sd + '\',\'' + mjEsc(rcode) + '\',\'' + mjEsc(wo) + '\',this.value)" onchange="_mjVolPersist(\'' + sd + '\',\'' + mjEsc(rcode) + '\',\'' + mjEsc(wo) + '\',this.value)" style="flex:1;accent-color:#00E785;">'
-          +   '<span id="mjVolVal-' + mjEsc(wo) + '" style="font-family:\'Space Mono\',monospace;min-width:52px;text-align:right;color:var(--text-primary);">' + val.toFixed(2) + ' cy</span>'
+          +   '<input type="range" min="0" max="' + smax + '" step="' + (truckCY / 8) + '" value="' + val + '" oninput="_mjVolSlide(\'' + sd + '\',\'' + mjEsc(rcode) + '\',\'' + mjEsc(wo) + '\',this.value)" onchange="_mjVolPersist(\'' + sd + '\',\'' + mjEsc(rcode) + '\',\'' + mjEsc(wo) + '\',this.value)" style="flex:1;accent-color:#00E785;">'
+          +   '<span id="mjVolVal-' + mjEsc(wo) + '" title="cubic yards · truckloads" style="font-family:\'Space Mono\',monospace;min-width:78px;text-align:right;color:var(--text-primary);">' + val.toFixed(1) + ' cy · ' + (val / truckCY).toFixed(2) + 'T</span>'
+          +   '<span id="mjVolSrc-' + mjEsc(wo) + '" style="flex:0 0 auto;min-width:44px;">' + _mjVolSrcChip(st.src[wo]) + '</span>'
           +   '<span id="mjVolCum-' + mjEsc(wo) + '" title="running total" style="font-family:\'Space Mono\',monospace;min-width:40px;text-align:right;color:var(--text-muted);">' + cum.toFixed(1) + '</span>'
           + '</div>'
-          + '<div id="mjVolMark-' + mjEsc(wo) + '" style="' + (crossWo === wo ? '' : 'display:none;') + 'color:#f59e0b;font-weight:700;font-size:11px;margin-top:3px;">🛢️ Full here (~' + cap + ' cy) — dump / swap</div>'
+          + '<div id="mjVolMark-' + mjEsc(wo) + '" style="' + (crossWo === wo ? '' : 'display:none;') + 'color:#f59e0b;font-weight:700;font-size:11px;margin-top:3px;">🛢️ Full here (~' + cap + ' cy' + (trucks > 1 ? ' · ' + trucks + ' trucks' : '') + ') — dump / swap</div>'
           + '</div>';
       });
       const ws = e && e.rollup && e.rollup.status;
@@ -11849,6 +11852,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const sd = _mjSD(cellEl.getAttribute('data-day') || '');
       const rcode = cellEl.getAttribute('data-rcode') || '', rname = cellEl.getAttribute('data-rname') || rcode;
       _mjExplainCtx = { sd, rcode, rname };
+      _mjVolLoadCharges(sd, rcode);   // pull real charge volumes on open (free of AI); seeds sliders when they return
       if (document.getElementById('dashLeftJobBody')) { _railShowInfo(_mjExplainPanelHTML(sd, rcode, rname, '40vh')); return; } // dashboard → left rail
       const ov = document.createElement('div');
       ov.id = '_mjExplainModal';
@@ -11894,10 +11898,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _mjJobDot(bj, rcode) {
       if (!bj) return '';
       const lo = Number(bj.labelOpt) || 0;
-      const isEst = String(rcode || '').toUpperCase() === 'EST' || lo === 9973 || lo === 9996;
       const done = !!(bj.completed || bj.labelDone);
-      const color = isEst ? '#AA4CB3' : (done ? 'var(--text-muted)' : 'var(--accent-green,#00E785)');
-      const title = isEst ? 'estimate' : (done ? 'completed' : 'job');
+      // EXACT board parity: same color the board cell paints — done→gray, else the Vonigo label color.
+      const color = done ? '#5b6b7a' : mjLabelColor(lo);
+      const title = done ? 'completed' : (lo === 9973 ? 'estimate only' : (lo === 9996 ? 'est completed (est only)' : (lo === 9975 || lo === 245 ? 'converted' : 'appointment')));
       return '<span title="' + title + '" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + ';margin:0 5px 0 1px;vertical-align:middle;flex:0 0 auto;"></span>';
     }
     function _mjVolRouteJobs(sd, rcode) {
@@ -11908,7 +11912,66 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // jobID -> board job. The eta rows carry only jobNo (= the board job's jobID); the board job carries the
     // woID + summary + items the volume estimate is keyed on. This bridges the two.
     function _mjVolBoardByJobId(sd, rcode) { const m = {}; _mjVolRouteJobs(sd, rcode).forEach(bj => { m[String(bj.jobID)] = bj; }); return m; }
-    function _mjVolState(sd, rcode) { _mjVol[sd] = _mjVol[sd] || {}; return (_mjVol[sd][rcode] = _mjVol[sd][rcode] || { est: {}, slider: {} }); }
+    function _mjVolState(sd, rcode) { _mjVol[sd] = _mjVol[sd] || {}; return (_mjVol[sd][rcode] = _mjVol[sd][rcode] || { est: {}, slider: {}, charges: {}, locked: {}, src: {} }); }
+    // The set of estimate-only (purple) woIDs on a route — they default OUT of the fill (may not haul) and
+    // are never auto-seeded from AI. 9973 Est-Only / 9996 Est-Compl-EstOnly, or the whole EST route.
+    function _mjVolEoSet(sd, rcode) {
+      const eo = {};
+      _mjVolRouteJobs(sd, rcode).forEach(j => { const lo = Number(j.labelOpt) || 0; if (String(rcode).toUpperCase() === 'EST' || lo === 9973 || lo === 9996) eo[_mjWo(j)] = true; });
+      return eo;
+    }
+    // Seed each UNLOCKED slider from the best available source, in the locked priority order:
+    //   crew slider / saved actual (locked, untouched here) > Vonigo charges > AI midpoint > 0.
+    // Charges are the real haul (Bibee: adjusted down to 1 Full at completion); AI is only the planning floor
+    // for jobs with no charges yet (purple estimate-only stays 0 — shows its AI range but isn't seeded).
+    function _mjVolApplySeeds(sd, rcode) {
+      const st = _mjVolState(sd, rcode), eoWo = _mjVolEoSet(sd, rcode);
+      _mjVolStops(sd, rcode).forEach(s => {
+        const wo = s.wo;
+        if (st.locked[wo]) return;                                   // crew drag / saved actual — never overwrite
+        const ch = st.charges[wo];
+        if (ch && ch.cy > 0) { st.slider[wo] = Math.round(ch.cy * 100) / 100; st.src[wo] = 'charges'; return; }
+        const e = st.est[wo];
+        if (e && !eoWo[wo] && e.low != null && e.high != null) { st.slider[wo] = Math.round(((e.low + e.high) / 2) * 4) / 4; st.src[wo] = 'ai'; return; }
+        if (st.slider[wo] == null) st.slider[wo] = 0;                 // EO / nothing yet → 0
+      });
+    }
+    // Pull each stop's Vonigo charge volume (the primary source). Runs on panel open — free of AI cost — so a
+    // job that already has charges (Pimental 1/8 = 2 cy) shows its real volume WITHOUT pressing AI.
+    async function _mjVolLoadCharges(sd, rcode) {
+      const st = _mjVolState(sd, rcode);
+      if (st.chargesLoaded || st.chargesLoading) return;
+      const woIDs = _mjVolStops(sd, rcode).map(s => s.wo).filter(Boolean);
+      if (!woIDs.length) { st.chargesLoaded = true; return; }
+      st.chargesLoading = true;
+      try {
+        const r = await edgeFunctionCall('crewlogic-dispatch', { action: 'routeCharges', franchiseID: currentUser.franchiseID, woIDs });
+        st.chargesLoading = false; st.chargesLoaded = true;
+        if (r && r.success && r.charges) {
+          const truckCY = truckCapacityCY() || 16;
+          Object.keys(r.charges).forEach(wo => { const c = r.charges[wo] || {}; st.charges[wo] = { trucks: c.trucks || 0, cy: (c.trucks || 0) * truckCY, items: c.items || [], total: c.total || 0 }; });
+          _mjVolApplySeeds(sd, rcode);
+          if (_mjExplainCtx && _mjExplainCtx.sd === sd && _mjExplainCtx.rcode === rcode) _mjVolRerender();
+        }
+      } catch (e) { st.chargesLoading = false; st.chargesLoaded = true; console.error('[mj-vol charges]', e); }
+    }
+    // Small source chip so the OM sees WHERE a number came from: charges (real) / AI (planning) / set (crew).
+    function _mjVolSrcChip(src) {
+      if (!src) return '';
+      const M = { charges: ['charges', '#54AD5B'], ai: ['AI', '#6EBFE7'], crew: ['set', '#f59e0b'], actual: ['set', '#f59e0b'] };
+      const m = M[src]; if (!m) return '';
+      return ' <span title="volume source" style="font-size:9.5px;font-weight:700;color:' + m[1] + ';">· ' + m[0] + '</span>';
+    }
+    // Fleet capacity for a route = (# trucks assigned to it) × truck size. Reads the truck count off the
+    // assignment column the OM already sets (piggyback = 2+ trucks), so capacity scales with no new clicks.
+    function _mjRouteTruckCount(sd, rcode) {
+      const routes = _mjEtaRoutesByDate[sd] || [];
+      const rt = routes.find(r => String(r.code || '') === String(rcode) || String(r.name || '') === String(rcode));
+      if (!rt) return 1;
+      const a = (_mjAssignByDate[sd] || {})[String(rt.id)] || [];
+      return Math.max(1, a.length);
+    }
+    function _mjRouteCapacityCY(sd, rcode) { return _mjRouteTruckCount(sd, rcode) * (truckCapacityCY() || 16); }
     // The ordered stop list for the volume panel — BOARD-DRIVEN so a stop STAYS until it's paid/archived
     // (keeps the current + completed-but-unpaid jobs on the list with their slider). Each entry carries the
     // board job (bj), woID, jobID, and the matching ETA row (ej) if the stop is still upcoming/remaining.
@@ -11937,33 +12000,42 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         st.loading = false;
         if (!r || !r.success) { st.err = (r && r.error) || 'Estimate failed'; _mjVolRerender(); return; }
         st.err = null; st.loaded = true;
-        // Estimate-only stops (purple) default to 0 — they may not haul. The AI range still shows so a
-        // converted EO can be dragged to it, but AI never SEEDS an EO slider (owner: EO defaults out).
-        const eoWo = {};
-        jobs.forEach(j => { const lo = Number(j.labelOpt) || 0; if (String(rcode).toUpperCase() === 'EST' || lo === 9973 || lo === 9996) eoWo[_mjWo(j)] = true; });
         (r.estimates || []).forEach(e => {
           st.est[e.woID] = e;
-          const mid = (e.low != null && e.high != null) ? Math.round(((e.low + e.high) / 2) * 4) / 4 : 0;
-          if (e.actual != null) st.slider[e.woID] = e.actual;                                     // a saved actual always wins
-          else if (eoWo[e.woID]) { /* estimate-only → leave at 0 (not counted) until dragged/converted */ }
-          else if (st.slider[e.woID] == null || st.slider[e.woID] === 0) st.slider[e.woID] = mid;  // else seed the AI midpoint over an untouched 0
+          if (e.actual != null) { st.slider[e.woID] = e.actual; st.locked[e.woID] = true; st.src[e.woID] = 'actual'; }  // a saved crew actual always wins
         });
+        // Seed unlocked sliders in priority order (charges > AI midpoint > 0). Estimate-only stays 0 — its AI
+        // range still shows so a converted EO can be dragged to it, but AI never SEEDS an EO slider.
+        _mjVolApplySeeds(sd, rcode);
         _mjVolRerender();
       } catch (e) { st.loading = false; st.err = 'Estimate failed'; console.error('[mj-vol]', e); _mjVolRerender(); }
     }
     function _mjVolFillHTML(cum, cap, crossWo, jobs, rcode) {
+      const truckCY = truckCapacityCY() || 16;
+      const trucks = Math.max(1, Math.round(cap / truckCY));           // cap = trucks × truckCY, so recover the count
+      const loads = cum / truckCY;
       const pct = Math.max(3, Math.min(100, Math.round(cum / cap * 100)));
-      const barColor = cum >= cap ? '#f59e0b' : '#00E785';
+      const over = cum > cap + 0.01;
+      const barColor = over ? '#ef4444' : (cum >= cap ? '#f59e0b' : '#00E785');
+      const fleetLbl = trucks > 1 ? (trucks + ' trucks · ' + cap + ' cy') : ('one truck · ' + cap + ' cy');
+      const loadLbl = loads.toFixed(2) + ' of ' + trucks + ' truck' + (trucks > 1 ? 's' : '') + ' (' + cum.toFixed(1) + ' cy)';
       let msg;
-      if (crossWo) { const j = (jobs || []).find(x => _mjWo(x) === String(crossWo)); const nm = j ? (String(j.client || '').split(',')[0] || 'a stop').trim() : 'a stop'; msg = '🛢️ Fills at <b>' + mjEsc(nm) + '</b> — plan a dump / can-swap there.'; }
-      else msg = 'Stays under one truck (' + cum.toFixed(1) + ' of ' + cap + ' cy).';
+      if (over) {
+        // Over the whole fleet's capacity → a truck has to empty at the dump and come back for the rest.
+        msg = '⚠️ <b>' + (cum - cap).toFixed(1) + ' cy over</b> the ' + fleetLbl + ' — a truck must <b>dump &amp; return</b>. ' + loadLbl + '.';
+      } else if (crossWo) {
+        const j = (jobs || []).find(x => _mjWo(x) === String(crossWo)); const nm = j ? (String(j.client || '').split(',')[0] || 'a stop').trim() : 'a stop';
+        msg = '🛢️ Fills the ' + fleetLbl + ' at <b>' + mjEsc(nm) + '</b> — plan a dump / can-swap there. ' + loadLbl + '.';
+      } else {
+        msg = 'Fits the ' + fleetLbl + ' — ' + loadLbl + '.';
+      }
       return '<div style="height:8px;background:var(--bg-input);border-radius:4px;overflow:hidden;"><div style="height:100%;width:' + pct + '%;background:' + barColor + ';transition:width .12s;"></div></div>'
         + '<div style="font-size:12px;color:var(--text-primary);margin-top:5px;">' + msg + '</div>';
     }
     // Walk the (time-ordered) BOARD-DRIVEN stops accumulating fill. Shared by the row render and the
     // in-place repaint so both always agree (same list, same order). perStop(s,i,wo,val,cum,crossWo).
     function _mjVolWalk(sd, rcode, perStop) {
-      const st = _mjVolState(sd, rcode), cap = truckCapacityCY() || 16, stops = _mjVolStops(sd, rcode);
+      const st = _mjVolState(sd, rcode), cap = _mjRouteCapacityCY(sd, rcode), stops = _mjVolStops(sd, rcode);
       let cum = 0, crossWo = null;
       stops.forEach((s, i) => {
         const wo = s.wo, val = st.slider[wo] != null ? Number(st.slider[wo]) : 0;
@@ -11977,12 +12049,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // (never re-render the panel — that would kill the input mid-drag; UI-state-preservation rule).
     function _mjVolSlide(sd, rcode, wo, val) {
       const st = _mjVolState(sd, rcode);
-      st.slider[wo] = Number(val) || 0;
-      const ve = document.getElementById('mjVolVal-' + wo); if (ve) ve.textContent = (Number(val) || 0).toFixed(2) + ' cy';
+      st.slider[wo] = Number(val) || 0; st.locked[wo] = true; st.src[wo] = 'crew';   // a crew drag is the truth now — charges/AI won't re-seed it
+      const truckCY = truckCapacityCY() || 16, ve = document.getElementById('mjVolVal-' + wo);
+      if (ve) ve.textContent = (Number(val) || 0).toFixed(1) + ' cy · ' + ((Number(val) || 0) / truckCY).toFixed(2) + 'T';
+      const se = document.getElementById('mjVolSrc-' + wo); if (se) se.innerHTML = _mjVolSrcChip('crew');
       _mjVolRepaintFill(sd, rcode);
     }
     function _mjVolRepaintFill(sd, rcode) {
-      const cap = truckCapacityCY() || 16, jobs = _mjVolRouteJobs(sd, rcode);
+      const cap = _mjRouteCapacityCY(sd, rcode), jobs = _mjVolRouteJobs(sd, rcode);
       const r = _mjVolWalk(sd, rcode, function (j, i, wo, val, cum, crossWo) {
         const cb = document.getElementById('mjVolCum-' + wo); if (cb) cb.textContent = cum.toFixed(1);
         const mk = document.getElementById('mjVolMark-' + wo); if (mk) mk.style.display = (crossWo === wo) ? '' : 'none';
@@ -11991,8 +12065,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // Slider RELEASE: persist the value as this stop's actual (survives refresh, feeds later reporting).
     function _mjVolPersist(sd, rcode, wo, val) {
+      const st = _mjVolState(sd, rcode); st.locked[wo] = true; st.src[wo] = 'crew';   // a crew drag becomes the truth — no source auto-overwrites it
       edgeFunctionCall('crewlogic-volume', { action: 'setActual', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: sd, woID: wo, actualCuyd: Number(val) || 0, setBy: (currentUser && currentUser.email) || '' })
-        .then(() => { const st = _mjVolState(sd, rcode); if (st.est[wo]) st.est[wo].actual = Number(val) || 0; })
+        .then(() => { if (st.est[wo]) st.est[wo].actual = Number(val) || 0; })
         .catch(e => console.error('[mj-vol persist]', e));
     }
     function _mjDialControlHTML() {

@@ -287,5 +287,59 @@ data to allow it; ship without it.
 
 ---
 
-*No code until this spec is approved. Once approved, build on `dev` behind the toggle (Off = today's
-board, unchanged), per the FW-59 dev-first + owner-gated-prod-promotion workflow.*
+## 16. LOCKED: volume source-routing model (owner, 2026-07-30)
+
+The slider value for each stop resolves from the **best available source**, in priority order. The AI is
+the *floor*, not the answer — it fills in only when nothing more authoritative exists yet. Charges always
+win because they are what the crew is *actually* hauling.
+
+**Priority (highest wins):**
+1. **Crew actual (the slider override)** — once a human drags the slider, that value is the truth for the
+   day and persists (`route_volume_estimates.actual_cuyd`). Nothing auto-overwrites it.
+2. **Appointment charges** — when the estimate has been copied onto the day's appointment ("Do work now")
+   and the crew has adjusted them, these line items are today's real volume. **They trump the estimate**
+   (Bibee: estimate = whole job, but today's appointment charges = the half we're taking today).
+3. **Estimate charges** — a converted estimate (green *Est-Converted* / brownish *Est-Completed*) carries
+   priced line items on the estimate object. Use them when the appointment hasn't been worked yet.
+4. **AI text guess** — for a purple *Estimate-Only* job (no charges yet) or a bare job with no estimate,
+   the AI reads the description + item list and returns a {low, high} cy range. This is the planning-night
+   number, deliberately rough.
+
+**Timing is why this matters (owner):** the ops manager plans the route the night before, when most jobs
+have **no charges yet** — so planning-night fill is AI-driven, and it must be as accurate as possible.
+As the day converts jobs and the crew works them, charges appear and **silently upgrade** each stop's
+number from AI → estimate charges → appointment charges, with the slider override on top.
+
+**By Vonigo label (the router key — we already pull the label):**
+| Label | Colour | Charges? | Source used |
+|---|---|---|---|
+| Estimate-Only (9973) / Est-Compl-EstOnly (9996) | purple | usually none | **AI text**, default slider **0** (may not haul) |
+| Est-Converted-Job (9975) | green (usually same-day) | yes | **charges** (appointment if worked, else estimate) |
+| Est-Completed-Job (245) | brownish (usually future-day) | yes | **charges** |
+| New Appt (9984) / plain job | — | maybe | appointment charges if present, else AI |
+
+**Charge shape (from the 2026-07-30 read-only Vonigo inspection):** charges are a **separate Vonigo
+object**, not embedded in the WorkOrder/Job dump — the WO only reports `countCharges` + `isUseCharges`
+(Bibee 870436: `countCharges: 4`, `isUseCharges: true`). Reading the truck-fraction volume therefore
+needs a dedicated **Charges query** per WO/estimate. CrewLogic already builds/writes charges (submitQuote,
+method 3) and mirrors them into `estimate_charges`, so the shape is known; the per-charge volume maps
+through the price-book item's truck-fraction (`truckLabel`/`truckQty`), same mapping the estimator uses.
+
+**Multi-truck capacity (SHIPPED v5.101.0, §11 extended):** a route's capacity = **(# trucks assigned) ×
+truck size**, read off the board's assignment column (no new input). The slider steps in **truck-eighths**
+with ≥1 truck of headroom past the cap (no practical ceiling), reads out in **truckloads** (cy · T), and
+when a route's total exceeds the whole fleet it flags **"dump & return"** with the overflow amount — the
+truck empties mid-route and comes back for the rest (Bibee's 2⅛ trucks on a 2-truck route).
+
+**Build order:** (1) multi-truck capacity + slider + dump-and-return — **done, dev v5.101.0**;
+(2) charge-volume read (primary source over AI) — **done, dev v5.102.0**: `crewlogic-dispatch routeCharges`
+reads `/data/Charges/` per WO (charge `name` = truckload item, field 9288 = qty), the client seeds sliders
+on panel open in the order crew/actual > charges > AI > 0 with a source chip; (3) EO-convert + the
+disposal-row time cost (§6). The AI + persistence backbone from Phase 1 is already live. Prod promotion of
+steps 1–2 still pending (deploy `crewlogic-dispatch` to the prod ref + merge dev→main).
+
+---
+
+*Sections 1–15 were the pre-build spec (approved 2026-07-29). Section 16 is the locked build model
+(owner "get this built" directive, 2026-07-30). Build on `dev` behind the toggle (Off = today's board,
+unchanged), per the FW-59 dev-first + owner-gated-prod-promotion workflow.*
