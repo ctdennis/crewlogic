@@ -173,12 +173,18 @@ async function syncFranchise(
     // (active OR deleted). A geofence deleted-on-done must NOT be re-created by a later same-day run.
     const cutoffISO = new Date(Date.now() - 20 * 3600 * 1000).toISOString();
     const { data: existing } = await sb.from("job_geofences")
-      .select("id, geofence_id, status, deleted_reason").eq("franchise_id", fr.id).eq("wo_id", woId)
+      .select("id, geofence_id, status, deleted_reason, route, route_id").eq("franchise_id", fr.id).eq("wo_id", woId)
       .gte("created_at", cutoffISO).order("created_at", { ascending: false }).limit(1).maybeSingle();
     // Block re-create only if it's still ACTIVE, or was ended for a TERMINAL reason (done/cancelled). A
     // geofence removed because the job MOVED OFF today ('moved_off') or by the EOD sweep ('eod') SHOULD be
     // re-created if the job is back on today's schedule.
     if (existing && (existing.status === "active" || existing.deleted_reason === "job_complete" || existing.deleted_reason === "job_cancelled")) {
+      // Route-change robustness: keep the ACTIVE fence's route_id/route current so a job moved to a different
+      // route mid-day still auto-assigns the right route on the next arrival (the fence itself doesn't move).
+      const curRouteId = job.routeID ? String(job.routeID) : null, curRoute = job.route ? String(job.route) : null;
+      if (existing.status === "active" && ((existing.route_id || null) !== curRouteId || (existing.route || null) !== curRoute)) {
+        await sb.from("job_geofences").update({ route_id: curRouteId, route: curRoute }).eq("id", existing.id);
+      }
       skipped.push({ woId, reason: "already handled today (" + existing.status + "/" + (existing.deleted_reason || "-") + ")", geofence_id: existing.geofence_id }); continue;
     }
 
@@ -197,6 +203,7 @@ async function syncFranchise(
       job_id: job.jobID ? String(job.jobID) : null,
       vonigo_job_number: job.jobID ? String(job.jobID) : null,
       route: job.route ? String(job.route) : null, // Phase 4: for the time-at-customer report's route filter
+      route_id: job.routeID ? String(job.routeID) : null, // numeric Vonigo route id — server-side auto-assign key (FW-16)
       geofence_id: gid, name, centre_lat: lat, centre_lon: lon, status: "active",
     });
     if (insErr) { errors.push({ woId, error: "mapping insert failed", detail: insErr.message, geofence_id: gid }); continue; }

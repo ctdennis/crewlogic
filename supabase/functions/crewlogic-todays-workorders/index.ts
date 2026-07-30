@@ -375,6 +375,7 @@ Deno.serve(async (req: Request) => {
           status: statusLabel,
           statusOptionID,
           route: routeRel?.name || '',
+          routeID: routeRel?.objectID != null ? String(routeRel.objectID) : null, // numeric Vonigo route objectID — job_geofences.route_id / route_truck_assignments key (server-side auto-assign)
           crew,
           dateService,
           price,
