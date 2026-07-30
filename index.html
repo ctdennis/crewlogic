@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.99.13 | 2026-07-29">
+  <meta name="crewlogic-version" content="v5.100.4 | 2026-07-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11762,18 +11762,38 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _mjExplainBody(sd, rcode) {
       const e = (_mjEtaByDate[sd] || {})[rcode], pct = Math.round(_mjDial * 100);
       if (!e || !(e.jobs || []).length) return '<p style="color:var(--text-muted);font-size:13px;">No day-start prediction for this route — it has no jobs, or the stops could not be geocoded.</p>';
-      const rows = e.jobs.map((j, i) => {
-        const st = j.status, m = j.minutesEarlyLate || 0;
+      // Each feasibility row also carries a VOLUME slider (always present, starts at 0, adjustable even
+      // before AI). The cumulative fill accumulates down the stops; the stop that tips it over the truck
+      // size gets the 🛢️ marker; the fill bar summarises at the bottom.
+      const st = _mjVolState(sd, rcode), board = _mjVolBoardByJobId(sd, rcode), cap = truckCapacityCY() || 16;
+      let cum = 0, crossWo = null, rows = '';
+      e.jobs.forEach((j, i) => {
+        const stt = j.status, m = j.minutesEarlyLate || 0;
         let tag = 'no ETA', col = 'var(--text-muted)';
-        if (st === 'arrived') { tag = 'arrived — on site'; col = '#00E785'; }
-        else if (st === 'late') { tag = '+' + m + ' min late'; col = '#ef4444'; }
-        else if (st === 'window') { tag = m + ' min after start'; col = '#eab308'; }
-        else if (st === 'ontime') { tag = m > 0 ? ('early by ' + _mjEarlyStr(m)) : 'on time'; col = '#00E785'; }
-        return '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px;">'
-          + '<div><b>' + (i + 1) + '. ' + mjEsc(j.customerName || ('Job ' + (j.jobNo || ''))) + '</b>' + (j.town ? ' <span style="color:var(--text-muted);">' + mjEsc(j.town) + '</span>' : '')
-          + '<br><span style="color:var(--text-muted);">window ' + mjEsc(j.windowStart || '') + '–' + mjEsc(j.windowEnd || '') + '</span></div>'
-          + '<div style="text-align:right;white-space:nowrap;"><b>' + mjEsc(j.predictedEta || '—') + '</b><br><span style="color:' + col + ';font-weight:700;">' + tag + '</span></div></div>';
-      }).join('');
+        if (stt === 'arrived') { tag = 'arrived — on site'; col = '#00E785'; }
+        else if (stt === 'late') { tag = '+' + m + ' min late'; col = '#ef4444'; }
+        else if (stt === 'window') { tag = m + ' min after start'; col = '#eab308'; }
+        else if (stt === 'ontime') { tag = m > 0 ? ('early by ' + _mjEarlyStr(m)) : 'on time'; col = '#00E785'; }
+        const bj = board[String(j.jobNo)] || null, wo = bj ? _mjWo(bj) : String(j.jobNo != null ? j.jobNo : i);
+        const est = st.est[wo] || null, val = st.slider[wo] != null ? Number(st.slider[wo]) : 0;
+        cum += val;
+        if (crossWo == null && val > 0 && cum >= cap) crossWo = wo;
+        const smax = Math.max(cap, Math.ceil(est && est.high != null ? est.high : cap));
+        const win = (j.windowStart && j.windowEnd) ? (' <span style="color:var(--text-muted);font-size:10px;">· ' + mjEsc(j.windowStart) + '–' + mjEsc(j.windowEnd) + '</span>') : '';
+        const aiTip = est ? ('AI ' + (est.low != null ? est.low : '?') + '–' + (est.high != null ? est.high : '?') + ' cy, ' + (est.confidence || '') + (est.actual != null ? ', set' : '')) : 'drag to set, or use AI to estimate';
+        rows += '<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;">'
+          + '<div style="display:flex;justify-content:space-between;gap:8px;line-height:1.2;">'
+          +   '<div style="min-width:0;"><b>' + (i + 1) + '.</b> ' + _mjJobDot(bj, rcode) + '<b>' + mjEsc(j.customerName || ('Job ' + (j.jobNo || ''))) + '</b>' + (j.town ? ' <span style="color:var(--text-muted);">' + mjEsc(j.town) + '</span>' : '') + win + '</div>'
+          +   '<div style="text-align:right;white-space:nowrap;flex:0 0 auto;"><b>' + mjEsc(j.predictedEta || '—') + '</b> <span style="color:' + col + ';font-weight:700;">' + tag + '</span></div>'
+          + '</div>'
+          + '<div style="display:flex;align-items:center;gap:6px;margin-top:3px;" title="' + mjEsc(aiTip) + '">'
+          +   '<input type="range" min="0" max="' + smax + '" step="0.25" value="' + val + '" oninput="_mjVolSlide(\'' + sd + '\',\'' + mjEsc(rcode) + '\',\'' + mjEsc(wo) + '\',this.value)" onchange="_mjVolPersist(\'' + sd + '\',\'' + mjEsc(rcode) + '\',\'' + mjEsc(wo) + '\',this.value)" style="flex:1;accent-color:#00E785;">'
+          +   '<span id="mjVolVal-' + mjEsc(wo) + '" style="font-family:\'Space Mono\',monospace;min-width:52px;text-align:right;color:var(--text-primary);">' + val.toFixed(2) + ' cy</span>'
+          +   '<span id="mjVolCum-' + mjEsc(wo) + '" title="running total" style="font-family:\'Space Mono\',monospace;min-width:40px;text-align:right;color:var(--text-muted);">' + cum.toFixed(1) + '</span>'
+          + '</div>'
+          + '<div id="mjVolMark-' + mjEsc(wo) + '" style="' + (crossWo === wo ? '' : 'display:none;') + 'color:#f59e0b;font-weight:700;font-size:11px;margin-top:3px;">🛢️ Full here (~' + cap + ' cy) — dump / swap</div>'
+          + '</div>';
+      });
       const ws = e.rollup && e.rollup.status;
       const verdict = ws === 'late' ? ('<span style="color:#ef4444;">Runs late by ' + (e.rollup.minutes || 0) + ' min</span>')
         : ws === 'window' ? '<span style="color:#eab308;">Makes every window (some after the start)</span>'
@@ -11782,30 +11802,163 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const lead = e.live
         ? 'Verdict: <b>' + verdict + '</b> at <b>' + pct + '% finish speed</b>, from the assigned truck&rsquo;s <b style="color:#00E785;">current GPS position</b>, right now.'
         : 'Verdict: <b>' + verdict + '</b> at <b>' + pct + '% finish speed</b>. Leave the yard by <b>' + mjEsc(e.departYard || '—') + '</b> to make the first stop.';
-      const method = e.live
-        ? 'How this is figured: start from the assigned truck&rsquo;s <b style="color:#00E785;">live GPS position</b> and the current time, drive to each REMAINING stop in order (map drive times), and assume each job takes its scheduled time × the finish-speed dial. A stop reached before its window opens waits for it. <b style="color:#00E785;">Green</b> = arrives ahead of or by the start; <b style="color:#eab308;">yellow</b> = within the window, after the start; <b style="color:#ef4444;">red</b> = after it closes. <b style="color:#00E785;">● Live</b> — recomputes as the truck moves.'
-        : 'How this is figured: start at your yard, drive to each stop in order (map drive times), and assume each job takes its scheduled time × the finish-speed dial. Note: a stop that lands before its window OPENS just waits for the window, so upstream slack is absorbed there. <b style="color:#00E785;">Green</b> = arrives ahead of or by the start time; <b style="color:#eab308;">yellow</b> = within the window but after the start; <b style="color:#ef4444;">red</b> = after the window closes. A day-start <b>guesstimate</b> — once trucks roll, live GPS takes over.';
-      return '<p style="font-size:12.5px;color:var(--text-secondary);margin:0 0 8px;">' + lead + '</p>' + rows
+      const method = '<b style="color:#00E785;">Green</b> = arrives ahead of or by the start time; <b style="color:#eab308;">yellow</b> = within the window but after the start; <b style="color:#ef4444;">red</b> = after the window closes.';
+      const fill = '<div id="mjVolFill" style="margin-top:8px;">' + _mjVolFillHTML(cum, cap, crossWo, _mjVolRouteJobs(sd, rcode), rcode) + '</div>';
+      return '<p style="font-size:12.5px;color:var(--text-secondary);margin:0 0 8px;">' + lead + '</p>' + rows + fill
         + '<p style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.5;">' + method + '</p>';
     }
     function _mjCloseExplain() { const m = document.getElementById('_mjExplainModal'); if (m) m.remove(); _mjExplainCtx = null; }
     // Live-refresh the open explain modal when the dial re-computes its date (so the numbers move with the slider).
-    function _mjExplainMaybeRefresh(sd) { if (!_mjExplainCtx || _mjExplainCtx.sd !== sd) return; const bd = document.getElementById('_mjExplainBodyDiv'); if (bd) bd.innerHTML = _mjExplainBody(sd, _mjExplainCtx.rcode); }
+    function _mjExplainMaybeRefresh(sd) {
+      if (!_mjExplainCtx || _mjExplainCtx.sd !== sd) return;
+      if (document.activeElement && document.activeElement.type === 'range') return; // don't clobber a volume slider mid-drag (a live-ETA tick fires every ~2.5 min)
+      const bd = document.getElementById('_mjExplainBodyDiv'); if (bd) bd.innerHTML = _mjExplainBody(sd, _mjExplainCtx.rcode);
+    }
+    // Route-cell click → the feasibility panel. On the DASHBOARD it renders into the LEFT RAIL (owner's
+    // FW-60 design: "open the feasibility settings in the details section"); on the standalone Manage Jobs
+    // board (no rail) it falls back to the modal. Both share _mjExplainPanelHTML so the content is identical.
     function _mjExplain(cellEl) {
       const sd = _mjSD(cellEl.getAttribute('data-day') || '');
       const rcode = cellEl.getAttribute('data-rcode') || '', rname = cellEl.getAttribute('data-rname') || rcode;
-      _mjExplainCtx = { sd, rcode };
-      const _eLive = ((_mjEtaByDate[sd] || {})[rcode] || {}).live;
-      const _liveTag = _eLive ? ' <span style="color:#00E785;font-size:11px;font-weight:700;white-space:nowrap;">● live</span>' : '';
+      _mjExplainCtx = { sd, rcode, rname };
+      if (document.getElementById('dashLeftJobBody')) { _railShowInfo(_mjExplainPanelHTML(sd, rcode, rname, '40vh')); return; } // dashboard → left rail
       const ov = document.createElement('div');
       ov.id = '_mjExplainModal';
       ov.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;padding:16px;';
       ov.onclick = (ev) => { if (ev.target === ov) _mjCloseExplain(); };
-      ov.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--btn-surface-border,#46596d);border-radius:14px;max-width:440px;width:100%;max-height:80vh;overflow:auto;padding:16px 18px;box-shadow:0 12px 40px rgba(0,0,0,.5);">'
-        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;"><h3 style="margin:0;font-size:16px;color:var(--text-primary);">' + mjEsc(rname) + ' — feasibility' + _liveTag + '</h3>'
-        + '<button onclick="_mjCloseExplain()" style="flex:0 0 auto;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:15px;">×</button></div>'
-        + '<div id="_mjExplainBodyDiv">' + _mjExplainBody(sd, rcode) + '</div></div>';
+      ov.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--btn-surface-border,#46596d);border-radius:14px;max-width:440px;width:100%;max-height:86vh;overflow:hidden;padding:16px 18px;box-shadow:0 12px 40px rgba(0,0,0,.5);position:relative;">'
+        + '<button onclick="_mjCloseExplain()" style="position:absolute;top:12px;right:12px;z-index:4;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:15px;">×</button>'
+        + _mjExplainPanelHTML(sd, rcode, rname, '78vh') + '</div>';
       document.body.appendChild(ov);
+    }
+    // Feasibility panel content (shared by rail + modal): title, the day-start/live breakdown, and the
+    // FW-60 volume/load-forecast section. Keeps the #_mjExplainBodyDiv wrapper so _mjExplainMaybeRefresh
+    // can still live-update the feasibility rows on a dial change.
+    function _mjExplainPanelHTML(sd, rcode, rname, maxH) {
+      const _eLive = ((_mjEtaByDate[sd] || {})[rcode] || {}).live;
+      const _liveTag = _eLive ? ' <span style="color:#00E785;font-size:11px;font-weight:700;white-space:nowrap;">● live</span>' : '';
+      const _hasJobs = _mjVolRouteJobs(sd, rcode).length > 0;
+      // FIXED header + an independently-scrolling body. CSS position:sticky was unreliable inside the flex
+      // rail (#dashLeftRail) and the modal, so the panel owns its own scroll: the header (route title +
+      // Load-forecast control) stays put while only the stop list scrolls.
+      return '<div style="display:flex;flex-direction:column;max-height:' + (maxH || '70vh') + ';min-height:0;">'
+        + '<div style="flex:0 0 auto;padding:0 26px 5px 0;border-bottom:1px solid var(--border);">'
+        +   '<h3 style="margin:0;font-size:13.5px;color:var(--text-primary);">' + mjEsc(rname) + ' — feasibility' + _liveTag + '</h3>'
+        +   (_hasJobs ? '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:5px;"><span style="font-size:12px;color:var(--text-secondary);font-weight:700;white-space:nowrap;">🚛 Load forecast</span>' + _mjVolButtonHTML(sd, rcode) + '</div>' : '')
+        + '</div>'
+        + '<div style="flex:1 1 auto;overflow-y:auto;min-height:0;padding-top:5px;"><div id="_mjExplainBodyDiv">' + _mjExplainBody(sd, rcode) + '</div></div>'
+        + '</div>';
+    }
+    // Re-render the whole panel (rail or modal) after a volume estimate/convert. Slider DRAGS never call
+    // this — they update the fill in place (_mjVolRepaintFill) so the input being dragged is never destroyed
+    // (UI-state-preservation rule).
+    function _mjVolRerender() {
+      const c = _mjExplainCtx; if (!c) return;
+      if (document.getElementById('dashLeftJobBody')) { _railShowInfo(_mjExplainPanelHTML(c.sd, c.rcode, c.rname, '40vh')); return; }
+      const modal = document.getElementById('_mjExplainModal'), inner = modal && modal.firstElementChild;
+      if (inner) inner.innerHTML = '<button onclick="_mjCloseExplain()" style="position:absolute;top:12px;right:12px;z-index:4;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:15px;">×</button>' + _mjExplainPanelHTML(c.sd, c.rcode, c.rname, '78vh');
+    }
+    // ── FW-60 Phase 1: AI volume / load-forecast ─────────────────────────────────────────────────────
+    let _mjVol = {}; // sd -> rcode -> { loaded, loading, err, est:{woID:{low,high,confidence,actual}}, slider:{woID:cuYd} }
+    function _mjWo(j) { return String(j.woID != null ? j.woID : (j.wo != null ? j.wo : (j.wo_id != null ? j.wo_id : ''))); }
+    // At-a-glance job-type dot before the name: purple = estimate, green = job, gray = completed. Estimate
+    // wins over done so an estimate visit always reads as an estimate. bj = the board job (has labelOpt/completed).
+    function _mjJobDot(bj, rcode) {
+      if (!bj) return '';
+      const lo = Number(bj.labelOpt) || 0;
+      const isEst = String(rcode || '').toUpperCase() === 'EST' || lo === 9973 || lo === 9996;
+      const done = !!(bj.completed || bj.labelDone);
+      const color = isEst ? '#AA4CB3' : (done ? 'var(--text-muted)' : 'var(--accent-green,#00E785)');
+      const title = isEst ? 'estimate' : (done ? 'completed' : 'job');
+      return '<span title="' + title + '" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + ';margin:0 5px 0 1px;vertical-align:middle;flex:0 0 auto;"></span>';
+    }
+    function _mjVolRouteJobs(sd, rcode) {
+      const routes = _mjEtaRoutesByDate[sd] || [];
+      const rt = routes.find(r => String(r.code || '') === String(rcode) || String(r.name || '') === String(rcode));
+      return rt ? (rt.jobs || []) : [];
+    }
+    // jobID -> board job. The eta rows carry only jobNo (= the board job's jobID); the board job carries the
+    // woID + summary + items the volume estimate is keyed on. This bridges the two.
+    function _mjVolBoardByJobId(sd, rcode) { const m = {}; _mjVolRouteJobs(sd, rcode).forEach(bj => { m[String(bj.jobID)] = bj; }); return m; }
+    function _mjVolState(sd, rcode) { _mjVol[sd] = _mjVol[sd] || {}; return (_mjVol[sd][rcode] = _mjVol[sd][rcode] || { est: {}, slider: {} }); }
+    // Small control for the sticky header. The AI is OPTIONAL — sliders always work (start at 0); AI just
+    // seeds them + shows the range. So the button is "AI estimate" / "Refresh AI", not a gate.
+    function _mjVolButtonHTML(sd, rcode) {
+      const st = (_mjVol[sd] || {})[rcode];
+      if (st && st.loading) return '<span style="font-size:11px;color:var(--text-muted);white-space:nowrap;"><span class="spinner-inline" style="display:inline-block;"></span> Estimating…</span>';
+      if (st && st.loaded) return '<button onclick="_mjVolEstimate(\'' + sd + '\',\'' + mjEsc(rcode) + '\')" title="Re-read new / changed stops (cached are free)" style="flex:0 0 auto;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:6px;font-size:11px;padding:3px 10px;cursor:pointer;white-space:nowrap;">↻ Refresh AI</button>';
+      return '<button onclick="_mjVolEstimate(\'' + sd + '\',\'' + mjEsc(rcode) + '\')" style="flex:0 0 auto;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:6px;font-weight:700;font-size:11.5px;padding:4px 12px;cursor:pointer;white-space:nowrap;">🔮 AI estimate</button>';
+    }
+    async function _mjVolEstimate(sd, rcode) {
+      const jobs = _mjVolRouteJobs(sd, rcode); if (!jobs.length) return;
+      const st = _mjVolState(sd, rcode); st.loading = true; _mjVolRerender();
+      try {
+        const payload = { action: 'estimateRoute', franchiseInternalID: currentUser.franchiseInternalID, tenantID: currentUser.tenantID, serviceDate: sd, truckCY: truckCapacityCY(),
+          jobs: jobs.map(j => ({ woID: _mjWo(j), summary: j.summary || '', items: j.items || '' })).filter(j => j.woID) };
+        const r = await edgeFunctionCall('crewlogic-volume', payload);
+        st.loading = false;
+        if (!r || !r.success) { st.err = (r && r.error) || 'Estimate failed'; _mjVolRerender(); return; }
+        st.err = null; st.loaded = true;
+        // Estimate-only stops (purple) default to 0 — they may not haul. The AI range still shows so a
+        // converted EO can be dragged to it, but AI never SEEDS an EO slider (owner: EO defaults out).
+        const eoWo = {};
+        jobs.forEach(j => { const lo = Number(j.labelOpt) || 0; if (String(rcode).toUpperCase() === 'EST' || lo === 9973 || lo === 9996) eoWo[_mjWo(j)] = true; });
+        (r.estimates || []).forEach(e => {
+          st.est[e.woID] = e;
+          const mid = (e.low != null && e.high != null) ? Math.round(((e.low + e.high) / 2) * 4) / 4 : 0;
+          if (e.actual != null) st.slider[e.woID] = e.actual;                                     // a saved actual always wins
+          else if (eoWo[e.woID]) { /* estimate-only → leave at 0 (not counted) until dragged/converted */ }
+          else if (st.slider[e.woID] == null || st.slider[e.woID] === 0) st.slider[e.woID] = mid;  // else seed the AI midpoint over an untouched 0
+        });
+        _mjVolRerender();
+      } catch (e) { st.loading = false; st.err = 'Estimate failed'; console.error('[mj-vol]', e); _mjVolRerender(); }
+    }
+    function _mjVolFillHTML(cum, cap, crossWo, jobs, rcode) {
+      const pct = Math.max(3, Math.min(100, Math.round(cum / cap * 100)));
+      const barColor = cum >= cap ? '#f59e0b' : '#00E785';
+      let msg;
+      if (crossWo) { const j = (jobs || []).find(x => _mjWo(x) === String(crossWo)); const nm = j ? (String(j.client || '').split(',')[0] || 'a stop').trim() : 'a stop'; msg = '🛢️ Fills at <b>' + mjEsc(nm) + '</b> — plan a dump / can-swap there.'; }
+      else msg = 'Stays under one truck (' + cum.toFixed(1) + ' of ' + cap + ' cy).';
+      return '<div style="height:8px;background:var(--bg-input);border-radius:4px;overflow:hidden;"><div style="height:100%;width:' + pct + '%;background:' + barColor + ';transition:width .12s;"></div></div>'
+        + '<div style="font-size:12px;color:var(--text-primary);margin-top:5px;">' + msg + '</div>';
+    }
+    // Walk the (time-ordered) eta rows accumulating fill, keyed by the bridged woID. Shared by the row
+    // render and the in-place repaint so both always agree. perStop(j,i,wo,val,cum,crossWo,bj) is optional.
+    function _mjVolWalk(sd, rcode, perStop) {
+      const e = (_mjEtaByDate[sd] || {})[rcode]; if (!e) return { cum: 0, crossWo: null };
+      const st = _mjVolState(sd, rcode), board = _mjVolBoardByJobId(sd, rcode), cap = truckCapacityCY() || 16;
+      let cum = 0, crossWo = null;
+      (e.jobs || []).forEach((j, i) => {
+        const bj = board[String(j.jobNo)] || null;
+        const wo = bj ? _mjWo(bj) : String(j.jobNo != null ? j.jobNo : i);
+        const val = st.slider[wo] != null ? Number(st.slider[wo]) : 0;
+        cum += val;
+        if (crossWo == null && val > 0 && cum >= cap) crossWo = wo;
+        if (perStop) perStop(j, i, wo, val, cum, crossWo, bj);
+      });
+      return { cum, crossWo };
+    }
+    // Slider DRAG: update state + this row's value label, then repaint ONLY the cum/marker/fill in place
+    // (never re-render the panel — that would kill the input mid-drag; UI-state-preservation rule).
+    function _mjVolSlide(sd, rcode, wo, val) {
+      const st = _mjVolState(sd, rcode);
+      st.slider[wo] = Number(val) || 0;
+      const ve = document.getElementById('mjVolVal-' + wo); if (ve) ve.textContent = (Number(val) || 0).toFixed(2) + ' cy';
+      _mjVolRepaintFill(sd, rcode);
+    }
+    function _mjVolRepaintFill(sd, rcode) {
+      const cap = truckCapacityCY() || 16, jobs = _mjVolRouteJobs(sd, rcode);
+      const r = _mjVolWalk(sd, rcode, function (j, i, wo, val, cum, crossWo) {
+        const cb = document.getElementById('mjVolCum-' + wo); if (cb) cb.textContent = cum.toFixed(1);
+        const mk = document.getElementById('mjVolMark-' + wo); if (mk) mk.style.display = (crossWo === wo) ? '' : 'none';
+      });
+      const fe = document.getElementById('mjVolFill'); if (fe) fe.innerHTML = _mjVolFillHTML(r.cum, cap, r.crossWo, jobs, rcode);
+    }
+    // Slider RELEASE: persist the value as this stop's actual (survives refresh, feeds later reporting).
+    function _mjVolPersist(sd, rcode, wo, val) {
+      edgeFunctionCall('crewlogic-volume', { action: 'setActual', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: sd, woID: wo, actualCuyd: Number(val) || 0, setBy: (currentUser && currentUser.email) || '' })
+        .then(() => { const st = _mjVolState(sd, rcode); if (st.est[wo]) st.est[wo].actual = Number(val) || 0; })
+        .catch(e => console.error('[mj-vol persist]', e));
     }
     function _mjDialControlHTML() {
       const opts = [60, 70, 80, 90, 100, 110, 120, 130, 140].map(p => '<option value="' + (p / 100) + '"' + (Math.round(_mjDial * 100) === p ? ' selected' : '') + '>' + p + '%</option>').join('');
@@ -12125,7 +12278,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           // thin orange bottom edge = booked SAME-DAY (WorkOrder created-day === service-day, franchise TZ).
           const _stripes = j.bookedOnline ? 'repeating-linear-gradient(135deg, rgba(0,0,0,0.22) 0 4px, transparent 4px 8px), ' : '';
           const _sameDayEdge = j.bookedSameDay ? ',inset 0 -3px 0 0 #f97316' : '';
-          h += '<div' + dragAttrs + ' onclick="mjTip(event,\'' + wkey + '\',true)" data-jid="' + wkey + '" title="' + (canDrag ? 'Drag to move' : (done ? 'Completed — adjust in Vonigo' : '')) + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:3px;bottom:3px;background:' + _stripes + bg + ';opacity:' + (done ? '0.72' : '1') + ';border-radius:5px;padding:2px 5px 2px 9px;overflow:hidden;cursor:' + (canDrag ? 'grab' : 'pointer') + ';box-shadow:inset 5px 0 0 0 ' + zoneStripe + _sameDayEdge + ',0 1px 2px rgba(0,0,0,.3);">';
+          h += '<div' + dragAttrs + ' onclick="mjTip(event,\'' + wkey + '\',true)" ondblclick="mjOpenVonigoJob(event,\'' + jidA + '\')" data-jid="' + wkey + '" title="' + (canDrag ? 'Drag to move · double-click → open in Vonigo' : (done ? 'Completed · double-click → open in Vonigo' : 'Double-click → open in Vonigo')) + '" style="position:absolute;left:' + left + 'px;width:' + w + 'px;top:3px;bottom:3px;background:' + _stripes + bg + ';opacity:' + (done ? '0.72' : '1') + ';border-radius:5px;padding:2px 5px 2px 9px;overflow:hidden;cursor:' + (canDrag ? 'grab' : 'pointer') + ';box-shadow:inset 5px 0 0 0 ' + zoneStripe + _sameDayEdge + ',0 1px 2px rgba(0,0,0,.3);">';
           h += '<div style="font-size:10px;font-weight:700;color:#fff;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (n + 1) + '. ' + (done ? '✓ ' : '') + name + (city ? ' <span style="font-weight:500;color:rgba(255,255,255,.82);">' + mjEsc(_titleCaseTown(city)) + '</span>' : '') + '</div>';
           h += '<div style="font-size:9px;color:rgba(255,255,255,.82);line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (j.zip ? mjEsc(j.zip) : '') + (j.zip && j.jobID ? ' · ' : '') + '#' + jidA + '</div>';
           if (canDrag) h += '<div onmousedown="dashResizeStart(event,\'' + wkey + '\')" title="Drag to resize duration" style="position:absolute;right:0;top:0;bottom:0;width:9px;cursor:ew-resize;background:linear-gradient(to right,transparent,rgba(255,255,255,0.28));"></div>'; // right-edge resize handle
@@ -13104,6 +13257,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     };
     function _mjTitle(s) { return String(s || '').replace(/\b\w/g, c => c.toUpperCase()); }
     function _mjOpenVonigoGrid(day) { window.open('https://junkluggers.vonigo.com/Schedule/Grid/Grid_Main.aspx?dayID=' + encodeURIComponent(String(day || '')) + '&viewType=1', '_blank'); }
+    // Double-click a board job → open it in Vonigo (single click still shows the details tip). The tip
+    // fires on the first click of the double; close it so the new Vonigo tab isn't left behind a popup.
+    function mjOpenVonigoJob(ev, jobID) {
+      if (ev) { try { ev.preventDefault(); ev.stopPropagation(); } catch (e) {} }
+      if (!jobID) return;
+      try { mjTipForceHide(); } catch (e) {}
+      window.open('https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(jobID)), '_blank', 'noopener');
+    }
     // Multi-appointment job: Vonigo's API can't cancel ONE appointment (only the whole job). Skip the reason
     // picker and send the user to that day's Vonigo grid to cancel the specific appointment there.
     function _mjCancelMultiAppt(j) {
