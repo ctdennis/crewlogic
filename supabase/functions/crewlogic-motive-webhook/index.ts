@@ -16,6 +16,50 @@
 // Deploy (DEV): supabase functions deploy --project-ref bagkimfwmpwjfhfhmsrb crewlogic-motive-webhook --use-api --no-verify-jwt
 
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { resolveTimezone, todayPartsInTz } from "../_shared/tz.ts";
+
+// Franchise-local "today" (YYYY-MM-DD) for the geofence auto-assign — service_date/scheduled_date are
+// franchise-local (multi-tenant TZ rule: never assume the server/UTC zone).
+async function franchiseToday(sb: SupabaseClient, franchiseId: string): Promise<string> {
+  const { data } = await sb.from("franchises").select("cost_settings").eq("id", franchiseId).maybeSingle();
+  const tz = resolveTimezone((data?.cost_settings as Record<string, unknown>) || {});
+  const { year, month, day } = todayPartsInTz(tz);
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+// Server-side geofence AUTO-ASSIGN (FW-16): the first truck to ARRIVE on a route defines the truck for
+// the day when no truck is set yet — done HERE (not just in the open dispatch board) so it happens even
+// with no browser watching. The route id is the NUMERIC Vonigo route objectID carried on the arrival's
+// job_geofences row (job_geofences.route_id, populated by crewlogic-job-geofence-sync and refreshed on
+// route change), so it maps straight onto route_truck_assignments.vonigo_route_id. Robust to:
+//   • cancel     — a cancelled job's fence is deleted by the sync, so jobGeo won't resolve → no assign.
+//   • reschedule — the assignment is scoped to franchise-local TODAY; a moved job auto-assigns on its day.
+//   • route move — the sync keeps the active fence's route_id current, so a later arrival assigns the NEW route.
+// Best-effort: any failure is logged and swallowed, never blocking the alert.
+async function autoAssignOnArrival(sb: SupabaseClient, franchiseId: string, routeId: string | null, routeName: string | null, vehicleNumber: string | null): Promise<void> {
+  if (!routeId || !vehicleNumber) return;
+  try {
+    const day = await franchiseToday(sb, franchiseId);
+    // truck_key for the arrived vehicle (franchise_trucks.name === Motive vehicle number).
+    const { data: truck } = await sb.from("franchise_trucks")
+      .select("truck_key").eq("franchise_id", franchiseId).eq("name", vehicleNumber).eq("active", true).maybeSingle();
+    const truckKey = truck?.truck_key;
+    if (!truckKey) return;
+    // Only when NO truck is set for this route/day yet — NEVER overwrite a hard-set (manual) assignment,
+    // and first-arrival wins over a later different truck (matches the client-side auto-set semantics).
+    const { data: existing } = await sb.from("route_truck_assignments")
+      .select("id").eq("franchise_id", franchiseId).eq("service_date", day).eq("vonigo_route_id", String(routeId)).limit(1);
+    if (existing && existing.length) return;
+    const { error } = await sb.from("route_truck_assignments").insert({
+      franchise_id: franchiseId, service_date: day, vonigo_route_id: String(routeId), route_name: routeName,
+      truck_key: truckKey, source: "inferred", confidence: "geofence-arrival", assigned_by: "geofence-auto",
+    });
+    if (error) { console.error("[motive-webhook] auto-assign insert failed:", error.message); return; }
+    console.log(`[motive-webhook] AUTO-ASSIGNED ${vehicleNumber} -> route ${routeId} (${day})`);
+  } catch (e) {
+    console.error("[motive-webhook] auto-assign failed (non-fatal):", (e as Error).message);
+  }
+}
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -161,13 +205,13 @@ Deno.serve(async (req: Request) => {
   // If so we already know the name; relabel as job_arrive / job_leave. We do NOT delete on exit —
   // the geofence persists for the whole job (multi-truck arrive/leave/return). Deletion is handled
   // by the sync (Vonigo WO done/cancelled) and the EOD sweep.
-  let jobGeo: { id: any; name: string | null; wo_id: string | null; job_id: string | null } | null = null;
+  let jobGeo: { id: any; name: string | null; wo_id: string | null; job_id: string | null; route: string | null; route_id: string | null } | null = null;
   if (ev.action === "vehicle_geofence_event" && ev.geofence_id != null) {
     const { data: jg } = await sb.from("job_geofences")
-      .select("id, name, wo_id, job_id")
+      .select("id, name, wo_id, job_id, route, route_id")
       .eq("franchise_id", matched.uuid).eq("geofence_id", ev.geofence_id).eq("status", "active")
       .maybeSingle();
-    if (jg) jobGeo = { id: jg.id, name: jg.name ?? null, wo_id: jg.wo_id ?? null, job_id: jg.job_id ?? null };
+    if (jg) jobGeo = { id: jg.id, name: jg.name ?? null, wo_id: jg.wo_id ?? null, job_id: jg.job_id ?? null, route: jg.route ?? null, route_id: jg.route_id ?? null };
   }
 
   let eventType = ev.event_type;
@@ -201,5 +245,12 @@ Deno.serve(async (req: Request) => {
   }
 
   console.log(`[motive-webhook] stored ${ev.action}/${eventType} veh=${ev.vehicle_number} f=${matched.external_id}${jobGeo ? " (job)" : ""}`);
+
+  // FW-16: server-side auto-assign on the first arrival — so it happens without the board open. Uses the
+  // fence's NUMERIC route_id (the route_truck_assignments key); job_geofences populated by the sync.
+  if (eventType === "job_arrive" && jobGeo && jobGeo.route_id) {
+    await autoAssignOnArrival(sb, matched.uuid, jobGeo.route_id, jobGeo.route, ev.vehicle_number);
+  }
+
   return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
 });
