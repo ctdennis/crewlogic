@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.100.2 | 2026-07-30">
+  <meta name="crewlogic-version" content="v5.100.3 | 2026-07-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11899,11 +11899,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         st.loading = false;
         if (!r || !r.success) { st.err = (r && r.error) || 'Estimate failed'; _mjVolRerender(); return; }
         st.err = null; st.loaded = true;
+        // Estimate-only stops (purple) default to 0 — they may not haul. The AI range still shows so a
+        // converted EO can be dragged to it, but AI never SEEDS an EO slider (owner: EO defaults out).
+        const eoWo = {};
+        jobs.forEach(j => { const lo = Number(j.labelOpt) || 0; if (String(rcode).toUpperCase() === 'EST' || lo === 9973 || lo === 9996) eoWo[_mjWo(j)] = true; });
         (r.estimates || []).forEach(e => {
           st.est[e.woID] = e;
           const mid = (e.low != null && e.high != null) ? Math.round(((e.low + e.high) / 2) * 4) / 4 : 0;
-          if (e.actual != null) st.slider[e.woID] = e.actual;                 // a saved actual always wins
-          else if (st.slider[e.woID] == null || st.slider[e.woID] === 0) st.slider[e.woID] = mid; // else seed the AI midpoint over an untouched 0
+          if (e.actual != null) st.slider[e.woID] = e.actual;                                     // a saved actual always wins
+          else if (eoWo[e.woID]) { /* estimate-only → leave at 0 (not counted) until dragged/converted */ }
+          else if (st.slider[e.woID] == null || st.slider[e.woID] === 0) st.slider[e.woID] = mid;  // else seed the AI midpoint over an untouched 0
         });
         _mjVolRerender();
       } catch (e) { st.loading = false; st.err = 'Estimate failed'; console.error('[mj-vol]', e); _mjVolRerender(); }
