@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.100.6 | 2026-07-30">
+  <meta name="crewlogic-version" content="v5.101.0 | 2026-07-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11782,7 +11782,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // (owner: a multi-truck job must not vanish when it starts). ETA feasibility is overlaid per stop.
       const stops = _mjVolStops(sd, rcode);
       if (!stops.length) return '<p style="color:var(--text-muted);font-size:13px;">No stops on this route — or they could not be geocoded.</p>';
-      const st = _mjVolState(sd, rcode), cap = truckCapacityCY() || 16;
+      const st = _mjVolState(sd, rcode), truckCY = truckCapacityCY() || 16, trucks = _mjRouteTruckCount(sd, rcode), cap = trucks * truckCY;
       let cum = 0, crossWo = null, rows = '';
       stops.forEach((s, i) => {
         const bj = s.bj, ej = s.ej, wo = s.wo;
@@ -11805,7 +11805,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const est = st.est[wo] || null, val = st.slider[wo] != null ? Number(st.slider[wo]) : 0;
         cum += val;
         if (crossWo == null && val > 0 && cum >= cap) crossWo = wo;
-        const smax = Math.max(cap, Math.ceil(est && est.high != null ? est.high : cap));
+        const smax = Math.max(cap + truckCY, Math.ceil(est && est.high != null ? est.high : 0), val + truckCY); // always ≥1 truck of headroom past cap/current → no practical ceiling
         const win = (winStart && winEnd) ? (' <span style="color:var(--text-muted);font-size:10px;">· ' + mjEsc(winStart) + '–' + mjEsc(winEnd) + '</span>') : (winStart ? ' <span style="color:var(--text-muted);font-size:10px;">· ' + mjEsc(winStart) + '</span>' : '');
         const aiTip = est ? ('AI ' + (est.low != null ? est.low : '?') + '–' + (est.high != null ? est.high : '?') + ' cy, ' + (est.confidence || '') + (est.actual != null ? ', set' : '')) : 'drag to set, or use AI to estimate';
         rows += '<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;">'
@@ -11814,11 +11814,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           +   '<div style="text-align:right;white-space:nowrap;flex:0 0 auto;"><b>' + mjEsc(eta) + '</b> <span style="color:' + col + ';font-weight:700;">' + tag + '</span></div>'
           + '</div>'
           + '<div style="display:flex;align-items:center;gap:6px;margin-top:3px;" title="' + mjEsc(aiTip) + '">'
-          +   '<input type="range" min="0" max="' + smax + '" step="0.25" value="' + val + '" oninput="_mjVolSlide(\'' + sd + '\',\'' + mjEsc(rcode) + '\',\'' + mjEsc(wo) + '\',this.value)" onchange="_mjVolPersist(\'' + sd + '\',\'' + mjEsc(rcode) + '\',\'' + mjEsc(wo) + '\',this.value)" style="flex:1;accent-color:#00E785;">'
-          +   '<span id="mjVolVal-' + mjEsc(wo) + '" style="font-family:\'Space Mono\',monospace;min-width:52px;text-align:right;color:var(--text-primary);">' + val.toFixed(2) + ' cy</span>'
+          +   '<input type="range" min="0" max="' + smax + '" step="' + (truckCY / 8) + '" value="' + val + '" oninput="_mjVolSlide(\'' + sd + '\',\'' + mjEsc(rcode) + '\',\'' + mjEsc(wo) + '\',this.value)" onchange="_mjVolPersist(\'' + sd + '\',\'' + mjEsc(rcode) + '\',\'' + mjEsc(wo) + '\',this.value)" style="flex:1;accent-color:#00E785;">'
+          +   '<span id="mjVolVal-' + mjEsc(wo) + '" title="cubic yards · truckloads" style="font-family:\'Space Mono\',monospace;min-width:78px;text-align:right;color:var(--text-primary);">' + val.toFixed(1) + ' cy · ' + (val / truckCY).toFixed(2) + 'T</span>'
           +   '<span id="mjVolCum-' + mjEsc(wo) + '" title="running total" style="font-family:\'Space Mono\',monospace;min-width:40px;text-align:right;color:var(--text-muted);">' + cum.toFixed(1) + '</span>'
           + '</div>'
-          + '<div id="mjVolMark-' + mjEsc(wo) + '" style="' + (crossWo === wo ? '' : 'display:none;') + 'color:#f59e0b;font-weight:700;font-size:11px;margin-top:3px;">🛢️ Full here (~' + cap + ' cy) — dump / swap</div>'
+          + '<div id="mjVolMark-' + mjEsc(wo) + '" style="' + (crossWo === wo ? '' : 'display:none;') + 'color:#f59e0b;font-weight:700;font-size:11px;margin-top:3px;">🛢️ Full here (~' + cap + ' cy' + (trucks > 1 ? ' · ' + trucks + ' trucks' : '') + ') — dump / swap</div>'
           + '</div>';
       });
       const ws = e && e.rollup && e.rollup.status;
@@ -11909,6 +11909,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // woID + summary + items the volume estimate is keyed on. This bridges the two.
     function _mjVolBoardByJobId(sd, rcode) { const m = {}; _mjVolRouteJobs(sd, rcode).forEach(bj => { m[String(bj.jobID)] = bj; }); return m; }
     function _mjVolState(sd, rcode) { _mjVol[sd] = _mjVol[sd] || {}; return (_mjVol[sd][rcode] = _mjVol[sd][rcode] || { est: {}, slider: {} }); }
+    // Fleet capacity for a route = (# trucks assigned to it) × truck size. Reads the truck count off the
+    // assignment column the OM already sets (piggyback = 2+ trucks), so capacity scales with no new clicks.
+    function _mjRouteTruckCount(sd, rcode) {
+      const routes = _mjEtaRoutesByDate[sd] || [];
+      const rt = routes.find(r => String(r.code || '') === String(rcode) || String(r.name || '') === String(rcode));
+      if (!rt) return 1;
+      const a = (_mjAssignByDate[sd] || {})[String(rt.id)] || [];
+      return Math.max(1, a.length);
+    }
+    function _mjRouteCapacityCY(sd, rcode) { return _mjRouteTruckCount(sd, rcode) * (truckCapacityCY() || 16); }
     // The ordered stop list for the volume panel — BOARD-DRIVEN so a stop STAYS until it's paid/archived
     // (keeps the current + completed-but-unpaid jobs on the list with their slider). Each entry carries the
     // board job (bj), woID, jobID, and the matching ETA row (ej) if the stop is still upcoming/remaining.
@@ -11952,18 +11962,31 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       } catch (e) { st.loading = false; st.err = 'Estimate failed'; console.error('[mj-vol]', e); _mjVolRerender(); }
     }
     function _mjVolFillHTML(cum, cap, crossWo, jobs, rcode) {
+      const truckCY = truckCapacityCY() || 16;
+      const trucks = Math.max(1, Math.round(cap / truckCY));           // cap = trucks × truckCY, so recover the count
+      const loads = cum / truckCY;
       const pct = Math.max(3, Math.min(100, Math.round(cum / cap * 100)));
-      const barColor = cum >= cap ? '#f59e0b' : '#00E785';
+      const over = cum > cap + 0.01;
+      const barColor = over ? '#ef4444' : (cum >= cap ? '#f59e0b' : '#00E785');
+      const fleetLbl = trucks > 1 ? (trucks + ' trucks · ' + cap + ' cy') : ('one truck · ' + cap + ' cy');
+      const loadLbl = loads.toFixed(2) + ' of ' + trucks + ' truck' + (trucks > 1 ? 's' : '') + ' (' + cum.toFixed(1) + ' cy)';
       let msg;
-      if (crossWo) { const j = (jobs || []).find(x => _mjWo(x) === String(crossWo)); const nm = j ? (String(j.client || '').split(',')[0] || 'a stop').trim() : 'a stop'; msg = '🛢️ Fills at <b>' + mjEsc(nm) + '</b> — plan a dump / can-swap there.'; }
-      else msg = 'Stays under one truck (' + cum.toFixed(1) + ' of ' + cap + ' cy).';
+      if (over) {
+        // Over the whole fleet's capacity → a truck has to empty at the dump and come back for the rest.
+        msg = '⚠️ <b>' + (cum - cap).toFixed(1) + ' cy over</b> the ' + fleetLbl + ' — a truck must <b>dump &amp; return</b>. ' + loadLbl + '.';
+      } else if (crossWo) {
+        const j = (jobs || []).find(x => _mjWo(x) === String(crossWo)); const nm = j ? (String(j.client || '').split(',')[0] || 'a stop').trim() : 'a stop';
+        msg = '🛢️ Fills the ' + fleetLbl + ' at <b>' + mjEsc(nm) + '</b> — plan a dump / can-swap there. ' + loadLbl + '.';
+      } else {
+        msg = 'Fits the ' + fleetLbl + ' — ' + loadLbl + '.';
+      }
       return '<div style="height:8px;background:var(--bg-input);border-radius:4px;overflow:hidden;"><div style="height:100%;width:' + pct + '%;background:' + barColor + ';transition:width .12s;"></div></div>'
         + '<div style="font-size:12px;color:var(--text-primary);margin-top:5px;">' + msg + '</div>';
     }
     // Walk the (time-ordered) BOARD-DRIVEN stops accumulating fill. Shared by the row render and the
     // in-place repaint so both always agree (same list, same order). perStop(s,i,wo,val,cum,crossWo).
     function _mjVolWalk(sd, rcode, perStop) {
-      const st = _mjVolState(sd, rcode), cap = truckCapacityCY() || 16, stops = _mjVolStops(sd, rcode);
+      const st = _mjVolState(sd, rcode), cap = _mjRouteCapacityCY(sd, rcode), stops = _mjVolStops(sd, rcode);
       let cum = 0, crossWo = null;
       stops.forEach((s, i) => {
         const wo = s.wo, val = st.slider[wo] != null ? Number(st.slider[wo]) : 0;
@@ -11978,11 +12001,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _mjVolSlide(sd, rcode, wo, val) {
       const st = _mjVolState(sd, rcode);
       st.slider[wo] = Number(val) || 0;
-      const ve = document.getElementById('mjVolVal-' + wo); if (ve) ve.textContent = (Number(val) || 0).toFixed(2) + ' cy';
+      const truckCY = truckCapacityCY() || 16, ve = document.getElementById('mjVolVal-' + wo);
+      if (ve) ve.textContent = (Number(val) || 0).toFixed(1) + ' cy · ' + ((Number(val) || 0) / truckCY).toFixed(2) + 'T';
       _mjVolRepaintFill(sd, rcode);
     }
     function _mjVolRepaintFill(sd, rcode) {
-      const cap = truckCapacityCY() || 16, jobs = _mjVolRouteJobs(sd, rcode);
+      const cap = _mjRouteCapacityCY(sd, rcode), jobs = _mjVolRouteJobs(sd, rcode);
       const r = _mjVolWalk(sd, rcode, function (j, i, wo, val, cum, crossWo) {
         const cb = document.getElementById('mjVolCum-' + wo); if (cb) cb.textContent = cum.toFixed(1);
         const mk = document.getElementById('mjVolMark-' + wo); if (mk) mk.style.display = (crossWo === wo) ? '' : 'none';
