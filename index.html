@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.99.13 | 2026-07-29">
+  <meta name="crewlogic-version" content="v5.100.0 | 2026-07-29">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11791,21 +11791,158 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _mjCloseExplain() { const m = document.getElementById('_mjExplainModal'); if (m) m.remove(); _mjExplainCtx = null; }
     // Live-refresh the open explain modal when the dial re-computes its date (so the numbers move with the slider).
     function _mjExplainMaybeRefresh(sd) { if (!_mjExplainCtx || _mjExplainCtx.sd !== sd) return; const bd = document.getElementById('_mjExplainBodyDiv'); if (bd) bd.innerHTML = _mjExplainBody(sd, _mjExplainCtx.rcode); }
+    // Route-cell click → the feasibility panel. On the DASHBOARD it renders into the LEFT RAIL (owner's
+    // FW-60 design: "open the feasibility settings in the details section"); on the standalone Manage Jobs
+    // board (no rail) it falls back to the modal. Both share _mjExplainPanelHTML so the content is identical.
     function _mjExplain(cellEl) {
       const sd = _mjSD(cellEl.getAttribute('data-day') || '');
       const rcode = cellEl.getAttribute('data-rcode') || '', rname = cellEl.getAttribute('data-rname') || rcode;
-      _mjExplainCtx = { sd, rcode };
-      const _eLive = ((_mjEtaByDate[sd] || {})[rcode] || {}).live;
-      const _liveTag = _eLive ? ' <span style="color:#00E785;font-size:11px;font-weight:700;white-space:nowrap;">● live</span>' : '';
+      _mjExplainCtx = { sd, rcode, rname };
+      if (document.getElementById('dashLeftJobBody')) { _railShowInfo(_mjExplainPanelHTML(sd, rcode, rname)); return; } // dashboard → left rail
       const ov = document.createElement('div');
       ov.id = '_mjExplainModal';
       ov.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;padding:16px;';
       ov.onclick = (ev) => { if (ev.target === ov) _mjCloseExplain(); };
-      ov.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--btn-surface-border,#46596d);border-radius:14px;max-width:440px;width:100%;max-height:80vh;overflow:auto;padding:16px 18px;box-shadow:0 12px 40px rgba(0,0,0,.5);">'
-        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;"><h3 style="margin:0;font-size:16px;color:var(--text-primary);">' + mjEsc(rname) + ' — feasibility' + _liveTag + '</h3>'
-        + '<button onclick="_mjCloseExplain()" style="flex:0 0 auto;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:15px;">×</button></div>'
-        + '<div id="_mjExplainBodyDiv">' + _mjExplainBody(sd, rcode) + '</div></div>';
+      ov.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--btn-surface-border,#46596d);border-radius:14px;max-width:440px;width:100%;max-height:80vh;overflow:auto;padding:16px 18px;box-shadow:0 12px 40px rgba(0,0,0,.5);position:relative;">'
+        + '<button onclick="_mjCloseExplain()" style="position:absolute;top:12px;right:12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:15px;">×</button>'
+        + _mjExplainPanelHTML(sd, rcode, rname) + '</div>';
       document.body.appendChild(ov);
+    }
+    // Feasibility panel content (shared by rail + modal): title, the day-start/live breakdown, and the
+    // FW-60 volume/load-forecast section. Keeps the #_mjExplainBodyDiv wrapper so _mjExplainMaybeRefresh
+    // can still live-update the feasibility rows on a dial change.
+    function _mjExplainPanelHTML(sd, rcode, rname) {
+      const _eLive = ((_mjEtaByDate[sd] || {})[rcode] || {}).live;
+      const _liveTag = _eLive ? ' <span style="color:#00E785;font-size:11px;font-weight:700;white-space:nowrap;">● live</span>' : '';
+      return '<h3 style="margin:0 0 10px;font-size:15px;color:var(--text-primary);">' + mjEsc(rname) + ' — feasibility' + _liveTag + '</h3>'
+        + '<div id="_mjExplainBodyDiv">' + _mjExplainBody(sd, rcode) + '</div>'
+        + _mjVolSectionHTML(sd, rcode);
+    }
+    // Re-render the whole panel (rail or modal) after a volume estimate/convert. Slider DRAGS never call
+    // this — they update the fill in place (_mjVolRepaintFill) so the input being dragged is never destroyed
+    // (UI-state-preservation rule).
+    function _mjVolRerender() {
+      const c = _mjExplainCtx; if (!c) return;
+      if (document.getElementById('dashLeftJobBody')) { _railShowInfo(_mjExplainPanelHTML(c.sd, c.rcode, c.rname)); return; }
+      const modal = document.getElementById('_mjExplainModal'), inner = modal && modal.firstElementChild;
+      if (inner) inner.innerHTML = '<button onclick="_mjCloseExplain()" style="position:absolute;top:12px;right:12px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:15px;">×</button>' + _mjExplainPanelHTML(c.sd, c.rcode, c.rname);
+    }
+    // ── FW-60 Phase 1: AI volume / load-forecast ─────────────────────────────────────────────────────
+    let _mjVol = {}; // sd -> rcode -> { loaded, loading, err, est:{woID:{low,high,confidence,actual,eoConverted}}, slider:{woID:cuYd} }
+    function _mjIsEstimateJob(j, rcode) { const lo = Number(j.labelOpt) || 0; return String(rcode || '').toUpperCase() === 'EST' || lo === 9973 || lo === 9996; }
+    function _mjWo(j) { return String(j.woID != null ? j.woID : (j.wo != null ? j.wo : (j.wo_id != null ? j.wo_id : ''))); }
+    function _mjVolRouteJobs(sd, rcode) {
+      const routes = _mjEtaRoutesByDate[sd] || [];
+      const rt = routes.find(r => String(r.code || '') === String(rcode) || String(r.name || '') === String(rcode));
+      return rt ? (rt.jobs || []) : [];
+    }
+    function _mjVolSectionHTML(sd, rcode) {
+      const jobs = _mjVolRouteJobs(sd, rcode);
+      const hdr = '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:8px;"><b style="font-size:13px;color:var(--text-primary);">🚛 Load forecast</b>';
+      if (!jobs.length) return hdr + '</div><span style="color:var(--text-muted);font-size:11.5px;">No stops loaded for this route yet.</span></div>';
+      const st = (_mjVol[sd] || {})[rcode];
+      if (st && st.loading) return hdr + '</div><div style="color:var(--text-muted);font-size:12px;"><span class="spinner-inline" style="display:inline-block;"></span> Estimating…</div></div>';
+      if (!st || !st.loaded) {
+        return hdr + '</div><button onclick="_mjVolEstimate(\'' + sd + '\',\'' + mjEsc(rcode) + '\')" style="width:100%;padding:8px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;font-weight:700;font-size:12.5px;cursor:pointer;">🔮 Estimate volume (AI)</button>'
+          + '<div style="color:var(--text-muted);font-size:11px;margin-top:5px;">Reads each stop\'s description + items → cubic yards. Only new / changed stops use an AI call.</div></div>';
+      }
+      return hdr + '<button onclick="_mjVolEstimate(\'' + sd + '\',\'' + mjEsc(rcode) + '\',true)" title="Re-read new or changed stops (cached ones are free)" style="background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:6px;font-size:11px;padding:2px 8px;cursor:pointer;">↻ Refresh</button></div>'
+        + _mjVolBreakdownHTML(sd, rcode) + '</div>';
+    }
+    async function _mjVolEstimate(sd, rcode, isRefresh) {
+      const jobs = _mjVolRouteJobs(sd, rcode); if (!jobs.length) return;
+      _mjVol[sd] = _mjVol[sd] || {}; _mjVol[sd][rcode] = _mjVol[sd][rcode] || { est: {}, slider: {} };
+      _mjVol[sd][rcode].loading = true; _mjVolRerender();
+      try {
+        const payload = { action: 'estimateRoute', franchiseInternalID: currentUser.franchiseInternalID, tenantID: currentUser.tenantID, serviceDate: sd, truckCY: truckCapacityCY(),
+          jobs: jobs.map(j => ({ woID: _mjWo(j), summary: j.summary || '', items: j.items || '' })).filter(j => j.woID) };
+        const r = await edgeFunctionCall('crewlogic-volume', payload);
+        const st = _mjVol[sd][rcode]; st.loading = false;
+        if (!r || !r.success) { st.err = (r && r.error) || 'Estimate failed'; _mjVolRerender(); return; }
+        st.err = null; st.loaded = true; st.est = {};
+        (r.estimates || []).forEach(e => {
+          st.est[e.woID] = e;
+          const mid = (e.low != null && e.high != null) ? Math.round(((e.low + e.high) / 2) * 4) / 4 : 0;
+          if (e.actual != null) st.slider[e.woID] = e.actual;              // a saved actual always wins
+          else if (st.slider[e.woID] == null) st.slider[e.woID] = mid;     // else seed at the AI midpoint (keep any live drag)
+        });
+        _mjVolRerender();
+      } catch (e) { const st = _mjVol[sd][rcode]; st.loading = false; st.err = 'Estimate failed'; console.error('[mj-vol]', e); _mjVolRerender(); }
+    }
+    function _mjVolBreakdownHTML(sd, rcode) {
+      const st = (_mjVol[sd] || {})[rcode]; if (!st || !st.loaded) return '';
+      if (st.err) return '<div style="color:#ff6b6b;font-size:12px;margin-top:6px;">' + mjEsc(st.err) + '</div>';
+      const jobs = _mjVolRouteJobs(sd, rcode).slice().sort((a, b) => (a.timeMin || 0) - (b.timeMin || 0));
+      const cap = truckCapacityCY() || 16;
+      let cum = 0, crossWo = null, out = '';
+      jobs.forEach((j, i) => {
+        const wo = _mjWo(j), e = st.est[wo]; if (!e) return;
+        const isEst = _mjIsEstimateJob(j, rcode), converted = e.eoConverted === true, counted = !isEst || converted;
+        const val = counted ? (st.slider[wo] != null ? Number(st.slider[wo]) : 0) : 0;
+        if (counted) cum += val;
+        if (counted && crossWo == null && cum >= cap) crossWo = wo;
+        const name = (String(j.client || '').split(',')[0] || 'Stop').trim();
+        out += '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">'
+          + '<div style="display:flex;justify-content:space-between;gap:8px;"><b>' + (i + 1) + '. ' + mjEsc(name) + '</b>'
+          + '<span id="mjVolCum-' + mjEsc(wo) + '" style="color:var(--text-muted);font-family:\'Space Mono\',monospace;">' + (counted ? cum.toFixed(1) + ' cy' : '—') + '</span></div>';
+        if (isEst && !converted) {
+          out += '<div style="color:var(--text-muted);margin-top:2px;">Estimate-only — not counted. <a onclick="_mjVolConvert(\'' + sd + '\',\'' + mjEsc(rcode) + '\',\'' + mjEsc(wo) + '\',true)" style="color:var(--accent-green);cursor:pointer;text-decoration:underline;">converted → count it</a></div>';
+        } else {
+          const smax = Math.max(cap, Math.ceil((e.high != null ? e.high : cap)));
+          out += '<div style="display:flex;align-items:center;gap:6px;margin-top:4px;">'
+            + '<input type="range" min="0" max="' + smax + '" step="0.25" value="' + val + '" oninput="_mjVolSlide(\'' + sd + '\',\'' + mjEsc(rcode) + '\',\'' + mjEsc(wo) + '\',this.value)" onchange="_mjVolPersist(\'' + sd + '\',\'' + mjEsc(rcode) + '\',\'' + mjEsc(wo) + '\',this.value)" style="flex:1;accent-color:#00E785;">'
+            + '<span id="mjVolVal-' + mjEsc(wo) + '" style="font-family:\'Space Mono\',monospace;min-width:52px;text-align:right;color:var(--text-primary);">' + val.toFixed(2) + ' cy</span></div>'
+            + '<div style="color:var(--text-muted);font-size:10.5px;margin-top:1px;">AI ' + (e.low != null ? e.low : '?') + '–' + (e.high != null ? e.high : '?') + ' cy · ' + mjEsc(e.confidence || '') + (e.actual != null ? ' · set' : '') + (isEst && converted ? ' · EO converted <a onclick="_mjVolConvert(\'' + sd + '\',\'' + mjEsc(rcode) + '\',\'' + mjEsc(wo) + '\',false)" style="color:var(--text-muted);cursor:pointer;text-decoration:underline;">undo</a>' : '') + '</div>';
+        }
+        out += '<div id="mjVolMark-' + mjEsc(wo) + '" style="' + (crossWo === wo ? '' : 'display:none;') + 'color:#f59e0b;font-weight:700;margin-top:4px;">🛢️ Truck full here (~' + cap + ' cy) — dump / grab an empty can</div></div>';
+      });
+      return out + '<div id="mjVolFill" style="margin-top:8px;">' + _mjVolFillHTML(cum, cap, crossWo, jobs, st, rcode) + '</div>';
+    }
+    function _mjVolFillHTML(cum, cap, crossWo, jobs, st, rcode) {
+      const pct = Math.max(3, Math.min(100, Math.round(cum / cap * 100)));
+      const barColor = cum >= cap ? '#f59e0b' : '#00E785';
+      let msg;
+      if (crossWo) { const j = jobs.find(x => _mjWo(x) === String(crossWo)); const nm = j ? (String(j.client || '').split(',')[0] || 'a stop').trim() : 'a stop'; msg = '🛢️ Fills at <b>' + mjEsc(nm) + '</b> — plan a dump / can-swap there.'; }
+      else msg = 'Stays under one truck (' + cum.toFixed(1) + ' of ' + cap + ' cy).';
+      return '<div style="height:8px;background:var(--bg-input);border-radius:4px;overflow:hidden;"><div style="height:100%;width:' + pct + '%;background:' + barColor + ';transition:width .12s;"></div></div>'
+        + '<div style="font-size:12px;color:var(--text-primary);margin-top:5px;">' + msg + '</div>';
+    }
+    // Slider DRAG: update state + this row's value label, then repaint ONLY the fill/cum/marker elements in
+    // place (never re-render the panel — that would kill the input mid-drag).
+    function _mjVolSlide(sd, rcode, wo, val) {
+      const st = (_mjVol[sd] || {})[rcode]; if (!st) return;
+      st.slider[wo] = Number(val) || 0;
+      const ve = document.getElementById('mjVolVal-' + wo); if (ve) ve.textContent = (Number(val) || 0).toFixed(2) + ' cy';
+      _mjVolRepaintFill(sd, rcode);
+    }
+    function _mjVolRepaintFill(sd, rcode) {
+      const st = (_mjVol[sd] || {})[rcode]; if (!st) return;
+      const jobs = _mjVolRouteJobs(sd, rcode).slice().sort((a, b) => (a.timeMin || 0) - (b.timeMin || 0));
+      const cap = truckCapacityCY() || 16;
+      let cum = 0, crossWo = null;
+      jobs.forEach(j => {
+        const wo = _mjWo(j), e = st.est[wo]; if (!e) return;
+        const counted = !_mjIsEstimateJob(j, rcode) || e.eoConverted === true;
+        if (counted) cum += (st.slider[wo] != null ? Number(st.slider[wo]) : 0);
+        if (counted && crossWo == null && cum >= cap) crossWo = wo;
+        const cb = document.getElementById('mjVolCum-' + wo); if (cb) cb.textContent = counted ? cum.toFixed(1) + ' cy' : '—';
+        const mk = document.getElementById('mjVolMark-' + wo); if (mk) mk.style.display = (crossWo === wo) ? '' : 'none';
+      });
+      const fe = document.getElementById('mjVolFill'); if (fe) fe.innerHTML = _mjVolFillHTML(cum, cap, crossWo, jobs, st, rcode);
+    }
+    // Slider RELEASE: persist the value as this stop's actual (survives refresh, feeds later reporting).
+    function _mjVolPersist(sd, rcode, wo, val) {
+      edgeFunctionCall('crewlogic-volume', { action: 'setActual', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: sd, woID: wo, actualCuyd: Number(val) || 0, setBy: (currentUser && currentUser.email) || '' })
+        .then(() => { const st = (_mjVol[sd] || {})[rcode]; if (st && st.est[wo]) st.est[wo].actual = Number(val) || 0; })
+        .catch(e => console.error('[mj-vol persist]', e));
+    }
+    async function _mjVolConvert(sd, rcode, wo, converted) {
+      try {
+        await edgeFunctionCall('crewlogic-volume', { action: 'setEoConverted', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: sd, woID: wo, converted: !!converted });
+        const st = (_mjVol[sd] || {})[rcode]; if (st && st.est[wo]) st.est[wo].eoConverted = !!converted;
+        if (converted && st && st.est[wo] && st.slider[wo] == null) { const e = st.est[wo]; st.slider[wo] = (e.actual != null) ? e.actual : ((e.low != null && e.high != null) ? Math.round(((e.low + e.high) / 2) * 4) / 4 : 0); }
+        _mjVolRerender();
+      } catch (e) { console.error('[mj-vol convert]', e); }
     }
     function _mjDialControlHTML() {
       const opts = [60, 70, 80, 90, 100, 110, 120, 130, 140].map(p => '<option value="' + (p / 100) + '"' + (Math.round(_mjDial * 100) === p ? ' selected' : '') + '>' + p + '%</option>').join('');
