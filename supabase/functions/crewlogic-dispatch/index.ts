@@ -103,6 +103,31 @@ async function vonigoAuth(franchiseID: string): Promise<{ token: string } | { er
 const vpost = (token: string, path: string, payload: any) =>
   fetch(VONIGO_BASE + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ securityToken: token, ...payload }) }).then(r => r.json());
 
+// ── Charge → truck-fraction volume (FW-60 step 2) ────────────────────────────────────────────────
+// A Vonigo charge's `name` IS the truckload item ("1/8 Truckload", "Full Truckload", "Minimum"); field
+// 9288 = quantity, 9287 = line total. Volume-in-trucks = fraction(name) × qty. Non-truckload lines
+// (Discount, "TV/Monitor(s)", add-ons) map to 0 fraction → contribute no volume, which is correct: the
+// truckload line IS the volume (verified against #90 Pimental 995866 = 1/8, Bibee 870436 = Full, 2026-07-30).
+const CHARGE_FRAC: Record<string, number> = { 'included': 0, 'minimum': 0.0625, '1/8': 0.125, '1/4': 0.25, '3/8': 0.375, '1/2': 0.5, '5/8': 0.625, '3/4': 0.75, '7/8': 0.875, 'full': 1 };
+function chargeFraction(name: string): number {
+  const tok = String(name || '').replace(/truckload/i, '').trim().toLowerCase();
+  if (tok in CHARGE_FRAC) return CHARGE_FRAC[tok];
+  const n = parseFloat(tok); return Number.isFinite(n) ? n : 0;   // e.g. a numeric "2 Truckload" line
+}
+const F_CHARGE_QTY = 9288, F_CHARGE_TOTAL = 9287;
+function chargeField(c: any, fid: number): string { return String(((c.Fields || []).find((f: any) => f.fieldID === fid) || {}).fieldValue || ''); }
+// Read one WorkOrder's charges → truckload volume. workOrderID scopes to THAT appointment, so a job that
+// was adjusted down at completion (Bibee: 2⅛ estimate → 1 Full actual) returns the actual, not the estimate.
+async function woChargeVolume(token: string, woID: string): Promise<{ trucks: number; total: number; items: Array<{ name: string; qty: number; fraction: number; trucks: number; price: number }> }> {
+  const r = await vpost(token, '/data/Charges/', { method: '-1', workOrderID: String(woID), isCompleteObject: 'true' });
+  const items = (r.Charges || []).map((c: any) => {
+    const qty = parseFloat(chargeField(c, F_CHARGE_QTY)) || 1;
+    const fraction = chargeFraction(c.name || '');
+    return { name: String(c.name || ''), qty, fraction, trucks: fraction * qty, price: parseFloat(chargeField(c, F_CHARGE_TOTAL)) || 0 };
+  });
+  return { trucks: items.reduce((s: number, i: any) => s + i.trucks, 0), total: items.reduce((s: number, i: any) => s + i.price, 0), items };
+}
+
 // Durable audit of every dispatcher write (move/cancel), incl. dry-runs. BEST-EFFORT: a failure here
 // must NEVER block or fail the actual Vonigo write — it only logs. (Table: dispatch_audit, migration 0024.)
 async function audit(row: { franchiseID: string; action: string; commandText?: string | null; resolved?: unknown; fieldsWritten?: unknown; vonigoErrno?: number | null; success: boolean; dryRun?: boolean; result?: unknown; actorEmail?: string | null }) {
@@ -503,6 +528,20 @@ Deno.serve(async (req: Request) => {
         workOrder: wo || null,
         job: (jobRes.Jobs && jobRes.Jobs[0]) || jobRes.Jobs || null,
       });
+    }
+
+    // action=routeCharges — READ ONLY. For a set of WorkOrder IDs, return each one's charge-derived
+    // truckload volume (FW-60 step 2 — the primary volume source, above the AI text guess). The volume
+    // panel calls this for the stops it's showing; woChargeVolume reads /data/Charges/ per WO in parallel.
+    if (action === 'routeCharges') {
+      const woIDs: string[] = Array.isArray(body.woIDs) ? body.woIDs.map((x: unknown) => String(x || '')).filter(Boolean) : [];
+      if (!woIDs.length) return json({ success: true, charges: {} });
+      const out: Record<string, unknown> = {};
+      await Promise.all(woIDs.map(async (woID) => {
+        try { out[woID] = await woChargeVolume(token, woID); }
+        catch (e) { console.error('[dispatch routeCharges] wo', woID, e); out[woID] = { trucks: 0, total: 0, items: [], error: 'charge_read_failed' }; }
+      }));
+      return json({ success: true, charges: out });
     }
 
     if (action === 'resolveJob') {
