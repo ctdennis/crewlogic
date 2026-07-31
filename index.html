@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.102.4 | 2026-07-30">
+  <meta name="crewlogic-version" content="v5.103.2 | 2026-07-31">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9793,7 +9793,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const siteHtml = '<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + _truckEsc(label) + '</b><br>' + _addrLink(_truckProperAddr(s.address), s.address, _truckEsc) + costLine + _measBtn(c.lat, c.lon, label) + '</div>';
           const m = L.marker([c.lat, c.lon], { icon: mkIcon(t.emoji, t.color, 20, true) }); // ~75% of the old size — bare emoji reads too big at full 26
           // Details show in the left rail on click; in measure mode attachMeasure's handler wins instead.
-          m.on('click', function () { if (!_measureFrom) { _clearMeasureLine(); _railShowInfo(siteHtml); } });
+          m.on('click', function () { if (!_measureFrom) { _clearMeasureLine(); _railShowInfo(siteHtml, [c.lat, c.lon]); } });
           attachMeasure(m, c.lat, c.lon, label);
           m.addTo(t.layer);
         });
@@ -10092,7 +10092,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const html = (data && data.success)
             ? '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(data.distanceText) + ' · ~' + _truckEsc(data.durationText) + ' drive' + arrHtml + (data.inTraffic ? '<br><span style="color:var(--text-muted);font-size:11px;">in current traffic</span>' : '')
             : 'Could not measure distance — try again.';
-          _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
+          _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>', (j.lat != null && j.lon != null) ? [j.lat, j.lon] : null);
           if (data && data.success && info && info.late === true && j.jobID) {
             _prefetchJobPhone(j.jobID).then(function (ph) { _renderJobPhoneSlot(j.jobID, ph); });
           }
@@ -10132,7 +10132,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + ((distText && durText) ? ' · ' : '') + _truckEsc(durText)
             + arrHtml
             + (traffic ? '<br><span style="color:var(--text-muted);font-size:11px;">in current traffic</span>' : '');
-          _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>');
+          _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>', (j.lat != null && j.lon != null) ? [j.lat, j.lon] : null);
           if (info && info.late === true && j.jobID) {
             _prefetchJobPhone(j.jobID).then(function (ph) { _renderJobPhoneSlot(j.jobID, ph); });
           }
@@ -10168,8 +10168,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Fill the .job-eta slot in the rail's Job-details card with the truck→job drive time (traffic-aware,
     // via crewlogic-estimate pointDistance = Google Distance Matrix). Fire-and-forget after the card renders.
     async function _fillJobEta() {
-      const el = document.querySelector('#dashLeftJobBody .job-eta-arrival'); if (!el) return;
-      const driveEl = document.querySelector('#dashLeftJobBody .job-eta-drive');
+      const root = _detailRoot(); if (!root) return;
+      const el = root.querySelector('.job-eta-arrival'); if (!el) return;
+      const driveEl = root.querySelector('.job-eta-drive');
       const tlat = el.getAttribute('data-tlat'), tlon = el.getAttribute('data-tlon');
       const jlat = el.getAttribute('data-jlat'), jlon = el.getAttribute('data-jlon');
       const jtime = el.getAttribute('data-jtime'), jtlabel = el.getAttribute('data-jtlabel'), jdur = el.getAttribute('data-jdur'), joffset = el.getAttribute('data-joffset');
@@ -10195,7 +10196,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Recompute the nearest-truck line from CURRENT truck positions each time a job card opens — trucks
     // move, so this must refresh per click, not be baked at marker-load. Then fill the drive-time ETA.
     function _fillNearestTruck() {
-      const slot = document.querySelector('#dashLeftJobBody .rail-nearest'); if (!slot) return;
+      const root = _detailRoot(); if (!root) return;
+      const slot = root.querySelector('.rail-nearest'); if (!slot) return;
       const jlat = Number(slot.getAttribute('data-jlat')), jlon = Number(slot.getAttribute('data-jlon'));
       const jtime = slot.getAttribute('data-jtime'), jtlabel = slot.getAttribute('data-jtlabel'), jdur = slot.getAttribute('data-jdur'), joffset = slot.getAttribute('data-joffset');
       if (!Number.isFinite(jlat) || !Number.isFinite(jlon)) return;
@@ -10418,7 +10420,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap);
           // Details in the fixed in-map hover box (no popup → no clip/pan); measure + disposal-pick first.
           m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } });
-          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _railShowJob(tip, j.jobID); });
+          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _railShowJob(tip, j.jobID, [j.lat, j.lon]); });
           _lookaheadMarkers.push(m);
         });
       });
@@ -10758,7 +10760,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Skipped on touch — mobile has no hover, and we don't want a tap to flash it.
         if (!_mtIsTouch()) m.bindTooltip(_truckEsc(t.name || ('Truck ' + (i + 1))), { direction: 'top', offset: [0, -18], opacity: 0.95 });
         // Truck details show in the fixed in-map hover box (no popup → no clip/pan); disposal mode picks the truck.
-        m.on('click', function () { if (_dispMode) { _dispTapTruck(i, t); } else if (_measureFrom) { _measureToJob({ lat: t.lat, lon: t.lon, clientName: (i + 1) + '. ' + (t.name || 'Truck') }); } else { _clearMeasureLine(); _railShowInfo(pop); } });
+        m.on('click', function () { if (_dispMode) { _dispTapTruck(i, t); } else if (_measureFrom) { _measureToJob({ lat: t.lat, lon: t.lon, clientName: (i + 1) + '. ' + (t.name || 'Truck') }); } else { _clearMeasureLine(); _railShowInfo(pop, [t.lat, t.lon]); } });
         _truckMarkers.push(m);
         pts.push([t.lat, t.lon]);
       });
@@ -10801,19 +10803,28 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _renderJobPhoneSlot(jobID, phone) {
       const e = document.getElementById('jobph-' + jobID);
       if (!e) return;
+      if (phone == null) { e.innerHTML = '<span style="color:var(--text-muted);">Phone unavailable — reopen to retry</span>'; return; } // lookup FAILED — do NOT claim "no phone on file"
       const digits = String(phone || '').replace(/[^0-9+]/g, '');
       e.innerHTML = phone
         ? '📞 <a href="tel:' + digits + '" style="color:#6db3ff;font-weight:600;text-decoration:none;">' + _truckEsc(_fmtPhone(phone)) + '</a>'
           + ' &nbsp;·&nbsp; <a href="' + _smsHref(digits, buildSmsBody({ clientName: _jobClients[jobID] || '' })) + '" style="color:#6db3ff;font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>'
-        : '<span style="color:var(--text-muted);">No phone on file</span>';
+        : '<span style="color:var(--text-muted);">No phone on file</span>'; // '' = genuinely no phone (successful lookup)
     }
     function _prefetchJobPhone(jobID) {
-      if (_jobPhones[jobID]) return _jobPhones[jobID];
+      // Cache only a RESOLVED lookup (a real phone OR a genuine ''). A FAILED lookup (502/!success) returns null
+      // and is NOT cached, so the next popup open retries — instead of the old code caching '' on failure and
+      // showing a false "No phone on file" forever. (v5.103.2)
+      if (typeof _jobPhones[jobID] === 'string') return Promise.resolve(_jobPhones[jobID]);
       const p = edgeFunctionCall('crewlogic-job-lookup', { jobID: String(jobID), franchiseID: currentUser.franchiseID })
-        .then(r => { if (r && r.success && r.clientName) _jobClients[jobID] = String(r.clientName).trim(); return (r && r.success && r.clientPhone) ? String(r.clientPhone).trim() : ''; })
-        .catch(() => '');
-      _jobPhones[jobID] = p;
-      p.then(ph => _renderJobPhoneSlot(jobID, ph)); // fill in if the popup happens to be open already
+        .then(r => {
+          if (!r || r.success !== true) return null;                 // lookup FAILED — null (≠ '' = genuinely no phone); don't cache → retry next open
+          if (r.clientName) _jobClients[jobID] = String(r.clientName).trim();
+          const ph = r.clientPhone ? String(r.clientPhone).trim() : '';
+          _jobPhones[jobID] = ph;                                    // cache the real result (phone or genuine no-phone)
+          return ph;
+        })
+        .catch(() => null);
+      p.then(ph => _renderJobPhoneSlot(jobID, ph));
       return p;
     }
 
@@ -10898,7 +10909,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           // Job details show in the fixed in-map hover box (no marker popup → never clips/pans). Measuring +
           // disposal-pick still take priority on the first interaction.
           m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } });
-          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else { _clearMeasureLine(); _railShowJob(pop, j.jobID); } });
+          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else { _clearMeasureLine(); _railShowJob(pop, j.jobID, [j.lat, j.lon]); } });
           _jobMarkers.push(m);
           jobPts.push([j.lat, j.lon]);
           // Cache this job's schedule under BOTH ids so the "#<woID>" in a geofence name resolves
@@ -10910,7 +10921,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Prefetch job phones ONLY on the initial load / date change (refit) — NOT on the 90s quiet color-
         // refresh, which would fire a crewlogic-job-lookup PER JOB every cycle (a big chunk of the 502 burst).
         // A popup opening still prefetches its own phone on demand (_railShowJob → _prefetchJobPhone).
-        if (refit) jobs.forEach(j => _prefetchJobPhone(j.jobID));
+        // No bulk phone prefetch — it fired a crewlogic-job-lookup PER JOB at once (a burst that 502'd, and a
+        // failed lookup then cached a false "No phone on file"). Phones now load ON DEMAND when a job popup/card
+        // opens (_railShowJob → _prefetchJobPhone): one call, retried on the next open if it fails. (v5.103.2)
         // Store the loaded jobs + re-render trucks so the "job under truck" badge can see them (trucks
         // render before jobs load on first paint). fit=false so this doesn't re-zoom the map.
         _trucksJobsData = jobs;
@@ -11674,18 +11687,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const chip = document.querySelector('#mjDateStrip .mj-date-chip[data-dayid="' + id + '"]');
       mjSelectDate(id, chip || null);
     }
-    async function mjSelectDate(dayID, chipEl) {
+    async function mjSelectDate(dayID, chipEl, quiet) {
       document.querySelectorAll('#mjDateStrip .mj-date-chip').forEach(c => mjChipActive(c, c === chipEl));
       _mjBoardDayID = dayID; // remember the shown day so a command without an explicit date defaults to it
       _mjPlan = null;
       const r = document.getElementById('mjResult');
-      r.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline" style="display:inline-block;"></span>Loading jobs…</div>';
-      // boardGrid returns ALL routes for the day (incl. empty/closed ones) with jobs (occupied) + open
-      // availability slots — so the board shows blocked vs open vs occupied, not just routes that have jobs.
-      const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'boardGrid', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, dayID });
-      if (!data || !data.success) { r.innerHTML = '<div style="color:#ff6b6b;font-size:13px;">' + mjEsc((data && data.error) || 'Could not load the schedule.') + '</div>'; return; }
+      // The 90s auto-refresh passes quiet=true → DON'T blank the board to "Loading jobs…" every cycle (owner-flagged UI flash).
+      if (!quiet) r.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline" style="display:inline-block;"></span>Loading jobs…</div>';
+      // boardGrid via dashFetchDay → retries once + requires routes, so a transient 502/empty response can't wipe a populated board.
+      const data = await dashFetchDay(dayID);
       const dayLabel = mjDayLabelFromID(dayID);
       const routesData = (data.routes || []).slice(); // preserve Vonigo's route order (config-screen order)
+      if (!routesData.length) { // failed OR empty
+        if (quiet) return; // quiet auto-refresh — KEEP the existing board, never blank it to an error/"Loading"
+        r.innerHTML = '<div style="color:#ff6b6b;font-size:13px;">' + mjEsc(data._err || 'Could not load the schedule.') + '</div>'; return;
+      }
       // Flatten jobs (stamping routeCode/route) for _mjBoardByID + the AI conversation memory.
       const jobs = [];
       routesData.forEach(rt => (rt.jobs || []).forEach(j => jobs.push(Object.assign({}, j, { routeCode: rt.code, route: rt.name }))));
@@ -11694,9 +11710,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const byRoute = {};
       jobs.forEach(j => { const rc = j.routeCode || '?'; (byRoute[rc] = byRoute[rc] || []).push(j); });
       const memParts = Object.keys(byRoute).sort().map(rc => rc + ': ' + byRoute[rc].map((j, n) => (n + 1) + '. ' + (j.timeLabel || '') + ' ' + (j.client || '') + ' (Job ' + (j.jobID || '') + ', WO ' + (j.woID || '') + ', ' + (j.durationMin || '') + 'min, zip ' + (j.zip || '') + ')').join('; '));
-      _mjHistory.push({ role: 'user', text: 'Show all jobs on ' + dayLabel });
-      _mjHistory.push({ role: 'assistant', text: 'Jobs on ' + dayLabel + ' by route — ' + (memParts.join(' | ') || 'none') });
-      if (_mjHistory.length > 8) _mjHistory = _mjHistory.slice(-8);
+      if (!quiet) { // don't push the background auto-refresh into the AI conversation memory
+        _mjHistory.push({ role: 'user', text: 'Show all jobs on ' + dayLabel });
+        _mjHistory.push({ role: 'assistant', text: 'Jobs on ' + dayLabel + ' by route — ' + (memParts.join(' | ') || 'none') });
+        if (_mjHistory.length > 8) _mjHistory = _mjHistory.slice(-8);
+      }
       await _mjLoadAssignData(dayID); // FW-59: roster + truck↔route assignments + live status, so the board renders with the Truck column filled
       mjRenderBoard({ dayID, dayLabel, routes: routesData, jobs, boardStartMin: data.boardStartMin, boardEndMin: data.boardEndMin, cancelledCount: data.cancelledCount });
       _mjLoadEta(dayID, routesData); // FW-59: day-start feasibility pills from the LIVE board jobs (async repaint)
@@ -12620,10 +12638,33 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (b) b.innerHTML = '<div class="dash-rail-empty" style="color:var(--text-muted);font-size:13px;padding:10px;">Tap a job or truck for details.</div>';
       _clearMeasureLine(); // dismissing the Details card (×) also removes the blue measure route line
     }
+    // Active detail-render target: the dashboard's left rail if present, else the open Leaflet popup content
+    // (the standalone "Where Are My Trucks" screen has no rail — a tap opens a map popup instead).
+    function _detailRoot() {
+      const rail = document.getElementById('dashLeftJobBody'); if (rail) return rail;
+      // Target the CURRENTLY-open popup (map._popup._contentNode), NOT a generic .leaflet-popup-content query —
+      // on a second tap the previous popup is still fading out, so the generic query matched the OLD (closing)
+      // one and filled it, leaving the new popup empty until you tapped again. (v5.103.2 first-tap fix)
+      const p = _trucksMap && _trucksMap._popup;
+      return (p && p._contentNode) || document.querySelector('.leaflet-popup-content') || null;
+    }
+    // Open a Leaflet popup with detail HTML anchored at latlng (trucks screen). Returns true if it opened.
+    function _openDetailPopup(latlng, html) {
+      if (!_trucksMap || !latlng || latlng[0] == null || latlng[1] == null) return false;
+      // Leaflet's own maxHeight caps the popup AND adds an internal scrollbar (the inner-div max-height didn't
+      // constrain positioning, so a tall popup on a top marker ran off-screen). keepInView + autoPan then pan
+      // the map so the (now height-capped) popup sits fully in view — same on desktop + mobile.
+      L.popup({ maxWidth: 300, maxHeight: 260, autoPan: true, keepInView: true, autoPanPadding: L.point(14, 14), className: 'mj-detail-popup' })
+        .setLatLng(latlng).setContent('<div class="mj-detail-body" style="font-size:13px;">' + (html || '') + '</div>').openOn(_trucksMap);
+      return true;
+    }
     // Render a job-details card (the same `pop` HTML the map hover box used) into the left rail's Job-details
-    // section, ensure that section is expanded, and wire the phone slot exactly as _mapHoverShow did.
-    function _railShowJob(pop, jobID) {
-      const body = document.getElementById('dashLeftJobBody'); if (!body) return;
+    // section, ensure that section is expanded, and wire the phone slot exactly as _mapHoverShow did. On a
+    // screen with NO rail (the trucks map), the same content opens in a Leaflet popup anchored at latlng, and
+    // the nearest-truck line + drive-time ETA fill INSIDE the popup (via _detailRoot).
+    function _railShowJob(pop, jobID, latlng) {
+      const body = document.getElementById('dashLeftJobBody');
+      if (!body) { if (_openDetailPopup(latlng, pop)) { if (jobID) _prefetchJobPhone(jobID).then(ph => _renderJobPhoneSlot(jobID, ph)); _fillNearestTruck(); } return; }
       body.innerHTML = '<div style="text-align:right;margin:-2px -2px 2px 0;"><span onclick="_railClearJob()" style="cursor:pointer;color:var(--text-muted);font-size:18px;line-height:1;">×</span></div>' + (pop || '');
       body.style.display = ''; // make sure the section is open
       const hdr = body.previousElementSibling, chev = hdr && hdr.querySelector('span'); if (chev) chev.textContent = '▾';
@@ -12633,8 +12674,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // Render arbitrary (non-job) info — trucks, sites, measure result — into the left rail's Details section.
     // Same visual wrapper as _railShowJob but NO phone-slot wiring (no jobID for non-job content).
-    function _railShowInfo(html) {
-      const body = document.getElementById('dashLeftJobBody'); if (!body) return;
+    function _railShowInfo(html, latlng) {
+      const body = document.getElementById('dashLeftJobBody');
+      if (!body) { _openDetailPopup(latlng, html); return; } // no rail (trucks screen) → popup at latlng (no-op if none, e.g. the measure prompt handled by _mtBanner)
       body.innerHTML = '<div style="text-align:right;margin:-2px -2px 2px 0;"><span onclick="_railClearJob()" style="cursor:pointer;color:var(--text-muted);font-size:18px;line-height:1;">×</span></div>' + (html || '');
       body.style.display = ''; // make sure the section is open
       const hdr = body.previousElementSibling, chev = hdr && hdr.querySelector('span'); if (chev) chev.textContent = '▾';
@@ -13488,7 +13530,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         await dashReloadOne('dest', true);
         if (document.getElementById('dashMapPane') && typeof loadJobMarkers === 'function') { try { await loadJobMarkers(false); } catch (e) {} } // re-color houses WITHOUT re-fitting the map
       }
-      else if (_mjBoardDayID) { try { mjSelectDate(_mjBoardDayID); } catch (e) {} }
+      else if (_mjBoardDayID) { try { mjSelectDate(_mjBoardDayID, null, true); } catch (e) {} } // quiet — no "Loading jobs…" blank, keep board on a failed/empty tick
     }
     // ── Schedule-board auto-refresh (every 90s) — keeps the visible board live without a manual reload.
     // Uses the QUIET reloads in _dispatchRefreshVisible (swap-in-place, no flash). One shared interval,
