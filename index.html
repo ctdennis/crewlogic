@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.103.0 | 2026-07-31">
+  <meta name="crewlogic-version" content="v5.103.1 | 2026-07-31">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12633,8 +12633,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Open a Leaflet popup with detail HTML anchored at latlng (trucks screen). Returns true if it opened.
     function _openDetailPopup(latlng, html) {
       if (!_trucksMap || !latlng || latlng[0] == null || latlng[1] == null) return false;
-      L.popup({ maxWidth: 300, autoPan: true, className: 'mj-detail-popup' }).setLatLng(latlng)
-        .setContent('<div class="mj-detail-body" style="font-size:13px;max-height:60vh;overflow:auto;">' + (html || '') + '</div>').openOn(_trucksMap);
+      // Leaflet's own maxHeight caps the popup AND adds an internal scrollbar (the inner-div max-height didn't
+      // constrain positioning, so a tall popup on a top marker ran off-screen). keepInView + autoPan then pan
+      // the map so the (now height-capped) popup sits fully in view — same on desktop + mobile.
+      L.popup({ maxWidth: 300, maxHeight: 260, autoPan: true, keepInView: true, autoPanPadding: L.point(14, 14), className: 'mj-detail-popup' })
+        .setLatLng(latlng).setContent('<div class="mj-detail-body" style="font-size:13px;">' + (html || '') + '</div>').openOn(_trucksMap);
       return true;
     }
     // Render a job-details card (the same `pop` HTML the map hover box used) into the left rail's Job-details
