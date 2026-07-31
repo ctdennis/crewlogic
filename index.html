@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.102.3 | 2026-07-30">
+  <meta name="crewlogic-version" content="v5.102.4 | 2026-07-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10824,6 +10824,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (!data || data.success === false) return; // transient 502/timeout — KEEP the existing job markers, don't blank the map
         // Server returns jobs sorted by appointment time → this IS each route's stop order.
         const jobs = (data.workOrders || []).filter(j => j.lat != null && j.lon != null); // keep completed (shown grayed); cancelled is filtered server-side
+        if (!refit && !jobs.length) return; // quiet auto-refresh returned no jobs (transient blip) — KEEP the existing markers rather than clearing the map
         if (_jobLayer) _jobLayer.clearLayers(); else _jobMarkers.forEach(m => _trucksMap.removeLayer(m));
         _jobMarkers = [];
         _jobPhones = {}; _jobClients = {}; // reset phone + client-name cache for this fresh job set
@@ -12697,8 +12698,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!container) return;
       if (!quiet) container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">Loading…</div>';
       const data = await dashFetchDay(dayID);
-      if (quiet && data._err) return; // transient refresh failure (502/timeout) — KEEP the existing board rather than blanking it to "No routes"
       const routesData = data.routes || [];
+      if (quiet && (data._err || !routesData.length)) return; // failed OR empty (transient 502/Vonigo blip) — KEEP the existing board; NEVER blank a populated board on an auto-refresh
       const axis = (Number.isFinite(data.boardStartMin) && Number.isFinite(data.boardEndMin))
         ? { originH: Math.floor(data.boardStartMin / 60), endH: Math.ceil(data.boardEndMin / 60) } : null;
       await _mjLoadAssignData(dayID); // FW-59: refresh this day's assignments before re-rendering its column
@@ -12710,7 +12711,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // busy (esp. under the initial concurrent load); a single retry recovers it instead of blanking the board.
       for (let attempt = 0; attempt < 2; attempt++) {
         const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'boardGrid', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, dayID });
-        if (data && data.success) return data;
+        if (data && data.success && Array.isArray(data.routes) && data.routes.length) return data; // require ROUTES — a success with 0 routes is a transient Vonigo blip; retry rather than return empty
         if (attempt === 0) await new Promise(r => setTimeout(r, 1500));
       }
       return { routes: [], _err: 'Could not load the schedule.' };
