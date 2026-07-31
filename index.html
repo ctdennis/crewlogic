@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.102.4 | 2026-07-30">
+  <meta name="crewlogic-version" content="v5.102.5 | 2026-07-31">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11674,18 +11674,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const chip = document.querySelector('#mjDateStrip .mj-date-chip[data-dayid="' + id + '"]');
       mjSelectDate(id, chip || null);
     }
-    async function mjSelectDate(dayID, chipEl) {
+    async function mjSelectDate(dayID, chipEl, quiet) {
       document.querySelectorAll('#mjDateStrip .mj-date-chip').forEach(c => mjChipActive(c, c === chipEl));
       _mjBoardDayID = dayID; // remember the shown day so a command without an explicit date defaults to it
       _mjPlan = null;
       const r = document.getElementById('mjResult');
-      r.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline" style="display:inline-block;"></span>Loading jobs…</div>';
-      // boardGrid returns ALL routes for the day (incl. empty/closed ones) with jobs (occupied) + open
-      // availability slots — so the board shows blocked vs open vs occupied, not just routes that have jobs.
-      const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'boardGrid', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, dayID });
-      if (!data || !data.success) { r.innerHTML = '<div style="color:#ff6b6b;font-size:13px;">' + mjEsc((data && data.error) || 'Could not load the schedule.') + '</div>'; return; }
+      // The 90s auto-refresh passes quiet=true → DON'T blank the board to "Loading jobs…" every cycle (owner-flagged UI flash).
+      if (!quiet) r.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);font-size:13px;"><span class="spinner-inline" style="display:inline-block;"></span>Loading jobs…</div>';
+      // boardGrid via dashFetchDay → retries once + requires routes, so a transient 502/empty response can't wipe a populated board.
+      const data = await dashFetchDay(dayID);
       const dayLabel = mjDayLabelFromID(dayID);
       const routesData = (data.routes || []).slice(); // preserve Vonigo's route order (config-screen order)
+      if (!routesData.length) { // failed OR empty
+        if (quiet) return; // quiet auto-refresh — KEEP the existing board, never blank it to an error/"Loading"
+        r.innerHTML = '<div style="color:#ff6b6b;font-size:13px;">' + mjEsc(data._err || 'Could not load the schedule.') + '</div>'; return;
+      }
       // Flatten jobs (stamping routeCode/route) for _mjBoardByID + the AI conversation memory.
       const jobs = [];
       routesData.forEach(rt => (rt.jobs || []).forEach(j => jobs.push(Object.assign({}, j, { routeCode: rt.code, route: rt.name }))));
@@ -11694,9 +11697,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const byRoute = {};
       jobs.forEach(j => { const rc = j.routeCode || '?'; (byRoute[rc] = byRoute[rc] || []).push(j); });
       const memParts = Object.keys(byRoute).sort().map(rc => rc + ': ' + byRoute[rc].map((j, n) => (n + 1) + '. ' + (j.timeLabel || '') + ' ' + (j.client || '') + ' (Job ' + (j.jobID || '') + ', WO ' + (j.woID || '') + ', ' + (j.durationMin || '') + 'min, zip ' + (j.zip || '') + ')').join('; '));
-      _mjHistory.push({ role: 'user', text: 'Show all jobs on ' + dayLabel });
-      _mjHistory.push({ role: 'assistant', text: 'Jobs on ' + dayLabel + ' by route — ' + (memParts.join(' | ') || 'none') });
-      if (_mjHistory.length > 8) _mjHistory = _mjHistory.slice(-8);
+      if (!quiet) { // don't push the background auto-refresh into the AI conversation memory
+        _mjHistory.push({ role: 'user', text: 'Show all jobs on ' + dayLabel });
+        _mjHistory.push({ role: 'assistant', text: 'Jobs on ' + dayLabel + ' by route — ' + (memParts.join(' | ') || 'none') });
+        if (_mjHistory.length > 8) _mjHistory = _mjHistory.slice(-8);
+      }
       await _mjLoadAssignData(dayID); // FW-59: roster + truck↔route assignments + live status, so the board renders with the Truck column filled
       mjRenderBoard({ dayID, dayLabel, routes: routesData, jobs, boardStartMin: data.boardStartMin, boardEndMin: data.boardEndMin, cancelledCount: data.cancelledCount });
       _mjLoadEta(dayID, routesData); // FW-59: day-start feasibility pills from the LIVE board jobs (async repaint)
@@ -13488,7 +13493,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         await dashReloadOne('dest', true);
         if (document.getElementById('dashMapPane') && typeof loadJobMarkers === 'function') { try { await loadJobMarkers(false); } catch (e) {} } // re-color houses WITHOUT re-fitting the map
       }
-      else if (_mjBoardDayID) { try { mjSelectDate(_mjBoardDayID); } catch (e) {} }
+      else if (_mjBoardDayID) { try { mjSelectDate(_mjBoardDayID, null, true); } catch (e) {} } // quiet — no "Loading jobs…" blank, keep board on a failed/empty tick
     }
     // ── Schedule-board auto-refresh (every 90s) — keeps the visible board live without a manual reload.
     // Uses the QUIET reloads in _dispatchRefreshVisible (swap-in-place, no flash). One shared interval,
