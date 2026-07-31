@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.102.0 | 2026-07-30">
+  <meta name="crewlogic-version" content="v5.102.4 | 2026-07-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10821,8 +10821,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (typeof L === 'undefined' || !_trucksMap) return;
       try {
         const data = await edgeFunctionCall('crewlogic-todays-workorders', { franchiseID: currentUser.franchiseID, dayOffset: _trucksJobDay, includeCoords: true, includeCrewTitles: true });
+        if (!data || data.success === false) return; // transient 502/timeout — KEEP the existing job markers, don't blank the map
         // Server returns jobs sorted by appointment time → this IS each route's stop order.
         const jobs = (data.workOrders || []).filter(j => j.lat != null && j.lon != null); // keep completed (shown grayed); cancelled is filtered server-side
+        if (!refit && !jobs.length) return; // quiet auto-refresh returned no jobs (transient blip) — KEEP the existing markers rather than clearing the map
         if (_jobLayer) _jobLayer.clearLayers(); else _jobMarkers.forEach(m => _trucksMap.removeLayer(m));
         _jobMarkers = [];
         _jobPhones = {}; _jobClients = {}; // reset phone + client-name cache for this fresh job set
@@ -10905,8 +10907,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           if (j.workOrderID != null) _jobsByWo[String(j.workOrderID)] = sched;
           if (j.jobID != null) _jobsByWo[String(j.jobID)] = sched;
         });
-        // Prefetch all job phones in the background now (transparent) so they're ready on click.
-        jobs.forEach(j => _prefetchJobPhone(j.jobID));
+        // Prefetch job phones ONLY on the initial load / date change (refit) — NOT on the 90s quiet color-
+        // refresh, which would fire a crewlogic-job-lookup PER JOB every cycle (a big chunk of the 502 burst).
+        // A popup opening still prefetches its own phone on demand (_railShowJob → _prefetchJobPhone).
+        if (refit) jobs.forEach(j => _prefetchJobPhone(j.jobID));
         // Store the loaded jobs + re-render trucks so the "job under truck" badge can see them (trucks
         // render before jobs load on first paint). fit=false so this doesn't re-zoom the map.
         _trucksJobsData = jobs;
@@ -11898,8 +11902,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _mjJobDot(bj, rcode) {
       if (!bj) return '';
       const lo = Number(bj.labelOpt) || 0;
-      const done = !!(bj.completed || bj.labelDone);
-      // EXACT board parity: same color the board cell paints — done→gray, else the Vonigo label color.
+      const done = !!bj.completed;   // EXACT board/map parity: gray ONLY for a paid+completed job (isComplete), NOT labelDone — a 245/9996 "done label" on an OPEN job stays its Vonigo label color (was wrongly graying, e.g. Cardenas 245)
+      // Same color the board cell paints — done→gray, else the Vonigo label color.
       const color = done ? '#5b6b7a' : mjLabelColor(lo);
       const title = done ? 'completed' : (lo === 9973 ? 'estimate only' : (lo === 9996 ? 'est completed (est only)' : (lo === 9975 || lo === 245 ? 'converted' : 'appointment')));
       return '<span title="' + title + '" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + ';margin:0 5px 0 1px;vertical-align:middle;flex:0 0 auto;"></span>';
@@ -12645,7 +12649,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _updateTrucksDayToggle();              // initialize the date picker to today
       showTrucks();
       _startTrucksAutoRefresh();
-      _startDashBoardRefresh();               // re-pull the boards from Vonigo every ~90s (new/moved/edited/cancelled jobs)
+      // NOTE: board auto-refresh is handled by _startBoardAutoRefresh → _dispatchRefreshVisible, which ALREADY
+      // reloads both boards (dashReloadOne src+dest) + the map every 90s. A second _startDashBoardRefresh timer
+      // here was redundant and DOUBLED the boardGrid load — every 90s both timers fired the same reload, so the
+      // burst (boardGrid ×4 + todays-workorders ×2 + a job-lookup per job) overwhelmed the edge/Vonigo and 502'd.
+      // Removed the duplicate; the single _startBoardAutoRefresh path keeps the boards live. (v5.102.2 fix)
       // Fix the "half-width tiles" + "zoomed-out on load" races: the map is created before the dashboard's
       // wide layout finishes reflowing, so Leaflet measures a too-narrow container AND any early fit picks a
       // too-low zoom that nothing corrects. invalidateSize keeps the size current; and once the layout has
@@ -12691,6 +12699,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!quiet) container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">Loading…</div>';
       const data = await dashFetchDay(dayID);
       const routesData = data.routes || [];
+      if (quiet && (data._err || !routesData.length)) return; // failed OR empty (transient 502/Vonigo blip) — KEEP the existing board; NEVER blank a populated board on an auto-refresh
       const axis = (Number.isFinite(data.boardStartMin) && Number.isFinite(data.boardEndMin))
         ? { originH: Math.floor(data.boardStartMin / 60), endH: Math.ceil(data.boardEndMin / 60) } : null;
       await _mjLoadAssignData(dayID); // FW-59: refresh this day's assignments before re-rendering its column
@@ -12698,15 +12707,24 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _mjLoadEta(dayID, routesData); // FW-59: refresh feasibility pills for this board
     }
     async function dashFetchDay(dayID) {
-      const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'boardGrid', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, dayID });
-      return (data && data.success) ? data : { routes: [], _err: (data && data.error) || 'Could not load the schedule.' };
+      // Retry once with a brief backoff — a boardGrid can 502 transiently when the edge/Vonigo is momentarily
+      // busy (esp. under the initial concurrent load); a single retry recovers it instead of blanking the board.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'boardGrid', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, dayID });
+        if (data && data.success && Array.isArray(data.routes) && data.routes.length) return data; // require ROUTES — a success with 0 routes is a transient Vonigo blip; retry rather than return empty
+        if (attempt === 0) await new Promise(r => setTimeout(r, 1500));
+      }
+      return { routes: [], _err: 'Could not load the schedule.' };
     }
     // Load BOTH days, union their routes, and render both boards with the SAME aligned route rows — so
     // every route is present on both (gray when inactive that day) and rows line up for cross-day drag.
     async function dashLoadBoards() {
       const srcC = document.getElementById('dashSrcBoard'), destC = document.getElementById('dashDestBoard');
       [srcC, destC].forEach(c => { if (c) c.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">Loading…</div>'; });
-      const [src, dest] = await Promise.all([dashFetchDay(_dashSrcDay), dashFetchDay(_dashDestDay)]);
+      // Load the two boards SEQUENTIALLY (was Promise.all) — firing both boardGrids at once was half the
+      // initial concurrent-edge burst that 502'd tomorrow's board. Serial is ~1.8s slower but reliable.
+      const src = await dashFetchDay(_dashSrcDay);
+      const dest = await dashFetchDay(_dashDestDay);
       const codes = []; [...(src.routes || []), ...(dest.routes || [])].forEach(r => { if (r && r.code && !codes.includes(r.code)) codes.push(r.code); }); // preserve Vonigo's route order
       const align = (dayRoutes) => codes.map(c => (dayRoutes || []).find(r => r.code === c) || { id: c, code: c, name: c, jobs: [], open: [] });
       const srcR = align(src.routes), destR = align(dest.routes);
@@ -13457,17 +13475,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       } catch (e) { /* non-blocking — geofence cleanup must never break the board refresh */ }
     }
     // Refresh whichever dispatch surface is visible (dashboard boards or the standalone Manage Jobs board).
-    function _dispatchRefreshVisible() {
+    async function _dispatchRefreshVisible() {
       _reconcileTodaysGeofences(); // near-real-time geofence cleanup (throttled, fire-and-forget)
       const eb = document.getElementById('estDashBoard');
       if (eb && eb.offsetParent !== null) { estDashLoadBoard(true); return; } // Estimates Desk board (quiet reload)
       const ds = document.getElementById('dashSrcBoard');
       if (ds && ds.offsetParent !== null) {
-        dashReloadOne('src', true); dashReloadOne('dest', true);
-        // Keep the dashboard MAP's job-house colors on the SAME cadence as the schedule pills, so a job that
-        // goes gray on complete/payment greys its house at the same time (was: map only updated on a manual
-        // refresh). loadJobMarkers no-ops if the map isn't mounted.
-        if (document.getElementById('dashMapPane') && typeof loadJobMarkers === 'function') { try { loadJobMarkers(false); } catch (e) {} } // re-color houses on the 90s cadence WITHOUT re-fitting the map
+        // SEQUENTIAL: src → dest → map, one at a time (was all-at-once). Firing all three edge calls together
+        // every 90s was the burst that 502'd; serialising them keeps peak concurrency low. Each is non-destructive
+        // (a failed one keeps the existing board/map), so a slow tick just skips this cycle, not blanks it.
+        await dashReloadOne('src', true);
+        await dashReloadOne('dest', true);
+        if (document.getElementById('dashMapPane') && typeof loadJobMarkers === 'function') { try { await loadJobMarkers(false); } catch (e) {} } // re-color houses WITHOUT re-fitting the map
       }
       else if (_mjBoardDayID) { try { mjSelectDate(_mjBoardDayID); } catch (e) {} }
     }
