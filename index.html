@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.102.1 | 2026-07-30">
+  <meta name="crewlogic-version" content="v5.102.2 | 2026-07-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10821,6 +10821,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (typeof L === 'undefined' || !_trucksMap) return;
       try {
         const data = await edgeFunctionCall('crewlogic-todays-workorders', { franchiseID: currentUser.franchiseID, dayOffset: _trucksJobDay, includeCoords: true, includeCrewTitles: true });
+        if (!data || data.success === false) return; // transient 502/timeout — KEEP the existing job markers, don't blank the map
         // Server returns jobs sorted by appointment time → this IS each route's stop order.
         const jobs = (data.workOrders || []).filter(j => j.lat != null && j.lon != null); // keep completed (shown grayed); cancelled is filtered server-side
         if (_jobLayer) _jobLayer.clearLayers(); else _jobMarkers.forEach(m => _trucksMap.removeLayer(m));
@@ -10905,8 +10906,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           if (j.workOrderID != null) _jobsByWo[String(j.workOrderID)] = sched;
           if (j.jobID != null) _jobsByWo[String(j.jobID)] = sched;
         });
-        // Prefetch all job phones in the background now (transparent) so they're ready on click.
-        jobs.forEach(j => _prefetchJobPhone(j.jobID));
+        // Prefetch job phones ONLY on the initial load / date change (refit) — NOT on the 90s quiet color-
+        // refresh, which would fire a crewlogic-job-lookup PER JOB every cycle (a big chunk of the 502 burst).
+        // A popup opening still prefetches its own phone on demand (_railShowJob → _prefetchJobPhone).
+        if (refit) jobs.forEach(j => _prefetchJobPhone(j.jobID));
         // Store the loaded jobs + re-render trucks so the "job under truck" badge can see them (trucks
         // render before jobs load on first paint). fit=false so this doesn't re-zoom the map.
         _trucksJobsData = jobs;
@@ -12645,7 +12648,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _updateTrucksDayToggle();              // initialize the date picker to today
       showTrucks();
       _startTrucksAutoRefresh();
-      _startDashBoardRefresh();               // re-pull the boards from Vonigo every ~90s (new/moved/edited/cancelled jobs)
+      // NOTE: board auto-refresh is handled by _startBoardAutoRefresh → _dispatchRefreshVisible, which ALREADY
+      // reloads both boards (dashReloadOne src+dest) + the map every 90s. A second _startDashBoardRefresh timer
+      // here was redundant and DOUBLED the boardGrid load — every 90s both timers fired the same reload, so the
+      // burst (boardGrid ×4 + todays-workorders ×2 + a job-lookup per job) overwhelmed the edge/Vonigo and 502'd.
+      // Removed the duplicate; the single _startBoardAutoRefresh path keeps the boards live. (v5.102.2 fix)
       // Fix the "half-width tiles" + "zoomed-out on load" races: the map is created before the dashboard's
       // wide layout finishes reflowing, so Leaflet measures a too-narrow container AND any early fit picks a
       // too-low zoom that nothing corrects. invalidateSize keeps the size current; and once the layout has
@@ -12690,6 +12697,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!container) return;
       if (!quiet) container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">Loading…</div>';
       const data = await dashFetchDay(dayID);
+      if (quiet && data._err) return; // transient refresh failure (502/timeout) — KEEP the existing board rather than blanking it to "No routes"
       const routesData = data.routes || [];
       const axis = (Number.isFinite(data.boardStartMin) && Number.isFinite(data.boardEndMin))
         ? { originH: Math.floor(data.boardStartMin / 60), endH: Math.ceil(data.boardEndMin / 60) } : null;
