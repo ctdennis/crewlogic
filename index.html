@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.102.2 | 2026-07-30">
+  <meta name="crewlogic-version" content="v5.102.3 | 2026-07-30">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12706,15 +12706,24 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _mjLoadEta(dayID, routesData); // FW-59: refresh feasibility pills for this board
     }
     async function dashFetchDay(dayID) {
-      const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'boardGrid', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, dayID });
-      return (data && data.success) ? data : { routes: [], _err: (data && data.error) || 'Could not load the schedule.' };
+      // Retry once with a brief backoff — a boardGrid can 502 transiently when the edge/Vonigo is momentarily
+      // busy (esp. under the initial concurrent load); a single retry recovers it instead of blanking the board.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const data = await edgeFunctionCall('crewlogic-dispatch', { action: 'boardGrid', franchiseID: currentUser.franchiseID, tenantID: currentUser.tenantID, dayID });
+        if (data && data.success) return data;
+        if (attempt === 0) await new Promise(r => setTimeout(r, 1500));
+      }
+      return { routes: [], _err: 'Could not load the schedule.' };
     }
     // Load BOTH days, union their routes, and render both boards with the SAME aligned route rows — so
     // every route is present on both (gray when inactive that day) and rows line up for cross-day drag.
     async function dashLoadBoards() {
       const srcC = document.getElementById('dashSrcBoard'), destC = document.getElementById('dashDestBoard');
       [srcC, destC].forEach(c => { if (c) c.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">Loading…</div>'; });
-      const [src, dest] = await Promise.all([dashFetchDay(_dashSrcDay), dashFetchDay(_dashDestDay)]);
+      // Load the two boards SEQUENTIALLY (was Promise.all) — firing both boardGrids at once was half the
+      // initial concurrent-edge burst that 502'd tomorrow's board. Serial is ~1.8s slower but reliable.
+      const src = await dashFetchDay(_dashSrcDay);
+      const dest = await dashFetchDay(_dashDestDay);
       const codes = []; [...(src.routes || []), ...(dest.routes || [])].forEach(r => { if (r && r.code && !codes.includes(r.code)) codes.push(r.code); }); // preserve Vonigo's route order
       const align = (dayRoutes) => codes.map(c => (dayRoutes || []).find(r => r.code === c) || { id: c, code: c, name: c, jobs: [], open: [] });
       const srcR = align(src.routes), destR = align(dest.routes);
@@ -13465,17 +13474,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       } catch (e) { /* non-blocking — geofence cleanup must never break the board refresh */ }
     }
     // Refresh whichever dispatch surface is visible (dashboard boards or the standalone Manage Jobs board).
-    function _dispatchRefreshVisible() {
+    async function _dispatchRefreshVisible() {
       _reconcileTodaysGeofences(); // near-real-time geofence cleanup (throttled, fire-and-forget)
       const eb = document.getElementById('estDashBoard');
       if (eb && eb.offsetParent !== null) { estDashLoadBoard(true); return; } // Estimates Desk board (quiet reload)
       const ds = document.getElementById('dashSrcBoard');
       if (ds && ds.offsetParent !== null) {
-        dashReloadOne('src', true); dashReloadOne('dest', true);
-        // Keep the dashboard MAP's job-house colors on the SAME cadence as the schedule pills, so a job that
-        // goes gray on complete/payment greys its house at the same time (was: map only updated on a manual
-        // refresh). loadJobMarkers no-ops if the map isn't mounted.
-        if (document.getElementById('dashMapPane') && typeof loadJobMarkers === 'function') { try { loadJobMarkers(false); } catch (e) {} } // re-color houses on the 90s cadence WITHOUT re-fitting the map
+        // SEQUENTIAL: src → dest → map, one at a time (was all-at-once). Firing all three edge calls together
+        // every 90s was the burst that 502'd; serialising them keeps peak concurrency low. Each is non-destructive
+        // (a failed one keeps the existing board/map), so a slow tick just skips this cycle, not blanks it.
+        await dashReloadOne('src', true);
+        await dashReloadOne('dest', true);
+        if (document.getElementById('dashMapPane') && typeof loadJobMarkers === 'function') { try { await loadJobMarkers(false); } catch (e) {} } // re-color houses WITHOUT re-fitting the map
       }
       else if (_mjBoardDayID) { try { mjSelectDate(_mjBoardDayID); } catch (e) {} }
     }
