@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.103.1 | 2026-07-31">
+  <meta name="crewlogic-version" content="v5.103.2 | 2026-07-31">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10803,19 +10803,28 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _renderJobPhoneSlot(jobID, phone) {
       const e = document.getElementById('jobph-' + jobID);
       if (!e) return;
+      if (phone == null) { e.innerHTML = '<span style="color:var(--text-muted);">Phone unavailable — reopen to retry</span>'; return; } // lookup FAILED — do NOT claim "no phone on file"
       const digits = String(phone || '').replace(/[^0-9+]/g, '');
       e.innerHTML = phone
         ? '📞 <a href="tel:' + digits + '" style="color:#6db3ff;font-weight:600;text-decoration:none;">' + _truckEsc(_fmtPhone(phone)) + '</a>'
           + ' &nbsp;·&nbsp; <a href="' + _smsHref(digits, buildSmsBody({ clientName: _jobClients[jobID] || '' })) + '" style="color:#6db3ff;font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>'
-        : '<span style="color:var(--text-muted);">No phone on file</span>';
+        : '<span style="color:var(--text-muted);">No phone on file</span>'; // '' = genuinely no phone (successful lookup)
     }
     function _prefetchJobPhone(jobID) {
-      if (_jobPhones[jobID]) return _jobPhones[jobID];
+      // Cache only a RESOLVED lookup (a real phone OR a genuine ''). A FAILED lookup (502/!success) returns null
+      // and is NOT cached, so the next popup open retries — instead of the old code caching '' on failure and
+      // showing a false "No phone on file" forever. (v5.103.2)
+      if (typeof _jobPhones[jobID] === 'string') return Promise.resolve(_jobPhones[jobID]);
       const p = edgeFunctionCall('crewlogic-job-lookup', { jobID: String(jobID), franchiseID: currentUser.franchiseID })
-        .then(r => { if (r && r.success && r.clientName) _jobClients[jobID] = String(r.clientName).trim(); return (r && r.success && r.clientPhone) ? String(r.clientPhone).trim() : ''; })
-        .catch(() => '');
-      _jobPhones[jobID] = p;
-      p.then(ph => _renderJobPhoneSlot(jobID, ph)); // fill in if the popup happens to be open already
+        .then(r => {
+          if (!r || r.success !== true) return null;                 // lookup FAILED — null (≠ '' = genuinely no phone); don't cache → retry next open
+          if (r.clientName) _jobClients[jobID] = String(r.clientName).trim();
+          const ph = r.clientPhone ? String(r.clientPhone).trim() : '';
+          _jobPhones[jobID] = ph;                                    // cache the real result (phone or genuine no-phone)
+          return ph;
+        })
+        .catch(() => null);
+      p.then(ph => _renderJobPhoneSlot(jobID, ph));
       return p;
     }
 
@@ -10912,7 +10921,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Prefetch job phones ONLY on the initial load / date change (refit) — NOT on the 90s quiet color-
         // refresh, which would fire a crewlogic-job-lookup PER JOB every cycle (a big chunk of the 502 burst).
         // A popup opening still prefetches its own phone on demand (_railShowJob → _prefetchJobPhone).
-        if (refit) jobs.forEach(j => _prefetchJobPhone(j.jobID));
+        // No bulk phone prefetch — it fired a crewlogic-job-lookup PER JOB at once (a burst that 502'd, and a
+        // failed lookup then cached a false "No phone on file"). Phones now load ON DEMAND when a job popup/card
+        // opens (_railShowJob → _prefetchJobPhone): one call, retried on the next open if it fails. (v5.103.2)
         // Store the loaded jobs + re-render trucks so the "job under truck" badge can see them (trucks
         // render before jobs load on first paint). fit=false so this doesn't re-zoom the map.
         _trucksJobsData = jobs;
@@ -12629,7 +12640,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // Active detail-render target: the dashboard's left rail if present, else the open Leaflet popup content
     // (the standalone "Where Are My Trucks" screen has no rail — a tap opens a map popup instead).
-    function _detailRoot() { return document.getElementById('dashLeftJobBody') || document.querySelector('.leaflet-popup-content'); }
+    function _detailRoot() {
+      const rail = document.getElementById('dashLeftJobBody'); if (rail) return rail;
+      // Target the CURRENTLY-open popup (map._popup._contentNode), NOT a generic .leaflet-popup-content query —
+      // on a second tap the previous popup is still fading out, so the generic query matched the OLD (closing)
+      // one and filled it, leaving the new popup empty until you tapped again. (v5.103.2 first-tap fix)
+      const p = _trucksMap && _trucksMap._popup;
+      return (p && p._contentNode) || document.querySelector('.leaflet-popup-content') || null;
+    }
     // Open a Leaflet popup with detail HTML anchored at latlng (trucks screen). Returns true if it opened.
     function _openDetailPopup(latlng, html) {
       if (!_trucksMap || !latlng || latlng[0] == null || latlng[1] == null) return false;
