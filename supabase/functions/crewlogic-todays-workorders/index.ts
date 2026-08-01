@@ -126,12 +126,28 @@ async function geocodeCensus(address: string): Promise<{ lat: number; lon: numbe
   return { lat, lon };
 }
 
-// Google Geocoding — rooftop-accurate; the PRIMARY geocoder for job pins (and thus the job-site
-// geofences + the <60m "arrived" house-on-truck icon, which all derive from the same coordinate).
-// Returns {found:true,lat,lon} on a hit, {found:false} on a definitive ZERO_RESULTS (cache it, don't
-// retry), or null on a transient error (OVER_QUERY_LIMIT / REQUEST_DENIED / network) so the caller
-// falls back to Census and retries Google next time.
-async function geocodeGoogle(apiKey: string, address: string): Promise<{ found: boolean; lat?: number; lon?: number } | null> {
+type GeoHit = { found: boolean; lat?: number; lon?: number; confidence?: 'high' | 'low' };
+
+// FW-63: drop the (often misleading) city from a Vonigo address, leaving "<street>, <STATE> <ZIP>".
+// Cape Cod is the poster child — a job in the town of Bourne is addressed to the VILLAGE
+// "Buzzards Bay", and Google approximates the village centroid (wrong side of the canal) instead of
+// finding the street. Geocoding street+state+zip (no city) lets Google resolve the actual street.
+// Returns null when the address can't be parsed (no US state+zip tail) so the caller skips the retry.
+function stripCityFromAddress(rawAddress: string): string | null {
+  if (!rawAddress) return null;
+  const norm = rawAddress.replace(/\s+/g, ' ').trim();
+  const m = norm.match(/\b([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?\b\s*$/); // state + 5-digit zip at the end
+  if (!m) return null;
+  const street = rawAddress.split(/[\n,]/)[0].replace(/\s+/g, ' ').trim(); // first line = street
+  if (!street) return null;
+  return `${street}, ${m[1].toUpperCase()} ${m[2]}`;
+}
+
+// One Google Geocoding attempt. Beyond lat/lon it now reads Google's CONFIDENCE signals —
+// results[0].partial_match (Google couldn't match everything and guessed) and
+// geometry.location_type (ROOFTOP / RANGE_INTERPOLATED = exact; GEOMETRIC_CENTER / APPROXIMATE =
+// coarse). confidence='high' only when it's an exact, non-partial match; otherwise 'low'.
+async function geocodeGoogleOnce(apiKey: string, address: string): Promise<GeoHit | null> {
   try {
     const url = 'https://maps.googleapis.com/maps/api/geocode/json?address='
       + encodeURIComponent(address) + '&key=' + apiKey;
@@ -140,14 +156,37 @@ async function geocodeGoogle(apiKey: string, address: string): Promise<{ found: 
     const data = await res.json().catch(() => null);
     const status = data?.status;
     if (status === 'OK') {
-      const loc = data.results?.[0]?.geometry?.location;
+      const r0 = data.results?.[0];
+      const loc = r0?.geometry?.location;
       const lat = Number(loc?.lat), lon = Number(loc?.lng);
-      if (Number.isFinite(lat) && Number.isFinite(lon)) return { found: true, lat, lon };
-      return null;
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+      const locType = r0?.geometry?.location_type;
+      const partial = r0?.partial_match === true;
+      const confident = !partial && (locType === 'ROOFTOP' || locType === 'RANGE_INTERPOLATED');
+      return { found: true, lat, lon, confidence: confident ? 'high' : 'low' };
     }
     if (status === 'ZERO_RESULTS') return { found: false }; // definitive not-found → cache, don't retry
     return null;                                            // transient → fall back to Census, retry later
   } catch (_e) { return null; }
+}
+
+// Google Geocoding — rooftop-accurate; the PRIMARY geocoder for job pins (and thus the job-site
+// geofences + the <60m "arrived" house-on-truck icon, which all derive from the same coordinate).
+// FW-63: on a LOW-confidence first result, retry WITHOUT the city (street+state+zip). If that retry
+// is high-confidence, trust it — this is what rescues the Cape Cod village-vs-town mis-geocode. If
+// neither is confident, keep the first result but return confidence:'low' so it can be flagged
+// "address unverified" instead of silently trusted. `oneLine` is the flattened address actually
+// geocoded; `rawAddress` is the original (possibly multi-line) form used to parse out the city.
+async function geocodeGoogle(apiKey: string, oneLine: string, rawAddress: string): Promise<GeoHit | null> {
+  const first = await geocodeGoogleOnce(apiKey, oneLine);
+  if (!first || !first.found) return first;         // transient (null) or definitive not-found
+  if (first.confidence === 'high') return first;
+  const noCity = stripCityFromAddress(rawAddress);
+  if (noCity && noCity.toLowerCase() !== oneLine.toLowerCase()) {
+    const retry = await geocodeGoogleOnce(apiKey, noCity);
+    if (retry && retry.found && retry.confidence === 'high') return retry; // confident retry wins
+  }
+  return first; // best we have, still flagged low-confidence
 }
 
 // Parse Vonigo's multi-checkbox field format into an array of CHECKED labels.
@@ -391,6 +430,7 @@ Deno.serve(async (req: Request) => {
           labelOpt: getField(fields, F_LABEL)?.optionID || 0,
           lat: null as number | null,
           lon: null as number | null,
+          addressUnverified: false as boolean, // FW-63: Google approximated the pin — confirm before dispatch
         };
 
         if (!includePlanData) return base;
@@ -456,20 +496,24 @@ Deno.serve(async (req: Request) => {
         try {
           const { data: cached } = await supabase
             .from('geocode_cache')
-            .select('lat, lon, found, provider')
+            .select('lat, lon, found, provider, confidence')
             .eq('address_key', key)
             .maybeSingle();
-          if (cached && cached.provider === 'google') {
+          // Trust a cached Google row (incl. a hand-corrected 'google-manual-fix' pin — the MOST
+          // trusted) UNLESS it's a known LOW-confidence result: those we re-geocode so the FW-63
+          // retry gets a chance to upgrade them. Legacy rows (confidence null) stay trusted so we
+          // don't force a re-geocode of the whole table.
+          if (cached && String(cached.provider || '').startsWith('google') && cached.confidence !== 'low') {
             if (cached.found) { w.lat = cached.lat; w.lon = cached.lon; }
             return;
           }
           // Google first (rooftop). Census only if Google errors transiently (so we retry Google later).
           let provider = 'google';
-          let g: { found: boolean; lat?: number; lon?: number } | null = GKEY ? await geocodeGoogle(GKEY, oneLine) : null;
+          let g: GeoHit | null = GKEY ? await geocodeGoogle(GKEY, oneLine, w.address) : null;
           if (g === null) {
             const c = await geocodeCensus(oneLine);
             provider = 'census';
-            g = c ? { found: true, lat: c.lat, lon: c.lon } : { found: false };
+            g = c ? { found: true, lat: c.lat, lon: c.lon, confidence: 'low' } : { found: false };
           }
           await supabase.from('geocode_cache').upsert({
             address_key: key,
@@ -477,9 +521,13 @@ Deno.serve(async (req: Request) => {
             lon: g.found ? g.lon : null,
             found: g.found,
             provider,
+            confidence: g.found ? (g.confidence || 'low') : null,
             updated_at: new Date().toISOString(),
           });
-          if (g.found) { w.lat = g.lat; w.lon = g.lon; }
+          if (g.found) {
+            w.lat = g.lat; w.lon = g.lon;
+            if (g.confidence === 'low') w.addressUnverified = true; // surface: "confirm before dispatch"
+          }
         } catch (e) {
           console.warn('[workorders] geocode failed for one job (non-fatal):', (e as Error).message);
         }

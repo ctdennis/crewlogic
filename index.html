@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.103.4 | 2026-08-01">
+  <meta name="crewlogic-version" content="v5.104.0 | 2026-08-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10789,15 +10789,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       t = t.replace(/,?\s*\b([A-Za-z]{2})\b\s+(\d{5})/, (_m, st, z) => ', ' + st.toUpperCase() + ' ' + z);
       return t;
     }
-    // Google Maps driving-directions URL for ANY address (carried across CrewLogic, matching estimates).
-    function _mapsDirUrl(addr) {
+    // Google Maps driving-directions URL. FW-63: when the caller passes the job's already-geocoded
+    // lat/lon, route to the COORDINATE (destination=lat,lon) so Google can't re-resolve the address
+    // TEXT to a wrong POI — the "3 Harbor Hill Drive, Buzzards Bay" link that opened the Hampton Inn on
+    // the far side of the Cape Cod canal. Falls back to the address text when no coordinate is given.
+    function _mapsDirUrl(addr, lat, lon) {
+      const la = Number(lat), lo = Number(lon);
+      if (Number.isFinite(la) && Number.isFinite(lo) && !(la === 0 && lo === 0)) {
+        return 'https://www.google.com/maps/dir/?api=1&destination=' + la + ',' + lo + '&travelmode=driving';
+      }
       const a = String(addr || '').replace(/\n/g, ', ').replace(/\s+/g, ' ').replace(/\s+,/g, ',').trim();
       return a ? 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(a) + '&travelmode=driving' : '';
     }
     // Render an address as a clickable maps link (📍, opens directions in a new tab). `disp` = pretty text,
     // `raw` = the address to route to, `esc` = the escaper to use for this context, `color` optional.
-    function _addrLink(disp, raw, esc, color) {
-      const url = _mapsDirUrl(raw); if (!url || !disp) return esc(disp || '');
+    // `lat`/`lon` optional — when present the link routes to the exact pin (FW-63), not the address text.
+    function _addrLink(disp, raw, esc, color, lat, lon) {
+      const url = _mapsDirUrl(raw, lat, lon); if (!url || !disp) return esc(disp || '');
       return '<a href="' + url + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:' + (color || '#2563eb') + ';text-decoration:none;font-weight:600;">📍 ' + esc(disp) + '</a>';
     }
     // Customer phones are PREFETCHED in the background when the truck map loads its jobs, so the
@@ -10898,7 +10906,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + (done ? '<div style="color:var(--text-muted);font-weight:700;font-size:11px;margin-top:2px;">✓ Completed</div>' : '')
             + (Number(j.price) > 0 ? '<div style="margin-top:2px;"><span style="color:var(--text-muted);">Job Total: </span><span style="font-weight:800;color:#00E785;font-size:13px;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span></div>' : '')
             + '<div style="margin-top:3px;">🏠 ' + _truckEsc(j.clientName || 'Job') + '</div>'
-            + (addr ? '<div>' + _addrLink(addr, addr, _truckEsc, '#6db3ff') + '</div>' : '')
+            + (addr ? '<div>' + _addrLink(addr, addr, _truckEsc, '#6db3ff', j.lat, j.lon) + '</div>' : '')
+            + (j.addressUnverified ? '<div style="color:#f59e0b;font-size:11px;font-weight:700;margin-top:1px;">⚠ Address unverified — confirm before dispatch</div>' : '')
             // Phone directly under the address, so address+phone read as one contact block, and
             // truck+crew group together below it.
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:var(--text-muted);">Loading phone…</div>'
@@ -13401,7 +13410,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       h += _mjArrivalStatement(j); // Part B: "We anticipate Truck X at TIME for NAME in TOWN — within/outside window"
       if (full) h += _mjRow('Name', mjEsc(full));
       h += _mjRow('Job', idLink);
-      h += _mjRow('Street', p.street ? _addrLink(p.street, j.address || (p.street + ', ' + (p.city || '') + ' ' + (p.zip || j.zip || '')), mjEsc, '#6db3ff') : '—');
+      h += _mjRow('Street', p.street ? _addrLink(p.street, j.address || (p.street + ', ' + (p.city || '') + ' ' + (p.zip || j.zip || '')), mjEsc, '#6db3ff', j.lat, j.lon) : '—');
+      if (j.addressUnverified) h += _mjRow('', '<span style="color:#f59e0b;font-weight:700;">⚠ Address unverified — confirm before dispatch</span>');
       h += _mjRow('City', mjEsc(p.city ? _titleCaseTown(p.city) : '—'));
       h += _mjRow('Zip', mjEsc(j.zip || p.zip || '—'));
       if (j.zoneName) h += _mjRow('Zone', '<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:' + mjZoneColor(j.zoneID) + ';margin-right:5px;vertical-align:middle;"></span>' + mjEsc(j.zoneName));

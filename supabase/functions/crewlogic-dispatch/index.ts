@@ -148,35 +148,75 @@ async function audit(row: { franchiseID: string; action: string; commandText?: s
 // match (e.g. "Street Ext" and other formats Census misses — Census is US-street-range based). Reuses
 // GOOGLE_GEOCODING_API_KEY (same key crewlogic-geofence-create uses). A prior census-only miss is
 // RE-TRIED so it gets the new Google fallback (auto-heals, no cache clearing); a google miss is final.
+// FW-63: drop the misleading city from a Vonigo address → "<street>, <STATE> <ZIP>" (see the twin
+// helper in crewlogic-todays-workorders — TODO: lift both into _shared/geocode.ts). Google approximates
+// Cape Cod VILLAGE names (Buzzards Bay) to the village centroid instead of finding the street; geocoding
+// street+state+zip lets it resolve the real rooftop. Returns null when there's no US state+zip to anchor.
+function stripCityFromAddress(rawAddress: string): string | null {
+  if (!rawAddress) return null;
+  const norm = rawAddress.replace(/\s+/g, ' ').trim();
+  const m = norm.match(/\b([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?\b\s*$/);
+  if (!m) return null;
+  const street = rawAddress.split(/[\n,]/)[0].replace(/\s+/g, ' ').trim();
+  if (!street) return null;
+  return `${street}, ${m[1].toUpperCase()} ${m[2]}`;
+}
+// One Google Geocoding attempt, reading the CONFIDENCE signals (partial_match + location_type).
+async function googleGeocodeOnce(gkey: string, address: string): Promise<{ found: boolean; lat?: number; lon?: number; confidence?: 'high' | 'low' } | null> {
+  try {
+    const gurl = 'https://maps.googleapis.com/maps/api/geocode/json?address=' + encodeURIComponent(address) + '&key=' + gkey;
+    const gd = await (await fetch(gurl)).json();
+    const st = gd?.status;
+    if (st === 'OK') {
+      const r0 = gd.results?.[0]; const loc = r0?.geometry?.location;
+      const lat = Number(loc?.lat), lon = Number(loc?.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+      const lt = r0?.geometry?.location_type;
+      const confident = r0?.partial_match !== true && (lt === 'ROOFTOP' || lt === 'RANGE_INTERPOLATED');
+      return { found: true, lat, lon, confidence: confident ? 'high' : 'low' };
+    }
+    if (st === 'ZERO_RESULTS') return { found: false };
+    return null;
+  } catch { return null; }
+}
+
+// Google-first (rooftop + FW-63 confidence/retry), Census fallback. Aligns with crewlogic-todays-workorders
+// so BOTH writers of geocode_cache produce the same high-confidence pin — a board-side geocode can no longer
+// poison the cache with a coarse pin the map/geofence path would then trust. Cache is trusted unless the row
+// is a known LOW-confidence result (those re-geocode so the retry can upgrade them).
 async function geocode(addr: string): Promise<{ lat: number; lon: number } | null> {
   const oneLine = String(addr || '').replace(/\n/g, ', ').replace(/\s+/g, ' ').trim();
   if (!oneLine) return null;
   const key = oneLine.toLowerCase(); const sb = supa();
-  const { data: c } = await sb.from('geocode_cache').select('lat, lon, found, provider').eq('address_key', key).maybeSingle();
-  if (c && c.found) return { lat: c.lat, lon: c.lon };
+  const { data: c } = await sb.from('geocode_cache').select('lat, lon, found, provider, confidence').eq('address_key', key).maybeSingle();
+  if (c && c.found && c.confidence !== 'low') return { lat: c.lat, lon: c.lon };
   if (c && !c.found && c.provider === 'google') return null; // already tried Google — genuinely not found
-  let g: { lat: number; lon: number } | null = null;
-  let provider = 'census';
-  try {
-    const url = 'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=' + encodeURIComponent(oneLine) + '&benchmark=Public_AR_Current&format=json';
-    const d = await (await fetch(url)).json();
-    const m = d?.result?.addressMatches?.[0];
-    if (m?.coordinates) g = { lat: Number(m.coordinates.y), lon: Number(m.coordinates.x) };
-  } catch { /* census failed — fall through to Google */ }
-  if (!g) {
-    const gkey = Deno.env.get('GOOGLE_GEOCODING_API_KEY') || Deno.env.get('GOOGLE_MAPS_API_KEY') || '';
-    if (gkey) {
-      provider = 'google';
-      try {
-        const gurl = 'https://maps.googleapis.com/maps/api/geocode/json?address=' + encodeURIComponent(oneLine) + '&key=' + gkey;
-        const gd = await (await fetch(gurl)).json();
-        const loc = gd?.results?.[0]?.geometry?.location;
-        if (loc && loc.lat != null && loc.lng != null) g = { lat: Number(loc.lat), lon: Number(loc.lng) };
-      } catch { /* google failed too */ }
+  let g: { found: boolean; lat?: number; lon?: number; confidence?: 'high' | 'low' } | null = null;
+  let provider = 'google';
+  const gkey = Deno.env.get('GOOGLE_GEOCODING_API_KEY') || Deno.env.get('GOOGLE_MAPS_API_KEY') || '';
+  if (gkey) {
+    g = await googleGeocodeOnce(gkey, oneLine);
+    if (g && g.found && g.confidence !== 'high') { // low-confidence → retry without the misleading city
+      const noCity = stripCityFromAddress(addr);
+      if (noCity && noCity.toLowerCase() !== oneLine.toLowerCase()) {
+        const retry = await googleGeocodeOnce(gkey, noCity);
+        if (retry && retry.found && retry.confidence === 'high') g = retry;
+      }
     }
   }
-  await sb.from('geocode_cache').upsert({ address_key: key, lat: g?.lat ?? null, lon: g?.lon ?? null, found: !!g, provider, updated_at: new Date().toISOString() });
-  return g;
+  // g === null means Google errored transiently (or no key) — fall back to Census (interpolated → 'low').
+  // g === {found:false} means Google definitively found nothing — do NOT census-guess; cache the miss.
+  if (g === null) {
+    try {
+      const url = 'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=' + encodeURIComponent(oneLine) + '&benchmark=Public_AR_Current&format=json';
+      const d = await (await fetch(url)).json();
+      const m = d?.result?.addressMatches?.[0];
+      if (m?.coordinates) { g = { found: true, lat: Number(m.coordinates.y), lon: Number(m.coordinates.x), confidence: 'low' }; provider = 'census'; }
+    } catch { /* census failed too */ }
+  }
+  const found = !!(g && g.found);
+  await sb.from('geocode_cache').upsert({ address_key: key, lat: found ? g!.lat : null, lon: found ? g!.lon : null, found, provider, confidence: found ? (g!.confidence || 'low') : null, updated_at: new Date().toISOString() });
+  return found ? { lat: g!.lat!, lon: g!.lon! } : null;
 }
 
 // listRouteJobs: WorkOrders for a day (+optional route filter), enriched + geocoded.
