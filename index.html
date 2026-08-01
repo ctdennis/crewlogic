@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.103.3 | 2026-08-01">
+  <meta name="crewlogic-version" content="v5.103.4 | 2026-08-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10693,14 +10693,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           : '';
         // Truck currently INSIDE a disposal/recycling/donation geofence (telematics, via geofence_alerts)
         // → badge its emoji (🗑️/♻️/🎁) bare, matching the standalone facility markers on the map.
-        const nearSite = _truckCurrentFacility[_normVeh(t.name)] || null;
+        // A truck DRIVING (speed > 5 mph) can't be "at" a facility/yard — suppress the geofence-CURRENT badge
+        // even if a stale/uncleared geofence-ENTRY still says so. The entry is set from a webhook event and only
+        // cleared by the matching EXIT event; a missed/delayed exit leaves it stuck. Live speed is fresh telematics,
+        // so it overrides. (Owner: Truck 1 doing 62 mph on MA-140 still badged "At Truck Parking since 2:05pm".)
+        const enRoute = t.speed != null && t.speed > 5;
+        const nearSite = enRoute ? null : (_truckCurrentFacility[_normVeh(t.name)] || null);
         // Yard / headquarters gets its own badge. It is NOT a facility (nothing is disposed there,
         // no dwell threshold applies) but it IS where a truck spends the start and end of every
         // day, and "is it back at the yard?" is exactly the question being asked of this map.
         // Regions are deliberately excluded — "Rhode Island - Region" contains half the fleet half
         // the time, so badging it would mark everything and mean nothing.
         const curGf = _truckCurrentGeofence[_normVeh(t.name)] || null;
-        const atYard = !nearSite && curGf && /headquarter|storage|yard|parking/i.test(curGf.category + ' ' + curGf.name);
+        const atYard = !enRoute && !nearSite && curGf && /headquarter|storage|yard|parking/i.test(curGf.category + ' ' + curGf.name);
         const siteBadge = nearSite ? '<text x="31" y="37" text-anchor="middle" font-size="15">' + nearSite.emoji + '</text>'
           : (atYard ? '<text x="31" y="37" text-anchor="middle" font-size="14">🏠</text>' : '');
 
