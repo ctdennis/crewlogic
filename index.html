@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.103.2 | 2026-07-31">
+  <meta name="crewlogic-version" content="v5.103.3 | 2026-08-01">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -13526,9 +13526,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // SEQUENTIAL: src → dest → map, one at a time (was all-at-once). Firing all three edge calls together
         // every 90s was the burst that 502'd; serialising them keeps peak concurrency low. Each is non-destructive
         // (a failed one keeps the existing board/map), so a slow tick just skips this cycle, not blanks it.
-        await dashReloadOne('src', true);
-        await dashReloadOne('dest', true);
-        if (document.getElementById('dashMapPane') && typeof loadJobMarkers === 'function') { try { await loadJobMarkers(false); } catch (e) {} } // re-color houses WITHOUT re-fitting the map
+        // EACH step isolated in its own try/catch — a throw/hang in one board reload must NOT starve the others,
+        // and especially not the map repaint (owner incident: the dest board reload threw on a tick, so the map
+        // houses never re-colored as jobs completed — board went 'done', map stayed blue all afternoon).
+        try { await dashReloadOne('src', true); } catch (e) { console.warn('[dash] src reload failed (non-fatal):', e); }
+        try { await dashReloadOne('dest', true); } catch (e) { console.warn('[dash] dest reload failed (non-fatal):', e); }
+        if (document.getElementById('dashMapPane') && typeof loadJobMarkers === 'function') { try { await loadJobMarkers(false); } catch (e) { console.warn('[dash] map recolor failed (non-fatal):', e); } } // re-color houses WITHOUT re-fitting the map
       }
       else if (_mjBoardDayID) { try { mjSelectDate(_mjBoardDayID, null, true); } catch (e) {} } // quiet — no "Loading jobs…" blank, keep board on a failed/empty tick
     }
