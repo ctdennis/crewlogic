@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.104.0 | 2026-08-01">
+  <meta name="crewlogic-version" content="v5.104.7 | 2026-08-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1596,7 +1596,10 @@
             <span id="trucksDayRel" style="font-size:12px;color:var(--text-muted,#6e8194);font-weight:600;"></span>
             <button id="trucksLookaheadBtn" onclick="toggleTrucksLookahead()" title="Show jobs for the next 3 days from the selected day, as magenta dots" style="font-size:12px;padding:7px 12px;background:var(--bg-input,#1e2f40);color:var(--text-muted,#6e8194);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;white-space:nowrap;">◌ +3 days</button>
           </div>
-          <button id="trucksRefreshBtn" onclick="showTrucks()" style="font-size:13px;padding:7px 16px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;">🔄 Refresh</button>
+          <div style="display:inline-flex;gap:8px;">
+            <button id="trucksMeasureBtn" onclick="toggleMeasureMode()" title="Measure driving distance between any two points — tap this, then tap two points (truck, job, facility or HQ) on the map" style="font-size:13px;padding:7px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;">📏 Measure</button>
+            <button id="trucksRefreshBtn" onclick="showTrucks()" style="font-size:13px;padding:7px 16px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;">🔄 Refresh</button>
+          </div>
         </div>
         <div id="trucksMap" style="height:60vh;min-height:400px;max-height:680px;border-radius:var(--radius,16px);overflow:hidden;border:1px solid var(--border,#22354a);background:var(--tile,#1e2f40);"></div>
         <div id="trucksLegend" style="display:none;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--text-muted,#6e8194);">
@@ -9781,7 +9784,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // mkIcon + _siteIconFor are now module-scope (hoisted for disposal-route reuse).
       // In measure mode (started from a truck), tapping a site measures truck→site (same as a job).
       // Bind both click and mouseover so a mobile first-tap (synthesized hover) triggers it too.
-      const attachMeasure = (m, lat, lon, label) => { const go = () => { if (_measureFrom) { try { m.closePopup(); } catch (e) {} _measureToJob({ lat: lat, lon: lon, clientName: label }); } }; m.on('click', go); m.on('mouseover', () => { if (_mtIsTouch()) go(); }); };
+      const attachMeasure = (m, lat, lon, label) => { const go = () => { if (_measureArmed) { measureStartFrom(lat, lon, label); return; } if (_measureFrom) { try { m.closePopup(); } catch (e) {} _measureToJob({ lat: lat, lon: lon, clientName: label }); } }; m.on('click', go); m.on('mouseover', () => { if (_mtIsTouch()) go(); }); };
       types.forEach(t => {
         if (!t.layer) return;
         t.layer.clearLayers();
@@ -9793,7 +9796,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const siteHtml = '<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + _truckEsc(label) + '</b><br>' + _addrLink(_truckProperAddr(s.address), s.address, _truckEsc) + costLine + _measBtn(c.lat, c.lon, label) + '</div>';
           const m = L.marker([c.lat, c.lon], { icon: mkIcon(t.emoji, t.color, 20, true) }); // ~75% of the old size — bare emoji reads too big at full 26
           // Details show in the left rail on click; in measure mode attachMeasure's handler wins instead.
-          m.on('click', function () { if (!_measureFrom) { _clearMeasureLine(); _railShowInfo(siteHtml, [c.lat, c.lon]); } });
+          m.on('click', function () { if (_measureArmed) return; if (!_measureFrom) { _clearMeasureLine(); _railShowInfo(siteHtml, [c.lat, c.lon]); } }); // armed → attachMeasure's handler sets the anchor
           attachMeasure(m, c.lat, c.lon, label);
           m.addTo(t.layer);
         });
@@ -9818,9 +9821,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // ── "Measure to a job" (tap a truck's "Distance to a job", then tap a job) ──
     // Next job isn't the closest, so the owner picks the job; we draw a line + show driving distance + ETA.
-    let _measureFrom = null, _measureLine = null;
+    let _measureFrom = null, _measureLine = null, _measureArmed = false, _measureResultShowing = false;
     // Remove the drawn measure line from the map (shared by the rail-info path and _mapHoverHide).
     function _clearMeasureLine() {
+      _measureResultShowing = false;
       if (_measureLine) { try { _measureLine.remove(); } catch (e) {} _measureLine = null; }
       // Belt-and-suspenders: also sweep any ORPHANED measure polyline off the current map. The _measureLine
       // reference can be lost across a re-render, leaving the blue line stuck — this catches it by its flag.
@@ -9865,13 +9869,31 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Generic "measure from here" — start a measurement from ANY placed object (job, facility, truck, HQ).
     // The measure-TO half already works for every marker (_measureToJob takes any lat/lon), so this makes it
     // any-object → any-object.
-    function measureStartFrom(lat, lon, label) {
+    function measureStartFrom(lat, lon, label, kind) {
       if (lat == null || lon == null) { alert('No location for this point.'); return; }
-      _measureFrom = { lat: Number(lat), lon: Number(lon), label: label || 'here' };
+      _measureArmed = false; // consumed the "pick the first point" arm
+      _measureFrom = { lat: Number(lat), lon: Number(lon), label: label || 'here', kind: kind || 'point' }; // kind 'truck' gates the arrival/late calc
       if (_trucksMap) _trucksMap.closePopup();
       _clearMeasureLine();
       _railShowInfo('<div style="font-size:13px;padding:8px;">Measuring… tap another job, facility, truck or HQ on the map.</div>');
       _mtBanner('📏 Measuring from ' + _measureFrom.label + ' — tap a target  ·  tap here to cancel');
+      _syncMeasureBtn();
+    }
+    // Toolbar "📏 Measure" toggle (standalone Where-Are-My-Trucks card, which has no side rail so the
+    // per-popup "Measure from here" buttons are hard to find). Tap it, then tap ANY two points on the map
+    // (truck, job, facility, HQ) → driving distance + ETA. Arms _measureArmed so the FIRST marker tap sets
+    // the anchor (via measureStartFrom) instead of opening its popup; the existing engine handles point B.
+    function toggleMeasureMode() {
+      if (_measureArmed || _measureFrom) { mtMeasureCancel(); return; } // tap again to exit / cancel
+      _measureArmed = true;
+      _mtBanner('📏 Measure — tap the FIRST point (truck, job, facility or HQ)  ·  tap here to cancel');
+      _syncMeasureBtn();
+    }
+    function _syncMeasureBtn() {
+      const btn = document.getElementById('trucksMeasureBtn'); if (!btn) return;
+      const on = _measureArmed || !!_measureFrom;
+      btn.style.background = on ? 'var(--accent-green,#00E785)' : 'var(--bg-input,#1e2f40)';
+      btn.style.color = on ? 'var(--accent-text,#04110a)' : 'var(--text-primary,#eef4fa)';
     }
     // Reusable "Measure from here" button HTML for job / facility / HQ popups. Escapes the label for the inline onclick.
     function _measBtn(lat, lon, label) {
@@ -9882,12 +9904,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function mtMeasureStart(i) {
       const t = (_trucksData || [])[i];
       if (!t || t.lat == null || t.lon == null) { alert('That truck has no current location.'); return; }
-      measureStartFrom(t.lat, t.lon, (i + 1) + '. ' + (t.name || 'Truck'));
+      measureStartFrom(t.lat, t.lon, (i + 1) + '. ' + (t.name || 'Truck'), 'truck');
     }
     function mtMeasureCancel() {
-      _measureFrom = null;
+      _measureFrom = null; _measureArmed = false;
       const b = document.getElementById('mtMeasureBanner'); if (b) b.style.display = 'none';
       if (_measureLine && _trucksMap) { _trucksMap.removeLayer(_measureLine); _measureLine = null; }
+      _syncMeasureBtn();
     }
     // ── Dashboard "Find disposal": tap a TRUCK + tap a JOB on the map → cheapest/fastest dump, plotted
     //    (green/blue/gold) with detail cards below. Reuses crewlogic-route-disposal + dispRecCard renderers.
@@ -10062,11 +10085,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const windowEnd = d.getTime() + (startMin + winMin) * 60000; // job start + duration (window end)
       return { text, late: expected.getTime() > windowEnd };
     }
-    async function _measureToJob(j) {
+    async function _measureToJob(j, dayOff) {
       if (!_measureFrom || j.lat == null || j.lon == null || !_trucksMap) return;
       const from = _measureFrom;
+      // Arrival ETA + "will be late" is meaningful ONLY when driving FROM a truck TO a job on TODAY's map.
+      // Suppress it when the start point isn't a truck (e.g. a disposal site → a home) and whenever the map
+      // is set to any day other than today — a future-dated job can't be "late" from today's drive. The
+      // measured distance + drive time still show in every case. (owner ask 2026-08-02)
+      if (dayOff == null) dayOff = Number(_trucksJobDay || 0);
+      const _considerArrival = (from && from.kind === 'truck') && Number(dayOff) === 0;
       if (_measureLine) { _trucksMap.removeLayer(_measureLine); _measureLine = null; }
-      _measureFrom = null;
+      _measureFrom = null; _measureArmed = false; _measureResultShowing = false; _syncMeasureBtn();
       const b = document.getElementById('mtMeasureBanner'); if (b) b.style.display = 'none';
       _trucksMap.closePopup(); // close any marker popup the tap opened
       const dest = _truckEsc(j.clientName || 'Job');
@@ -10077,7 +10106,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _measureLine = L.polyline([[from.lat, from.lon], [j.lat, j.lon]], { color: '#1e6fff', weight: 4, dashArray: '7,6', opacity: 0.95, _measure: true }).addTo(_trucksMap);
         try {
           const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: from.lat + ',' + from.lon, dest: j.lat + ',' + j.lon });
-          const info = _arrivalInfo(data && data.minutes, j.time, j.timeLabel, j.durationMin);
+          const info = _considerArrival ? _arrivalInfo(data && data.minutes, j.time, j.timeLabel, j.durationMin) : null;
           let arrHtml = '';
           if (info) {
             if (info.late === true && j.jobID) {
@@ -10093,10 +10122,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             ? '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(data.distanceText) + ' · ~' + _truckEsc(data.durationText) + ' drive' + arrHtml + (data.inTraffic ? '<br><span style="color:var(--text-muted);font-size:11px;">in current traffic</span>' : '')
             : 'Could not measure distance — try again.';
           _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>', (j.lat != null && j.lon != null) ? [j.lat, j.lon] : null);
+          _measureResultShowing = true; // dismissing this result popup clears the line (rail-less card)
           if (data && data.success && info && info.late === true && j.jobID) {
             _prefetchJobPhone(j.jobID).then(function (ph) { _renderJobPhoneSlot(j.jobID, ph); });
           }
-        } catch (_e) { _railShowInfo('<div style="font-size:13px;">Could not measure distance.</div>'); }
+        } catch (_e) { _railShowInfo('<div style="font-size:13px;">Could not measure distance.</div>'); _measureResultShowing = true; }
       };
       // Primary: TomTom Calculate Route — real road-following geometry + traffic-aware ETA (same TomTom key as the traffic tiles).
       if (TOMTOM_TRAFFIC_KEY && TOMTOM_TRAFFIC_KEY !== 'PASTE_TOMTOM_KEY_HERE') {
@@ -10116,7 +10146,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const distText = (miles != null) ? ((miles < 10 ? miles.toFixed(1) : String(Math.round(miles))) + ' mi') : '';
           const durText = (mins != null) ? ('~' + mins + ' min drive') : '';
           const traffic = !!(sum.trafficDelayInSeconds && sum.trafficDelayInSeconds > 0);
-          const info = _arrivalInfo(mins, j.time, j.timeLabel, j.durationMin);
+          const info = _considerArrival ? _arrivalInfo(mins, j.time, j.timeLabel, j.durationMin) : null;
           let arrHtml = '';
           if (info) {
             if (info.late === true && j.jobID) {
@@ -10133,6 +10163,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + arrHtml
             + (traffic ? '<br><span style="color:var(--text-muted);font-size:11px;">in current traffic</span>' : '');
           _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>', (j.lat != null && j.lon != null) ? [j.lat, j.lon] : null);
+          _measureResultShowing = true; // dismissing this result popup clears the line (rail-less card)
           if (info && info.late === true && j.jobID) {
             _prefetchJobPhone(j.jobID).then(function (ph) { _renderJobPhoneSlot(j.jobID, ph); });
           }
@@ -10419,8 +10450,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap);
           // Details in the fixed in-map hover box (no popup → no clip/pan); measure + disposal-pick first.
-          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } });
-          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _railShowJob(tip, j.jobID, [j.lat, j.lon]); });
+          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j, base + k); } });
+          m.on('click', function () { if (_measureArmed) { measureStartFrom(j.lat, j.lon, (j.clientName || 'Job')); return; } if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j, base + k); } else _railShowJob(tip, j.jobID, [j.lat, j.lon]); });
           _lookaheadMarkers.push(m);
         });
       });
@@ -10569,6 +10600,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (typeof L === 'undefined') return;
       if (!_trucksMap) {
         _trucksMap = L.map(_trucksMapEl, { zoomControl: true, attributionControl: true }).setView([41.86, -70.92], 12);
+        // Rail-less card: the measure RESULT shows as a map popup, so dismissing that popup should take the
+        // line with it (owner ask). _measureResultShowing is only true while that result popup is up, so the
+        // intermediate "Measuring…" popup close doesn't clear the line early. Dispatch (dashMapPane) shows
+        // results in the tall rail, not a popup, so it's excluded — its line clears via Measure/cancel.
+        _trucksMap.on('popupclose', function () { if (_measureResultShowing && _trucksMapEl === 'trucksMap') { _measureResultShowing = false; _clearMeasureLine(); } });
         const _streetLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
           attribution: '© OpenStreetMap contributors © CARTO', subdomains: 'abcd', maxZoom: 20
         });
@@ -10765,7 +10801,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Skipped on touch — mobile has no hover, and we don't want a tap to flash it.
         if (!_mtIsTouch()) m.bindTooltip(_truckEsc(t.name || ('Truck ' + (i + 1))), { direction: 'top', offset: [0, -18], opacity: 0.95 });
         // Truck details show in the fixed in-map hover box (no popup → no clip/pan); disposal mode picks the truck.
-        m.on('click', function () { if (_dispMode) { _dispTapTruck(i, t); } else if (_measureFrom) { _measureToJob({ lat: t.lat, lon: t.lon, clientName: (i + 1) + '. ' + (t.name || 'Truck') }); } else { _clearMeasureLine(); _railShowInfo(pop, [t.lat, t.lon]); } });
+        m.on('click', function () { if (_measureArmed) { measureStartFrom(t.lat, t.lon, (i + 1) + '. ' + (t.name || 'Truck'), 'truck'); return; } if (_dispMode) { _dispTapTruck(i, t); } else if (_measureFrom) { _measureToJob({ lat: t.lat, lon: t.lon, clientName: (i + 1) + '. ' + (t.name || 'Truck') }); } else { _clearMeasureLine(); _railShowInfo(pop, [t.lat, t.lon]); } });
         _truckMarkers.push(m);
         pts.push([t.lat, t.lon]);
       });
@@ -10912,9 +10948,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             // truck+crew group together below it.
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:var(--text-muted);">Loading phone…</div>'
             + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (_trucksJobDay || 0) + '"></div>'
+            // Measure button ABOVE crew/items: on the rail-less trucks card the popup is height-capped, so
+            // keeping "Measure from here" below the items list buried it — only the (short) truck popup's
+            // measure button was reachable. Placed here it stays visible without scrolling. (FW-21 parity)
+            + _measBtn(j.lat, j.lon, (j.clientName || 'Job'))
             + _crewLineHtml(j.crew)
             + itemsHtml
-            + _measBtn(j.lat, j.lon, (j.clientName || 'Job'))
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: 1 }).addTo(_jobLayer || _trucksMap); // solid for ALL houses incl. completed (gray) — the faded 0.6 was unreadable on the map
           // Desktop hover: lightweight tooltip with just the route code (mobile has no hover — skip it, since
@@ -10923,7 +10962,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           // Job details show in the fixed in-map hover box (no marker popup → never clips/pans). Measuring +
           // disposal-pick still take priority on the first interaction.
           m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } });
-          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else { _clearMeasureLine(); _railShowJob(pop, j.jobID, [j.lat, j.lon]); } });
+          m.on('click', function () { if (_measureArmed) { measureStartFrom(j.lat, j.lon, (j.clientName || 'Job')); return; } if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else { _clearMeasureLine(); _railShowJob(pop, j.jobID, [j.lat, j.lon]); } });
           _jobMarkers.push(m);
           jobPts.push([j.lat, j.lon]);
           // Cache this job's schedule under BOTH ids so the "#<woID>" in a geofence name resolves
@@ -12504,6 +12543,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<button onclick="showTrucks()" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🔄 Refresh</button>'
         +   '<button id="dashDispBtn" onclick="dashFindDisposal()" title="Plan a dump: tap a truck, then the destination job" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🗑️ Find disposal</button>'
         +   '<button onclick="dashGeneratePlan()" title="Generate the AI Job Plan for the selected day" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">📋 Generate plan</button>'
+        +   (IS_DEV_ENV ? '<button onclick="openAnalysisEngine()" title="Ask questions about your franchise data by voice or text (beta)" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🎤 Analysis Engine</button>' : '') // FW-62: dev-only until the query backend ships
         +   '<button id="dashWxChip" onclick="dashWeatherDetails()" style="display:none;"></button>' // weather-alert chip (filled by dashLoadWeather)
         + '</div>'
         // disposal control bar (hidden until "Find disposal") — % full + tap-status + done
@@ -14269,6 +14309,71 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Dashboard "Generate plan" → generate the Job Plan for the trucks-map's SELECTED day and show it in a
     // scrollable popup (Copy all / Cancel), without leaving the dashboard.
     let _dashPlanText = '';
+    // ── Analysis Engine (FW-62) — franchise-scoped natural-language reporting. Entry point next to
+    // "Generate plan". SHELL for now: opens the ask surface (text + voice) + example questions; the
+    // query backend (curated report-skills, franchise-scoped + read-only) wires in behind this.
+    function openAnalysisEngine() {
+      let ov = document.getElementById('aeModalOv');
+      if (!ov) { ov = document.createElement('div'); ov.id = 'aeModalOv'; document.body.appendChild(ov); }
+      ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(3,8,14,0.62);display:flex;align-items:center;justify-content:center;padding:5vh 12px;';
+      const fr = (currentUser && (currentUser.franchiseName || currentUser.franchiseID)) ? mjEsc(String(currentUser.franchiseName || ('#' + currentUser.franchiseID))) : 'your franchise';
+      const ex = [
+        'How many trucks are active right now?',
+        'Average wait at Raynham on a Saturday?',
+        'How many jobs did we complete last week?',
+        "What's our average job size this month?",
+      ];
+      const chips = ex.map(q => '<button onclick="aeSetQ(this)" data-q="' + mjEsc(q) + '" style="text-align:left;font-size:12px;padding:7px 11px;background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:8px;cursor:pointer;">' + mjEsc(q) + '</button>').join('');
+      const micBtn = mjSpeechOK() ? '<button id="aeMicBtn" onclick="aeMic()" title="Ask by voice" style="font-size:16px;padding:8px 12px;background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:8px;cursor:pointer;">🎤</button>' : '';
+      ov.innerHTML = '<div style="background:var(--bg-card,#1e2f40);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.5);width:96%;max-width:560px;max-height:86vh;display:flex;flex-direction:column;font-size:13px;color:var(--text-primary);">'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px 4px;"><span style="font-size:16px;font-weight:800;">🎤 Analysis Engine</span><span onclick="aeClose()" style="cursor:pointer;color:var(--text-muted);font-size:20px;line-height:1;">×</span></div>'
+        + '<div style="padding:0 18px 8px;color:var(--text-muted);font-size:12px;">Ask about <b>' + fr + '</b>’s data by voice or text. Answers stay scoped to your franchise.</div>'
+        + '<div style="padding:2px 18px 10px;display:flex;flex-direction:column;gap:6px;"><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;">Try one</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">' + chips + '</div></div>'
+        + '<div style="display:flex;gap:8px;padding:6px 18px 4px;align-items:stretch;">'
+        +   '<input id="aeQ" type="text" placeholder="Ask a question…" onkeydown="if(event.key===\'Enter\')aeAsk()" style="flex:1;font-size:14px;padding:9px 12px;background:var(--bg-input,#253545);color:var(--text-primary);border:1px solid var(--border);border-radius:8px;">'
+        +   micBtn
+        +   '<button onclick="aeAsk()" style="font-size:13px;font-weight:700;padding:9px 16px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:8px;cursor:pointer;">Ask</button>'
+        + '</div>'
+        + '<div id="aeBody" style="overflow-y:auto;padding:10px 18px 16px;flex:1;min-height:80px;"><div style="color:var(--text-muted);padding:14px 2px;">Ask a question above, or tap an example. Results and a CSV export will appear here.</div></div>'
+        + '</div>';
+      setTimeout(() => { const i = document.getElementById('aeQ'); if (i) i.focus(); }, 40);
+    }
+    function aeClose() { const ov = document.getElementById('aeModalOv'); if (ov) ov.remove(); try { if (_aeRec) _aeRec.stop(); } catch (e) {} }
+    function aeSetQ(el) { const i = document.getElementById('aeQ'); if (i && el) { i.value = el.getAttribute('data-q') || ''; i.focus(); } }
+    let _aeRec = null, _aeFinal = '';
+    function _aeMicUI(on) {
+      const btn = document.getElementById('aeMicBtn'); if (!btn) return;
+      btn.style.background = on ? 'var(--accent-green)' : 'var(--btn-surface,#34485d)';
+      btn.textContent = on ? '⏹' : '🎤';
+      btn.title = on ? 'Listening… tap when done' : 'Ask by voice';
+    }
+    function aeMic() {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) return;
+      const inp = document.getElementById('aeQ');
+      if (_aeRec) { try { _aeRec.stop(); } catch (e) {} return; } // tap again = stop (onend resets the UI)
+      _aeRec = new SR(); _aeRec.lang = 'en-US'; _aeRec.interimResults = true; _aeRec.maxAlternatives = 1;
+      try { _aeRec.continuous = true; } catch (e) {} // keep listening THROUGH pauses; stop on the user's tap, not on a detected pause
+      _aeFinal = (inp && inp.value ? inp.value.trim() + ' ' : ''); // preserve any already-typed text
+      _aeRec.onresult = (e) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) _aeFinal += t + ' '; else interim += t; }
+        if (inp) inp.value = (_aeFinal + interim).replace(/\s+/g, ' ').trimStart();
+      };
+      const reset = () => { _aeRec = null; _aeMicUI(false); };
+      _aeRec.onerror = reset;
+      _aeRec.onend = () => { if (inp) inp.value = String(inp.value || '').trim(); reset(); }; // fills the box; user taps Ask
+      try { _aeRec.start(); _aeMicUI(true); } catch (e) { reset(); }
+    }
+    function aeAsk() {
+      const inp = document.getElementById('aeQ'), body = document.getElementById('aeBody');
+      const q = inp ? String(inp.value || '').trim() : '';
+      if (!q || !body) return;
+      // SHELL: the query backend (report-skills, franchise-scoped read-only) isn't wired yet. Echo the
+      // question + a clear in-progress state so the entry point is coherent, not a dead button.
+      body.innerHTML = '<div style="margin-bottom:10px;"><span style="color:var(--text-muted);">You asked:</span> <b>' + mjEsc(q) + '</b></div>'
+        + '<div style="padding:12px 14px;background:var(--bg-input,#253545);border:1px solid var(--border);border-radius:8px;color:var(--text-muted);line-height:1.5;">The Analysis Engine is being built. Your question is captured — franchise-scoped answers with a CSV/Excel export will land here shortly.</div>';
+    }
+
     function dashGeneratePlan() {
       const off = (typeof _trucksJobDay === 'number' ? _trucksJobDay : 0);
       const dayLabel = off === 0 ? 'Today' : off === 1 ? 'Tomorrow' : off === 2 ? 'Day After Tomorrow' : _dateStrFromOffset(off);
