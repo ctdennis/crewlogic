@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.104.4 | 2026-08-02">
+  <meta name="crewlogic-version" content="v5.104.5 | 2026-08-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9821,9 +9821,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // ── "Measure to a job" (tap a truck's "Distance to a job", then tap a job) ──
     // Next job isn't the closest, so the owner picks the job; we draw a line + show driving distance + ETA.
-    let _measureFrom = null, _measureLine = null, _measureArmed = false;
+    let _measureFrom = null, _measureLine = null, _measureArmed = false, _measureResultShowing = false;
     // Remove the drawn measure line from the map (shared by the rail-info path and _mapHoverHide).
     function _clearMeasureLine() {
+      _measureResultShowing = false;
       if (_measureLine) { try { _measureLine.remove(); } catch (e) {} _measureLine = null; }
       // Belt-and-suspenders: also sweep any ORPHANED measure polyline off the current map. The _measureLine
       // reference can be lost across a re-render, leaving the blue line stuck — this catches it by its flag.
@@ -10088,7 +10089,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!_measureFrom || j.lat == null || j.lon == null || !_trucksMap) return;
       const from = _measureFrom;
       if (_measureLine) { _trucksMap.removeLayer(_measureLine); _measureLine = null; }
-      _measureFrom = null; _measureArmed = false; _syncMeasureBtn();
+      _measureFrom = null; _measureArmed = false; _measureResultShowing = false; _syncMeasureBtn();
       const b = document.getElementById('mtMeasureBanner'); if (b) b.style.display = 'none';
       _trucksMap.closePopup(); // close any marker popup the tap opened
       const dest = _truckEsc(j.clientName || 'Job');
@@ -10115,10 +10116,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             ? '<b>' + _truckEsc(from.label) + ' → ' + dest + '</b><br>' + _truckEsc(data.distanceText) + ' · ~' + _truckEsc(data.durationText) + ' drive' + arrHtml + (data.inTraffic ? '<br><span style="color:var(--text-muted);font-size:11px;">in current traffic</span>' : '')
             : 'Could not measure distance — try again.';
           _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>', (j.lat != null && j.lon != null) ? [j.lat, j.lon] : null);
+          _measureResultShowing = true; // dismissing this result popup clears the line (rail-less card)
           if (data && data.success && info && info.late === true && j.jobID) {
             _prefetchJobPhone(j.jobID).then(function (ph) { _renderJobPhoneSlot(j.jobID, ph); });
           }
-        } catch (_e) { _railShowInfo('<div style="font-size:13px;">Could not measure distance.</div>'); }
+        } catch (_e) { _railShowInfo('<div style="font-size:13px;">Could not measure distance.</div>'); _measureResultShowing = true; }
       };
       // Primary: TomTom Calculate Route — real road-following geometry + traffic-aware ETA (same TomTom key as the traffic tiles).
       if (TOMTOM_TRAFFIC_KEY && TOMTOM_TRAFFIC_KEY !== 'PASTE_TOMTOM_KEY_HERE') {
@@ -10155,6 +10157,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + arrHtml
             + (traffic ? '<br><span style="color:var(--text-muted);font-size:11px;">in current traffic</span>' : '');
           _railShowInfo('<div style="font-size:13px;line-height:1.5;">' + html + '</div>', (j.lat != null && j.lon != null) ? [j.lat, j.lon] : null);
+          _measureResultShowing = true; // dismissing this result popup clears the line (rail-less card)
           if (info && info.late === true && j.jobID) {
             _prefetchJobPhone(j.jobID).then(function (ph) { _renderJobPhoneSlot(j.jobID, ph); });
           }
@@ -10591,6 +10594,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (typeof L === 'undefined') return;
       if (!_trucksMap) {
         _trucksMap = L.map(_trucksMapEl, { zoomControl: true, attributionControl: true }).setView([41.86, -70.92], 12);
+        // Rail-less card: the measure RESULT shows as a map popup, so dismissing that popup should take the
+        // line with it (owner ask). _measureResultShowing is only true while that result popup is up, so the
+        // intermediate "Measuring…" popup close doesn't clear the line early. Dispatch (dashMapPane) shows
+        // results in the tall rail, not a popup, so it's excluded — its line clears via Measure/cancel.
+        _trucksMap.on('popupclose', function () { if (_measureResultShowing && _trucksMapEl === 'trucksMap') { _measureResultShowing = false; _clearMeasureLine(); } });
         const _streetLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
           attribution: '© OpenStreetMap contributors © CARTO', subdomains: 'abcd', maxZoom: 20
         });
