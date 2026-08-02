@@ -75,10 +75,29 @@ Each is a parameterized, franchise-scoped, read-only query with a clear title + 
 
 Every skill returns a small result table + a plain-English summary sentence.
 
-## 7. Answer + export
+## 7. Answer + export (adaptive to the answer shape)
 
-- Response = a **one-line plain answer** ("~22 min average; ~18 min typical, over 25 Saturdays") + a **small table** of the underlying rows + a **📥 Export CSV** button (CSV opens in Excel; no server round-trip needed for the download).
-- Show the **method + sample size** so the OM can trust it (e.g. "25 Saturday visits, blips under 2 min excluded") — same discipline as a good analyst.
+The response format follows the **shape of the answer**, not a fixed template (owner directive 2026-08-02):
+
+- **Scalar / single-value answer** → just a **plain-English sentence**, no table, **no CSV button**. Examples: "3 trucks are active right now." · "The average Saturday wait at Raynham is ~22 min (18 min typical), over 25 visits." Offering a spreadsheet for one number is noise.
+- **Tabular / multi-row answer** (per-facility, per-day, per-truck, a job list, a trend) → a **one-line plain summary** + a **small table** of the rows + a **📥 Export CSV** button (CSV opens in Excel; built client-side, no server round-trip). The rule of thumb: **more than one row or more than one data point → offer the CSV.**
+- Always show the **method + sample size** so the OM can trust it (e.g. "25 Saturday visits, blips under 2 min excluded") — same discipline as a good analyst.
+
+## 7a. Graceful failure — never leave the user hanging (owner directive 2026-08-02)
+
+Every failure mode returns a **plain-English explanation of what happened and why the report can't be written** — never a blank result, a spinner that dies, a raw error, or silence. The assistant always closes the loop, and where possible points at what *would* work.
+
+| Failure | Plain-English response (pattern) |
+|---|---|
+| **No skill covers the ask** | "I can't answer that one yet — I don't have a report for *X*. I can tell you *[nearest things it can do]*. Want me to add *X* to the list?" |
+| **Nonsense / non-metric part** (the √π case) | Deliver the meaningful part, then: "I gave you the averages; I can't multiply them by √π — that isn't a metric I compute. Did you mean something else?" |
+| **No data in range** | "No jobs found between *A* and *B* for your franchise." (state the range + scope, don't return an empty table) |
+| **Range too broad / query too heavy** | "That range is larger than I can pull at once — try a smaller window (e.g. a month)." |
+| **Data only goes back so far** (Vonigo mirror retention) | "I only have history back to *[date]* for jobs — want that range instead?" |
+| **Ambiguous request** | Ask ONE clarifying question, don't guess. |
+| **Backend / system error** | A short safe message ("Something went wrong pulling that — try again in a moment."), full detail to server logs only — never a stack trace, SQL, or the generated query to the client (per the no-internals-to-client rule). |
+
+The tone is a helpful analyst, not an error dialog: say what happened, why, and what to try next.
 
 ## 8. Input — voice + text
 
