@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.104.1 | 2026-08-02">
+  <meta name="crewlogic-version" content="v5.104.2 | 2026-08-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14301,17 +14301,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function aeClose() { const ov = document.getElementById('aeModalOv'); if (ov) ov.remove(); try { if (_aeRec) _aeRec.stop(); } catch (e) {} }
     function aeSetQ(el) { const i = document.getElementById('aeQ'); if (i && el) { i.value = el.getAttribute('data-q') || ''; i.focus(); } }
-    let _aeRec = null;
+    let _aeRec = null, _aeFinal = '';
+    function _aeMicUI(on) {
+      const btn = document.getElementById('aeMicBtn'); if (!btn) return;
+      btn.style.background = on ? 'var(--accent-green)' : 'var(--btn-surface,#34485d)';
+      btn.textContent = on ? '⏹' : '🎤';
+      btn.title = on ? 'Listening… tap when done' : 'Ask by voice';
+    }
     function aeMic() {
       const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) return;
-      const btn = document.getElementById('aeMicBtn'), inp = document.getElementById('aeQ');
-      if (_aeRec) { try { _aeRec.stop(); } catch (e) {} _aeRec = null; if (btn) btn.style.background = 'var(--btn-surface,#34485d)'; return; }
-      _aeRec = new SR(); _aeRec.lang = 'en-US'; _aeRec.interimResults = true; _aeRec.continuous = false;
-      if (btn) btn.style.background = 'var(--accent-green)';
-      _aeRec.onresult = (e) => { let t = ''; for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript; if (inp) inp.value = t; };
-      _aeRec.onend = () => { _aeRec = null; if (btn) btn.style.background = 'var(--btn-surface,#34485d)'; };
-      _aeRec.onerror = () => { _aeRec = null; if (btn) btn.style.background = 'var(--btn-surface,#34485d)'; };
-      try { _aeRec.start(); } catch (e) { _aeRec = null; }
+      const inp = document.getElementById('aeQ');
+      if (_aeRec) { try { _aeRec.stop(); } catch (e) {} return; } // tap again = stop (onend resets the UI)
+      _aeRec = new SR(); _aeRec.lang = 'en-US'; _aeRec.interimResults = true; _aeRec.maxAlternatives = 1;
+      try { _aeRec.continuous = true; } catch (e) {} // keep listening THROUGH pauses; stop on the user's tap, not on a detected pause
+      _aeFinal = (inp && inp.value ? inp.value.trim() + ' ' : ''); // preserve any already-typed text
+      _aeRec.onresult = (e) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) _aeFinal += t + ' '; else interim += t; }
+        if (inp) inp.value = (_aeFinal + interim).replace(/\s+/g, ' ').trimStart();
+      };
+      const reset = () => { _aeRec = null; _aeMicUI(false); };
+      _aeRec.onerror = reset;
+      _aeRec.onend = () => { if (inp) inp.value = String(inp.value || '').trim(); reset(); }; // fills the box; user taps Ask
+      try { _aeRec.start(); _aeMicUI(true); } catch (e) { reset(); }
     }
     function aeAsk() {
       const inp = document.getElementById('aeQ'), body = document.getElementById('aeBody');
