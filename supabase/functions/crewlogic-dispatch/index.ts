@@ -482,7 +482,10 @@ Deno.serve(async (req: Request) => {
       // duration writes still validate the real job length via the lock step.
       const [routes, jobs, openSlots, tz] = await Promise.all([
         getRoutesFull(token, dayID),
-        listRouteJobs(token, franchiseID, dayID, undefined, false),
+        // withCoords=true (FW-63): geocode each board job so the board-detail popup's directions link can
+        // route to the exact PIN, not the address text (the text re-resolved to the Hampton Inn POI on the
+        // wrong side of the Cape Cod canal). Geocode is cache-first — DB reads, no extra Vonigo load.
+        listRouteJobs(token, franchiseID, dayID, undefined, true),
         suggestSlotsFn(token, franchiseID, dayID, 30).catch(() => []),
         franchiseTz(franchiseID),
       ]);
@@ -491,7 +494,7 @@ Deno.serve(async (req: Request) => {
       for (const j of jobs) {
         const k = j.routeID; if (!k) continue;
         if (!byId[k]) byId[k] = { id: k, code: j.routeCode, name: j.route, isActive: true, jobs: [], open: [] };
-        byId[k].jobs.push({ woID: j.woID, jobID: j.jobID, client: j.client, timeMin: j.timeMin, durationMin: j.durationMin, timeLabel: j.timeLabel, status: j.status, completed: j.completed, labelDone: j.labelDone, labelOpt: j.labelOpt, apptCount: j.apptCount, zoneID: j.zoneID, zoneName: j.zoneName, zip: j.zip, address: j.address, routeCode: j.routeCode, price: j.price, summary: j.summary, items: j.items, bookedOnline: j.bookedOnline, bookedSameDay: !!(j.dateCreated && j.dateService && ymdInTz(+j.dateCreated, tz) === ymdInTz(+j.dateService, tz)) });
+        byId[k].jobs.push({ woID: j.woID, jobID: j.jobID, client: j.client, timeMin: j.timeMin, durationMin: j.durationMin, timeLabel: j.timeLabel, status: j.status, completed: j.completed, labelDone: j.labelDone, labelOpt: j.labelOpt, apptCount: j.apptCount, zoneID: j.zoneID, zoneName: j.zoneName, zip: j.zip, address: j.address, lat: j.lat, lon: j.lon, routeCode: j.routeCode, price: j.price, summary: j.summary, items: j.items, bookedOnline: j.bookedOnline, bookedSameDay: !!(j.dateCreated && j.dateService && ymdInTz(+j.dateCreated, tz) === ymdInTz(+j.dateService, tz)) });
       }
       for (const s of openSlots) { const k = String(s.routeID); if (byId[k]) byId[k].open.push({ startTime: s.startTime, label: s.label }); }
       // Emit in getRoutesFull's sequence order — NOT Object.values(byId), which JS reorders by the
