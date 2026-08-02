@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.104.3 | 2026-08-02">
+  <meta name="crewlogic-version" content="v5.104.4 | 2026-08-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1596,7 +1596,10 @@
             <span id="trucksDayRel" style="font-size:12px;color:var(--text-muted,#6e8194);font-weight:600;"></span>
             <button id="trucksLookaheadBtn" onclick="toggleTrucksLookahead()" title="Show jobs for the next 3 days from the selected day, as magenta dots" style="font-size:12px;padding:7px 12px;background:var(--bg-input,#1e2f40);color:var(--text-muted,#6e8194);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;white-space:nowrap;">◌ +3 days</button>
           </div>
-          <button id="trucksRefreshBtn" onclick="showTrucks()" style="font-size:13px;padding:7px 16px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;">🔄 Refresh</button>
+          <div style="display:inline-flex;gap:8px;">
+            <button id="trucksMeasureBtn" onclick="toggleMeasureMode()" title="Measure driving distance between any two points — tap this, then tap two points (truck, job, facility or HQ) on the map" style="font-size:13px;padding:7px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;">📏 Measure</button>
+            <button id="trucksRefreshBtn" onclick="showTrucks()" style="font-size:13px;padding:7px 16px;background:var(--bg-input,#1e2f40);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);cursor:pointer;font-weight:600;">🔄 Refresh</button>
+          </div>
         </div>
         <div id="trucksMap" style="height:60vh;min-height:400px;max-height:680px;border-radius:var(--radius,16px);overflow:hidden;border:1px solid var(--border,#22354a);background:var(--tile,#1e2f40);"></div>
         <div id="trucksLegend" style="display:none;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--text-muted,#6e8194);">
@@ -9781,7 +9784,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // mkIcon + _siteIconFor are now module-scope (hoisted for disposal-route reuse).
       // In measure mode (started from a truck), tapping a site measures truck→site (same as a job).
       // Bind both click and mouseover so a mobile first-tap (synthesized hover) triggers it too.
-      const attachMeasure = (m, lat, lon, label) => { const go = () => { if (_measureFrom) { try { m.closePopup(); } catch (e) {} _measureToJob({ lat: lat, lon: lon, clientName: label }); } }; m.on('click', go); m.on('mouseover', () => { if (_mtIsTouch()) go(); }); };
+      const attachMeasure = (m, lat, lon, label) => { const go = () => { if (_measureArmed) { measureStartFrom(lat, lon, label); return; } if (_measureFrom) { try { m.closePopup(); } catch (e) {} _measureToJob({ lat: lat, lon: lon, clientName: label }); } }; m.on('click', go); m.on('mouseover', () => { if (_mtIsTouch()) go(); }); };
       types.forEach(t => {
         if (!t.layer) return;
         t.layer.clearLayers();
@@ -9793,7 +9796,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const siteHtml = '<div style="font-size:13px;line-height:1.5;min-width:150px;"><b>' + _truckEsc(label) + '</b><br>' + _addrLink(_truckProperAddr(s.address), s.address, _truckEsc) + costLine + _measBtn(c.lat, c.lon, label) + '</div>';
           const m = L.marker([c.lat, c.lon], { icon: mkIcon(t.emoji, t.color, 20, true) }); // ~75% of the old size — bare emoji reads too big at full 26
           // Details show in the left rail on click; in measure mode attachMeasure's handler wins instead.
-          m.on('click', function () { if (!_measureFrom) { _clearMeasureLine(); _railShowInfo(siteHtml, [c.lat, c.lon]); } });
+          m.on('click', function () { if (_measureArmed) return; if (!_measureFrom) { _clearMeasureLine(); _railShowInfo(siteHtml, [c.lat, c.lon]); } }); // armed → attachMeasure's handler sets the anchor
           attachMeasure(m, c.lat, c.lon, label);
           m.addTo(t.layer);
         });
@@ -9818,7 +9821,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // ── "Measure to a job" (tap a truck's "Distance to a job", then tap a job) ──
     // Next job isn't the closest, so the owner picks the job; we draw a line + show driving distance + ETA.
-    let _measureFrom = null, _measureLine = null;
+    let _measureFrom = null, _measureLine = null, _measureArmed = false;
     // Remove the drawn measure line from the map (shared by the rail-info path and _mapHoverHide).
     function _clearMeasureLine() {
       if (_measureLine) { try { _measureLine.remove(); } catch (e) {} _measureLine = null; }
@@ -9867,11 +9870,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // any-object → any-object.
     function measureStartFrom(lat, lon, label) {
       if (lat == null || lon == null) { alert('No location for this point.'); return; }
+      _measureArmed = false; // consumed the "pick the first point" arm
       _measureFrom = { lat: Number(lat), lon: Number(lon), label: label || 'here' };
       if (_trucksMap) _trucksMap.closePopup();
       _clearMeasureLine();
       _railShowInfo('<div style="font-size:13px;padding:8px;">Measuring… tap another job, facility, truck or HQ on the map.</div>');
       _mtBanner('📏 Measuring from ' + _measureFrom.label + ' — tap a target  ·  tap here to cancel');
+      _syncMeasureBtn();
+    }
+    // Toolbar "📏 Measure" toggle (standalone Where-Are-My-Trucks card, which has no side rail so the
+    // per-popup "Measure from here" buttons are hard to find). Tap it, then tap ANY two points on the map
+    // (truck, job, facility, HQ) → driving distance + ETA. Arms _measureArmed so the FIRST marker tap sets
+    // the anchor (via measureStartFrom) instead of opening its popup; the existing engine handles point B.
+    function toggleMeasureMode() {
+      if (_measureArmed || _measureFrom) { mtMeasureCancel(); return; } // tap again to exit / cancel
+      _measureArmed = true;
+      _mtBanner('📏 Measure — tap the FIRST point (truck, job, facility or HQ)  ·  tap here to cancel');
+      _syncMeasureBtn();
+    }
+    function _syncMeasureBtn() {
+      const btn = document.getElementById('trucksMeasureBtn'); if (!btn) return;
+      const on = _measureArmed || !!_measureFrom;
+      btn.style.background = on ? 'var(--accent-green,#00E785)' : 'var(--bg-input,#1e2f40)';
+      btn.style.color = on ? 'var(--accent-text,#04110a)' : 'var(--text-primary,#eef4fa)';
     }
     // Reusable "Measure from here" button HTML for job / facility / HQ popups. Escapes the label for the inline onclick.
     function _measBtn(lat, lon, label) {
@@ -9885,9 +9906,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       measureStartFrom(t.lat, t.lon, (i + 1) + '. ' + (t.name || 'Truck'));
     }
     function mtMeasureCancel() {
-      _measureFrom = null;
+      _measureFrom = null; _measureArmed = false;
       const b = document.getElementById('mtMeasureBanner'); if (b) b.style.display = 'none';
       if (_measureLine && _trucksMap) { _trucksMap.removeLayer(_measureLine); _measureLine = null; }
+      _syncMeasureBtn();
     }
     // ── Dashboard "Find disposal": tap a TRUCK + tap a JOB on the map → cheapest/fastest dump, plotted
     //    (green/blue/gold) with detail cards below. Reuses crewlogic-route-disposal + dispRecCard renderers.
@@ -10066,7 +10088,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!_measureFrom || j.lat == null || j.lon == null || !_trucksMap) return;
       const from = _measureFrom;
       if (_measureLine) { _trucksMap.removeLayer(_measureLine); _measureLine = null; }
-      _measureFrom = null;
+      _measureFrom = null; _measureArmed = false; _syncMeasureBtn();
       const b = document.getElementById('mtMeasureBanner'); if (b) b.style.display = 'none';
       _trucksMap.closePopup(); // close any marker popup the tap opened
       const dest = _truckEsc(j.clientName || 'Job');
@@ -10420,7 +10442,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap);
           // Details in the fixed in-map hover box (no popup → no clip/pan); measure + disposal-pick first.
           m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } });
-          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _railShowJob(tip, j.jobID, [j.lat, j.lon]); });
+          m.on('click', function () { if (_measureArmed) { measureStartFrom(j.lat, j.lon, (j.clientName || 'Job')); return; } if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _railShowJob(tip, j.jobID, [j.lat, j.lon]); });
           _lookaheadMarkers.push(m);
         });
       });
@@ -10765,7 +10787,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Skipped on touch — mobile has no hover, and we don't want a tap to flash it.
         if (!_mtIsTouch()) m.bindTooltip(_truckEsc(t.name || ('Truck ' + (i + 1))), { direction: 'top', offset: [0, -18], opacity: 0.95 });
         // Truck details show in the fixed in-map hover box (no popup → no clip/pan); disposal mode picks the truck.
-        m.on('click', function () { if (_dispMode) { _dispTapTruck(i, t); } else if (_measureFrom) { _measureToJob({ lat: t.lat, lon: t.lon, clientName: (i + 1) + '. ' + (t.name || 'Truck') }); } else { _clearMeasureLine(); _railShowInfo(pop, [t.lat, t.lon]); } });
+        m.on('click', function () { if (_measureArmed) { measureStartFrom(t.lat, t.lon, (i + 1) + '. ' + (t.name || 'Truck')); return; } if (_dispMode) { _dispTapTruck(i, t); } else if (_measureFrom) { _measureToJob({ lat: t.lat, lon: t.lon, clientName: (i + 1) + '. ' + (t.name || 'Truck') }); } else { _clearMeasureLine(); _railShowInfo(pop, [t.lat, t.lon]); } });
         _truckMarkers.push(m);
         pts.push([t.lat, t.lon]);
       });
@@ -10926,7 +10948,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           // Job details show in the fixed in-map hover box (no marker popup → never clips/pans). Measuring +
           // disposal-pick still take priority on the first interaction.
           m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } });
-          m.on('click', function () { if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else { _clearMeasureLine(); _railShowJob(pop, j.jobID, [j.lat, j.lon]); } });
+          m.on('click', function () { if (_measureArmed) { measureStartFrom(j.lat, j.lon, (j.clientName || 'Job')); return; } if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else { _clearMeasureLine(); _railShowJob(pop, j.jobID, [j.lat, j.lon]); } });
           _jobMarkers.push(m);
           jobPts.push([j.lat, j.lon]);
           // Cache this job's schedule under BOTH ids so the "#<woID>" in a geofence name resolves
