@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.104.5 | 2026-08-02">
+  <meta name="crewlogic-version" content="v5.104.6 | 2026-08-02">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9869,10 +9869,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Generic "measure from here" — start a measurement from ANY placed object (job, facility, truck, HQ).
     // The measure-TO half already works for every marker (_measureToJob takes any lat/lon), so this makes it
     // any-object → any-object.
-    function measureStartFrom(lat, lon, label) {
+    function measureStartFrom(lat, lon, label, kind) {
       if (lat == null || lon == null) { alert('No location for this point.'); return; }
       _measureArmed = false; // consumed the "pick the first point" arm
-      _measureFrom = { lat: Number(lat), lon: Number(lon), label: label || 'here' };
+      _measureFrom = { lat: Number(lat), lon: Number(lon), label: label || 'here', kind: kind || 'point' }; // kind 'truck' gates the arrival/late calc
       if (_trucksMap) _trucksMap.closePopup();
       _clearMeasureLine();
       _railShowInfo('<div style="font-size:13px;padding:8px;">Measuring… tap another job, facility, truck or HQ on the map.</div>');
@@ -9904,7 +9904,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function mtMeasureStart(i) {
       const t = (_trucksData || [])[i];
       if (!t || t.lat == null || t.lon == null) { alert('That truck has no current location.'); return; }
-      measureStartFrom(t.lat, t.lon, (i + 1) + '. ' + (t.name || 'Truck'));
+      measureStartFrom(t.lat, t.lon, (i + 1) + '. ' + (t.name || 'Truck'), 'truck');
     }
     function mtMeasureCancel() {
       _measureFrom = null; _measureArmed = false;
@@ -10085,9 +10085,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const windowEnd = d.getTime() + (startMin + winMin) * 60000; // job start + duration (window end)
       return { text, late: expected.getTime() > windowEnd };
     }
-    async function _measureToJob(j) {
+    async function _measureToJob(j, dayOff) {
       if (!_measureFrom || j.lat == null || j.lon == null || !_trucksMap) return;
       const from = _measureFrom;
+      // Arrival ETA + "will be late" is meaningful ONLY when driving FROM a truck TO a job on TODAY's map.
+      // Suppress it when the start point isn't a truck (e.g. a disposal site → a home) and whenever the map
+      // is set to any day other than today — a future-dated job can't be "late" from today's drive. The
+      // measured distance + drive time still show in every case. (owner ask 2026-08-02)
+      if (dayOff == null) dayOff = Number(_trucksJobDay || 0);
+      const _considerArrival = (from && from.kind === 'truck') && Number(dayOff) === 0;
       if (_measureLine) { _trucksMap.removeLayer(_measureLine); _measureLine = null; }
       _measureFrom = null; _measureArmed = false; _measureResultShowing = false; _syncMeasureBtn();
       const b = document.getElementById('mtMeasureBanner'); if (b) b.style.display = 'none';
@@ -10100,7 +10106,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _measureLine = L.polyline([[from.lat, from.lon], [j.lat, j.lon]], { color: '#1e6fff', weight: 4, dashArray: '7,6', opacity: 0.95, _measure: true }).addTo(_trucksMap);
         try {
           const data = await edgeFunctionCall('crewlogic-estimate', { action: 'pointDistance', origin: from.lat + ',' + from.lon, dest: j.lat + ',' + j.lon });
-          const info = _arrivalInfo(data && data.minutes, j.time, j.timeLabel, j.durationMin);
+          const info = _considerArrival ? _arrivalInfo(data && data.minutes, j.time, j.timeLabel, j.durationMin) : null;
           let arrHtml = '';
           if (info) {
             if (info.late === true && j.jobID) {
@@ -10140,7 +10146,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const distText = (miles != null) ? ((miles < 10 ? miles.toFixed(1) : String(Math.round(miles))) + ' mi') : '';
           const durText = (mins != null) ? ('~' + mins + ' min drive') : '';
           const traffic = !!(sum.trafficDelayInSeconds && sum.trafficDelayInSeconds > 0);
-          const info = _arrivalInfo(mins, j.time, j.timeLabel, j.durationMin);
+          const info = _considerArrival ? _arrivalInfo(mins, j.time, j.timeLabel, j.durationMin) : null;
           let arrHtml = '';
           if (info) {
             if (info.late === true && j.jobID) {
@@ -10444,8 +10450,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap);
           // Details in the fixed in-map hover box (no popup → no clip/pan); measure + disposal-pick first.
-          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j); } });
-          m.on('click', function () { if (_measureArmed) { measureStartFrom(j.lat, j.lon, (j.clientName || 'Job')); return; } if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j); } else _railShowJob(tip, j.jobID, [j.lat, j.lon]); });
+          m.on('mouseover', function () { if (_measureFrom && _mtIsTouch()) { _measureToJob(j, base + k); } });
+          m.on('click', function () { if (_measureArmed) { measureStartFrom(j.lat, j.lon, (j.clientName || 'Job')); return; } if (_dispMode) { _dispTapJob(j); } else if (_measureFrom) { _measureToJob(j, base + k); } else _railShowJob(tip, j.jobID, [j.lat, j.lon]); });
           _lookaheadMarkers.push(m);
         });
       });
@@ -10795,7 +10801,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Skipped on touch — mobile has no hover, and we don't want a tap to flash it.
         if (!_mtIsTouch()) m.bindTooltip(_truckEsc(t.name || ('Truck ' + (i + 1))), { direction: 'top', offset: [0, -18], opacity: 0.95 });
         // Truck details show in the fixed in-map hover box (no popup → no clip/pan); disposal mode picks the truck.
-        m.on('click', function () { if (_measureArmed) { measureStartFrom(t.lat, t.lon, (i + 1) + '. ' + (t.name || 'Truck')); return; } if (_dispMode) { _dispTapTruck(i, t); } else if (_measureFrom) { _measureToJob({ lat: t.lat, lon: t.lon, clientName: (i + 1) + '. ' + (t.name || 'Truck') }); } else { _clearMeasureLine(); _railShowInfo(pop, [t.lat, t.lon]); } });
+        m.on('click', function () { if (_measureArmed) { measureStartFrom(t.lat, t.lon, (i + 1) + '. ' + (t.name || 'Truck'), 'truck'); return; } if (_dispMode) { _dispTapTruck(i, t); } else if (_measureFrom) { _measureToJob({ lat: t.lat, lon: t.lon, clientName: (i + 1) + '. ' + (t.name || 'Truck') }); } else { _clearMeasureLine(); _railShowInfo(pop, [t.lat, t.lon]); } });
         _truckMarkers.push(m);
         pts.push([t.lat, t.lon]);
       });
