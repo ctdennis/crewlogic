@@ -57,9 +57,19 @@ Scope: `franchise_id` (+ `tenant_id`). Timestamps: `start_time`, `end_time`, `cr
 - Other useful columns: `vehicle_number` ("Truck 3"), `wo_id`, `job_id`, `geofence_id`, `raw jsonb`.
 - **TZ:** `start_time` is UTC — convert to franchise TZ before a day-of-week ("Saturday") or hour ("3pm") filter.
 
-**Facility-name mapping (join dwell → facility):** `facilities.name` ("Raynham") differs from
-`geofence_alerts.geofence_name` ("Raynham - Transfer"). Match by prefix / `ILIKE facilities.name || ' -%'`,
-or maintain an explicit alias map. Do the mapping — don't assume equality.
+**Facility + truck conformance — USE THE VIEW `v_geofence_dwell` (migration 0079).** Don't hand-roll the
+join. The view resolves both dimension-key mismatches on real columns (no alias tables needed):
+- **Facility:** `geofence_alerts.geofence_id = facilities.provider_geofence_id` (exact; covers 1827/1836
+  #90 exit rows). `facility_id` is NULL for non-facility geofences (fuel/office/customer/test).
+- **Truck:** `geofence_alerts.vehicle_number = franchise_trucks.name` (per franchise). `truck_id` NULL for a
+  retired vehicle number.
+It emits one row per real dwell (`geofence_exit`, `dwell_seconds`, `start_time` UTC, resolved
+`facility_id`/`facility_name`/`facility_type` + `truck_id`/`truck_name`). Facility-dwell measure =
+`where facility_id is not null` + your day/hour filter (convert `start_time` to franchise TZ) + hygiene
+(`dwell_seconds between 120 and 7200`). Acceptance: Raynham Saturday = 22 visits, avg 21:07, median 16:56.
+**Known gap (~0.5%):** 9 null-`geofence_id` rows (early 2026-07-08→10 window, mostly non-facilities) aren't
+facility-mapped; none are Saturdays, so the Raynham measure is unaffected. Backfill those geofence_ids later
+if exhaustive coverage is ever needed.
 
 ## `facilities` — reference list (#90 = 9 sites)
 
