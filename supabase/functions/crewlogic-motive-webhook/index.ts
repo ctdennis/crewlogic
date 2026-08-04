@@ -175,18 +175,6 @@ Deno.serve(async (req: Request) => {
 
   const rawBody = await req.text().catch(() => "");
 
-  // TEMP DIAGNOSTIC (2026-08-03): capture EVERY incoming POST before verification, so we can see whether
-  // Motive is actually delivering to #90's webhook (and if so, whether the signature is present). The sig
-  // VALUE is never stored (present/absent only). Remove once the #90 delivery/secret issue is resolved.
-  try {
-    await createClient(SUPABASE_URL, SERVICE_KEY).from("motive_webhook_capture").insert({
-      method: req.method,
-      query: url.search,
-      headers: { sig: req.headers.get(SIG_HEADER) ? "present" : "absent", ua: req.headers.get("user-agent") || "", ct: req.headers.get("content-type") || "" },
-      body: rawBody.slice(0, 1000),
-    });
-  } catch (_e) { /* best-effort diagnostic — never block the webhook */ }
-
   // Activation handshake: Motive posts a JSON array of event-type strings — ack without a signature.
   let parsed: any = null;
   try { parsed = JSON.parse(rawBody); } catch (_e) { /* not JSON */ }
