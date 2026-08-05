@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.104.9 | 2026-08-05">
+  <meta name="crewlogic-version" content="v5.105.0 | 2026-08-05">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11103,13 +11103,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _geoAlertRows = rows || []; // remembered so the job popup can flip to 'arrived' once the truck is on site
       _mjGeofenceCheck(rows).catch(function () {}); // FW-59 task 6: auto-assign truck on first arrival + wrong-truck warning
     }
-    // ── FW-59 task 6: geofence auto-assign + wrong-truck warning ─────────────────────────────────────────
-    // On a job_arrive event: if the arrived truck's route has NO truck set yet, auto-assign it (the first crew to
-    // show up defines the truck for the day, source 'inferred'); if a DIFFERENT truck than the hard-set one arrives,
-    // warn in the Live Alerts rail. Client-side on LIVE data — arrivals from the alerts feed (rows), wo→route from
-    // the loaded board (_mjEtaRoutesByDate), vehicle_number→truck_key from the roster. NEVER overwrites an existing
-    // assignment (only fills an empty route), so a manual hard-set always wins.
-    let _mjGeoAutoSet = {}; // routeId → truckKey already auto-set this session (guards against duplicate writes)
+    // ── FW-59 task 6: geofence auto-assign (every crew that arrives) ─────────────────────────────────────
+    // On a job_arrive event: EVERY distinct truck that shows up on a route gets assigned to it (append,
+    // source 'inferred') — a two-truck double-team job shows both crews, not just the first. The ops manager
+    // can unassign. Client-side on LIVE data — arrivals from the alerts feed (rows), wo→route from the loaded
+    // board (_mjEtaRoutesByDate), vehicle_number→truck_key from the roster. Uses the 'add' action (idempotent
+    // append), so it NEVER disturbs a truck already on the route (a manual hard-set is preserved).
+    let _mjGeoAutoSet = {}; // "routeId|truckKey" already auto-added this session (guards against duplicate writes)
     let _geoAlertRows = []; // last geofence alert rows — so the job popup can show 'arrived' instead of a predicted ETA
     async function _mjGeofenceCheck(rows) {
       if (!currentUser || !currentUser.franchiseInternalID || typeof mjNowParts !== 'function') return;
@@ -11125,38 +11125,44 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       });
       const nameToKey = {};
       (_mjRoster || []).forEach(function (t) { if (t.name) nameToKey[String(t.name)] = t.truckKey; });
-      // Earliest job_arrive per route = the first truck to physically show up on it.
-      const byRoute = {};
+      // Every DISTINCT truck with a job_arrive on a route = a crew that physically showed up on it. All of
+      // them get assigned (append), not just the first — a two-truck job shows both.
+      const arrivals = {}; // routeId → { route, trucks: { truckKey: vehicleName } }
       (rows || []).forEach(function (a) {
         if (!a || a.event_type !== 'job_arrive' || a.wo_id == null || !a.vehicle_number) return;
         const route = woToRoute[String(a.wo_id)]; if (!route) return;
         const tk = nameToKey[String(a.vehicle_number)]; if (!tk) return;
-        const t = String(a.start_time || a.created_at || '');
-        if (!byRoute[route.id] || t < byRoute[route.id].t) byRoute[route.id] = { route: route, tk: tk, vehicle: a.vehicle_number, t: t };
+        if (!arrivals[route.id]) arrivals[route.id] = { route: route, trucks: {} };
+        arrivals[route.id].trucks[tk] = a.vehicle_number;
       });
       const assign = _mjAssignByDate[sd] || (_mjAssignByDate[sd] = {});
       const notes = [];
-      const rids = Object.keys(byRoute);
+      const rids = Object.keys(arrivals);
       for (let i = 0; i < rids.length; i++) {
-        const rid = rids[i], hit = byRoute[rid];
+        const rid = rids[i], route = arrivals[rid].route, trucks = arrivals[rid].trucks;
         const assigned = (assign[rid] || []).map(function (x) { return x.truckKey; });
-        if (!assigned.length) {
-          if (_mjGeoAutoSet[rid]) continue;                               // already auto-set this session
-          _mjGeoAutoSet[rid] = hit.tk;
+        const tks = Object.keys(trucks);
+        for (let j = 0; j < tks.length; j++) {
+          const tk = tks[j], vehicle = trucks[tk];
+          if (assigned.indexOf(tk) !== -1) continue;                      // already on this route
+          const gk = rid + '|' + tk;
+          if (_mjGeoAutoSet[gk]) continue;                                // already auto-added this session
+          _mjGeoAutoSet[gk] = true;
           try {
-            const res = await edgeFunctionCall('crewlogic-assignments', { action: 'set', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: sd, vonigoRouteId: String(rid), routeName: hit.route.name, truckKeys: [hit.tk], assignedBy: 'geofence-auto', source: 'inferred' });
-            if (res && res.success) { assign[rid] = [{ truckKey: hit.tk, source: 'inferred' }]; _mjRepaintAllTruckCells(); notes.push({ kind: 'auto', route: hit.route.code, vehicle: hit.vehicle }); }
-            else { delete _mjGeoAutoSet[rid]; }                           // failed → let it retry next cycle
-          } catch (e) { delete _mjGeoAutoSet[rid]; console.error('[mj-geo] auto-set failed', e); }
-        } else if (assigned.indexOf(hit.tk) === -1) {
-          notes.push({ kind: 'mismatch', route: hit.route.code, vehicle: hit.vehicle, assigned: assigned.map(_mjTruckName).join(', ') });
+            const res = await edgeFunctionCall('crewlogic-assignments', { action: 'add', franchiseInternalID: currentUser.franchiseInternalID, serviceDate: sd, vonigoRouteId: String(rid), routeName: route.name, truckKey: tk, assignedBy: 'geofence-auto', source: 'inferred' });
+            if (res && res.success) {
+              assign[rid] = (res.assignments || []).map(function (x) { return { truckKey: x.truckKey, source: x.source }; }); // authoritative full set
+              _mjRepaintAllTruckCells();
+              notes.push({ kind: 'auto', route: route.code, vehicle: vehicle });
+            } else { delete _mjGeoAutoSet[gk]; }                          // failed → let it retry next cycle
+          } catch (e) { delete _mjGeoAutoSet[gk]; console.error('[mj-geo] auto-add failed', e); }
         }
       }
       if (notes.length) _mjRenderGeoNotes(notes);
     }
     function _mjRenderGeoNotes(notes) {
       const html = notes.map(function (n) {
-        if (n.kind === 'auto') return '<div style="padding:9px 12px;border-bottom:1px solid var(--border);background:rgba(0,231,133,0.10);font-size:12px;color:var(--text-primary);">🚚 <b>Auto-assigned</b> ' + mjEsc(n.vehicle) + ' → <b>' + mjEsc(n.route) + '</b> (first crew to arrive)</div>';
+        if (n.kind === 'auto') return '<div style="padding:9px 12px;border-bottom:1px solid var(--border);background:rgba(0,231,133,0.10);font-size:12px;color:var(--text-primary);">🚚 <b>Auto-assigned</b> ' + mjEsc(n.vehicle) + ' → <b>' + mjEsc(n.route) + '</b> (arrived on site)</div>';
         return '<div style="padding:9px 12px;border-bottom:1px solid var(--border);background:rgba(245,158,11,0.14);font-size:12px;color:var(--text-primary);">⚠️ <b>' + mjEsc(n.vehicle) + '</b> arrived on <b>' + mjEsc(n.route) + '</b> — but <b>' + mjEsc(n.assigned) + '</b> is assigned</div>';
       }).join('');
       document.querySelectorAll('.gf-alerts-list').forEach(function (l) { l.insertAdjacentHTML('afterbegin', html); });

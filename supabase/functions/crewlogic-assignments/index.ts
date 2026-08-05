@@ -197,6 +197,47 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    // Append one or more trucks to a route WITHOUT disturbing the trucks already on it — the geofence
+    // auto-assign path: every crew that ARRIVES gets added; the ops manager can unassign. Idempotent on
+    // the (franchise, day, route, truck) unique key — re-adding an existing truck is a no-op, and a truck
+    // already there (including a manual hard-set) is left untouched (source/assigned_by preserved).
+    // Contrast 'set', which REPLACES the whole set for the route.
+    if (action === 'add') {
+      const vonigoRouteId = str(body.vonigoRouteId);
+      const routeName = str(body.routeName);
+      const assignedBy = str(body.assignedBy) || null;
+      const src = str(body.source) || 'inferred';
+      if (!vonigoRouteId) return json({ success: false, error: 'vonigoRouteId required' }, 400);
+
+      const raw = Array.isArray(body.truckKeys) ? body.truckKeys : (body.truckKey != null ? [body.truckKey] : []);
+      const truckKeys = Array.from(new Set(raw.map(str).filter(Boolean)));
+      if (!truckKeys.length) return json({ success: false, error: 'truckKey(s) required' }, 400);
+
+      const rows = truckKeys.map(tk => ({
+        franchise_id: franchiseInternalID,
+        service_date: serviceDate,
+        vonigo_route_id: vonigoRouteId,
+        route_name: routeName || null,
+        truck_key: tk,
+        source: src,
+        assigned_by: assignedBy,
+      }));
+      const { error: uErr } = await db.from('route_truck_assignments')
+        .upsert(rows, { onConflict: 'franchise_id,service_date,vonigo_route_id,truck_key', ignoreDuplicates: true });
+      if (uErr) throw uErr;
+
+      // Return the route's FULL current set so the caller repaints authoritatively (not just what it added).
+      const { data: cur } = await db.from('route_truck_assignments')
+        .select('vonigo_route_id, truck_key, source, updated_at')
+        .eq('franchise_id', franchiseInternalID).eq('service_date', serviceDate).eq('vonigo_route_id', vonigoRouteId);
+      return json({
+        success: true, serviceDate, vonigoRouteId,
+        assignments: (cur || []).map(r => ({
+          vonigoRouteId: r.vonigo_route_id, truckKey: r.truck_key, source: r.source, updatedAt: r.updated_at,
+        })),
+      });
+    }
+
     // ── eta (day-start feasibility) ─────────────────────────────────────────
     // Truck-agnostic walk of each route from the yard, in local minutes-from-midnight, checking each
     // job's arrival against its scheduled window [start, start+duration]. The duration dial scales the

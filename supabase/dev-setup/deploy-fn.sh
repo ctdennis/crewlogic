@@ -40,6 +40,7 @@ PUBLIC=(
   crewlogic-notify
   crewlogic-vonigo-import
   crewlogic-vonigo-deep-backfill
+  crewlogic-assignments
 )
 
 case "$ENV" in
