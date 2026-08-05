@@ -57,9 +57,19 @@ Scope: `franchise_id` (+ `tenant_id`). Timestamps: `start_time`, `end_time`, `cr
 - Other useful columns: `vehicle_number` ("Truck 3"), `wo_id`, `job_id`, `geofence_id`, `raw jsonb`.
 - **TZ:** `start_time` is UTC — convert to franchise TZ before a day-of-week ("Saturday") or hour ("3pm") filter.
 
-**Facility-name mapping (join dwell → facility):** `facilities.name` ("Raynham") differs from
-`geofence_alerts.geofence_name` ("Raynham - Transfer"). Match by prefix / `ILIKE facilities.name || ' -%'`,
-or maintain an explicit alias map. Do the mapping — don't assume equality.
+**Facility + truck conformance — USE THE VIEW `v_geofence_dwell` (migration 0079).** Don't hand-roll the
+join. The view resolves both dimension-key mismatches on real columns (no alias tables needed):
+- **Facility:** `geofence_alerts.geofence_id = facilities.provider_geofence_id` (exact; covers 1827/1836
+  #90 exit rows). `facility_id` is NULL for non-facility geofences (fuel/office/customer/test).
+- **Truck:** `geofence_alerts.vehicle_number = franchise_trucks.name` (per franchise). `truck_id` NULL for a
+  retired vehicle number.
+It emits one row per real dwell (`geofence_exit`, `dwell_seconds`, `start_time` UTC, resolved
+`facility_id`/`facility_name`/`facility_type` + `truck_id`/`truck_name`). Facility-dwell measure =
+`where facility_id is not null` + your day/hour filter (convert `start_time` to franchise TZ) + hygiene
+(`dwell_seconds between 120 and 7200`). Acceptance: Raynham Saturday = 22 visits, avg 21:07, median 16:56.
+**Known gap (~0.5%):** 9 null-`geofence_id` rows (early 2026-07-08→10 window, mostly non-facilities) aren't
+facility-mapped; none are Saturdays, so the Raynham measure is unaffected. Backfill those geofence_ids later
+if exhaustive coverage is ever needed.
 
 ## `facilities` — reference list (#90 = 9 sites)
 
@@ -81,9 +91,16 @@ they are the facility's posted hours in its own local time, not UTC. Don't tz-co
 Scope `franchise_id`. `created_at`/`updated_at` tz-aware. Key cols: `status` (completed 197 / scheduled 127),
 `service_address`/`city`/`state`/`zip`/`lat`/`lng`, `items_description`, `estimate_id`, `estimate_mode`,
 `source_external_id` (= Vonigo job_number), several `*_reason_id`/`*_type_id` FKs.
-**QUIRK — freshness:** `origin='import'` — a **one-time Vonigo backfill** (all rows created 2026-07-23),
-**not live-synced.** Historical/aggregate questions are fine; **very recent jobs may be missing** and need live
-Vonigo. State the snapshot date when answering "recent" questions, or route them to the live board.
+**QUIRK — freshness DIFFERS BY ENVIRONMENT (verified 2026-08-04):**
+- **PROD is live-synced** — `crewlogic-vonigo-sync` (*/15) + a daily deep-backfill keep the mirror current
+  (jobs created daily, `updated_at` within minutes). So on prod, "jobs completed yesterday/this week" is
+  accurate. (The earlier "one-time import" note was generalized from DEV — wrong for prod.)
+- **DEV was a frozen 2026-07-23 import** with NO sync — it returned stale/empty results for recent dates
+  (the Aug-3 "0 completed" disconnect). Now kept current by a `*/30` dev cron
+  (`crewlogic-vonigo-import-sync-90`) that calls `crewlogic-vonigo-import` (action `sync`, 14d back/7fwd).
+- **Refresh dev on demand:** `POST crewlogic-vonigo-import {franchiseID:"90", action:"sync"}`.
+- Note: `jobs.created_at` is the row's IMPORT time, not the service date — always date jobs by
+  `job_appointments.scheduled_date` (as the jobs_completed skill does).
 
 ## `job_appointments` — scheduled slots (#90 = 363)
 

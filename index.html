@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.104.7 | 2026-08-02">
+  <meta name="crewlogic-version" content="v5.104.9 | 2026-08-05">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4256,6 +4256,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Dev = localhost / the Cloudflare "dev" branch preview. Everything else = prod.
     const _DEV_HOSTNAMES = ['localhost', '127.0.0.1', 'dev.crewlogic.pages.dev'];
     const IS_DEV_ENV = _DEV_HOSTNAMES.includes(location.hostname);
+    // FW-62 Analysis Engine — prod visibility switch. FALSE = super-admin only (soft launch).
+    // Flip to TRUE to expose the 🎤 Analysis Engine button to EVERYONE with Dispatch access.
+    // (Dev always shows it regardless, for continued development.)
+    const AE_GENERAL_ACCESS = false;
     const SUPABASE_URL = IS_DEV_ENV
       ? 'https://bagkimfwmpwjfhfhmsrb.supabase.co'    // crewlogic-dev
       : 'https://ozfkpxyachigfpcmvekz.supabase.co';   // crewlogic-prod
@@ -12543,7 +12547,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<button onclick="showTrucks()" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🔄 Refresh</button>'
         +   '<button id="dashDispBtn" onclick="dashFindDisposal()" title="Plan a dump: tap a truck, then the destination job" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🗑️ Find disposal</button>'
         +   '<button onclick="dashGeneratePlan()" title="Generate the AI Job Plan for the selected day" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">📋 Generate plan</button>'
-        +   (IS_DEV_ENV ? '<button onclick="openAnalysisEngine()" title="Ask questions about your franchise data by voice or text (beta)" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🎤 Analysis Engine</button>' : '') // FW-62: dev-only until the query backend ships
+        +   ((IS_DEV_ENV || AE_GENERAL_ACCESS || (currentUser && currentUser.email === 'charles.dennis@junkluggers.com')) ? '<button onclick="openAnalysisEngine()" title="Ask questions about your franchise data by voice or text (beta)" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🎤 Analysis Engine</button>' : '') // FW-62: dev always; prod = super-admin only until AE_GENERAL_ACCESS flips to true
         +   '<button id="dashWxChip" onclick="dashWeatherDetails()" style="display:none;"></button>' // weather-alert chip (filled by dashLoadWeather)
         + '</div>'
         // disposal control bar (hidden until "Find disposal") — % full + tap-status + done
@@ -14317,26 +14321,45 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!ov) { ov = document.createElement('div'); ov.id = 'aeModalOv'; document.body.appendChild(ov); }
       ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(3,8,14,0.62);display:flex;align-items:center;justify-content:center;padding:5vh 12px;';
       const fr = (currentUser && (currentUser.franchiseName || currentUser.franchiseID)) ? mjEsc(String(currentUser.franchiseName || ('#' + currentUser.franchiseID))) : 'your franchise';
+      // v1 examples showcase the ONE live skill (facility dwell); the last one demonstrates the graceful
+      // "not yet" reply so testers see the guardrail in action.
       const ex = [
-        'How many trucks are active right now?',
-        'Average wait at Raynham on a Saturday?',
+        'Average wait at Raynham on a Saturday',
+        'Show dwell by facility',
+        'Average wait at Vinagro at 3pm',
         'How many jobs did we complete last week?',
-        "What's our average job size this month?",
       ];
       const chips = ex.map(q => '<button onclick="aeSetQ(this)" data-q="' + mjEsc(q) + '" style="text-align:left;font-size:12px;padding:7px 11px;background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:8px;cursor:pointer;">' + mjEsc(q) + '</button>').join('');
       const micBtn = mjSpeechOK() ? '<button id="aeMicBtn" onclick="aeMic()" title="Ask by voice" style="font-size:16px;padding:8px 12px;background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:8px;cursor:pointer;">🎤</button>' : '';
       ov.innerHTML = '<div style="background:var(--bg-card,#1e2f40);border:1px solid var(--border);border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.5);width:96%;max-width:560px;max-height:86vh;display:flex;flex-direction:column;font-size:13px;color:var(--text-primary);">'
-        + '<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px 4px;"><span style="font-size:16px;font-weight:800;">🎤 Analysis Engine</span><span onclick="aeClose()" style="cursor:pointer;color:var(--text-muted);font-size:20px;line-height:1;">×</span></div>'
-        + '<div style="padding:0 18px 8px;color:var(--text-muted);font-size:12px;">Ask about <b>' + fr + '</b>’s data by voice or text. Answers stay scoped to your franchise.</div>'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px 4px;"><span style="font-size:16px;font-weight:800;">🎤 Analysis Engine <span style="font-size:10px;font-weight:700;color:var(--accent-yellow,#f5c451);border:1px solid var(--accent-yellow,#f5c451);border-radius:4px;padding:1px 5px;vertical-align:middle;">BETA</span></span><span onclick="aeClose()" style="cursor:pointer;color:var(--text-muted);font-size:20px;line-height:1;">×</span></div>'
+        + '<div style="padding:0 18px 8px;color:var(--text-muted);font-size:12px;">Ask about <b>' + fr + '</b>’s data by voice or text.</div>'
+        // Guardrail help text (owner ask): explain scope + what it can/can't do so a tester isn't surprised.
+        + '<div style="margin:0 18px 8px;padding:8px 10px;background:var(--bg-input,#253545);border:1px solid var(--border);border-radius:8px;color:var(--text-muted);font-size:11px;line-height:1.55;">'
+        +   '🔒 <b>Read-only</b> and scoped to <b>' + fr + '</b> — it never changes anything and never sees another franchise.<br>'
+        +   '📚 It answers from a set of <b>ready reports</b> (today: <b>facility wait / dwell times</b>). Ask for a number ("average wait at Raynham on Saturdays") or a breakdown ("dwell by facility").<br>'
+        +   '🙋 If it can’t answer something yet, it’ll <b>say so in plain English</b> and point you to what it can do — it won’t guess or make up a number.'
+        + '</div>'
         + '<div style="padding:2px 18px 10px;display:flex;flex-direction:column;gap:6px;"><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;">Try one</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">' + chips + '</div></div>'
         + '<div style="display:flex;gap:8px;padding:6px 18px 4px;align-items:stretch;">'
         +   '<input id="aeQ" type="text" placeholder="Ask a question…" onkeydown="if(event.key===\'Enter\')aeAsk()" style="flex:1;font-size:14px;padding:9px 12px;background:var(--bg-input,#253545);color:var(--text-primary);border:1px solid var(--border);border-radius:8px;">'
         +   micBtn
-        +   '<button onclick="aeAsk()" style="font-size:13px;font-weight:700;padding:9px 16px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:8px;cursor:pointer;">Ask</button>'
+        +   '<button id="aeAskBtn" onclick="aeAsk()" style="font-size:13px;font-weight:700;padding:9px 16px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:8px;cursor:pointer;">Ask</button>'
         + '</div>'
-        + '<div id="aeBody" style="overflow-y:auto;padding:10px 18px 16px;flex:1;min-height:80px;"><div style="color:var(--text-muted);padding:14px 2px;">Ask a question above, or tap an example. Results and a CSV export will appear here.</div></div>'
+        + '<div id="aeBody" style="overflow-y:auto;padding:10px 18px 16px;flex:1;min-height:80px;"><div style="color:var(--text-muted);padding:14px 2px;">Ask a question above, or tap an example.</div></div>'
+        // Cost readout (owner ask): running token + $ total for this session so cost impact is visible while testing.
+        + '<div id="aeCost" style="padding:7px 18px;border-top:1px solid var(--border);font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;gap:10px;"><span id="aeCostL">No questions yet this session.</span><span id="aeCostR"></span></div>'
         + '</div>';
       setTimeout(() => { const i = document.getElementById('aeQ'); if (i) i.focus(); }, 40);
+    }
+    // Session-scoped running cost (owner wants to watch spend while testing). Reset on page load only.
+    let _aeCalls = 0, _aeTokIn = 0, _aeTokOut = 0, _aeCost = 0, _aeLastRows = null;
+    function _aeUpdateCost(u) {
+      if (u) { _aeCalls++; _aeTokIn += (u.input_tokens || 0); _aeTokOut += (u.output_tokens || 0); _aeCost += (u.cost_usd || 0); }
+      const l = document.getElementById('aeCostL'), r = document.getElementById('aeCostR');
+      if (l) l.textContent = _aeCalls + ' question' + (_aeCalls === 1 ? '' : 's') + ' · ' + (_aeTokIn + _aeTokOut).toLocaleString() + ' tokens';
+      if (r && u) r.textContent = 'this: ' + (u.input_tokens + u.output_tokens).toLocaleString() + ' tok · $' + (u.cost_usd || 0).toFixed(4) + '  |  total $' + _aeCost.toFixed(4);
+      else if (r) r.textContent = 'total $' + _aeCost.toFixed(4);
     }
     function aeClose() { const ov = document.getElementById('aeModalOv'); if (ov) ov.remove(); try { if (_aeRec) _aeRec.stop(); } catch (e) {} }
     function aeSetQ(el) { const i = document.getElementById('aeQ'); if (i && el) { i.value = el.getAttribute('data-q') || ''; i.focus(); } }
@@ -14364,14 +14387,64 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _aeRec.onend = () => { if (inp) inp.value = String(inp.value || '').trim(); reset(); }; // fills the box; user taps Ask
       try { _aeRec.start(); _aeMicUI(true); } catch (e) { reset(); }
     }
-    function aeAsk() {
-      const inp = document.getElementById('aeQ'), body = document.getElementById('aeBody');
+    async function aeAsk() {
+      const inp = document.getElementById('aeQ'), body = document.getElementById('aeBody'), btn = document.getElementById('aeAskBtn');
       const q = inp ? String(inp.value || '').trim() : '';
       if (!q || !body) return;
-      // SHELL: the query backend (report-skills, franchise-scoped read-only) isn't wired yet. Echo the
-      // question + a clear in-progress state so the entry point is coherent, not a dead button.
-      body.innerHTML = '<div style="margin-bottom:10px;"><span style="color:var(--text-muted);">You asked:</span> <b>' + mjEsc(q) + '</b></div>'
-        + '<div style="padding:12px 14px;background:var(--bg-input,#253545);border:1px solid var(--border);border-radius:8px;color:var(--text-muted);line-height:1.5;">The Analysis Engine is being built. Your question is captured — franchise-scoped answers with a CSV/Excel export will land here shortly.</div>';
+      const head = '<div style="margin-bottom:10px;"><span style="color:var(--text-muted);">You asked:</span> <b>' + mjEsc(q) + '</b></div>';
+      body.innerHTML = head + '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);"><span class="spinner-inline" style="display:inline-block;"></span>Analyzing…</div>';
+      if (btn) btn.disabled = true;
+      try {
+        const data = await edgeFunctionCall('crewlogic-analysis', { franchiseInternalID: currentUser.franchiseInternalID, tenantID: currentUser.tenantID, userId: (currentUser.profileID || null), question: q });
+        _aeRenderResult(q, data);
+        _aeUpdateCost(data && data.usage);
+      } catch (e) {
+        body.innerHTML = head + '<div style="padding:12px 14px;background:var(--bg-input,#253545);border:1px solid var(--border);border-radius:8px;color:#ffb3b3;">Couldn’t reach the analysis service — check your connection and try again.</div>';
+      } finally { if (btn) btn.disabled = false; }
+    }
+    // Minimal safe text render: escape first, THEN honor the AI reply's **bold** + newlines (no raw HTML).
+    function _aeText(s) { return mjEsc(String(s || '')).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>'); }
+    function _aeRenderResult(q, data) {
+      const body = document.getElementById('aeBody'); if (!body) return;
+      const head = '<div style="margin-bottom:10px;"><span style="color:var(--text-muted);">You asked:</span> <b>' + mjEsc(q) + '</b></div>';
+      if (!data || data.success === false) {
+        body.innerHTML = head + '<div style="padding:12px 14px;background:var(--bg-input,#253545);border:1px solid var(--border);border-radius:8px;color:#ffb3b3;">' + mjEsc((data && data.error) || 'Something went wrong.') + '</div>';
+        _aeLastRows = null; return;
+      }
+      // graceful miss / clarify → plain-English reply (§7a)
+      if (data.reply) {
+        body.innerHTML = head + '<div style="padding:12px 14px;background:var(--bg-input,#253545);border:1px solid var(--border);border-radius:8px;line-height:1.55;">' + _aeText(data.reply) + '</div>';
+        _aeLastRows = null; return;
+      }
+      const method = data.method ? '<div style="margin-top:8px;color:var(--text-muted);font-size:11px;">' + mjEsc(data.method) + '</div>' : '';
+      const note = data.note ? '<div style="margin-top:8px;color:var(--accent-yellow,#f5c451);font-size:12px;line-height:1.5;">' + _aeText(data.note) + '</div>' : '';
+      // TABLE → summary + table + Export CSV (§7: multi-row ⇒ offer CSV)
+      if (data.shape === 'table' && Array.isArray(data.table) && data.table.length) {
+        const cols = Object.keys(data.table[0]);
+        const th = cols.map(c => '<th style="text-align:left;padding:5px 8px;border-bottom:1px solid var(--border);text-transform:capitalize;white-space:nowrap;">' + mjEsc(c) + '</th>').join('');
+        const trs = data.table.map(row => '<tr>' + cols.map(c => '<td style="padding:5px 8px;border-bottom:1px solid var(--border);white-space:nowrap;">' + mjEsc(String(row[c])) + '</td>').join('') + '</tr>').join('');
+        _aeLastRows = data.table;
+        body.innerHTML = head
+          + '<div style="font-weight:700;margin-bottom:8px;line-height:1.4;">' + mjEsc(data.answer || '') + '</div>'
+          + '<div style="overflow-x:auto;"><table style="border-collapse:collapse;width:100%;font-size:12px;"><thead><tr>' + th + '</tr></thead><tbody>' + trs + '</tbody></table></div>'
+          + '<button onclick="aeExportCSV()" style="margin-top:10px;font-size:12px;font-weight:700;padding:7px 14px;background:var(--btn-surface,#34485d);color:var(--text-primary);border:1px solid var(--btn-surface-border,#46596d);border-radius:8px;cursor:pointer;">📥 Export CSV</button>'
+          + note + method;
+        return;
+      }
+      // SCALAR → plain sentence, NO CSV (§7: single value)
+      _aeLastRows = null;
+      body.innerHTML = head
+        + '<div style="padding:12px 14px;background:var(--bg-input,#253545);border:1px solid var(--border);border-radius:8px;font-size:15px;font-weight:700;line-height:1.45;">' + mjEsc(data.answer || '') + '</div>'
+        + note + method;
+    }
+    function aeExportCSV() {
+      const rows = _aeLastRows; if (!Array.isArray(rows) || !rows.length) return;
+      const cols = Object.keys(rows[0]);
+      const esc = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+      const csv = [cols.join(',')].concat(rows.map(r => cols.map(c => esc(r[c])).join(','))).join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'crewlogic-report.csv';
+      document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
     }
 
     function dashGeneratePlan() {
