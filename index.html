@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.104.8 | 2026-08-03">
+  <meta name="crewlogic-version" content="v5.104.9 | 2026-08-05">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4256,6 +4256,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Dev = localhost / the Cloudflare "dev" branch preview. Everything else = prod.
     const _DEV_HOSTNAMES = ['localhost', '127.0.0.1', 'dev.crewlogic.pages.dev'];
     const IS_DEV_ENV = _DEV_HOSTNAMES.includes(location.hostname);
+    // FW-62 Analysis Engine — prod visibility switch. FALSE = super-admin only (soft launch).
+    // Flip to TRUE to expose the 🎤 Analysis Engine button to EVERYONE with Dispatch access.
+    // (Dev always shows it regardless, for continued development.)
+    const AE_GENERAL_ACCESS = false;
     const SUPABASE_URL = IS_DEV_ENV
       ? 'https://bagkimfwmpwjfhfhmsrb.supabase.co'    // crewlogic-dev
       : 'https://ozfkpxyachigfpcmvekz.supabase.co';   // crewlogic-prod
@@ -12543,7 +12547,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<button onclick="showTrucks()" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🔄 Refresh</button>'
         +   '<button id="dashDispBtn" onclick="dashFindDisposal()" title="Plan a dump: tap a truck, then the destination job" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🗑️ Find disposal</button>'
         +   '<button onclick="dashGeneratePlan()" title="Generate the AI Job Plan for the selected day" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">📋 Generate plan</button>'
-        +   (IS_DEV_ENV ? '<button onclick="openAnalysisEngine()" title="Ask questions about your franchise data by voice or text (beta)" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🎤 Analysis Engine</button>' : '') // FW-62: dev-only until the query backend ships
+        +   ((IS_DEV_ENV || AE_GENERAL_ACCESS || (currentUser && currentUser.email === 'charles.dennis@junkluggers.com')) ? '<button onclick="openAnalysisEngine()" title="Ask questions about your franchise data by voice or text (beta)" style="font-size:12px;padding:6px 14px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-weight:600;">🎤 Analysis Engine</button>' : '') // FW-62: dev always; prod = super-admin only until AE_GENERAL_ACCESS flips to true
         +   '<button id="dashWxChip" onclick="dashWeatherDetails()" style="display:none;"></button>' // weather-alert chip (filled by dashLoadWeather)
         + '</div>'
         // disposal control bar (hidden until "Find disposal") — % full + tap-status + done
