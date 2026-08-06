@@ -27,9 +27,10 @@ async function franchiseToday(sb: SupabaseClient, franchiseId: string): Promise<
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-// Server-side geofence AUTO-ASSIGN (FW-16): the first truck to ARRIVE on a route defines the truck for
-// the day when no truck is set yet — done HERE (not just in the open dispatch board) so it happens even
-// with no browser watching. The route id is the NUMERIC Vonigo route objectID carried on the arrival's
+// Server-side geofence AUTO-ASSIGN (FW-16): EVERY truck that ARRIVES on a route gets assigned to it —
+// appended, not capped at one — so a genuine two-truck (double-team) job shows both crews. Done HERE
+// (not just in the open dispatch board) so it happens even with no browser watching. The ops manager can
+// unassign a truck; a manual replace-set ('set') is the override. The route id is the NUMERIC Vonigo route objectID carried on the arrival's
 // job_geofences row (job_geofences.route_id, populated by crewlogic-job-geofence-sync and refreshed on
 // route change), so it maps straight onto route_truck_assignments.vonigo_route_id. Robust to:
 //   • cancel     — a cancelled job's fence is deleted by the sync, so jobGeo won't resolve → no assign.
@@ -45,16 +46,17 @@ async function autoAssignOnArrival(sb: SupabaseClient, franchiseId: string, rout
       .select("truck_key").eq("franchise_id", franchiseId).eq("name", vehicleNumber).eq("active", true).maybeSingle();
     const truckKey = truck?.truck_key;
     if (!truckKey) return;
-    // Only when NO truck is set for this route/day yet — NEVER overwrite a hard-set (manual) assignment,
-    // and first-arrival wins over a later different truck (matches the client-side auto-set semantics).
-    const { data: existing } = await sb.from("route_truck_assignments")
-      .select("id").eq("franchise_id", franchiseId).eq("service_date", day).eq("vonigo_route_id", String(routeId)).limit(1);
-    if (existing && existing.length) return;
-    const { error } = await sb.from("route_truck_assignments").insert({
-      franchise_id: franchiseId, service_date: day, vonigo_route_id: String(routeId), route_name: routeName,
-      truck_key: truckKey, source: "inferred", confidence: "geofence-arrival", assigned_by: "geofence-auto",
-    });
-    if (error) { console.error("[motive-webhook] auto-assign insert failed:", error.message); return; }
+    // EVERY truck that ARRIVES on a route's job gets assigned — APPEND, don't cap at one. If a crew was on
+    // site we want the board to show them; the ops manager can unassign. Idempotent on the
+    // (franchise, day, route, truck) unique key: a re-arrival of the same truck is a no-op, and any truck
+    // already on the route (including a manual hard-set) is left untouched — we never overwrite or delete
+    // another truck's row. A manual replace-set (action 'set') is still the ops override.
+    const { error } = await sb.from("route_truck_assignments")
+      .upsert({
+        franchise_id: franchiseId, service_date: day, vonigo_route_id: String(routeId), route_name: routeName,
+        truck_key: truckKey, source: "inferred", confidence: "geofence-arrival", assigned_by: "geofence-auto",
+      }, { onConflict: "franchise_id,service_date,vonigo_route_id,truck_key", ignoreDuplicates: true });
+    if (error) { console.error("[motive-webhook] auto-assign upsert failed:", error.message); return; }
     console.log(`[motive-webhook] AUTO-ASSIGNED ${vehicleNumber} -> route ${routeId} (${day})`);
   } catch (e) {
     console.error("[motive-webhook] auto-assign failed (non-fatal):", (e as Error).message);
