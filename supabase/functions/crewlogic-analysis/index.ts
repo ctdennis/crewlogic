@@ -240,7 +240,7 @@ async function runFacilityDwell(sb: any, franchiseId: string, tz: string, names:
 
   return {
     shape: 'table',
-    answer: `${dayTxt}Dwell by ${breakdown.replace('_', ' ')} at ${facTxt}${hourTxt}${rangeTxt} — ${rows.length} visits across ${table.length} group${table.length === 1 ? '' : 's'}:`,
+    answer: `${dayTxt}Dwell by ${breakdown.replace(/_/g, ' ')} at ${facTxt}${hourTxt}${rangeTxt} — ${rows.length} visits across ${table.length} group${table.length === 1 ? '' : 's'}:`,
     table, method, sampleSize: rows.length,
   };
 }
@@ -316,7 +316,7 @@ async function runCustomerDwell(sb: any, franchiseId: string, tz: string, p: any
     median: fmtMMSS(median(secs)),
     _avgSec: Math.round(secs.reduce((a, b) => a + b, 0) / secs.length),
   })).sort((a, b) => b._avgSec - a._avgSec).map(({ _avgSec, ...row }) => row);
-  return { shape: 'table', answer: `${dayTxt}Customer on-site time by ${breakdown.replace('_', ' ')}${hourTxt}${rangeTxt} — ${rows.length} jobs across ${table.length} group${table.length === 1 ? '' : 's'}:`, table, method, sampleSize: rows.length };
+  return { shape: 'table', answer: `${dayTxt}Customer on-site time by ${breakdown.replace(/_/g, ' ')}${hourTxt}${rangeTxt} — ${rows.length} jobs across ${table.length} group${table.length === 1 ? '' : 's'}:`, table, method, sampleSize: rows.length };
 }
 
 Deno.serve(async (req) => {
