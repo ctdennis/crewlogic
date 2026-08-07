@@ -69,6 +69,68 @@ function resolveFacility(spoken: string, names: string[]): string | null {
   return hit || null;
 }
 
+// ── Two-axis PIVOT ("week × day-of-week", "month × facility", "year × month", "season × hour", …) ──────────
+// Each dimension buckets a visit (franchise-local start time + optional category `cat`) into one axis value.
+const SEASON: Record<number, string> = { 12: 'Winter', 1: 'Winter', 2: 'Winter', 3: 'Spring', 4: 'Spring', 5: 'Spring', 6: 'Summer', 7: 'Summer', 8: 'Summer', 9: 'Fall', 10: 'Fall', 11: 'Fall' };
+const SEASON_ORD: Record<string, number> = { Winter: 0, Spring: 1, Summer: 2, Fall: 3 };
+const DOW_ORD: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const PIVOT_DIMS = ['day', 'week', 'month', 'quarter', 'year', 'day_of_week', 'hour', 'season', 'facility'];
+
+// franchise-local calendar parts of a UTC iso (DST-safe via Intl).
+function localParts(iso: string, tz: string): { y: number; mo: number; d: number; dow: number; hour: number } {
+  const p = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short', hour: 'numeric', hour12: false }).formatToParts(new Date(iso));
+  const g = (t: string) => p.find((x) => x.type === t)?.value || '';
+  let hh = parseInt(g('hour') || '0', 10); if (hh === 24) hh = 0;
+  return { y: +g('year'), mo: +g('month'), d: +g('day'), dow: Math.max(0, WD.indexOf(g('weekday'))), hour: hh };
+}
+// Monday-of-week label (YYYY-MM-DD) for a local day — UTC arithmetic only to LABEL (no DST math needed).
+function weekKey(pt: { y: number; mo: number; d: number; dow: number }): string {
+  const daysSinceMon = (pt.dow + 6) % 7; // dow 0=Sun..6=Sat → Mon=0
+  return new Date(Date.UTC(pt.y, pt.mo - 1, pt.d) - daysSinceMon * 86400000).toISOString().slice(0, 10);
+}
+type PivRow = { sec: number; iso: string; cat: string | null };
+// deno-lint-ignore no-explicit-any
+const DIMS: Record<string, { key: (pt: any, r: PivRow) => string; ord: (k: string) => number | string }> = {
+  day:         { key: (pt) => `${pt.y}-${pad2(pt.mo)}-${pad2(pt.d)}`,           ord: (k) => k },
+  week:        { key: (pt) => weekKey(pt),                                       ord: (k) => k },
+  month:       { key: (pt) => `${pt.y}-${pad2(pt.mo)}`,                          ord: (k) => k },
+  quarter:     { key: (pt) => `${pt.y}-Q${Math.floor((pt.mo - 1) / 3) + 1}`,     ord: (k) => k },
+  year:        { key: (pt) => `${pt.y}`,                                         ord: (k) => k },
+  day_of_week: { key: (pt) => WD[pt.dow],                                        ord: (k) => DOW_ORD[k] ?? 9 },
+  hour:        { key: (pt) => String(pt.hour),                                   ord: (k) => +k },
+  season:      { key: (pt) => SEASON[pt.mo] || '?',                              ord: (k) => SEASON_ORD[k] ?? 9 },
+  facility:    { key: (_pt, r) => r.cat || '—',                                  ord: (k) => k },
+};
+const PIVOT_COL_CAP = 18;
+
+// Build a matrix: one row per rowDim value, one column per colDim value, cell = AVG dwell (mm:ss). Returns a
+// flat table the client's table renderer + CSV export already handle (a rowDim label column + one col per colVal).
+function runPivot(rows: PivRow[], rowDim: string, colDim: string, tz: string, ctx: string) {
+  const R = DIMS[rowDim], C = DIMS[colDim];
+  if (!R || !C) return { shape: 'scalar', answer: `I can't pivot by "${rowDim}" × "${colDim}". Axes can be: week, month, quarter, year, day, day-of-week, hour, season, or facility.`, method: 'invalid pivot dims', sampleSize: 0 };
+  const cell: Record<string, Record<string, number[]>> = {};
+  const colSet = new Set<string>(), rowSet = new Set<string>();
+  for (const r of rows) {
+    const pt = localParts(r.iso, tz);
+    const rk = R.key(pt, r), ck = C.key(pt, r);
+    rowSet.add(rk); colSet.add(ck);
+    ((cell[rk] ||= {})[ck] ||= []).push(r.sec);
+  }
+  const cmp = (ord: (k: string) => number | string) => (a: string, b: string) => { const x = ord(a), y = ord(b); return x < y ? -1 : x > y ? 1 : 0; };
+  const cols = [...colSet].sort(cmp(C.ord));
+  if (cols.length > PIVOT_COL_CAP) {
+    return { shape: 'scalar', answer: `That grid is too wide — ${cols.length} "${colDim}" columns. Use a coarser column bucket (e.g. week or month) or narrow the date range.`, method: `pivot ${rowDim}×${colDim} exceeded ${PIVOT_COL_CAP} cols`, sampleSize: rows.length };
+  }
+  const rowsK = [...rowSet].sort(cmp(R.ord));
+  const table = rowsK.map((rk) => {
+    const obj: Record<string, string> = { [rowDim]: rk };
+    for (const ck of cols) { const arr = cell[rk]?.[ck]; obj[ck] = (arr && arr.length) ? fmtMMSS(arr.reduce((a, b) => a + b, 0) / arr.length) : ''; }
+    return obj;
+  });
+  return { shape: 'table', answer: `Avg ${ctx} — ${rowDim.replace(/_/g, ' ')} (rows) × ${colDim.replace(/_/g, ' ')} (columns), ${rows.length} visit${rows.length === 1 ? '' : 's'}, franchise time ${tz}:`, table, method: `pivot ${rowDim}×${colDim}, ${rows.length} visits`, sampleSize: rows.length };
+}
+
 const FACILITY_DWELL_TOOL = {
   name: 'facility_dwell',
   description: 'Average / median / count of how long trucks DWELL (wait) at a disposal, recycle, or donation FACILITY. Use for any question about wait time, time spent, or how long at a transfer station / recycle center / dump / donation site.',
@@ -81,7 +143,9 @@ const FACILITY_DWELL_TOOL = {
       hourEnd: { type: ['integer', 'null'], description: 'End hour 0-23 (franchise local), inclusive; null = all hours.' },
       dateFrom: { type: ['string', 'null'], description: 'ISO date YYYY-MM-DD lower bound, or null for all available history.' },
       dateTo: { type: ['string', 'null'], description: 'ISO date YYYY-MM-DD upper bound, or null.' },
-      breakdown: { type: 'string', enum: ['none', 'facility', 'day_of_week', 'hour'], description: '"none" = one overall number (scalar). "facility" = one row per facility. "day_of_week"/"hour" = grouped table.' },
+      breakdown: { type: 'string', enum: ['none', 'facility', 'day_of_week', 'hour', 'pivot'], description: '"none" = one overall number (scalar). "facility" = one row per facility. "day_of_week"/"hour" = single-axis grouped table. "pivot" = a TWO-axis matrix (set rowDim + colDim) — use for any "week × day", "month by day-of-week", "year × month" grid.' },
+      rowDim: { type: 'string', enum: ['day', 'week', 'month', 'quarter', 'year', 'day_of_week', 'hour', 'season', 'facility'], description: 'PIVOT only: the ROW axis.' },
+      colDim: { type: 'string', enum: ['day', 'week', 'month', 'quarter', 'year', 'day_of_week', 'hour', 'season', 'facility'], description: 'PIVOT only: the COLUMN axis.' },
     },
     required: ['facility'],
   },
@@ -98,7 +162,9 @@ const CUSTOMER_DWELL_TOOL = {
       hourEnd: { type: ['integer', 'null'], description: 'End hour 0-23 (franchise local), inclusive; null = all hours.' },
       dateFrom: { type: ['string', 'null'], description: 'ISO date YYYY-MM-DD lower bound, or null for all available history.' },
       dateTo: { type: ['string', 'null'], description: 'ISO date YYYY-MM-DD upper bound, or null.' },
-      breakdown: { type: 'string', enum: ['none', 'day_of_week', 'hour', 'job'], description: '"none" = one overall number (scalar). day_of_week/hour = grouped table. "job" = one row per job, longest first (for "which jobs/customers took longest").' },
+      breakdown: { type: 'string', enum: ['none', 'day_of_week', 'hour', 'job', 'pivot'], description: '"none" = one overall number (scalar). day_of_week/hour = single-axis grouped table. "job" = one row per job, longest first. "pivot" = a TWO-axis matrix (set rowDim + colDim) — use for any "week × day", "month by day-of-week", "year × month" grid.' },
+      rowDim: { type: 'string', enum: ['day', 'week', 'month', 'quarter', 'year', 'day_of_week', 'hour', 'season'], description: 'PIVOT only: the ROW axis.' },
+      colDim: { type: 'string', enum: ['day', 'week', 'month', 'quarter', 'year', 'day_of_week', 'hour', 'season'], description: 'PIVOT only: the COLUMN axis.' },
     },
     required: [],
   },
@@ -167,6 +233,7 @@ RULES:
 - DWELL DISAMBIGUATION: a FACILITY (dump, transfer station, recycle, donation center — one of the named facilities above) → facility_dwell. A CUSTOMER / job site / "on site" / "at the customer" / "how long jobs take" → customer_dwell. If the question names a facility, it's facility_dwell; if it says customer/job/on-site, it's customer_dwell.
 - If the question maps to facility_dwell, CALL THE TOOL with your best params (facility, dayOfWeek, hour range, date range, breakdown). One facility + no grouping = breakdown "none". "which facility is slowest" / "by facility" = breakdown "facility".
 - If the question maps to customer_dwell, CALL THE TOOL with your best params. Overall / no grouping = breakdown "none". "by day" / "busiest day" = day_of_week; "by hour" = hour; "which jobs/customers took longest" = breakdown "job".
+- PIVOT / GRID / MATRIX (either dwell skill): any request for a TWO-dimension table — "week × day", "rows as weeks and columns as days of the week", "month by day-of-week", "by season across the years", a calendar grid — use breakdown "pivot" with rowDim + colDim from day/week/month/quarter/year/day_of_week/hour/season (facility_dwell also allows facility). Map "rows as X, columns as Y" → rowDim=X, colDim=Y. Prefer a COARSE bucket on the many-valued axis (rows: week/month/quarter; columns: day-of-week/month/season) so the grid stays readable — a too-wide grid is declined automatically.
 - If the question is NOT something a skill covers (e.g. revenue or job dollar value, a truck's live location, or a nonsensical transform like "multiply by the square root of pi"), DO NOT call the tool. Reply in plain English: say plainly what you can't do and why, and point them to what you CAN answer right now (facility wait/dwell times). Keep it short and friendly — an analyst, not an error message.
 - If the ask is a MIX (a real dwell question plus a nonsensical part), call the tool for the dwell part AND add one short plain-text sentence noting the part you skipped and why.
 - If the request is too vague to fill params (e.g. no facility and no "all"), ask ONE clarifying question in plain text instead of guessing.
@@ -211,6 +278,11 @@ async function runFacilityDwell(sb: any, franchiseId: string, tz: string, names:
 
   if (!rows.length) {
     return { shape: 'scalar', answer: `No ${dayTxt}visits found at ${facTxt}${hourTxt}${rangeTxt}.`, method, sampleSize: 0 };
+  }
+
+  if (p.breakdown === 'pivot') {
+    return runPivot(rows.map((r: any) => ({ sec: Number(r.dwell_seconds), iso: r.start_time, cat: r.facility_name })),
+      String(p.rowDim || 'week'), String(p.colDim || 'day_of_week'), tz, `wait at ${facTxt}`);
   }
 
   const breakdown = p.breakdown && p.breakdown !== 'none' ? p.breakdown : (facName ? 'none' : 'facility');
@@ -284,6 +356,11 @@ async function runCustomerDwell(sb: any, franchiseId: string, tz: string, p: any
 
   if (!rows.length) {
     return { shape: 'scalar', answer: `No ${dayTxt}customer jobs found${hourTxt}${rangeTxt}.`, method, sampleSize: 0 };
+  }
+
+  if (p.breakdown === 'pivot') {
+    return runPivot(rows.map((r: any) => ({ sec: Number(r.duration), iso: r.start_time, cat: parseCustomer(r.geofence_name).town })),
+      String(p.rowDim || 'week'), String(p.colDim || 'day_of_week'), tz, 'customer on-site time');
   }
 
   const breakdown = p.breakdown && p.breakdown !== 'none' ? p.breakdown : 'none';
