@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.105.0 | 2026-08-05">
+  <meta name="crewlogic-version" content="v5.105.1 | 2026-08-07">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -13986,6 +13986,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('dashboardScreen').style.display = 'block';
         document.getElementById('headerTitle').textContent = 'Dispatch';
         currentScreen = 'dashboard';
+        // On each open of Dispatch, default the two schedules to Today (source) → Tomorrow (destination),
+        // the common reschedule direction. (renderDashboard only seeds these when empty, so re-apply here
+        // so re-opening — or a day rollover — always lands on today/tomorrow, not a stale prior selection.)
+        const _dashOpenToday = mjNowParts().dayID;
+        _dashSrcDay = _dashOpenToday;
+        _dashDestDay = mjAddDays(_dashOpenToday, 1);
         renderDashboard();
         _startBoardAutoRefresh();
         return;
