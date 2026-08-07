@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.105.3 | 2026-08-07">
+  <meta name="crewlogic-version" content="v5.105.4 | 2026-08-07">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9728,15 +9728,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           _fitTrucksCentered();
           if (_dashTrucksLoaded && _dashJobsLoaded) {
             _dashNeedsFit = false; // both waves in → lock the view
-            // ONE final authoritative fit after layout+paint fully settle (v5.105.3). The fit just above can
-            // run at an INTERMEDIATE container width — the offsetWidth>150 bar passes before the full-width
-            // reflow finishes — computing a too-low, zoomed-OUT zoom that then never corrects (the "wrong zoom
-            // on open, but right after nav-to-tomorrow-and-back" bug). A double rAF is guaranteed to fire AFTER
-            // the browser finishes layout, so re-fitting there matches the correct nav-back view. Fires once as
-            // the initial coverage-fit finishes; it does NOT re-zoom on divider drags or auto-refreshes.
-            requestAnimationFrame(() => requestAnimationFrame(() => {
-              if (_trucksMap && _trucksMapEl === 'dashMapPane') { try { _fitTrucksCentered(); } catch (e) {} }
-            }));
+            // Set the map zoom LAST — after the window, schedules, and rails have finished expanding (owner
+            // 2026-08-07: "the last thing should be setting the map zoom"). The fit just above (and a double-rAF)
+            // fire too soon, before the boxes finish laying out, so the zoom is computed against a not-yet-final
+            // container and comes out zoomed-OUT — right only after a nav-away-and-back re-fit. requestIdleCallback
+            // runs once the browser is IDLE (all layout/render work done); the timeout is a hard backstop so it
+            // always fires. Once per initial load — not on divider drags or auto-refreshes.
+            const _finalFit = () => { if (_trucksMap && _trucksMapEl === 'dashMapPane') { try { _fitTrucksCentered(); } catch (e) {} } };
+            if (window.requestIdleCallback) requestIdleCallback(_finalFit, { timeout: 900 });
+            else setTimeout(_finalFit, 350);
           }
           return;
         }
