@@ -9,7 +9,8 @@
 // AUTH MODEL (matches crewlogic-volume): app calls with the anon key + franchiseInternalID (= franchises.id
 // UUID). Service role here; EVERY query is scoped by that UUID server-side — the question can't widen it.
 //
-// Skills (v1): facility_dwell (wait/dwell time at a disposal/recycle/donation facility, on v_geofence_dwell).
+// Skills (v1): facility_dwell (wait/dwell at a disposal/recycle/donation facility, on v_geofence_dwell),
+//   customer_dwell (on-site time at a customer job, from geofence_alerts job_leave), jobs_completed (count).
 //
 // Action: POST { franchiseInternalID, tenantID?, question, userId? }
 //   -> hit:   { success, shape:'scalar'|'table', answer, table?, method, sampleSize, note?, usage }
@@ -86,6 +87,23 @@ const FACILITY_DWELL_TOOL = {
   },
 };
 
+const CUSTOMER_DWELL_TOOL = {
+  name: 'customer_dwell',
+  description: 'Average / median / count of how long a truck stays ON SITE at a CUSTOMER JOB — time spent at the customer, i.e. the job on-site duration. Use for any question about time at customer jobs, on-site time, how long jobs take, or which customers/jobs took the longest. This is the CUSTOMER side; for a dump / transfer / recycle / donation facility use facility_dwell instead.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      dayOfWeek: { type: 'string', enum: ['any', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], description: 'Restrict to one weekday, or "any".' },
+      hourStart: { type: ['integer', 'null'], description: 'Start hour 0-23 (franchise local), inclusive; null = all hours.' },
+      hourEnd: { type: ['integer', 'null'], description: 'End hour 0-23 (franchise local), inclusive; null = all hours.' },
+      dateFrom: { type: ['string', 'null'], description: 'ISO date YYYY-MM-DD lower bound, or null for all available history.' },
+      dateTo: { type: ['string', 'null'], description: 'ISO date YYYY-MM-DD upper bound, or null.' },
+      breakdown: { type: 'string', enum: ['none', 'day_of_week', 'hour', 'job'], description: '"none" = one overall number (scalar). day_of_week/hour = grouped table. "job" = one row per job, longest first (for "which jobs/customers took longest").' },
+    },
+    required: [],
+  },
+};
+
 const JOBS_COMPLETED_TOOL = {
   name: 'jobs_completed',
   description: 'COUNT of completed jobs over a date range (optionally broken down by week/day/month). Use for "how many jobs did we complete last week / this month". NOTE: only a COUNT — job dollar value / revenue / average job size are NOT available in the data.',
@@ -138,14 +156,17 @@ function buildSystem(facilityNames: string[], tz: string, todayISO: string): str
 Today is ${todayISO} in the franchise timezone ${tz}. Use it to resolve relative ranges ("last week", "this month", "in July") into dateFrom/dateTo (YYYY-MM-DD).
 
 AVAILABLE SKILLS (v1):
-- facility_dwell — how long trucks wait/dwell at a facility. Call the tool with params.
+- facility_dwell — how long trucks wait/dwell at a FACILITY (dump / transfer station / recycle / donation center). Call the tool with params.
+- customer_dwell — how long a truck stays ON SITE at a CUSTOMER JOB (on-site / time at the customer / how long jobs take / which customers took longest). Call the tool with params.
 - jobs_completed — COUNT of completed jobs over a date range (optionally grouped by day/week/month). Call the tool with params. NOTE: it is a COUNT only — job dollar value / revenue / average job size are NOT available, so decline those parts plainly.
 
 THIS FRANCHISE'S FACILITIES (map a spoken name to exactly one of these; never invent others):
 ${facilityNames.map((n) => '  - ' + n).join('\n') || '  (none configured)'}
 
 RULES:
+- DWELL DISAMBIGUATION: a FACILITY (dump, transfer station, recycle, donation center — one of the named facilities above) → facility_dwell. A CUSTOMER / job site / "on site" / "at the customer" / "how long jobs take" → customer_dwell. If the question names a facility, it's facility_dwell; if it says customer/job/on-site, it's customer_dwell.
 - If the question maps to facility_dwell, CALL THE TOOL with your best params (facility, dayOfWeek, hour range, date range, breakdown). One facility + no grouping = breakdown "none". "which facility is slowest" / "by facility" = breakdown "facility".
+- If the question maps to customer_dwell, CALL THE TOOL with your best params. Overall / no grouping = breakdown "none". "by day" / "busiest day" = day_of_week; "by hour" = hour; "which jobs/customers took longest" = breakdown "job".
 - If the question is NOT something a skill covers (e.g. revenue or job dollar value, a truck's live location, or a nonsensical transform like "multiply by the square root of pi"), DO NOT call the tool. Reply in plain English: say plainly what you can't do and why, and point them to what you CAN answer right now (facility wait/dwell times). Keep it short and friendly — an analyst, not an error message.
 - If the ask is a MIX (a real dwell question plus a nonsensical part), call the tool for the dwell part AND add one short plain-text sentence noting the part you skipped and why.
 - If the request is too vague to fill params (e.g. no facility and no "all"), ask ONE clarifying question in plain text instead of guessing.
@@ -219,9 +240,83 @@ async function runFacilityDwell(sb: any, franchiseId: string, tz: string, names:
 
   return {
     shape: 'table',
-    answer: `${dayTxt}Dwell by ${breakdown.replace('_', ' ')} at ${facTxt}${hourTxt}${rangeTxt} — ${rows.length} visits across ${table.length} group${table.length === 1 ? '' : 's'}:`,
+    answer: `${dayTxt}Dwell by ${breakdown.replace(/_/g, ' ')} at ${facTxt}${hourTxt}${rangeTxt} — ${rows.length} visits across ${table.length} group${table.length === 1 ? '' : 's'}:`,
     table, method, sampleSize: rows.length,
   };
+}
+
+// "Joyce, Christopher · #1004516 · BRIDGEWATER" -> { customer, town } (job geofence_name convention).
+function parseCustomer(gname: string): { customer: string; town: string } {
+  const parts = String(gname || '').split('·').map((s) => s.trim()).filter(Boolean);
+  return { customer: parts[0] || String(gname || ''), town: parts.length >= 3 ? parts[2] : '' };
+}
+
+// CUSTOMER on-site dwell: the job_leave event carries the whole on-site visit's `duration` (seconds).
+// Distinct from facility dwell (geofence_exit on v_geofence_dwell). Customer jobs run longer than the 2h
+// facility cap, so the missed-leave guard is 6h; blips <2m are still excluded.
+async function runCustomerDwell(sb: any, franchiseId: string, tz: string, p: any) {
+  let q = sb.from('geofence_alerts')
+    .select('duration, start_time, geofence_name, wo_id')
+    .eq('franchise_id', franchiseId)
+    .eq('event_type', 'job_leave')
+    .gte('duration', 120).lte('duration', 21600); // hygiene: blips <2m + missed-leaves >6h
+  if (p.dateFrom) q = q.gte('start_time', String(p.dateFrom) + 'T00:00:00Z');
+  if (p.dateTo) q = q.lte('start_time', String(p.dateTo) + 'T23:59:59Z');
+  const { data, error } = await q.limit(20000);
+  if (error) throw error;
+
+  const dow = p.dayOfWeek && p.dayOfWeek !== 'any' ? p.dayOfWeek : null;
+  const hs = (typeof p.hourStart === 'number') ? p.hourStart : null;
+  const he = (typeof p.hourEnd === 'number') ? p.hourEnd : null;
+  const rows = (data || []).filter((r: any) => {
+    if (r.duration == null) return false;
+    const lh = localDowHour(r.start_time, tz);
+    if (dow && WD[lh.dow] !== dow) return false;
+    if (hs != null && lh.hour < hs) return false;
+    if (he != null && lh.hour > he) return false;
+    return true;
+  });
+
+  const dayTxt = dow ? dow + ' ' : '';
+  const hourTxt = (hs != null || he != null) ? ` between ${hs ?? 0}:00 and ${(he ?? 23)}:59` : '';
+  const rangeTxt = (p.dateFrom || p.dateTo) ? ` (${p.dateFrom || 'start'} → ${p.dateTo || 'now'})` : '';
+  const method = `${rows.length} customer job${rows.length === 1 ? '' : 's'}${dayTxt ? `, ${dow} only` : ''}, on-site time from job_leave, blips <2m + missed-leaves >6h excluded, franchise time ${tz}`;
+
+  if (!rows.length) {
+    return { shape: 'scalar', answer: `No ${dayTxt}customer jobs found${hourTxt}${rangeTxt}.`, method, sampleSize: 0 };
+  }
+
+  const breakdown = p.breakdown && p.breakdown !== 'none' ? p.breakdown : 'none';
+  if (breakdown === 'none') {
+    const secs = rows.map((r: any) => Number(r.duration));
+    const avg = secs.reduce((a: number, b: number) => a + b, 0) / secs.length;
+    return {
+      shape: 'scalar',
+      answer: `Trucks spend an average of ~${fmtMMSS(avg)} on site per ${dayTxt}customer job (${fmtMMSS(median(secs))} typical), over ${rows.length} job${rows.length === 1 ? '' : 's'}${hourTxt}${rangeTxt}.`,
+      method, sampleSize: rows.length,
+    };
+  }
+
+  if (breakdown === 'job') {
+    const table = rows.map((r: any) => {
+      const c = parseCustomer(r.geofence_name);
+      const lh = localDowHour(r.start_time, tz);
+      return { customer: c.customer, town: c.town, day: WD[lh.dow], onSite: fmtMMSS(Number(r.duration)), _sec: Number(r.duration) };
+    }).sort((a: any, b: any) => b._sec - a._sec).slice(0, 50).map(({ _sec, ...row }: any) => row);
+    return { shape: 'table', answer: `Customer on-site time per job${dayTxt ? `, ${dow}` : ''}${hourTxt}${rangeTxt} — longest first (top ${table.length}):`, table, method, sampleSize: rows.length };
+  }
+
+  // day_of_week / hour grouped
+  const keyOf = (r: any) => breakdown === 'day_of_week' ? WD[localDowHour(r.start_time, tz).dow] : String(localDowHour(r.start_time, tz).hour);
+  const groups: Record<string, number[]> = {};
+  for (const r of rows) { const k = keyOf(r); (groups[k] ||= []).push(Number(r.duration)); }
+  const table = Object.entries(groups).map(([k, secs]) => ({
+    group: k, jobs: secs.length,
+    avg: fmtMMSS(secs.reduce((a, b) => a + b, 0) / secs.length),
+    median: fmtMMSS(median(secs)),
+    _avgSec: Math.round(secs.reduce((a, b) => a + b, 0) / secs.length),
+  })).sort((a, b) => b._avgSec - a._avgSec).map(({ _avgSec, ...row }) => row);
+  return { shape: 'table', answer: `${dayTxt}Customer on-site time by ${breakdown.replace(/_/g, ' ')}${hourTxt}${rangeTxt} — ${rows.length} jobs across ${table.length} group${table.length === 1 ? '' : 's'}:`, table, method, sampleSize: rows.length };
 }
 
 Deno.serve(async (req) => {
@@ -244,7 +339,7 @@ Deno.serve(async (req) => {
     const res = await fetch(ANTHROPIC_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: MODEL, max_tokens: 900, system: buildSystem(names, tz, todayISO), tools: [FACILITY_DWELL_TOOL, JOBS_COMPLETED_TOOL], messages: [{ role: 'user', content: question }] }),
+      body: JSON.stringify({ model: MODEL, max_tokens: 900, system: buildSystem(names, tz, todayISO), tools: [FACILITY_DWELL_TOOL, CUSTOMER_DWELL_TOOL, JOBS_COMPLETED_TOOL], messages: [{ role: 'user', content: question }] }),
     });
     const data = await res.json();
     if (data.type === 'error' || !data.content) {
@@ -254,7 +349,7 @@ Deno.serve(async (req) => {
     const usage = usageFrom(data);
     logUsage(sb, { franchiseId, tenantId: body.tenantID || fr?.tenant_id || null, userId: body.userId || null, eventType: 'ai.analysis', model: MODEL, units: 1, metadata: { question: question.slice(0, 300), input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, cost_usd: usage.cost_usd } });
 
-    const toolUse = (data.content as any[]).find((b) => b.type === 'tool_use' && (b.name === 'facility_dwell' || b.name === 'jobs_completed'));
+    const toolUse = (data.content as any[]).find((b) => b.type === 'tool_use' && (b.name === 'facility_dwell' || b.name === 'customer_dwell' || b.name === 'jobs_completed'));
     const note = (data.content as any[]).filter((b) => b.type === 'text').map((b) => String(b.text || '').trim()).filter(Boolean).join(' ');
 
     if (!toolUse) {
@@ -262,6 +357,8 @@ Deno.serve(async (req) => {
     }
     const result = toolUse.name === 'jobs_completed'
       ? await runJobsCompleted(sb, franchiseId, toolUse.input || {})
+      : toolUse.name === 'customer_dwell'
+      ? await runCustomerDwell(sb, franchiseId, tz, toolUse.input || {})
       : await runFacilityDwell(sb, franchiseId, tz, names, toolUse.input || {});
     return json({ success: true, ...result, ...(note ? { note } : {}), usage });
   } catch (e) {

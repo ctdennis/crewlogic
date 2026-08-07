@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.105.0 | 2026-08-05">
+  <meta name="crewlogic-version" content="v5.105.5 | 2026-08-07">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9709,6 +9709,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _dashMapRO = null; // ResizeObserver that keeps the dashboard map sized to its pane (fixes the half-width race)
     let _dashNeedsFit = false; // request a one-time coverage-fit once the dashboard map's layout + markers are ready
     let _dashTrucksLoaded = false, _dashJobsLoaded = false, _dashFitTimer = null, _dashFitTries = 0;
+    let _dashSettleTimer = null, _dashFitLocked = false;
     // Deterministic dashboard coverage-fit. The trucks load AND the jobs load each call this when they finish
     // painting (not a timer heuristic); it fits once the pane is actually SIZED, re-fits as each wave lands, and
     // LOCKS (_dashNeedsFit=false) only after BOTH waves are in — so the final fit always covers trucks+jobs and
@@ -9726,12 +9727,33 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (sized) {
           try { _trucksMap.invalidateSize(false); } catch (e) {}
           _fitTrucksCentered();
-          if (_dashTrucksLoaded && _dashJobsLoaded) _dashNeedsFit = false; // both waves in → lock the view
+          if (_dashTrucksLoaded && _dashJobsLoaded) { _dashNeedsFit = false; _dashArmSettleFit(); } // both waves in → lock; set the zoom LAST once the pane size settles (see _dashArmSettleFit)
           return;
         }
         if (_dashFitTries++ < 140) _dashFitTimer = setTimeout(attempt, 200); // wait for the pane to reflow (bounded ~28s)
       };
       _dashFitTimer = setTimeout(attempt, 60);
+    }
+    // Authoritative FINAL map fit — run the coverage-fit only AFTER the pane's size has STOPPED changing.
+    // Owner 2026-08-07: on open the app-shell widens to full-view in stages (hideAll resets the shell to 480px,
+    // the dashboard handler re-widens it, boards/rails settle) — so the map pane resizes several times: it expands,
+    // shrinks, then the window expands full. Every timing guess (rAF/idle) fired mid-sequence → a stale, zoomed-out
+    // view; only a later nav-away-and-back re-fit corrected it. The ResizeObserver already fires on each resize;
+    // this re-arms a ~260ms debounce off it, so when the pane has been QUIET (last resize done) AND both data waves
+    // are in, we fit ONCE and lock. Reacting to the real settle beats guessing the timing. Fires once per open;
+    // _dashFitLocked prevents re-zoom on divider drags / auto-refreshes.
+    function _dashArmSettleFit() {
+      if (_dashFitLocked || _trucksMapEl !== 'dashMapPane') return;
+      if (_dashSettleTimer) clearTimeout(_dashSettleTimer);
+      _dashSettleTimer = setTimeout(() => {
+        _dashSettleTimer = null;
+        if (_dashFitLocked || !_trucksMap || _trucksMapEl !== 'dashMapPane') return;
+        const p = document.getElementById('dashMapPane');
+        if (p && p.offsetWidth > 150 && p.offsetHeight > 150 && _dashTrucksLoaded && _dashJobsLoaded) {
+          _fitTrucksCentered();   // set the zoom LAST — pane quiet 260ms + both data waves in
+          _dashFitLocked = true;
+        }
+      }, 260);
     }
     // Drop + rebuild the trucks map if it's stale (container detached, e.g. dashboard re-rendered) or the
     // target container changed — so the same map machinery (markers, layers, measure) serves both contexts.
@@ -12771,13 +12793,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // are done" heuristic raced the loads and fit the wrong set on some loads (the hit-or-miss zoom). The
       // ResizeObserver stays, but ONLY to keep the map sized on divider drags — it no longer drives the fit.
       _dashNeedsFit = true; _dashTrucksLoaded = false; _dashJobsLoaded = false;
+      _dashFitLocked = false; if (_dashSettleTimer) { try { clearTimeout(_dashSettleTimer); } catch (e) {} _dashSettleTimer = null; } // reset the settle-fit for this open
       if (_dashFitTimer) { try { clearTimeout(_dashFitTimer); } catch (e) {} _dashFitTimer = null; }
       if (window.ResizeObserver) {
         if (_dashMapRO) { try { _dashMapRO.disconnect(); } catch (e) {} }
-        _dashMapRO = new ResizeObserver(() => { if (_trucksMap && _trucksMapEl === 'dashMapPane') { try { _trucksMap.invalidateSize(); } catch (e) {} } });
+        _dashMapRO = new ResizeObserver(() => { if (_trucksMap && _trucksMapEl === 'dashMapPane') { try { _trucksMap.invalidateSize(); } catch (e) {} _dashArmSettleFit(); } }); // each resize re-arms the settle-fit → the zoom is set after the LAST resize
         _dashMapRO.observe(pane);
       }
       _dashScheduleCoverFit(); // kick off in case a wave already landed before this ran
+      // Deterministic expand-on-open backstop (v5.105.2): the full-width dashboard layout reflows AFTER the map
+      // mounts, so Leaflet can measure a collapsed pane and — if the polling coverage-fit loses the race — never
+      // correct ("map didn't expand"). A DOUBLE requestAnimationFrame fires guaranteed AFTER the browser finishes
+      // layout+paint (not a 60/120ms timing guess), so force a size sync + re-kick the fit once the pane truly has
+      // its dimensions. invalidateSize is idempotent → safe belt-and-suspenders alongside the existing machinery.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (_trucksMap && _trucksMapEl === 'dashMapPane') {
+          try { _trucksMap.invalidateSize(true); } catch (e) {}
+          _dashScheduleCoverFit();
+        }
+      }));
     }
     // Apply a specific dayID to a board: state + label + calendar-input value + in-place reload. Shared by the
     // ◀/▶ steppers and the calendar drop-down so all three stay in sync.
@@ -13986,6 +14020,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('dashboardScreen').style.display = 'block';
         document.getElementById('headerTitle').textContent = 'Dispatch';
         currentScreen = 'dashboard';
+        // On each open of Dispatch, default the two schedules to Today (source) → Tomorrow (destination),
+        // the common reschedule direction. (renderDashboard only seeds these when empty, so re-apply here
+        // so re-opening — or a day rollover — always lands on today/tomorrow, not a stale prior selection.)
+        const _dashOpenToday = mjNowParts().dayID;
+        _dashSrcDay = _dashOpenToday;
+        _dashDestDay = mjAddDays(_dashOpenToday, 1);
         renderDashboard();
         _startBoardAutoRefresh();
         return;
