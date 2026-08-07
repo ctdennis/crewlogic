@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.105.1 | 2026-08-07">
+  <meta name="crewlogic-version" content="v5.105.2 | 2026-08-07">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12778,6 +12778,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _dashMapRO.observe(pane);
       }
       _dashScheduleCoverFit(); // kick off in case a wave already landed before this ran
+      // Deterministic expand-on-open backstop (v5.105.2): the full-width dashboard layout reflows AFTER the map
+      // mounts, so Leaflet can measure a collapsed pane and — if the polling coverage-fit loses the race — never
+      // correct ("map didn't expand"). A DOUBLE requestAnimationFrame fires guaranteed AFTER the browser finishes
+      // layout+paint (not a 60/120ms timing guess), so force a size sync + re-kick the fit once the pane truly has
+      // its dimensions. invalidateSize is idempotent → safe belt-and-suspenders alongside the existing machinery.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (_trucksMap && _trucksMapEl === 'dashMapPane') {
+          try { _trucksMap.invalidateSize(true); } catch (e) {}
+          _dashScheduleCoverFit();
+        }
+      }));
     }
     // Apply a specific dayID to a board: state + label + calendar-input value + in-place reload. Shared by the
     // ◀/▶ steppers and the calendar drop-down so all three stay in sync.
