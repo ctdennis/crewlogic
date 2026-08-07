@@ -162,7 +162,7 @@ const CUSTOMER_DWELL_TOOL = {
       hourEnd: { type: ['integer', 'null'], description: 'End hour 0-23 (franchise local), inclusive; null = all hours.' },
       dateFrom: { type: ['string', 'null'], description: 'ISO date YYYY-MM-DD lower bound, or null for all available history.' },
       dateTo: { type: ['string', 'null'], description: 'ISO date YYYY-MM-DD upper bound, or null.' },
-      breakdown: { type: 'string', enum: ['none', 'day_of_week', 'hour', 'job', 'pivot'], description: '"none" = one overall number (scalar). day_of_week/hour = single-axis grouped table. "job" = one row per job, longest first. "pivot" = a TWO-axis matrix (set rowDim + colDim) — use for any "week × day", "month by day-of-week", "year × month" grid.' },
+      breakdown: { type: 'string', enum: ['none', 'day_of_week', 'hour', 'job', 'customer', 'pivot'], description: '"none" = one overall number (scalar). day_of_week/hour = single-axis grouped table. "job" = one row per job (appointment), longest first. "customer" = one row PER CUSTOMER (aggregated: total + avg time + visit count), most total time first — use for "summarize by customer" / "which customers took the most time". "pivot" = a TWO-axis matrix (set rowDim + colDim) for a "week × day" grid.' },
       rowDim: { type: 'string', enum: ['day', 'week', 'month', 'quarter', 'year', 'day_of_week', 'hour', 'season'], description: 'PIVOT only: the ROW axis.' },
       colDim: { type: 'string', enum: ['day', 'week', 'month', 'quarter', 'year', 'day_of_week', 'hour', 'season'], description: 'PIVOT only: the COLUMN axis.' },
     },
@@ -232,7 +232,7 @@ ${facilityNames.map((n) => '  - ' + n).join('\n') || '  (none configured)'}
 RULES:
 - DWELL DISAMBIGUATION: a FACILITY (dump, transfer station, recycle, donation center — one of the named facilities above) → facility_dwell. A CUSTOMER / job site / "on site" / "at the customer" / "how long jobs take" → customer_dwell. If the question names a facility, it's facility_dwell; if it says customer/job/on-site, it's customer_dwell.
 - If the question maps to facility_dwell, CALL THE TOOL with your best params (facility, dayOfWeek, hour range, date range, breakdown). One facility + no grouping = breakdown "none". "which facility is slowest" / "by facility" = breakdown "facility".
-- If the question maps to customer_dwell, CALL THE TOOL with your best params. Overall / no grouping = breakdown "none". "by day" / "busiest day" = day_of_week; "by hour" = hour; "which jobs/customers took longest" = breakdown "job".
+- If the question maps to customer_dwell, CALL THE TOOL with your best params. Overall / no grouping = breakdown "none". "by day" / "busiest day" = day_of_week; "by hour" = hour. "summarize BY CUSTOMER" / "per customer" / "which customers took the most/longest total time" = breakdown "customer" (ONE aggregated row per customer — total + avg + visit count). "which individual jobs/appointments took longest" = breakdown "job" (one row per job).
 - PIVOT / GRID / MATRIX (either dwell skill): any request for a TWO-dimension table — "week × day", "rows as weeks and columns as days of the week", "month by day-of-week", "by season across the years", a calendar grid — use breakdown "pivot" with rowDim + colDim from day/week/month/quarter/year/day_of_week/hour/season (facility_dwell also allows facility). Map "rows as X, columns as Y" → rowDim=X, colDim=Y. Prefer a COARSE bucket on the many-valued axis (rows: week/month/quarter; columns: day-of-week/month/season) so the grid stays readable — a too-wide grid is declined automatically.
 - If the question is NOT something a skill covers (e.g. revenue or job dollar value, a truck's live location, or a nonsensical transform like "multiply by the square root of pi"), DO NOT call the tool. Reply in plain English: say plainly what you can't do and why, and point them to what you CAN answer right now (facility wait/dwell times). Keep it short and friendly — an analyst, not an error message.
 - If the ask is a MIX (a real dwell question plus a nonsensical part), call the tool for the dwell part AND add one short plain-text sentence noting the part you skipped and why.
@@ -340,7 +340,7 @@ async function runCustomerDwell(sb: any, franchiseId: string, tz: string, p: any
   const dow = p.dayOfWeek && p.dayOfWeek !== 'any' ? p.dayOfWeek : null;
   const hs = (typeof p.hourStart === 'number') ? p.hourStart : null;
   const he = (typeof p.hourEnd === 'number') ? p.hourEnd : null;
-  const rows = (data || []).filter((r: any) => {
+  const raw = (data || []).filter((r: any) => {
     if (r.duration == null) return false;
     const lh = localDowHour(r.start_time, tz);
     if (dow && WD[lh.dow] !== dow) return false;
@@ -348,6 +348,18 @@ async function runCustomerDwell(sb: any, franchiseId: string, tz: string, p: any
     if (he != null && lh.hour > he) return false;
     return true;
   });
+  // Collapse multiple job_leave events for the SAME appointment (wo_id) into ONE visit: a truck's GPS bounces
+  // in/out of a job's geofence and fires several job_leave rows (e.g. 6 for one appointment), which would
+  // otherwise DUPLICATE the customer and inflate counts/averages. Keep the MAX duration per wo_id — the full
+  // first-in → last-out span. Rows with no wo_id pass through as-is.
+  const byWo: Record<string, any> = {};
+  const rows: any[] = [];
+  for (const r of raw) {
+    const wo = (r.wo_id != null && r.wo_id !== '') ? String(r.wo_id) : null;
+    if (!wo) { rows.push(r); continue; }
+    if (!byWo[wo] || Number(r.duration) > Number(byWo[wo].duration)) byWo[wo] = r;
+  }
+  for (const k in byWo) rows.push(byWo[k]);
 
   const dayTxt = dow ? dow + ' ' : '';
   const hourTxt = (hs != null || he != null) ? ` between ${hs ?? 0}:00 and ${(he ?? 23)}:59` : '';
@@ -372,6 +384,21 @@ async function runCustomerDwell(sb: any, franchiseId: string, tz: string, p: any
       answer: `Trucks spend an average of ~${fmtMMSS(avg)} on site per ${dayTxt}customer job (${fmtMMSS(median(secs))} typical), over ${rows.length} job${rows.length === 1 ? '' : 's'}${hourTxt}${rangeTxt}.`,
       method, sampleSize: rows.length,
     };
+  }
+
+  if (breakdown === 'customer') {
+    // One row PER CUSTOMER (aggregated across their visits) — total + avg on-site time + visit count, most time first.
+    const byCust: Record<string, { town: string; secs: number[] }> = {};
+    for (const r of rows) {
+      const c = parseCustomer(r.geofence_name);
+      const key = c.customer + '||' + c.town;
+      (byCust[key] ||= { town: c.town, secs: [] }).secs.push(Number(r.duration));
+    }
+    const table = Object.entries(byCust).map(([key, v]) => {
+      const total = v.secs.reduce((a, b) => a + b, 0);
+      return { customer: key.split('||')[0], town: v.town, visits: v.secs.length, total: fmtMMSS(total), avg: fmtMMSS(total / v.secs.length), _t: total };
+    }).sort((a, b) => b._t - a._t).map(({ _t, ...row }) => row);
+    return { shape: 'table', answer: `Customer on-site time BY CUSTOMER${dayTxt ? `, ${dow}` : ''}${hourTxt}${rangeTxt} — most total time first (${table.length} customer${table.length === 1 ? '' : 's'}, ${rows.length} visits):`, table, method, sampleSize: rows.length };
   }
 
   if (breakdown === 'job') {
