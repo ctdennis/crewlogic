@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.110.2 | 2026-08-08">
+  <meta name="crewlogic-version" content="v5.110.3 | 2026-08-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14094,11 +14094,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         opts.map(o => '<option value="'+_ecEsc(o)+'"'+(o===selected?' selected':'')+'>'+_ecEsc(o)+'</option>').join('') +
         '</select>';
     }
+    // Measure the actual width and set an EXPLICIT column count (repeat(N,...)) — no auto-fill guesswork.
+    function ecFixPhotoCols(){
+      const grid = document.getElementById('ecPhotos'); if (!grid) return;
+      const w = grid.getBoundingClientRect().width || (grid.parentElement && grid.parentElement.getBoundingClientRect().width) || 320;
+      const cols = Math.max(2, Math.min(5, Math.floor(w / 115)));
+      grid.style.gridTemplateColumns = 'repeat(' + cols + ', minmax(0, 1fr))';
+    }
     function ecRenderPhotos() {
       const grid = document.getElementById('ecPhotos');
-      // Apply the grid explicitly here (not just via the initial inline style) so nothing can leave it 1-column.
       grid.style.display = 'grid';
-      grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(105px, 1fr))';
       grid.style.gap = '8px';
       grid.innerHTML = _ec.photos.map(p => {
         const src = p.b64 ? ('data:image/jpeg;base64,' + p.b64) : ecProxy(p.downloadUrl); // display the already-downscaled copy
@@ -14107,7 +14112,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '<div id="ecRoomCell'+p.index+'">'+ecRoomSelect(p.index, p.room)+'</div>' +
         '</div>';
       }).join('');
+      ecFixPhotoCols();
     }
+    window.addEventListener('resize', function(){ if (document.getElementById('ecPhotos') && (document.getElementById('ecPhotos').childElementCount)) ecFixPhotoCols(); });
     function ecSetRoom(idx, val){ if (_ec.photos[idx]) { _ec.photos[idx].room = val; const c = document.getElementById('ecRoomCell'+idx); if (c) c.innerHTML = ecRoomSelect(idx, val); } }
     // Lightbox: click a thumbnail → full-size photo + the room dropdown, so you can read the room and assign it.
     function ecPhotoZoom(i){
