@@ -26,23 +26,27 @@ Everything here is a capability CrewLogic already has (AI photo→volume, 1/8-tr
 the **order of operations and the screen are different**, and the Vonigo-pull is new (photo pull proven 2026-08-08,
 memory `vonigo-pull-photos-documents`).
 
-## 1b. The two estimate types (owner, 2026-08-08) + the filter
+## 1b. Which estimates the picker shows (owner-narrowed 2026-08-08)
 
-Reverse-estimate surfaces **two** kinds of Vonigo estimate, both already color-coded on CrewLogic's schedule:
-1. **Purple — "estimate only"** (e.g. David Michael) = Vonigo label **9973 Est-Only** (`#AA4CB3`). An estimate
-   appointment.
-2. **Yellow-green — "estimate done, job not yet scheduled"** (e.g. job **873421** / Eric Wordell) = label
-   **9996 Est-Completed-EstOnly** (`#B8C84D`) / **245**. The Vonigo estimate exists; no job scheduled.
+**The picker shows only COSTABLE estimates: label 9996 "Estimate Completed (Est. Only)" (yellow-green) that
+actually have photos.** This is the stage where the estimate has been performed and photos loaded — the only
+thing there's anything to cost.
 
-**Filter = reuse the existing `_mjIsEst` predicate** (index.html ~12422): a job is an estimate if
-`routeCode === 'EST'` **OR** `labelOpt ∈ {9973, 9996}`. This is the same label logic that already paints the
-schedule, so the picker and the schedule agree by construction. Both probed examples sit on route **Estimate
-(EST) objectID 3848**. *(Resolves open item 2.)*
+- **Excluded: purple 9973 "Estimate Only"** — a pre-visit, scheduled-but-not-performed estimate. No quote, no
+  photos, nothing to cost (owner: "eliminate the purple estimate; this is only for estimates that actually have
+  photos"). Verified: David Michael / Askins (9973) carry `quoteID:""` and 0 photos.
+- **Filter by LABEL, not route.** 9996 estimates can sit on a regular route, not just EST (verified: 867798 /
+  "Mike" is label 9996 on Route 1 with 26 photos). A route-only filter would miss those — so the edge fn keys off
+  `label === 9996` and then requires `photoCount > 0` (photos live on the QUOTE). EST route (3848) is used only to
+  prefer the estimate WO when deduping a job's WOs. *(Resolves open item 2.)*
+
+*(Future: 245 "Estimate Completed (Job)" — a converted estimate — could be added if owner wants to cost
+already-booked jobs; out of scope for now.)*
 
 ## 2. The flow
 
-1. **Pick the estimate** — a **date picker + a jobs/estimates dropdown** for that day; filter via `_mjIsEst`
-   (purple 9973 + yellow-green 9996 + EST route), exclude completed. Select one.
+1. **Pick the estimate** — a **date picker + a jobs/estimates dropdown** for that day; the picker lists only
+   costable estimates (label 9996 "Estimate Completed (Est. Only)" **with photos**; purple 9973 excluded). Select one.
 2. **Pull from Vonigo** — that estimate's structure (customer, address, **zip**, service items, any existing
    Vonigo volume/price) + **all its photos** (documents → download URLs).
 3. **Per-photo AI, grouped by room** — photos are **grouped by room/area**; the AI produces a per-photo
@@ -267,9 +271,10 @@ Pass 2 = Sonnet** (§5.8); Haiku ~$1/$5, Sonnet ~$3/$15 per M tok; Pass-1 thumbs
 ## 10. Build phases (proposed)
 
 - **P1 — ingestion: ✅ SHIPPED to dev (2026-08-08).** Edge fn `crewlogic-ny-estimate`:
-  - `action:'list'` — estimates for a date (filter = `_mjIsEst`: EST route / label 9973/9996), deduped by job,
-    each flagged with `photoCount`/`hasPhotos` (checked off the QUOTE). Smoked: 2026-08-05 → 3 estimates, 873112
-    correctly flagged 42 photos, the other two 0.
+  - `action:'list'` — costable estimates for a date (label **9996** "Estimate Completed (Est. Only)" **with
+    photos**; purple 9973 excluded), deduped by job, each with `photoCount`/`hasPhotos` (checked off the QUOTE).
+    Smoked: 2026-08-05 → only 873112 (42 photos); the two photo-less 9996s that day are dropped. 2026-07-18 →
+    867798 (26 photos, label 9996 on Route 1 — confirms label-not-route filtering).
   - `action:'load'` — one estimate's full structure (client/contact/address/**zip**/quoteID/label/dateService/
     existingPrice) + all photo download URLs. Smoked: 873112 → 42 photos with filenames + zip 02790.
   - Auth/creds/field patterns mirror `crewlogic-todays-workorders`/`crewlogic-job-lookup`; read-only to Vonigo.
@@ -287,7 +292,7 @@ Pass 2 = Sonnet** (§5.8); Haiku ~$1/$5, Sonnet ~$3/$15 per M tok; Pass-1 thumbs
   "292 Alden Road, FAIRHAVEN, MA 02719" → zip **02719**, route EST 3848, quote 700022.
 
 **What the probe CONFIRMED:**
-- ✅ **Filter** = `_mjIsEst` (EST route / labels 9973 + 9996) — examples on route EST 3848.
+- ✅ **Filter** = label **9996** "Estimate Completed (Est. Only)" **with photos** (purple 9973 excluded, owner 2026-08-08).
 - ✅ **Resolve by jobID** → `POST /data/WorkOrders/ {jobID, isCompleteObject:true}` returns the estimate WO
   (the existing `crewlogic-job-lookup` already does this). Relations carry proper `relationType`
   (client / contact / location1 / **quote** / route / servicetype), **address = field 184** (`fieldValue`);
@@ -317,7 +322,7 @@ separate upcoming item — deal with it next, not in this scope.
 1. **Kevin** — NY-unique pricing-model items. Blocks P4 pricing.
 
 **Resolved this rev (2026-08-08):**
-2. ✅ **Estimate filter** — reuse `_mjIsEst` (EST route or label 9973 purple / 9996 yellow-green); covers both owner-described types (§1b). Probed on David Michael + job 873421.
+2. ✅ **Estimate filter (narrowed 2026-08-08)** — picker shows only **label 9996 "Estimate Completed (Est. Only)" WITH photos**; purple 9973 eliminated. Filter by label, not route (9996 can sit on a non-EST route, e.g. 867798 on Route 1). See §1b.
 3. ✅ **Increments** — truck = 16 cu yd; increment = 1/8 = 2 cu yd; **minimum charge = 1 cu yd**; round total up to the next 1/8. Per-step $ still from the Vonigo zip schedule (§6).
 4. ✅ **Overlap** — code for it: AI **visually** clusters photos by room/scene (NOT by filename — that's a CrewLogic-only artifact, NYC photos are unnamed), produces one de-duplicated volume per cluster, estimator re-groups + adjusts (§5).
 9. ✅ **Photos live on the QUOTE object** — pull by `quoteID`/`jobID`, not `workOrderID` (§4). Test estimate: **job 873112** (Prentice, 42 photos, zip 02790).

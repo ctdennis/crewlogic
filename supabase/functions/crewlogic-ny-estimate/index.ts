@@ -8,8 +8,9 @@
 //
 // Actions:
 //   { action: 'list', franchiseID, date?: 'YYYY-MM-DD', dayOffset?: number }
-//     → estimates for that day (filter = the schedule's `_mjIsEst`: EST route OR label 9973/9996),
-//       deduped by job, each flagged with photoCount (photos live on the QUOTE object).
+//     → COSTABLE estimates for that day: label 9996 "Estimate Completed (Est. Only)" AND has photos.
+//       Purple 9973 "Estimate Only" (pre-visit, no photos) is excluded. Deduped by job; photos live on
+//       the QUOTE object.
 //     Response: { success, estimates: [ { jobID, workOrderID, appointmentName, clientName, address,
 //                 zip, route, labelOptionID, labelName, status, dateService, timeLabel,
 //                 photoCount, hasPhotos } ] }
@@ -21,8 +22,9 @@
 //                 photos: [ { objectID, fileName, downloadUrl } ], photoCount }
 //
 // Vonigo facts this relies on (verified 2026-08-08, #90 — see docs/plan-ny-estimate.md):
-//   - Estimate WOs sit on route "Estimate (EST)" objectID 3848; labels 9973 (Est-Only / purple),
-//     9996 (Est-Completed-EstOnly / yellow-green) also mark estimates.
+//   - Costable estimates carry label 9996 "Estimate Completed (Est. Only)" (yellow-green) — the stage where
+//     the estimate has been performed and photos loaded. (Route "Estimate (EST)" objectID 3848 is used only to
+//     prefer the estimate WO when deduping.)
 //   - Resolve a job → its WO via POST /data/WorkOrders/ {jobID}. Address = field 184; zip via the
 //     state-anchored /\b[A-Z]{2}\s+(\d{5})\b/. The `quote` relation gives the quoteID.
 //   - PHOTOS HANG OFF THE QUOTE, not the WorkOrder: POST /data/documents/ {method:-1, quoteID}
@@ -49,9 +51,12 @@ const F_TIME_MINUTES = 9082; // minutes from franchise-local midnight
 const F_PRICE = 813;
 const F_LABEL = 201;
 
-// The "is this an estimate" signal — mirrors index.html `_mjIsEst`.
-const EST_ROUTE_ID = 3848;                 // route "Estimate (EST)"
-const EST_LABELS = new Set([9973, 9996]);  // 9973 Est-Only (purple), 9996 Est-Completed-EstOnly (yellow-green)
+// Costable estimates = the "Estimate Completed (Est. Only)" stage (9996, yellow-green): the estimate has
+// been PERFORMED and photos loaded. Purple 9973 "Estimate Only" (pre-visit, no quote, no photos) is
+// intentionally EXCLUDED — this feature is only for estimates that actually have photos (owner 2026-08-08).
+// `list` further requires photoCount > 0, so photo-less 9996s are dropped too.
+const EST_ROUTE_ID = 3848;                 // route "Estimate (EST)" — used only to prefer the estimate WO on dedup
+const COSTABLE_LABELS = new Set([9996]);   // 9996 Est-Completed-EstOnly (yellow-green)
 const LABEL_NAMES: Record<number, string> = {
   9973: 'Estimate Only',
   9996: 'Estimate Completed (Est. Only)',
@@ -93,12 +98,9 @@ function timeLabel(minutes: number): string {
 function naiveDayEpoch(y: number, m: number, d: number): number {
   return Math.floor(Date.UTC(y, m - 1, d, 0, 0, 0) / 1000);
 }
-function isEstimateWO(wo: VonigoWorkOrder): boolean {
-  const routeRel = rel(wo.Relations || [], 'route');
-  const routeId = Number(routeRel?.objectID) || 0;
-  const routeName = String(routeRel?.name || '');
+function isCostableEstimate(wo: VonigoWorkOrder): boolean {
   const label = getField(wo.Fields || [], F_LABEL)?.optionID || 0;
-  return routeId === EST_ROUTE_ID || /estimate/i.test(routeName) || EST_LABELS.has(label);
+  return COSTABLE_LABELS.has(label);
 }
 
 // Resolve Vonigo credentials for a franchise (same cascade as crewlogic-todays-workorders).
@@ -199,10 +201,10 @@ Deno.serve(async (req: Request) => {
         if (page.length < 200) break;
       }
 
-      // Filter to estimates, dedupe by job (prefer the EST-route WO).
+      // Filter to costable estimates (9996 only), dedupe by job (prefer the EST-route WO).
       const byJob: Record<string, VonigoWorkOrder> = {};
       for (const wo of all) {
-        if (!isEstimateWO(wo)) continue;
+        if (!isCostableEstimate(wo)) continue;
         const jobRel = rel(wo.Relations || [], 'job');
         const jobID = jobRel?.objectID != null ? String(jobRel.objectID) : String(wo.objectID);
         const existing = byJob[jobID];
@@ -223,6 +225,9 @@ Deno.serve(async (req: Request) => {
         // photoCount off the QUOTE (via jobID, which returns the quote's docs)
         let photoCount = 0;
         try { photoCount = (await listDocs(token, 'jobID', jobID)).length; } catch (_e) { photoCount = -1; }
+        // This feature is only for estimates that actually have photos — drop photo-less ones.
+        // (photoCount === -1 = a transient doc-list error; keep it rather than silently hide the estimate.)
+        if (photoCount === 0) continue;
         estimates.push({
           jobID,
           workOrderID: wo.objectID,
