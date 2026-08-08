@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.109.1 | 2026-08-08">
+  <meta name="crewlogic-version" content="v5.110.0 | 2026-08-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1453,6 +1453,16 @@
             <input type="text" id="estimatesSearchInput" placeholder="🔍 Search name or address" oninput="filterEstimatesList()" style="width:100%;background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 28px 6px 10px;font-size:12px;font-family:inherit;outline:none;">
             <button id="estimatesSearchClear" onclick="clearEstimatesSearch()" style="display:none;position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);font-size:14px;cursor:pointer;padding:2px 6px;line-height:1;">×</button>
           </div>
+        </div>
+        <!-- Estimate Costing toolbar (lives in the sticky header so the picker + Calculate stay pinned) -->
+        <div id="ecToolbar" style="display:none;flex-direction:column;gap:6px;align-items:stretch;">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <select class="form-select" id="ecEstimateSel" onchange="ecSelectEstimate()" style="flex:1;min-width:150px;font-size:13px;padding:6px 8px;"><option value="">Loading…</option></select>
+            <button id="ecCalcBtn" class="btn-surface" style="padding:7px 14px;font-weight:700;display:none;" onclick="ecQuantify()">Calculate volumes</button>
+            <span id="ecSpend" style="font-size:12px;color:var(--text-muted);display:none;white-space:nowrap;"></span>
+          </div>
+          <div id="ecProgress" style="display:none;height:3px;background:var(--bg-input);border-radius:2px;overflow:hidden;"><div style="height:100%;width:40%;background:var(--accent-green);animation:ecslide 1.1s ease-in-out infinite;"></div></div>
+          <div id="ecStatus" style="font-size:12px;color:var(--text-muted);"></div>
         </div>
       </div>
     </div>
@@ -8938,10 +8948,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const bar = document.getElementById('secondaryToolbar');
       const editor = document.getElementById('editorToolbar');
       const list = document.getElementById('listToolbar');
+      const ec = document.getElementById('ecToolbar');
       if (!bar) return;
       if (editor) editor.style.display = which === 'editor' ? 'flex' : 'none';
       if (list) list.style.display = which === 'list' ? 'flex' : 'none';
-      bar.style.display = (which === 'editor' || which === 'list') ? 'block' : 'none';
+      if (ec) ec.style.display = which === 'estimateCosting' ? 'flex' : 'none';
+      bar.style.display = (which === 'editor' || which === 'list' || which === 'estimateCosting') ? 'block' : 'none';
       // After showing, sync button enablement state
       if (which === 'editor') updateEditorToolbarState();
     }
@@ -8981,6 +8993,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (editor) editor.style.display = 'none';
       const list = document.getElementById('listToolbar');
       if (list) list.style.display = 'none';
+      const ec = document.getElementById('ecToolbar');
+      if (ec) ec.style.display = 'none';
     }
 
     // ===== HOME SCREEN: drag-to-reorder card preference (per-user, DB-persisted) =====
@@ -13997,18 +14011,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       div.style.display = 'none';
       div.innerHTML =
         '<div style="max-width:1100px;margin:0 auto;">' +
-          '<div id="ecTop" style="position:sticky;top:0;z-index:6;background:var(--bg-primary);padding:8px 0 2px;">' +
-          '<div style="margin-bottom:10px;"><label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:4px;">Estimate — recent, with photos</label>' +
-            '<select class="form-select" id="ecEstimateSel" onchange="ecSelectEstimate()"><option value="">Loading…</option></select></div>' +
-          '<div id="ecBar" style="background:var(--bg-card);border:1px solid var(--border);padding:8px 10px;margin-bottom:12px;border-radius:10px;">' +
-            '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">' +
-              '<button id="ecCalcBtn" class="btn-surface" style="padding:8px 16px;font-weight:700;display:none;" onclick="ecQuantify()">Calculate volumes</button>' +
-              '<div id="ecStatus" style="font-size:13px;color:var(--text-muted);flex:1;min-width:120px;"></div>' +
-              '<div id="ecSpend" style="font-size:12px;color:var(--text-muted);display:none;"></div>' +
-            '</div>' +
-            '<div id="ecProgress" style="display:none;height:3px;background:var(--bg-input);border-radius:2px;overflow:hidden;margin-top:6px;"><div style="height:100%;width:40%;background:var(--accent-green);animation:ecslide 1.1s ease-in-out infinite;"></div></div>' +
-          '</div>' +
-          '</div>' +
           '<div id="ecPhotos" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;"></div>' +
           '<div id="ecResults"></div>' +
         '</div>' +
@@ -14035,10 +14037,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function ecOpen() {
       await ecEnsureScreen();
       document.getElementById('estimateCostingScreen').style.display = 'block';
-      // The page (body) scrolls and the app header is sticky top:0 z-100, so a sub-sticky at top:0 hides BEHIND
-      // the header. Pin #ecTop at the header's height instead (measured, robust to header changes).
-      const _hdr = document.querySelector('.app-header'); const _ecTop = document.getElementById('ecTop');
-      if (_hdr && _ecTop) _ecTop.style.top = _hdr.offsetHeight + 'px';
       _ec.jobID = null; _ec.photos = []; _ec.rooms = []; _ec.spend = 0; _ec.estimates = []; _ec.counts = {};
       document.getElementById('ecPhotos').innerHTML = '';
       document.getElementById('ecResults').innerHTML = '';
@@ -14295,6 +14293,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (module === 'estimateCosting') {
         document.getElementById('headerTitle').textContent = 'Estimate Costing';
         currentScreen = 'estimateCosting';
+        showSecondaryToolbar('estimateCosting'); // picker + Calculate live in the sticky header
         ecOpen();
         return;
       }
