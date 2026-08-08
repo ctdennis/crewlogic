@@ -176,13 +176,15 @@ function uint8ToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 // Download one photo → an Anthropic base64 image block (Vonigo serves octet-stream; the bytes are JPEG).
+// NOTE: server-side downscaling (ImageScript) OOM/CPU-limits the edge worker on 40+ images — downscaling is
+// done CLIENT-SIDE in P3 (browser canvas) instead, which also lowers AI cost. See docs/plan-ny-estimate.md §5.7.
 async function fetchImageBlock(url: string): Promise<Record<string, unknown> | null> {
   const r = await fetch(url);
   if (!r.ok) return null;
-  const buf = new Uint8Array(await r.arrayBuffer());
+  const bytes = new Uint8Array(await r.arrayBuffer());
   const ct = r.headers.get('content-type') || '';
   const mt = ct.startsWith('image/') ? ct.split(';')[0].trim() : 'image/jpeg';
-  return { type: 'image', source: { type: 'base64', media_type: mt, data: uint8ToBase64(buf) } };
+  return { type: 'image', source: { type: 'base64', media_type: mt, data: uint8ToBase64(bytes) } };
 }
 async function callAnthropic(model: string, system: string, userContent: unknown, maxTokens: number, label: string): Promise<Record<string, unknown>> {
   if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not configured');

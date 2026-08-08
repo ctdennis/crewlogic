@@ -230,6 +230,11 @@ Distinct screen off the **"Estimate Costing" home card**, reusing the estimator'
   Garage, Laundry Room, Workshop, Storage Room, Closet, Bathroom, Deck/Patio, Front/Side/Back Yard, Driveway,
   Parking Lot, Shed, Other. (The grouper already labels from this list, so each photo's dropdown pre-selects the
   AI's room; the bedroom-numbering challenge is handled by the fixed Bedroom 1..8 + Primary options.)
+- **Client downscales the photos** (canvas → ~700px base64) before sending to the AI — cuts cost ~⅔ and avoids the
+  edge worker's compute limit (server-side ImageScript OOMs on 40+ photos). Needs an edge image-proxy action
+  (CORS-clean bytes) so the canvas isn't tainted; `group`/`quantify` accept the client base64 array.
+- **Per-room "details" link → modal** (owner ask): shows that room's full item inventory + confidence. **Free** —
+  `analyze`/`quantify` already return the items; the modal just displays them, no extra AI call.
 - **Quantify:** after the user is satisfied with the room assignments, run `quantify` on the confirmed groups →
   per-room de-duplicated item inventory + editable `volume_cuyd` (adjust up/down). Re-assigning a photo re-runs
   only the affected rooms.
@@ -309,8 +314,14 @@ Pass 2 = Sonnet** (§5.8); Haiku ~$1/$5, Sonnet ~$3/$15 per M tok; Pass-1 thumbs
     dropped.
   - **Known (resolved by P3 estimator-review):** run-to-run volume variance (~15%) → estimator adjusts; the
     Other/Unsorted bucket can double-count dup angles → estimator reassigns the photo to its room.
-  - **Cost lever not yet applied:** Pass-1 sends full images (no downscale — Deno has no native resize). Downscaling
-    thumbnails for grouping would cut Pass-1 tokens ~⅔ (§5.7). Deferred (Haiku Pass-1 is already cheap).
+  - **Cost = ~$0.45 on 42 photos** (full-res: Anthropic bills ~1,550 tok/image, sent to both passes). Typical
+    20-photo estimates ≈ $0.22–0.25.
+  - **Downscaling — moved to the CLIENT (P3).** Tried server-side downscale (ImageScript in the edge fn) → the
+    worker hit `WORKER_RESOURCE_LIMIT` decoding 40+ images (CPU/memory), even at low concurrency. Reverted. The fix
+    lands in P3: the client already fetches + displays the photos (via an edge image-proxy so the canvas is
+    CORS-clean), so it downscales to ~700px there and passes the small base64 to `group`/`quantify` (which will
+    accept client-provided images instead of downloading). This **cuts image tokens ~⅔ AND removes the edge
+    resource limit** (server never holds 42 bitmaps). Target after: ~$0.15–0.28/estimate.
 - **P3 — screen:** the NY Estimate screen — job picker, photo cards (AI + editable volume), markup panel (reused).
 - **P4 — price + cost + margin:** Vonigo zip pricing (increment + minimum) + CrewLogic cost engine → margin roll-up.
 - **P5 — NY extras:** fold in Kevin's NY-unique pricing items.
