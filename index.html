@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.108.0 | 2026-08-08">
+  <meta name="crewlogic-version" content="v5.109.0 | 2026-08-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14035,6 +14035,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function ecOpen() {
       await ecEnsureScreen();
       document.getElementById('estimateCostingScreen').style.display = 'block';
+      // The page (body) scrolls and the app header is sticky top:0 z-100, so a sub-sticky at top:0 hides BEHIND
+      // the header. Pin #ecTop at the header's height instead (measured, robust to header changes).
+      const _hdr = document.querySelector('.app-header'); const _ecTop = document.getElementById('ecTop');
+      if (_hdr && _ecTop) _ecTop.style.top = _hdr.offsetHeight + 'px';
       _ec.jobID = null; _ec.photos = []; _ec.rooms = []; _ec.spend = 0; _ec.estimates = []; _ec.counts = {};
       document.getElementById('ecPhotos').innerHTML = '';
       document.getElementById('ecResults').innerHTML = '';
@@ -14093,7 +14097,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         '</select>';
     }
     function ecRenderPhotos() {
-      document.getElementById('ecPhotos').innerHTML = _ec.photos.map(p => {
+      const grid = document.getElementById('ecPhotos'); grid.style.display = 'grid'; // re-show (Calculate hides it)
+      grid.innerHTML = _ec.photos.map(p => {
         const src = p.b64 ? ('data:image/jpeg;base64,' + p.b64) : ecProxy(p.downloadUrl); // display the already-downscaled copy
         return '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:6px;">' +
           '<img src="'+src+'" loading="lazy" onclick="ecPhotoZoom('+p.index+')" title="Tap to enlarge" style="width:100%;height:110px;object-fit:cover;border-radius:6px;background:var(--bg-input);cursor:pointer;" alt="">' +
@@ -14146,33 +14151,72 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     function ecConf(c){ c = c||0; const col = c>=0.75?'#2e7d32':(c>=0.6?'#b8860b':'#c0392b'); return '<span style="background:'+col+';color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;">'+Math.round(c*100)+'%</span>'; }
-    function ecBilledCuyd(total){ if (total <= 1) return 1; return Math.ceil(total / 2) * 2; } // min 1 cy, else next 1/8-truck (2 cy) step
+    function ecBilledCuyd(total){ if (total <= 1) return 1; return Math.ceil(total / 2) * 2; }
+    // Truck volume: 1 truck = 16 cu yd = 8 eighths (2 cu yd each). eighths 0 = "Minimum" (1 cu yd, per Vonigo).
+    function ecEighthsToCy(e){ return e <= 0 ? 1 : e * 2; }
+    function ecCyToEighths(cy){ cy = parseFloat(cy)||0; if (cy <= 1) return 0; return Math.max(1, Math.round(cy / 2)); } // round to nearest 1/8 truck
+    function ecFracLabel(e){
+      if (e <= 0) return 'Minimum';
+      const F = ['','1/8','1/4','3/8','1/2','5/8','3/4','7/8'];
+      const whole = Math.floor(e/8), rem = e%8, unit = whole === 1 ? 'truck' : 'trucks';
+      if (whole === 0) return F[rem];
+      return rem === 0 ? (whole+' '+unit) : (whole+' '+F[rem]+' '+unit);
+    }
+    function ecFracOptions(sel){ let o=''; for (let e=0;e<=40;e++){ o += '<option value="'+e+'"'+(e===sel?' selected':'')+'>'+ecFracLabel(e)+'</option>'; } return o; }
     function ecRecalcTotals(){
       const t = +(_ec.rooms.reduce((s,rm) => s + (parseFloat(rm.volume_cuyd)||0), 0)).toFixed(2);
       const set = (id,v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
       set('ecTotalCuyd', t + ' cy'); set('ecBilled', ecBilledCuyd(t) + ' cy'); set('ecTrucks', (+(t/16).toFixed(2)) + '');
     }
-    function ecSetVolume(i, val){ if (_ec.rooms[i]) { _ec.rooms[i].volume_cuyd = Math.max(0, parseFloat(val)||0); ecRecalcTotals(); } }
-    function ecRenderResults(r) {
-      const cards = (_ec.rooms||[]).map((rm,i) =>
-        '<div onclick="ecRoomDetails('+i+')" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:10px 12px;cursor:pointer;transition:border-color .15s;" onmouseover="this.style.borderColor=\'var(--accent-green)\'" onmouseout="this.style.borderColor=\'var(--border)\'">' +
-          '<div style="display:flex;align-items:center;gap:8px;"><span style="font-weight:700;flex:1;">'+_ecEsc(rm.room_label)+'</span>'+ecConf(rm.confidence)+'</div>' +
-          '<div style="display:flex;align-items:center;gap:6px;margin-top:8px;">' +
-            '<input type="number" step="0.25" min="0" value="'+rm.volume_cuyd+'" onclick="event.stopPropagation()" onchange="ecSetVolume('+i+', this.value)" style="width:76px;font-size:15px;font-weight:700;padding:4px 6px;background:var(--bg-input);color:var(--accent-green);border:1px solid var(--btn-surface-border);border-radius:6px;">' +
-            '<span style="color:var(--text-muted);font-size:12px;">cu yd</span>' +
-            '<span style="flex:1;"></span>' +
-            '<span style="color:var(--text-muted);font-size:12px;">'+((rm.items||[]).length)+' items · tap ›</span>' +
-          '</div>' +
-        '</div>').join('');
-      document.getElementById('ecResults').innerHTML =
-        '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:16px 0;display:flex;gap:20px;flex-wrap:wrap;">' +
-          '<div><div id="ecTotalCuyd" style="font-size:24px;font-weight:800;color:var(--accent-green);">'+r.totalCuyd+' cy</div><div style="font-size:12px;color:var(--text-muted);">total (editable below)</div></div>' +
-          '<div><div id="ecBilled" style="font-size:24px;font-weight:800;color:var(--accent-green);">'+r.billedCuyd+' cy</div><div style="font-size:12px;color:var(--text-muted);">billed (min 1, 1/8-truck steps)</div></div>' +
-          '<div><div id="ecTrucks" style="font-size:24px;font-weight:800;color:var(--accent-green);">'+r.truckFraction+'</div><div style="font-size:12px;color:var(--text-muted);">16-cy truckloads</div></div>' +
+    function ecSetEighths(i, e){
+      const rm = _ec.rooms[i]; if (!rm) return;
+      rm.eighths = e; rm.volume_cuyd = ecEighthsToCy(e);
+      const lbl = document.getElementById('ecFracLbl'+i); if (lbl) lbl.textContent = ecFracLabel(e);
+      const cy = document.getElementById('ecRoomCy'+i); if (cy) cy.textContent = rm.volume_cuyd + ' cu yd';
+      ecRecalcTotals();
+    }
+    function ecToggleRoom(i){
+      const b = document.getElementById('ecRoomBody'+i), a = document.getElementById('ecArrow'+i);
+      if (!b) return; const open = b.style.display === 'none'; b.style.display = open ? 'block' : 'none'; if (a) a.textContent = open ? '▾' : '▸';
+    }
+    function ecRoomRow(rm, i){
+      const photos = _ec.photos.filter(p => p.room === rm.room_label && p.b64);
+      const thumbs = photos.map(p => '<img src="data:image/jpeg;base64,'+p.b64+'" onclick="ecPhotoZoom('+p.index+')" title="Tap to enlarge" style="width:78px;height:58px;object-fit:cover;border-radius:5px;cursor:pointer;">').join('');
+      const items = (rm.items||[]).map(it => '<tr><td style="padding:2px 4px;border-bottom:1px solid var(--border);">'+_ecEsc(it.name)+'</td><td style="padding:2px 4px;border-bottom:1px solid var(--border);text-align:right;">'+_ecEsc(it.qty)+'</td><td style="padding:2px 4px;border-bottom:1px solid var(--border);text-align:right;">'+it.est_cuyd+'</td></tr>').join('');
+      return '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden;">' +
+        '<div onclick="ecToggleRoom('+i+')" style="display:flex;align-items:center;gap:10px;padding:11px 12px;cursor:pointer;">' +
+          '<span style="font-weight:700;flex:1;">'+_ecEsc(rm.room_label)+'</span>' +
+          '<span id="ecFracLbl'+i+'" style="font-weight:700;color:var(--accent-green);">'+ecFracLabel(rm.eighths)+'</span>' +
+          '<span style="color:var(--text-muted);font-size:12px;">'+photos.length+' 📷</span>' +
+          '<span id="ecArrow'+i+'" style="color:var(--text-muted);">▸</span>' +
         '</div>' +
-        '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Adjust any room\'s volume — the totals update live. Tap a room for its item detail.</div>' +
-        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;">'+cards+'</div>' +
+        '<div id="ecRoomBody'+i+'" style="display:none;padding:0 12px 12px;">' +
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">' +
+            '<span style="font-size:12px;color:var(--text-muted);">Truck volume:</span>' +
+            '<select class="form-select" style="width:auto;font-size:13px;padding:5px 8px;" onchange="ecSetEighths('+i+', +this.value)">'+ecFracOptions(rm.eighths)+'</select>' +
+            '<span id="ecRoomCy'+i+'" style="color:var(--text-muted);font-size:12px;">'+rm.volume_cuyd+' cu yd</span>' +
+            '<span style="flex:1;"></span>'+ecConf(rm.confidence) +
+          '</div>' +
+          (thumbs ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">'+thumbs+'</div>' : '') +
+          (items ? '<table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr><th style="text-align:left;color:var(--text-muted);font-size:11px;">Item</th><th style="text-align:right;color:var(--text-muted);font-size:11px;">Qty</th><th style="text-align:right;color:var(--text-muted);font-size:11px;">cu yd</th></tr></thead><tbody>'+items+'</tbody></table>' : '') +
+          (rm.notes ? '<div style="font-size:12px;color:var(--text-muted);font-style:italic;margin-top:8px;">'+_ecEsc(rm.notes)+'</div>' : '') +
+        '</div>' +
+      '</div>';
+    }
+    function ecRenderResults(r) {
+      _ec.rooms.forEach(rm => { rm.eighths = ecCyToEighths(rm.volume_cuyd); rm.volume_cuyd = ecEighthsToCy(rm.eighths); });
+      const grid = document.getElementById('ecPhotos'); if (grid) grid.style.display = 'none'; // photos now live inside their rooms
+      const rows = _ec.rooms.map((rm,i) => ecRoomRow(rm,i)).join('');
+      document.getElementById('ecResults').innerHTML =
+        '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:12px 0;display:flex;gap:20px;flex-wrap:wrap;">' +
+          '<div><div id="ecTotalCuyd" style="font-size:24px;font-weight:800;color:var(--accent-green);"></div><div style="font-size:12px;color:var(--text-muted);">total cu yd</div></div>' +
+          '<div><div id="ecBilled" style="font-size:24px;font-weight:800;color:var(--accent-green);"></div><div style="font-size:12px;color:var(--text-muted);">billed (min 1, 1/8-truck steps)</div></div>' +
+          '<div><div id="ecTrucks" style="font-size:24px;font-weight:800;color:var(--accent-green);"></div><div style="font-size:12px;color:var(--text-muted);">16-cy truckloads</div></div>' +
+        '</div>' +
+        '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Tap a room to see its photos + items and set its truck volume. Totals update live.</div>' +
+        rows +
         '<div style="font-size:12px;color:var(--text-muted);margin-top:10px;">Pricing (Vonigo zip) + cost (CrewLogic Cost tab) → margin: coming next.</div>';
+      ecRecalcTotals();
     }
     function ecRoomDetails(i) {
       const rm = _ec.rooms[i]; if (!rm) return;
