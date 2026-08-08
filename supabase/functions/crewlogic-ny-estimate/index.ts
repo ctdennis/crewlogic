@@ -72,7 +72,9 @@ const STATUS_ARCHIVED = 165;
 // ── P2: AI grouping + de-dup ──────────────────────────────────────────────────
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
-const MODEL_GROUP = 'claude-haiku-4-5-20251001'; // Pass 1 grouping — cheap; not the customer number (estimator gate catches misclusters)
+// Pass 1 grouping — switched Haiku → Sonnet (owner 2026-08-08): Haiku mis-grouped rooms too often; Sonnet's
+// multi-image reasoning is materially better and the owner chose accuracy over the small cost delta.
+const MODEL_GROUP = 'claude-sonnet-4-6';
 const MODEL_QUANTIFY = 'claude-sonnet-4-6';       // Pass 2 volume — identifier-adjacent (price rides on it) → Sonnet+
 const TRUCK_CY = 16;  // Vonigo pricing truck
 const EIGHTH_CY = 2;  // 1/8 of a 16 cu yd truck

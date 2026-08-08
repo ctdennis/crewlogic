@@ -185,9 +185,10 @@ multiple photos to the same object (proof it de-duped).
   `action:'rooms'`); the P3 per-photo dropdown uses the same list. Handles the bedroom-numbering challenge
   (Primary + Bedroom 1..8). Confirmed on 873112: labels came back clean (Basement, Kitchen, Primary Bedroom,
   Bedroom 1..5, Garage, …).
-- **Model tier (DECIDED 2026-08-08):** **Pass 1 grouping → Haiku** (grouping is not the customer-facing number, and
-  the estimator-review gate catches any miscluster, so Haiku is safe here and ~⅔ cheaper). **Pass 2 quantify/volume →
-  Sonnet-class or better** (the volume rides the customer's price — identifier-adjacent, never Haiku).
+- **Model tier (REVISED 2026-08-08):** **both passes → Sonnet.** Started Pass 1 grouping on Haiku for cost, but
+  Haiku mis-grouped rooms too often (over-segmented, left photos unassigned). Owner chose accuracy over the small
+  delta → grouping switched to Sonnet. Verified on 873112: Sonnet gave 14 clean rooms, **0 ungrouped** (Haiku:
+  ~18–20 groups, 3–5 ungrouped). Because images are client-downscaled (~700px), the cost bump is modest.
 
 ## 6. Pricing (revenue) — Vonigo zip schedule (increments known)
 
