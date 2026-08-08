@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.106.0 | 2026-08-08">
+  <meta name="crewlogic-version" content="v5.106.1 | 2026-08-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -13956,10 +13956,36 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Gated feature (dev + super-admin for now). Backend: crewlogic-ny-estimate (list/load/group/quantify/rooms)
     // + crewlogic-ny-photo (public image proxy). See docs/plan-ny-estimate.md.
     // ═══════════════════════════════════════════════════════════════════════
-    let _ec = { jobID: null, photos: [], rooms: [], roomOptions: [], busy: false };
+    let _ec = { jobID: null, photos: [], rooms: [], roomOptions: [], busy: false, spend: 0 };
+    const EC_PRICE = { group: { in: 1, out: 5 }, quantify: { in: 3, out: 15 } }; // $/M tokens (Haiku group, Sonnet quantify)
     function _ecEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
     function ecProxy(url){ return EDGE_BASE + '/crewlogic-ny-photo?u=' + encodeURIComponent(url); }
     function ecStatus(msg){ const el = document.getElementById('ecStatus'); if (el) el.textContent = msg || ''; }
+    function ecBusy(on, msg){ const pr = document.getElementById('ecProgress'); if (pr) pr.style.display = on ? 'block' : 'none'; if (msg != null) ecStatus(msg); }
+    function ecCanSeeSpend(){ return IS_DEV_ENV || (currentUser && currentUser.email === 'charles.dennis@junkluggers.com'); }
+    function ecAddSpend(kind, usage){ if (!usage) return; const p = EC_PRICE[kind] || EC_PRICE.quantify; _ec.spend += (usage.tokens_in||0)/1e6*p.in + (usage.tokens_out||0)/1e6*p.out; ecRenderSpend(); }
+    function ecRenderSpend(){ const el = document.getElementById('ecSpend'); if (!el) return; if (ecCanSeeSpend()) { el.style.display=''; el.textContent = 'AI spend: $' + _ec.spend.toFixed(2); } else { el.style.display='none'; } }
+    // Client-side downscale (canvas) — cuts AI image tokens ~2/3 and avoids server-side image processing.
+    // crossOrigin + the CORS-clean proxy keep the canvas un-tainted so toDataURL works.
+    function ecDownscale(url, maxEdge){
+      return new Promise((resolve) => {
+        const im = new Image(); im.crossOrigin = 'anonymous';
+        im.onload = () => {
+          let w = im.naturalWidth, h = im.naturalHeight; const L = Math.max(w, h);
+          if (L > maxEdge) { const s = maxEdge / L; w = Math.round(w*s); h = Math.round(h*s); }
+          const c = document.createElement('canvas'); c.width = w; c.height = h;
+          c.getContext('2d').drawImage(im, 0, 0, w, h);
+          try { resolve(c.toDataURL('image/jpeg', 0.72).split(',')[1] || null); } catch(_e){ resolve(null); }
+        };
+        im.onerror = () => resolve(null);
+        im.src = url;
+      });
+    }
+    async function ecDownscaleAll(){
+      let done = 0; const total = _ec.photos.length;
+      await Promise.all(_ec.photos.map(async (p) => { p.b64 = await ecDownscale(ecProxy(p.downloadUrl), 700); done++; ecStatus('Preparing photos ' + done + '/' + total + '…'); }));
+    }
+    function ecImages(){ return _ec.photos.filter(p => p.b64).map(p => ({ index: p.index, b64: p.b64 })); }
 
     async function ecEnsureScreen() {
       if (document.getElementById('estimateCostingScreen')) return;
@@ -13974,9 +14000,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             '<div style="flex:1;min-width:220px;"><label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:4px;">Estimate</label>' +
               '<select class="form-select" id="ecEstimateSel" onchange="ecSelectEstimate()"><option value="">— pick a date —</option></select></div>' +
           '</div>' +
-          '<div id="ecStatus" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;"></div>' +
+          '<div id="ecBar" style="position:sticky;top:0;z-index:6;background:var(--bg-card);border-bottom:1px solid var(--border);padding:8px 10px;margin:0 -10px 12px;border-radius:0 0 10px 10px;">' +
+            '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">' +
+              '<button id="ecCalcBtn" class="btn-surface" style="padding:8px 16px;font-weight:700;display:none;" onclick="ecQuantify()">Calculate volumes</button>' +
+              '<div id="ecStatus" style="font-size:13px;color:var(--text-muted);flex:1;min-width:120px;"></div>' +
+              '<div id="ecSpend" style="font-size:12px;color:var(--text-muted);display:none;"></div>' +
+            '</div>' +
+            '<div id="ecProgress" style="display:none;height:3px;background:var(--bg-input);border-radius:2px;overflow:hidden;margin-top:6px;"><div style="height:100%;width:40%;background:var(--accent-green);animation:ecslide 1.1s ease-in-out infinite;"></div></div>' +
+          '</div>' +
           '<div id="ecPhotos" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;"></div>' +
-          '<div id="ecActions" style="margin:16px 0;display:none;"><button class="btn-surface" style="padding:10px 18px;font-weight:700;" onclick="ecQuantify()">Calculate volumes</button></div>' +
           '<div id="ecResults"></div>' +
         '</div>' +
         '<div id="ecRoomModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)ecCloseModal()">' +
@@ -13986,16 +14018,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '</div>' +
         '</div>';
       document.getElementById('homeScreen').parentNode.appendChild(div);
+      if (!document.getElementById('ecKeyframes')) { const st = document.createElement('style'); st.id = 'ecKeyframes'; st.textContent = '@keyframes ecslide{0%{margin-left:-40%}100%{margin-left:100%}}'; document.head.appendChild(st); }
       try { const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'rooms' }); if (r && r.success) _ec.roomOptions = r.rooms || []; } catch(_e){}
     }
 
     async function ecOpen() {
       await ecEnsureScreen();
       document.getElementById('estimateCostingScreen').style.display = 'block';
-      _ec.jobID = null; _ec.photos = []; _ec.rooms = [];
+      _ec.jobID = null; _ec.photos = []; _ec.rooms = []; _ec.spend = 0;
       document.getElementById('ecPhotos').innerHTML = '';
       document.getElementById('ecResults').innerHTML = '';
-      document.getElementById('ecActions').style.display = 'none';
+      document.getElementById('ecCalcBtn').style.display = 'none';
+      ecRenderSpend(); ecBusy(false, '');
       document.getElementById('ecEstimateSel').innerHTML = '<option value="">— pick a date —</option>';
       const d = document.getElementById('ecDate'); if (!d.value) { d.value = new Date().toISOString().slice(0,10); }
       ecLoadList();
@@ -14005,7 +14039,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const date = document.getElementById('ecDate').value;
       if (!date) return;
       ecStatus('Loading estimates for ' + date + '…');
-      document.getElementById('ecPhotos').innerHTML=''; document.getElementById('ecResults').innerHTML=''; document.getElementById('ecActions').style.display='none';
+      document.getElementById('ecPhotos').innerHTML=''; document.getElementById('ecResults').innerHTML=''; document.getElementById('ecCalcBtn').style.display='none';
       const sel = document.getElementById('ecEstimateSel');
       try {
         const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'list', franchiseID: currentUser.franchiseID, date });
@@ -14019,18 +14053,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     async function ecSelectEstimate() {
       const jobID = document.getElementById('ecEstimateSel').value;
-      document.getElementById('ecResults').innerHTML=''; document.getElementById('ecActions').style.display='none';
-      if (!jobID) { document.getElementById('ecPhotos').innerHTML=''; return; }
-      _ec.jobID = jobID;
-      ecStatus('Loading photos…');
+      document.getElementById('ecResults').innerHTML=''; document.getElementById('ecCalcBtn').style.display='none';
+      if (!jobID) { document.getElementById('ecPhotos').innerHTML=''; ecBusy(false,''); return; }
+      _ec.jobID = jobID; _ec.spend = 0; ecRenderSpend();
+      ecBusy(true, 'Loading photos…');
       try {
         const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'load', franchiseID: currentUser.franchiseID, jobID });
-        if (!r || !r.success) { ecStatus('Could not load estimate.'); return; }
+        if (!r || !r.success) { ecBusy(false,'Could not load estimate.'); return; }
         _ec.photos = (r.photos || []).map((p,i) => Object.assign({}, p, { index:i, room:'' }));
         ecRenderPhotos();
-        ecStatus('Grouping ' + _ec.photos.length + ' photos into rooms…');
-        ecGroup();
-      } catch(_e){ ecStatus('Error loading estimate.'); }
+        ecBusy(true, 'Preparing photos…');
+        await ecDownscaleAll();
+        ecBusy(true, 'Grouping ' + _ec.photos.length + ' photos into rooms…');
+        await ecGroup();
+      } catch(_e){ ecBusy(false, 'Error loading estimate.'); }
     }
 
     function ecRoomSelect(idx, selected) {
@@ -14050,16 +14086,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function ecSetRoom(idx, val){ if (_ec.photos[idx]) _ec.photos[idx].room = val; }
 
     async function ecGroup() {
-      if (!_ec.jobID) return;
+      const images = ecImages();
+      if (!images.length) { ecBusy(false, 'No photos to group.'); return; }
       try {
-        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'group', franchiseID: currentUser.franchiseID, jobID: _ec.jobID });
-        if (!r || !r.success) { ecStatus('Grouping failed — set rooms manually, then Calculate.'); document.getElementById('ecActions').style.display='block'; return; }
+        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'group', images });
+        if (!r || !r.success) { ecBusy(false, 'Grouping failed — set rooms manually, then Calculate.'); document.getElementById('ecCalcBtn').style.display=''; return; }
+        ecAddSpend('group', r.usage);
         (r.groups||[]).forEach(g => (g.photo_indices||[]).forEach(i => { if (_ec.photos[i]) _ec.photos[i].room = g.room_label; }));
         (r.ungrouped||[]).forEach(i => { if (_ec.photos[i] && !_ec.photos[i].room) _ec.photos[i].room = 'Other'; });
         _ec.photos.forEach(p => { const c = document.getElementById('ecRoomCell'+p.index); if (c) c.innerHTML = ecRoomSelect(p.index, p.room); });
-        document.getElementById('ecActions').style.display = 'block';
-        ecStatus('Grouped into rooms — review the dropdowns, then Calculate volumes.');
-      } catch(_e){ ecStatus('Grouping error — set rooms manually, then Calculate.'); document.getElementById('ecActions').style.display='block'; }
+        document.getElementById('ecCalcBtn').style.display = '';
+        ecBusy(false, 'Grouped into rooms — review the dropdowns, then Calculate volumes.');
+      } catch(_e){ ecBusy(false, 'Grouping error — set rooms manually, then Calculate.'); document.getElementById('ecCalcBtn').style.display=''; }
     }
 
     async function ecQuantify() {
@@ -14068,25 +14106,26 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _ec.photos.forEach(p => { const rm = p.room || 'Other'; (byRoom[rm] = byRoom[rm] || []).push(p.index); });
       const groups = Object.keys(byRoom).map(rm => ({ room_label: rm, photo_indices: byRoom[rm] }));
       if (!groups.length) return;
-      _ec.busy = true; ecStatus('Calculating volumes — this can take up to a minute…');
+      _ec.busy = true; ecBusy(true, 'Calculating volumes — this can take up to a minute…');
       document.getElementById('ecResults').innerHTML = '';
       try {
-        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'quantify', franchiseID: currentUser.franchiseID, jobID: _ec.jobID, groups });
-        if (!r || !r.success) { ecStatus('Volume calculation failed.'); _ec.busy=false; return; }
+        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'quantify', images: ecImages(), groups });
+        if (!r || !r.success) { ecBusy(false, 'Volume calculation failed.'); _ec.busy=false; return; }
+        ecAddSpend('quantify', r.usage);
         _ec.rooms = r.rooms || [];
         ecRenderResults(r);
-        ecStatus('');
-      } catch(_e){ ecStatus('Volume calculation error.'); }
+        ecBusy(false, '');
+      } catch(_e){ ecBusy(false, 'Volume calculation error.'); }
       _ec.busy = false;
     }
 
     function ecConf(c){ c = c||0; const col = c>=0.75?'#2e7d32':(c>=0.6?'#b8860b':'#c0392b'); return '<span style="background:'+col+';color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;">'+Math.round(c*100)+'%</span>'; }
     function ecRenderResults(r) {
       const cards = (r.rooms||[]).map((rm,i) =>
-        '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:10px 12px;">' +
+        '<div onclick="ecRoomDetails('+i+')" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:10px 12px;cursor:pointer;transition:border-color .15s;" onmouseover="this.style.borderColor=\'var(--accent-green)\'" onmouseout="this.style.borderColor=\'var(--border)\'">' +
           '<div style="display:flex;align-items:center;gap:8px;"><span style="font-weight:700;flex:1;">'+_ecEsc(rm.room_label)+'</span>' +
           '<span style="font-weight:700;color:var(--accent-green);">'+rm.volume_cuyd+' cy</span>'+ecConf(rm.confidence)+'</div>' +
-          '<a onclick="ecRoomDetails('+i+')" style="color:var(--accent-green);font-size:12px;cursor:pointer;">details ('+((rm.items||[]).length)+' items)</a>' +
+          '<div style="color:var(--text-muted);font-size:12px;margin-top:4px;">'+((rm.items||[]).length)+' items · tap for detail ›</div>' +
         '</div>').join('');
       document.getElementById('ecResults').innerHTML =
         '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:16px 0;display:flex;gap:20px;flex-wrap:wrap;">' +

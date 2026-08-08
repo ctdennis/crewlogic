@@ -240,6 +240,15 @@ async function downloadPhotos(token: string, jobID: string): Promise<Img[]> {
   }
   return imgs;
 }
+// Build image blocks from CLIENT-provided base64 (the browser downscales the photos → much cheaper AI + no
+// server-side image download/decode). Each item: { index, b64 } (b64 may include a data: prefix).
+function imgsFromClient(images: Array<{ index?: number; b64?: string }>): Img[] {
+  return (images || []).map((im, k) => ({
+    index: (im.index != null ? im.index : k),
+    objectID: '', fileName: '',
+    block: { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: String(im.b64 || '').replace(/^data:image\/\w+;base64,/, '') } },
+  }));
+}
 // §6 billing preview (final pricing is P4): min 1 cu yd, else round up to the next 1/8-truck (2 cu yd) step.
 function billedCuyd(total: number): number {
   if (total <= 1) return 1;
@@ -304,19 +313,26 @@ Deno.serve(async (req: Request) => {
     if (!action) return jsonResponse({ success: false, error: 'action required', reqId }, 400);
     // Static taxonomy — the P3 room dropdown reads its options from here (single source, no auth/Vonigo needed).
     if (action === 'rooms') return jsonResponse({ success: true, rooms: ROOM_TAXONOMY, reqId });
-    if (!franchiseID) return jsonResponse({ success: false, error: 'franchiseID required', reqId }, 400);
 
     const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-    const { data: franchiseRow, error: franchiseErr } = await supabase
-      .from('franchises').select('id').eq('external_id', franchiseID).eq('tenant_id', TENANT_ID).single();
-    if (franchiseErr || !franchiseRow) return jsonResponse({ success: false, error: 'Franchise not found: ' + franchiseID, reqId }, 404);
-
-    const creds = await resolveCreds(supabase, (franchiseRow as { id: string }).id);
-    if (!creds) return jsonResponse({ success: false, error: 'Vonigo credentials not found for franchise ' + franchiseID, reqId }, 404);
-    const token = await vonigoLogin(creds.vonigo_username, creds.vonigo_md5);
+    // Lazy Vonigo login — only list/load (and group/quantify WITHOUT client images) need it; group/quantify with
+    // client-provided base64 images skip Vonigo entirely (browser already fetched + downscaled the photos).
+    let _token: string | null = null;
+    async function getToken(): Promise<string> {
+      if (_token) return _token;
+      if (!franchiseID) throw new Error('franchiseID required');
+      const { data: fr, error: fe } = await supabase
+        .from('franchises').select('id').eq('external_id', franchiseID).eq('tenant_id', TENANT_ID).single();
+      if (fe || !fr) throw new Error('Franchise not found: ' + franchiseID);
+      const creds = await resolveCreds(supabase, (fr as { id: string }).id);
+      if (!creds) throw new Error('Vonigo credentials not found for franchise ' + franchiseID);
+      _token = await vonigoLogin(creds.vonigo_username, creds.vonigo_md5);
+      return _token;
+    }
 
     // ---------- action: list ----------
     if (action === 'list') {
+      const token = await getToken();
       // Date window (naive clock-face epochs — Vonigo date-field convention).
       let y: number, m: number, d: number;
       const dateStr = String(body.date || '').trim();
@@ -398,6 +414,7 @@ Deno.serve(async (req: Request) => {
 
     // ---------- action: load ----------
     if (action === 'load') {
+      const token = await getToken();
       const jobID = String(body.jobID || '').trim();
       if (!jobID) return jsonResponse({ success: false, error: 'jobID required', reqId }, 400);
 
@@ -444,9 +461,10 @@ Deno.serve(async (req: Request) => {
     // ---------- action: group (Pass 1 — Haiku clusters photos into rooms) ----------
     if (action === 'group') {
       const jobID = String(body.jobID || '').trim();
-      if (!jobID) return jsonResponse({ success: false, error: 'jobID required', reqId }, 400);
-      const imgs = await downloadPhotos(token, jobID);
-      if (imgs.length === 0) return jsonResponse({ success: false, error: 'No photos on this estimate', reqId }, 404);
+      const imgs = (Array.isArray(body.images) && body.images.length)
+        ? imgsFromClient(body.images)                        // client-downscaled (cheap, preferred)
+        : (jobID ? await downloadPhotos(await getToken(), jobID) : []); // legacy: server downloads full-res
+      if (imgs.length === 0) return jsonResponse({ success: false, error: 'No photos provided', reqId }, 400);
       const { groups, usage } = await doGroup(imgs);
       const assigned = new Set<number>();
       for (const grp of groups) for (const i of (grp.photo_indices || [])) assigned.add(i);
@@ -462,10 +480,11 @@ Deno.serve(async (req: Request) => {
     if (action === 'quantify') {
       const jobID = String(body.jobID || '').trim();
       const groupsIn = (body.groups as Array<{ room_label: string; photo_indices: number[] }>) || [];
-      if (!jobID) return jsonResponse({ success: false, error: 'jobID required', reqId }, 400);
       if (!Array.isArray(groupsIn) || groupsIn.length === 0) return jsonResponse({ success: false, error: 'groups required', reqId }, 400);
-      const imgs = await downloadPhotos(token, jobID);
-      if (imgs.length === 0) return jsonResponse({ success: false, error: 'No photos on this estimate', reqId }, 404);
+      const imgs = (Array.isArray(body.images) && body.images.length)
+        ? imgsFromClient(body.images)
+        : (jobID ? await downloadPhotos(await getToken(), jobID) : []);
+      if (imgs.length === 0) return jsonResponse({ success: false, error: 'No photos provided', reqId }, 400);
       const byIdx = new Map(imgs.map((im) => [im.index, im]));
       const jobs = groupsIn.map((g) => ({ label: g.room_label, imgs: (g.photo_indices || []).map((i) => byIdx.get(i)).filter(Boolean) as Img[] })).filter((j) => j.imgs.length > 0);
       const rooms = await mapPool(jobs, 4, async (j) => {
@@ -486,9 +505,10 @@ Deno.serve(async (req: Request) => {
     // ---------- action: analyze (chain group → quantify; downloads photos once) ----------
     if (action === 'analyze') {
       const jobID = String(body.jobID || '').trim();
-      if (!jobID) return jsonResponse({ success: false, error: 'jobID required', reqId }, 400);
-      const imgs = await downloadPhotos(token, jobID);
-      if (imgs.length === 0) return jsonResponse({ success: false, error: 'No photos on this estimate', reqId }, 404);
+      const imgs = (Array.isArray(body.images) && body.images.length)
+        ? imgsFromClient(body.images)
+        : (jobID ? await downloadPhotos(await getToken(), jobID) : []);
+      if (imgs.length === 0) return jsonResponse({ success: false, error: 'No photos provided', reqId }, 400);
       const g = await doGroup(imgs);
       const byIdx = new Map(imgs.map((im) => [im.index, im]));
       // Any photo Haiku left un-grouped → an "Other / Unsorted" bucket so nothing is silently dropped.

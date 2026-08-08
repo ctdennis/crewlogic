@@ -327,8 +327,13 @@ Pass 2 = Sonnet** (§5.8); Haiku ~$1/$5, Sonnet ~$3/$15 per M tok; Pass-1 thumbs
   homeScreen; registered in `allScreens`; `openModule('estimateCosting')` branch). Flow: date picker → estimate
   dropdown (`list`) → photos render via the `crewlogic-ny-photo` proxy → auto-`group` → per-photo room dropdown
   (canonical taxonomy via `rooms`) → "Calculate volumes" (`quantify`) → per-room cards (volume + confidence +
-  "details" modal with the item inventory) + total/billed/truckloads. **Still to do:** editable per-room volume,
-  reused markup panel (labor/discounts/surcharges), client-side downscale (§5.7), then P4 pricing+cost+margin.
+  tap-anywhere details modal) + total/billed/truckloads.
+  - **v2 (v5.106.1, owner UX feedback):** **client-side downscale** landed — the browser canvas-shrinks each photo
+    to ~700px and sends base64 to `group`/`quantify` (which now accept `images` and skip the Vonigo download; edge
+    lazy-logs-in only when needed). Cuts the AI spend (873112 42-photo now well under the $0.45 full-res). Added a
+    **sticky control bar** (status + progress bar + Calculate button + AI-spend readout, gated dev/super-admin) so
+    it stays visible while scrolling; whole room card is clickable for details.
+  - **Still to do:** editable per-room volume, reused markup panel (labor/discounts/surcharges), then P4 pricing+cost+margin.
 - **P4 — price + cost + margin:** Vonigo zip pricing (increment + minimum) + CrewLogic cost engine → margin roll-up.
 - **P5 — NY extras:** fold in Kevin's NY-unique pricing items.
 
