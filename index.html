@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.107.2 | 2026-08-08">
+  <meta name="crewlogic-version" content="v5.107.3 | 2026-08-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -13981,9 +13981,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         im.src = url;
       });
     }
+    async function ecMapPool(items, n, fn){ const res = new Array(items.length); let i = 0; async function w(){ while (i < items.length) { const c = i++; res[c] = await fn(items[c], c); } } await Promise.all(Array.from({ length: Math.min(n, items.length) }, w)); return res; }
     async function ecDownscaleAll(){
+      // Bounded concurrency — a burst of proxy fetches was dropping a couple of images. Each photo is fetched
+      // ONCE here (canvas), and the thumbnail then displays from this downscaled copy (no second proxy fetch).
       let done = 0; const total = _ec.photos.length;
-      await Promise.all(_ec.photos.map(async (p) => { p.b64 = await ecDownscale(ecProxy(p.downloadUrl), 700); done++; ecStatus('Preparing photos ' + done + '/' + total + '…'); }));
+      await ecMapPool(_ec.photos, 6, async (p) => { p.b64 = await ecDownscale(ecProxy(p.downloadUrl), 700); done++; ecStatus('Preparing photos ' + done + '/' + total + '…'); });
     }
     function ecImages(){ return _ec.photos.filter(p => p.b64).map(p => ({ index: p.index, b64: p.b64 })); }
 
@@ -14072,9 +14075,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (!r || !r.success) { ecBusy(false,'Could not load estimate.'); return; }
         _ec.photos = (r.photos || []).map((p,i) => Object.assign({}, p, { index:i, room:'' }));
         if (!_ec.photos.length) { document.getElementById('ecPhotos').innerHTML=''; ecBusy(false, 'This estimate has no photos loaded in Vonigo — pick another.'); return; }
-        ecRenderPhotos();
         ecBusy(true, 'Preparing photos…');
         await ecDownscaleAll();
+        ecRenderPhotos();
         ecBusy(true, 'Grouping ' + _ec.photos.length + ' photos into rooms…');
         await ecGroup();
       } catch(_e){ ecBusy(false, 'Error loading estimate.'); }
@@ -14088,11 +14091,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         '</select>';
     }
     function ecRenderPhotos() {
-      document.getElementById('ecPhotos').innerHTML = _ec.photos.map(p =>
-        '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:6px;">' +
-          '<img src="'+ecProxy(p.downloadUrl)+'" loading="lazy" onclick="ecPhotoZoom('+p.index+')" title="Tap to enlarge" style="width:100%;height:110px;object-fit:cover;border-radius:6px;background:var(--bg-input);cursor:pointer;" alt="">' +
+      document.getElementById('ecPhotos').innerHTML = _ec.photos.map(p => {
+        const src = p.b64 ? ('data:image/jpeg;base64,' + p.b64) : ecProxy(p.downloadUrl); // display the already-downscaled copy
+        return '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:6px;">' +
+          '<img src="'+src+'" loading="lazy" onclick="ecPhotoZoom('+p.index+')" title="Tap to enlarge" style="width:100%;height:110px;object-fit:cover;border-radius:6px;background:var(--bg-input);cursor:pointer;" alt="">' +
           '<div id="ecRoomCell'+p.index+'">'+ecRoomSelect(p.index, p.room)+'</div>' +
-        '</div>').join('');
+        '</div>';
+      }).join('');
     }
     function ecSetRoom(idx, val){ if (_ec.photos[idx]) { _ec.photos[idx].room = val; const c = document.getElementById('ecRoomCell'+idx); if (c) c.innerHTML = ecRoomSelect(idx, val); } }
     // Lightbox: click a thumbnail → full-size photo + the room dropdown, so you can read the room and assign it.
