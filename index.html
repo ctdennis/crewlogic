@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.105.7 | 2026-08-07">
+  <meta name="crewlogic-version" content="v5.106.0 | 2026-08-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1504,6 +1504,12 @@
             <div class="module-icon">📐</div>
             <div class="module-name">Volume Check</div>
             <div class="module-desc">Quick AI volume check from photos — no job needed</div>
+          </div>
+
+          <div class="module-card fade-in fade-in-delay-2" id="estimateCostingCard" data-card="estimateCosting" onclick="openModule('estimateCosting')" style="display:none;">
+            <div class="module-icon">📸</div>
+            <div class="module-name">Estimate Costing</div>
+            <div class="module-desc">Cost a Vonigo estimate from photos → margin</div>
           </div>
 
           <div class="module-card fade-in fade-in-delay-3" id="routerCard" data-card="router" onclick="openModule('router')" style="display:none;">
@@ -8785,6 +8791,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (trucksCard) trucksCard.style.display = ''; // shown; per-user visibility handled by applyTileToggles() (default-off for non-owners)
       const truckAlertsCard = document.getElementById('truckAlertsCard'); // mobile-friendly alerts (owner-gated, no desktop-width restriction)
       if (truckAlertsCard) truckAlertsCard.style.display = ''; // shown; per-user visibility handled by applyTileToggles() (default-off for non-owners)
+      // Estimate Costing (reverse-estimate) — gated feature, entitlement default-off: dev + super-admin only for now
+      const ecCard = document.getElementById('estimateCostingCard');
+      if (ecCard) ecCard.style.display = (IS_DEV_ENV || currentUser.email === 'charles.dennis@junkluggers.com') ? '' : 'none';
 
       // Job Router (R1) — recommends the best transfer station between the truck's LIVE position and the
       // next job, so it requires telematics ACTUALLY connected (not just "is an owner") AND a Vonigo
@@ -8891,7 +8900,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       'disposalRouterScreen',
       'storageScreen', 'storageResultsScreen',
       'mattressScreen', 'mattressResultsScreen',
-      'priceLookupScreen', 'promosScreen', 'backupScheduleScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'truckAlertsScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen'
+      'priceLookupScreen', 'promosScreen', 'backupScheduleScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'truckAlertsScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen', 'estimateCostingScreen'
     ];
 
     function hideAll() {
@@ -13942,6 +13951,163 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       mjSendCommand(cmd); // -> dispatcher resolves slot/zoning -> standard confirm card -> mjExecute
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // ESTIMATE COSTING (internal: reverse-estimate) — Vonigo-first photo → AI volume → margin.
+    // Gated feature (dev + super-admin for now). Backend: crewlogic-ny-estimate (list/load/group/quantify/rooms)
+    // + crewlogic-ny-photo (public image proxy). See docs/plan-ny-estimate.md.
+    // ═══════════════════════════════════════════════════════════════════════
+    let _ec = { jobID: null, photos: [], rooms: [], roomOptions: [], busy: false };
+    function _ecEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+    function ecProxy(url){ return EDGE_BASE + '/crewlogic-ny-photo?u=' + encodeURIComponent(url); }
+    function ecStatus(msg){ const el = document.getElementById('ecStatus'); if (el) el.textContent = msg || ''; }
+
+    async function ecEnsureScreen() {
+      if (document.getElementById('estimateCostingScreen')) return;
+      const div = document.createElement('div');
+      div.id = 'estimateCostingScreen';
+      div.style.display = 'none';
+      div.innerHTML =
+        '<div style="max-width:1100px;margin:0 auto;">' +
+          '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:14px;">' +
+            '<div><label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:4px;">Estimate date</label>' +
+              '<input type="date" id="ecDate" onchange="ecLoadList()" style="font-size:13px;padding:6px 8px;background:var(--bg-input,#253545);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);color-scheme:dark;"></div>' +
+            '<div style="flex:1;min-width:220px;"><label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:4px;">Estimate</label>' +
+              '<select class="form-select" id="ecEstimateSel" onchange="ecSelectEstimate()"><option value="">— pick a date —</option></select></div>' +
+          '</div>' +
+          '<div id="ecStatus" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;"></div>' +
+          '<div id="ecPhotos" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;"></div>' +
+          '<div id="ecActions" style="margin:16px 0;display:none;"><button class="btn-surface" style="padding:10px 18px;font-weight:700;" onclick="ecQuantify()">Calculate volumes</button></div>' +
+          '<div id="ecResults"></div>' +
+        '</div>' +
+        '<div id="ecRoomModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)ecCloseModal()">' +
+          '<div style="width:100%;max-width:520px;background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border);margin:auto;padding:16px;">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><div id="ecModalTitle" style="font-weight:700;font-size:16px;"></div><button class="btn-surface" style="padding:2px 10px;" onclick="ecCloseModal()">&times;</button></div>' +
+            '<div id="ecModalBody"></div>' +
+          '</div>' +
+        '</div>';
+      document.getElementById('homeScreen').parentNode.appendChild(div);
+      try { const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'rooms' }); if (r && r.success) _ec.roomOptions = r.rooms || []; } catch(_e){}
+    }
+
+    async function ecOpen() {
+      await ecEnsureScreen();
+      document.getElementById('estimateCostingScreen').style.display = 'block';
+      _ec.jobID = null; _ec.photos = []; _ec.rooms = [];
+      document.getElementById('ecPhotos').innerHTML = '';
+      document.getElementById('ecResults').innerHTML = '';
+      document.getElementById('ecActions').style.display = 'none';
+      document.getElementById('ecEstimateSel').innerHTML = '<option value="">— pick a date —</option>';
+      const d = document.getElementById('ecDate'); if (!d.value) { d.value = new Date().toISOString().slice(0,10); }
+      ecLoadList();
+    }
+
+    async function ecLoadList() {
+      const date = document.getElementById('ecDate').value;
+      if (!date) return;
+      ecStatus('Loading estimates for ' + date + '…');
+      document.getElementById('ecPhotos').innerHTML=''; document.getElementById('ecResults').innerHTML=''; document.getElementById('ecActions').style.display='none';
+      const sel = document.getElementById('ecEstimateSel');
+      try {
+        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'list', franchiseID: currentUser.franchiseID, date });
+        if (!r || !r.success) { ecStatus('Could not load estimates.'); return; }
+        const ests = r.estimates || [];
+        if (!ests.length) { sel.innerHTML = '<option value="">No photo estimates on this date</option>'; ecStatus('No estimates with photos on ' + date + '.'); return; }
+        sel.innerHTML = '<option value="">— select an estimate —</option>' + ests.map(e => '<option value="'+e.jobID+'">'+_ecEsc(e.clientName)+' — '+e.photoCount+' photos — '+_ecEsc(e.zip)+'</option>').join('');
+        ecStatus(ests.length + ' estimate(s) with photos.');
+      } catch(_e){ ecStatus('Error loading estimates.'); }
+    }
+
+    async function ecSelectEstimate() {
+      const jobID = document.getElementById('ecEstimateSel').value;
+      document.getElementById('ecResults').innerHTML=''; document.getElementById('ecActions').style.display='none';
+      if (!jobID) { document.getElementById('ecPhotos').innerHTML=''; return; }
+      _ec.jobID = jobID;
+      ecStatus('Loading photos…');
+      try {
+        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'load', franchiseID: currentUser.franchiseID, jobID });
+        if (!r || !r.success) { ecStatus('Could not load estimate.'); return; }
+        _ec.photos = (r.photos || []).map((p,i) => Object.assign({}, p, { index:i, room:'' }));
+        ecRenderPhotos();
+        ecStatus('Grouping ' + _ec.photos.length + ' photos into rooms…');
+        ecGroup();
+      } catch(_e){ ecStatus('Error loading estimate.'); }
+    }
+
+    function ecRoomSelect(idx, selected) {
+      const opts = _ec.roomOptions.length ? _ec.roomOptions : ['Other'];
+      return '<select class="form-select" style="font-size:12px;padding:4px 6px;margin-top:4px;" onchange="ecSetRoom('+idx+', this.value)">' +
+        '<option value="">— room —</option>' +
+        opts.map(o => '<option value="'+_ecEsc(o)+'"'+(o===selected?' selected':'')+'>'+_ecEsc(o)+'</option>').join('') +
+        '</select>';
+    }
+    function ecRenderPhotos() {
+      document.getElementById('ecPhotos').innerHTML = _ec.photos.map(p =>
+        '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:6px;">' +
+          '<img src="'+ecProxy(p.downloadUrl)+'" loading="lazy" style="width:100%;height:110px;object-fit:cover;border-radius:6px;background:var(--bg-input);" alt="">' +
+          '<div id="ecRoomCell'+p.index+'">'+ecRoomSelect(p.index, p.room)+'</div>' +
+        '</div>').join('');
+    }
+    function ecSetRoom(idx, val){ if (_ec.photos[idx]) _ec.photos[idx].room = val; }
+
+    async function ecGroup() {
+      if (!_ec.jobID) return;
+      try {
+        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'group', franchiseID: currentUser.franchiseID, jobID: _ec.jobID });
+        if (!r || !r.success) { ecStatus('Grouping failed — set rooms manually, then Calculate.'); document.getElementById('ecActions').style.display='block'; return; }
+        (r.groups||[]).forEach(g => (g.photo_indices||[]).forEach(i => { if (_ec.photos[i]) _ec.photos[i].room = g.room_label; }));
+        (r.ungrouped||[]).forEach(i => { if (_ec.photos[i] && !_ec.photos[i].room) _ec.photos[i].room = 'Other'; });
+        _ec.photos.forEach(p => { const c = document.getElementById('ecRoomCell'+p.index); if (c) c.innerHTML = ecRoomSelect(p.index, p.room); });
+        document.getElementById('ecActions').style.display = 'block';
+        ecStatus('Grouped into rooms — review the dropdowns, then Calculate volumes.');
+      } catch(_e){ ecStatus('Grouping error — set rooms manually, then Calculate.'); document.getElementById('ecActions').style.display='block'; }
+    }
+
+    async function ecQuantify() {
+      if (_ec.busy || !_ec.jobID) return;
+      const byRoom = {};
+      _ec.photos.forEach(p => { const rm = p.room || 'Other'; (byRoom[rm] = byRoom[rm] || []).push(p.index); });
+      const groups = Object.keys(byRoom).map(rm => ({ room_label: rm, photo_indices: byRoom[rm] }));
+      if (!groups.length) return;
+      _ec.busy = true; ecStatus('Calculating volumes — this can take up to a minute…');
+      document.getElementById('ecResults').innerHTML = '';
+      try {
+        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'quantify', franchiseID: currentUser.franchiseID, jobID: _ec.jobID, groups });
+        if (!r || !r.success) { ecStatus('Volume calculation failed.'); _ec.busy=false; return; }
+        _ec.rooms = r.rooms || [];
+        ecRenderResults(r);
+        ecStatus('');
+      } catch(_e){ ecStatus('Volume calculation error.'); }
+      _ec.busy = false;
+    }
+
+    function ecConf(c){ c = c||0; const col = c>=0.75?'#2e7d32':(c>=0.6?'#b8860b':'#c0392b'); return '<span style="background:'+col+';color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;">'+Math.round(c*100)+'%</span>'; }
+    function ecRenderResults(r) {
+      const cards = (r.rooms||[]).map((rm,i) =>
+        '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:10px 12px;">' +
+          '<div style="display:flex;align-items:center;gap:8px;"><span style="font-weight:700;flex:1;">'+_ecEsc(rm.room_label)+'</span>' +
+          '<span style="font-weight:700;color:var(--accent-green);">'+rm.volume_cuyd+' cy</span>'+ecConf(rm.confidence)+'</div>' +
+          '<a onclick="ecRoomDetails('+i+')" style="color:var(--accent-green);font-size:12px;cursor:pointer;">details ('+((rm.items||[]).length)+' items)</a>' +
+        '</div>').join('');
+      document.getElementById('ecResults').innerHTML =
+        '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:16px 0;display:flex;gap:20px;flex-wrap:wrap;">' +
+          '<div><div style="font-size:24px;font-weight:800;color:var(--accent-green);">'+r.totalCuyd+' cy</div><div style="font-size:12px;color:var(--text-muted);">total (de-duplicated)</div></div>' +
+          '<div><div style="font-size:24px;font-weight:800;color:var(--accent-green);">'+r.billedCuyd+' cy</div><div style="font-size:12px;color:var(--text-muted);">billed (min 1, 1/8-truck steps)</div></div>' +
+          '<div><div style="font-size:24px;font-weight:800;color:var(--accent-green);">'+r.truckFraction+'</div><div style="font-size:12px;color:var(--text-muted);">16-cy truckloads</div></div>' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;">'+cards+'</div>' +
+        '<div style="font-size:12px;color:var(--text-muted);margin-top:10px;">Pricing (Vonigo zip) + cost (CrewLogic Cost tab) → margin: coming next.</div>';
+    }
+    function ecRoomDetails(i) {
+      const rm = _ec.rooms[i]; if (!rm) return;
+      document.getElementById('ecModalTitle').textContent = rm.room_label + ' — ' + rm.volume_cuyd + ' cy';
+      const items = (rm.items||[]).map(it => '<tr><td style="padding:3px 4px;border-bottom:1px solid var(--border);">'+_ecEsc(it.name)+'</td><td style="padding:3px 4px;border-bottom:1px solid var(--border);text-align:right;">'+_ecEsc(it.qty)+'</td><td style="padding:3px 4px;border-bottom:1px solid var(--border);text-align:right;">'+it.est_cuyd+'</td></tr>').join('');
+      document.getElementById('ecModalBody').innerHTML =
+        '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr><th style="text-align:left;color:var(--text-muted);font-size:11px;">Item</th><th style="text-align:right;color:var(--text-muted);font-size:11px;">Qty</th><th style="text-align:right;color:var(--text-muted);font-size:11px;">cu yd</th></tr></thead><tbody>'+items+'</tbody></table>' +
+        (rm.notes?'<div style="font-size:12px;color:var(--text-muted);font-style:italic;margin-top:8px;">'+_ecEsc(rm.notes)+'</div>':'');
+      document.getElementById('ecRoomModal').style.display = 'flex';
+    }
+    function ecCloseModal(){ const m = document.getElementById('ecRoomModal'); if (m) m.style.display='none'; }
+
     function openModule(module) {
       // If in estimate editor with unsaved changes OR a discardable throwaway draft, prompt
       // first (same condition as promptSaveBeforeLeaving, so both exit paths behave alike).
@@ -13970,6 +14136,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('headerTitle').textContent = 'Yard Signs';
         currentScreen = 'signs';
         openSignsScreen();
+        return;
+      }
+      if (module === 'estimateCosting') {
+        document.getElementById('headerTitle').textContent = 'Estimate Costing';
+        currentScreen = 'estimateCosting';
+        ecOpen();
         return;
       }
       if (module === 'trucks') {

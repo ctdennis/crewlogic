@@ -322,7 +322,13 @@ Pass 2 = Sonnet** (§5.8); Haiku ~$1/$5, Sonnet ~$3/$15 per M tok; Pass-1 thumbs
     CORS-clean), so it downscales to ~700px there and passes the small base64 to `group`/`quantify` (which will
     accept client-provided images instead of downloading). This **cuts image tokens ~⅔ AND removes the edge
     resource limit** (server never holds 42 bitmaps). Target after: ~$0.15–0.28/estimate.
-- **P3 — screen:** the NY Estimate screen — job picker, photo cards (AI + editable volume), markup panel (reused).
+- **P3 — Estimate Costing screen: 🟡 v1 ON DEV (2026-08-08, v5.106.0).** Additive to `index.html`: home card
+  "Estimate Costing" (gated dev + super-admin), new `estimateCostingScreen` (built lazily in JS, sibling of
+  homeScreen; registered in `allScreens`; `openModule('estimateCosting')` branch). Flow: date picker → estimate
+  dropdown (`list`) → photos render via the `crewlogic-ny-photo` proxy → auto-`group` → per-photo room dropdown
+  (canonical taxonomy via `rooms`) → "Calculate volumes" (`quantify`) → per-room cards (volume + confidence +
+  "details" modal with the item inventory) + total/billed/truckloads. **Still to do:** editable per-room volume,
+  reused markup panel (labor/discounts/surcharges), client-side downscale (§5.7), then P4 pricing+cost+margin.
 - **P4 — price + cost + margin:** Vonigo zip pricing (increment + minimum) + CrewLogic cost engine → margin roll-up.
 - **P5 — NY extras:** fold in Kevin's NY-unique pricing items.
 
