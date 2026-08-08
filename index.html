@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.109.0 | 2026-08-08">
+  <meta name="crewlogic-version" content="v5.109.1 | 2026-08-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14170,19 +14170,62 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function ecSetEighths(i, e){
       const rm = _ec.rooms[i]; if (!rm) return;
-      rm.eighths = e; rm.volume_cuyd = ecEighthsToCy(e);
+      rm.eighths = e; rm.volume_cuyd = ecEighthsToCy(e); rm.rawCy = ecEighthsToCy(e); // manual override sets the raw too
       const lbl = document.getElementById('ecFracLbl'+i); if (lbl) lbl.textContent = ecFracLabel(e);
       const cy = document.getElementById('ecRoomCy'+i); if (cy) cy.textContent = rm.volume_cuyd + ' cu yd';
       ecRecalcTotals();
+    }
+    // Re-round a room from its raw volume after an item edit, re-render its body, update label + totals.
+    function ecRoomRecalc(i){
+      const rm = _ec.rooms[i]; if (!rm) return;
+      rm.eighths = ecCyToEighths(rm.rawCy); rm.volume_cuyd = ecEighthsToCy(rm.eighths);
+      const b = document.getElementById('ecRoomBody'+i); if (b) b.innerHTML = ecRoomBodyHtml(rm, i);
+      const lbl = document.getElementById('ecFracLbl'+i); if (lbl) lbl.textContent = ecFracLabel(rm.eighths);
+      ecRecalcTotals();
+    }
+    function ecSetItemQty(i, j, val){
+      const rm = _ec.rooms[i]; const it = rm && rm.items && rm.items[j]; if (!it) return;
+      const q0 = (parseFloat(it.qty) > 0) ? parseFloat(it.qty) : 1;
+      const perUnit = (parseFloat(it.est_cuyd)||0) / q0;
+      const newQty = Math.max(0, parseInt(val)||0);
+      const newCy = +(perUnit * newQty).toFixed(2);
+      rm.rawCy = Math.max(0, (parseFloat(rm.rawCy)||0) - (parseFloat(it.est_cuyd)||0) + newCy); // delta, no drift
+      it.qty = newQty; it.est_cuyd = newCy;
+      ecRoomRecalc(i);
+    }
+    function ecDeleteItem(i, j){
+      const rm = _ec.rooms[i]; const it = rm && rm.items && rm.items[j]; if (!it) return;
+      rm.rawCy = Math.max(0, (parseFloat(rm.rawCy)||0) - (parseFloat(it.est_cuyd)||0));
+      rm.items.splice(j, 1);
+      ecRoomRecalc(i);
     }
     function ecToggleRoom(i){
       const b = document.getElementById('ecRoomBody'+i), a = document.getElementById('ecArrow'+i);
       if (!b) return; const open = b.style.display === 'none'; b.style.display = open ? 'block' : 'none'; if (a) a.textContent = open ? '▾' : '▸';
     }
-    function ecRoomRow(rm, i){
+    function ecRoomBodyHtml(rm, i){
       const photos = _ec.photos.filter(p => p.room === rm.room_label && p.b64);
       const thumbs = photos.map(p => '<img src="data:image/jpeg;base64,'+p.b64+'" onclick="ecPhotoZoom('+p.index+')" title="Tap to enlarge" style="width:78px;height:58px;object-fit:cover;border-radius:5px;cursor:pointer;">').join('');
-      const items = (rm.items||[]).map(it => '<tr><td style="padding:2px 4px;border-bottom:1px solid var(--border);">'+_ecEsc(it.name)+'</td><td style="padding:2px 4px;border-bottom:1px solid var(--border);text-align:right;">'+_ecEsc(it.qty)+'</td><td style="padding:2px 4px;border-bottom:1px solid var(--border);text-align:right;">'+it.est_cuyd+'</td></tr>').join('');
+      const cell = 'padding:3px 4px;border-bottom:1px solid var(--border);';
+      const items = (rm.items||[]).map((it,j) =>
+        '<tr>' +
+          '<td style="'+cell+'">'+_ecEsc(it.name)+'</td>' +
+          '<td style="'+cell+'text-align:right;"><input type="number" min="0" value="'+(it.qty!=null?it.qty:1)+'" onchange="ecSetItemQty('+i+','+j+',this.value)" style="width:46px;text-align:right;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:4px;padding:2px 4px;font-size:12px;"></td>' +
+          '<td style="'+cell+'text-align:right;color:var(--text-muted);">'+it.est_cuyd+'</td>' +
+          '<td style="'+cell+'text-align:center;"><span onclick="ecDeleteItem('+i+','+j+')" title="Remove item" style="color:#e05a4f;cursor:pointer;font-weight:800;padding:0 6px;">×</span></td>' +
+        '</tr>').join('');
+      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">' +
+            '<span style="font-size:12px;color:var(--text-muted);">Truck volume:</span>' +
+            '<select class="form-select" style="width:auto;font-size:13px;padding:5px 8px;" onchange="ecSetEighths('+i+', +this.value)">'+ecFracOptions(rm.eighths)+'</select>' +
+            '<span id="ecRoomCy'+i+'" style="color:var(--text-muted);font-size:12px;">'+rm.volume_cuyd+' cu yd</span>' +
+            '<span style="flex:1;"></span>'+ecConf(rm.confidence) +
+          '</div>' +
+          (thumbs ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">'+thumbs+'</div>' : '') +
+          (items ? '<table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr><th style="text-align:left;color:var(--text-muted);font-size:11px;">Item</th><th style="text-align:right;color:var(--text-muted);font-size:11px;">Qty</th><th style="text-align:right;color:var(--text-muted);font-size:11px;">cu yd</th><th></th></tr></thead><tbody>'+items+'</tbody></table>' : '') +
+          (rm.notes ? '<div style="font-size:12px;color:var(--text-muted);font-style:italic;margin-top:8px;">'+_ecEsc(rm.notes)+'</div>' : '');
+    }
+    function ecRoomRow(rm, i){
+      const photos = _ec.photos.filter(p => p.room === rm.room_label && p.b64);
       return '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden;">' +
         '<div onclick="ecToggleRoom('+i+')" style="display:flex;align-items:center;gap:10px;padding:11px 12px;cursor:pointer;">' +
           '<span style="font-weight:700;flex:1;">'+_ecEsc(rm.room_label)+'</span>' +
@@ -14190,21 +14233,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '<span style="color:var(--text-muted);font-size:12px;">'+photos.length+' 📷</span>' +
           '<span id="ecArrow'+i+'" style="color:var(--text-muted);">▸</span>' +
         '</div>' +
-        '<div id="ecRoomBody'+i+'" style="display:none;padding:0 12px 12px;">' +
-          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">' +
-            '<span style="font-size:12px;color:var(--text-muted);">Truck volume:</span>' +
-            '<select class="form-select" style="width:auto;font-size:13px;padding:5px 8px;" onchange="ecSetEighths('+i+', +this.value)">'+ecFracOptions(rm.eighths)+'</select>' +
-            '<span id="ecRoomCy'+i+'" style="color:var(--text-muted);font-size:12px;">'+rm.volume_cuyd+' cu yd</span>' +
-            '<span style="flex:1;"></span>'+ecConf(rm.confidence) +
-          '</div>' +
-          (thumbs ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">'+thumbs+'</div>' : '') +
-          (items ? '<table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr><th style="text-align:left;color:var(--text-muted);font-size:11px;">Item</th><th style="text-align:right;color:var(--text-muted);font-size:11px;">Qty</th><th style="text-align:right;color:var(--text-muted);font-size:11px;">cu yd</th></tr></thead><tbody>'+items+'</tbody></table>' : '') +
-          (rm.notes ? '<div style="font-size:12px;color:var(--text-muted);font-style:italic;margin-top:8px;">'+_ecEsc(rm.notes)+'</div>' : '') +
-        '</div>' +
+        '<div id="ecRoomBody'+i+'" style="display:none;padding:0 12px 12px;">'+ecRoomBodyHtml(rm,i)+'</div>' +
       '</div>';
     }
     function ecRenderResults(r) {
-      _ec.rooms.forEach(rm => { rm.eighths = ecCyToEighths(rm.volume_cuyd); rm.volume_cuyd = ecEighthsToCy(rm.eighths); });
+      _ec.rooms.forEach(rm => { rm.rawCy = parseFloat(rm.volume_cuyd)||0; rm.eighths = ecCyToEighths(rm.rawCy); rm.volume_cuyd = ecEighthsToCy(rm.eighths); });
       const grid = document.getElementById('ecPhotos'); if (grid) grid.style.display = 'none'; // photos now live inside their rooms
       const rows = _ec.rooms.map((rm,i) => ecRoomRow(rm,i)).join('');
       document.getElementById('ecResults').innerHTML =
