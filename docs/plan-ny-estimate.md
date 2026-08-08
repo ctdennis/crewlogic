@@ -341,7 +341,12 @@ Pass 2 = Sonnet** (§5.8); Haiku ~$1/$5, Sonnet ~$3/$15 per M tok; Pass-1 thumbs
     shows "date · client · N photos · zip" (the quote's `job` relation gives the jobID for load). Verified #90: 9
     estimates (Prentice 42, Bibee 36, Mike 26, …). (Earlier WorkOrder-based approaches — the countDocuments on the
     estimate WO reads 0 because photos hang off the quote — are retired.)
-  - **Still to do:** editable per-room volume, reused markup panel (labor/discounts/surcharges), then P4 pricing+cost+margin.
+  - **v5 (v5.107.1–.3):** photo **lightbox** (tap a thumbnail → full-size + room dropdown); grouping model
+    Haiku→**Sonnet** (accuracy, owner); blank-thumbnail fix (display the downscaled copy, bounded fetch concurrency).
+  - **v6 (v5.108.0):** **editable per-room volumes** — each room card has a cu-yd input; total/billed/truckloads
+    recompute live (`ecSetVolume`/`ecRecalcTotals`). The **picker + control bar are pinned** in a sticky `#ecTop`
+    so they stay on screen while scrolling the photos/rooms.
+  - **Still to do:** reused markup panel (labor/discounts/surcharges), then P4 pricing+cost+margin.
 - **P4 — price + cost + margin:** Vonigo zip pricing (increment + minimum) + CrewLogic cost engine → margin roll-up.
 - **P5 — NY extras:** fold in Kevin's NY-unique pricing items.
 
