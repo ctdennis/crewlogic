@@ -333,24 +333,23 @@ Deno.serve(async (req: Request) => {
     // ---------- action: list ----------
     if (action === 'list') {
       const token = await getToken();
-      // Date window (naive clock-face epochs — Vonigo date-field convention).
-      let y: number, m: number, d: number;
+      // Window (naive clock-face epochs — Vonigo date-field convention): a specific `date`, else the recent
+      // N days (default 45) so the client can just SHOW a list of estimates-with-photos — no date-guessing.
       const dateStr = String(body.date || '').trim();
+      let dateStart: number, dateEnd: number;
       if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-        [y, m, d] = dateStr.split('-').map(Number);
+        const [yy, mm, dd] = dateStr.split('-').map(Number);
+        dateStart = naiveDayEpoch(yy, mm, dd); dateEnd = dateStart + 86400;
       } else {
-        // dayOffset relative to the UTC "today" (server clock). #90 is ET; callers should pass an
-        // explicit `date` for correctness across zones — dayOffset is a convenience fallback.
-        const off = Number(body.dayOffset) || 0;
-        const now = new Date(Date.now() + off * 86400000);
-        y = now.getUTCFullYear(); m = now.getUTCMonth() + 1; d = now.getUTCDate();
+        const days = Math.min(Math.max(Number(body.days) || 45, 1), 120);
+        const now = new Date();
+        dateEnd = naiveDayEpoch(now.getUTCFullYear(), now.getUTCMonth() + 1, now.getUTCDate()) + 86400;
+        dateStart = dateEnd - (days + 1) * 86400;
       }
-      const dateStart = naiveDayEpoch(y, m, d);
-      const dateEnd = dateStart + 86400;
 
-      // Pull the day's WorkOrders (paginate defensively; a single day is well under one page).
+      // Pull WorkOrders across the window (paginate; a multi-week range can span several pages).
       const all: VonigoWorkOrder[] = [];
-      for (let pg = 1; pg <= 5; pg++) {
+      for (let pg = 1; pg <= 15; pg++) {
         const wr = await vonigoPost('/data/WorkOrders/', {
           securityToken: token, franchiseID, pageNo: String(pg), pageSize: '200',
           sortMode: '1', sortDirection: '1', isCompleteObject: 'true',
@@ -375,21 +374,18 @@ Deno.serve(async (req: Request) => {
         if (onEst(wo) && !onEst(existing)) byJob[jobID] = wo;
       }
 
-      const estimates = [];
-      for (const jobID of Object.keys(byJob)) {
+      // Photo-count off the QUOTE (via jobID) per candidate — parallelized (a range can have many candidates).
+      const built = await mapPool(Object.keys(byJob), 6, async (jobID) => {
         const wo = byJob[jobID];
         const fields = wo.Fields || [];
         const relations = wo.Relations || [];
         const label = getField(fields, F_LABEL)?.optionID || 0;
         const statusOpt = getField(fields, F_STATUS)?.optionID || 0;
         const addr = getField(fields, F_ADDRESS)?.fieldValue || '';
-        // photoCount off the QUOTE (via jobID, which returns the quote's docs)
         let photoCount = 0;
         try { photoCount = (await listDocs(token, 'jobID', jobID)).length; } catch (_e) { photoCount = -1; }
-        // This feature is only for estimates that actually have photos — drop photo-less ones.
-        // (photoCount === -1 = a transient doc-list error; keep it rather than silently hide the estimate.)
-        if (photoCount === 0) continue;
-        estimates.push({
+        if (photoCount === 0) return null; // only estimates that actually have photos (-1 = transient error, keep)
+        return {
           jobID,
           workOrderID: wo.objectID,
           appointmentName: wo.name || '',
@@ -406,9 +402,9 @@ Deno.serve(async (req: Request) => {
           timeLabel: timeLabel(parseInt(getField(fields, F_TIME_MINUTES)?.fieldValue || '0', 10)),
           photoCount,
           hasPhotos: photoCount > 0,
-        });
-      }
-      estimates.sort((a, b) => (b.dateService || 0) - (a.dateService || 0));
+        };
+      });
+      const estimates = built.filter(Boolean).sort((a, b) => (b!.dateService || 0) - (a!.dateService || 0));
       return jsonResponse({ success: true, count: estimates.length, estimates, reqId });
     }
 

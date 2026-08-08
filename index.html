@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.106.1 | 2026-08-08">
+  <meta name="crewlogic-version" content="v5.106.2 | 2026-08-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -13994,12 +13994,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       div.style.display = 'none';
       div.innerHTML =
         '<div style="max-width:1100px;margin:0 auto;">' +
-          '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:14px;">' +
-            '<div><label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:4px;">Estimate date</label>' +
-              '<input type="date" id="ecDate" onchange="ecLoadList()" style="font-size:13px;padding:6px 8px;background:var(--bg-input,#253545);color:var(--text-primary,#eef4fa);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);color-scheme:dark;"></div>' +
-            '<div style="flex:1;min-width:220px;"><label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:4px;">Estimate</label>' +
-              '<select class="form-select" id="ecEstimateSel" onchange="ecSelectEstimate()"><option value="">— pick a date —</option></select></div>' +
-          '</div>' +
+          '<div style="margin-bottom:14px;"><label style="display:block;font-size:12px;color:var(--text-muted);margin-bottom:4px;">Estimate — recent, with photos</label>' +
+            '<select class="form-select" id="ecEstimateSel" onchange="ecSelectEstimate()"><option value="">Loading…</option></select></div>' +
           '<div id="ecBar" style="position:sticky;top:0;z-index:6;background:var(--bg-card);border-bottom:1px solid var(--border);padding:8px 10px;margin:0 -10px 12px;border-radius:0 0 10px 10px;">' +
             '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">' +
               '<button id="ecCalcBtn" class="btn-surface" style="padding:8px 16px;font-weight:700;display:none;" onclick="ecQuantify()">Calculate volumes</button>' +
@@ -14030,25 +14026,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.getElementById('ecResults').innerHTML = '';
       document.getElementById('ecCalcBtn').style.display = 'none';
       ecRenderSpend(); ecBusy(false, '');
-      document.getElementById('ecEstimateSel').innerHTML = '<option value="">— pick a date —</option>';
-      const d = document.getElementById('ecDate'); if (!d.value) { d.value = new Date().toISOString().slice(0,10); }
+      document.getElementById('ecEstimateSel').innerHTML = '<option value="">Loading…</option>';
       ecLoadList();
     }
 
+    function ecDateLabel(epoch){ if (!epoch) return ''; const d = new Date(epoch*1000); return (d.getUTCMonth()+1)+'/'+d.getUTCDate(); }
     async function ecLoadList() {
-      const date = document.getElementById('ecDate').value;
-      if (!date) return;
-      ecStatus('Loading estimates for ' + date + '…');
+      ecBusy(true, 'Finding recent estimates with photos…');
       document.getElementById('ecPhotos').innerHTML=''; document.getElementById('ecResults').innerHTML=''; document.getElementById('ecCalcBtn').style.display='none';
       const sel = document.getElementById('ecEstimateSel');
       try {
-        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'list', franchiseID: currentUser.franchiseID, date });
-        if (!r || !r.success) { ecStatus('Could not load estimates.'); return; }
+        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'list', franchiseID: currentUser.franchiseID, days: 60 });
+        if (!r || !r.success) { ecBusy(false,'Could not load estimates.'); sel.innerHTML='<option value="">error loading</option>'; return; }
         const ests = r.estimates || [];
-        if (!ests.length) { sel.innerHTML = '<option value="">No photo estimates on this date</option>'; ecStatus('No estimates with photos on ' + date + '.'); return; }
-        sel.innerHTML = '<option value="">— select an estimate —</option>' + ests.map(e => '<option value="'+e.jobID+'">'+_ecEsc(e.clientName)+' — '+e.photoCount+' photos — '+_ecEsc(e.zip)+'</option>').join('');
-        ecStatus(ests.length + ' estimate(s) with photos.');
-      } catch(_e){ ecStatus('Error loading estimates.'); }
+        if (!ests.length) { sel.innerHTML = '<option value="">No estimates with photos (last 60 days)</option>'; ecBusy(false,'No estimates with photos in the last 60 days.'); return; }
+        sel.innerHTML = '<option value="">— select an estimate ('+ests.length+') —</option>' + ests.map(e => '<option value="'+e.jobID+'">'+ecDateLabel(e.dateService)+' · '+_ecEsc(e.clientName)+' · '+e.photoCount+' photos · '+_ecEsc(e.zip)+'</option>').join('');
+        ecBusy(false, ests.length + ' estimate(s) with photos (last 60 days).');
+      } catch(_e){ ecBusy(false,'Error loading estimates.'); }
     }
 
     async function ecSelectEstimate() {
