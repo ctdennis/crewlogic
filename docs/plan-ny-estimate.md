@@ -279,7 +279,21 @@ Pass 2 = Sonnet** (§5.8); Haiku ~$1/$5, Sonnet ~$3/$15 per M tok; Pass-1 thumbs
     existingPrice) + all photo download URLs. Smoked: 873112 → 42 photos with filenames + zip 02790.
   - Auth/creds/field patterns mirror `crewlogic-todays-workorders`/`crewlogic-job-lookup`; read-only to Vonigo.
   - Source: `supabase/functions/crewlogic-ny-estimate/index.ts`. (Not a public webhook — JWT-verified app fn.)
-- **P2 — per-photo AI:** per-photo analysis (description + cuyd + eighths); metered.
+- **P2 — AI grouping + de-dup: ✅ SHIPPED to dev (2026-08-08).** Added to `crewlogic-ny-estimate`:
+  - `action:'group'` (Haiku) — downloads the estimate's photos, clusters into rooms (visual, filename ignored),
+    returns groups + any `ungrouped` indices.
+  - `action:'quantify'` (Sonnet) — per room, one de-duplicated item inventory + `volume_cuyd` (counts each item
+    once across angles). Bounded concurrency (pool of 4) + per-room error isolation.
+  - `action:'analyze'` (chains both; downloads photos once) — returns groups, per-room inventories/volumes, and
+    `totalCuyd` / `billedCuyd` (§6 preview: min 1 cy, round up to 2-cy step) / `truckFraction` + token usage.
+  - **Smoked on 873112 (42 photos):** 18–19 room groups, de-dup confirmed in the notes; total ≈ **42–48 cu yd
+    (~3 truckloads)**, ~**$0.45/run** (Haiku group + Sonnet quantify; 130–140k in / 11–13k out) — matches the
+    heavy-case cost model. Un-grouped photos are surfaced + swept into an "Other/Unsorted" bucket so nothing is
+    dropped.
+  - **Known (resolved by P3 estimator-review):** run-to-run volume variance (~15%) → estimator adjusts; the
+    Other/Unsorted bucket can double-count dup angles → estimator reassigns the photo to its room.
+  - **Cost lever not yet applied:** Pass-1 sends full images (no downscale — Deno has no native resize). Downscaling
+    thumbnails for grouping would cut Pass-1 tokens ~⅔ (§5.7). Deferred (Haiku Pass-1 is already cheap).
 - **P3 — screen:** the NY Estimate screen — job picker, photo cards (AI + editable volume), markup panel (reused).
 - **P4 — price + cost + margin:** Vonigo zip pricing (increment + minimum) + CrewLogic cost engine → margin roll-up.
 - **P5 — NY extras:** fold in Kevin's NY-unique pricing items.

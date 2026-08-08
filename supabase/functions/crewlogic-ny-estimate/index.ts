@@ -69,6 +69,14 @@ const LABEL_NAMES: Record<number, string> = {
 const STATUS_COMPLETED = 164;
 const STATUS_ARCHIVED = 165;
 
+// ── P2: AI grouping + de-dup ──────────────────────────────────────────────────
+const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
+const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
+const MODEL_GROUP = 'claude-haiku-4-5-20251001'; // Pass 1 grouping — cheap; not the customer number (estimator gate catches misclusters)
+const MODEL_QUANTIFY = 'claude-sonnet-4-6';       // Pass 2 volume — identifier-adjacent (price rides on it) → Sonnet+
+const TRUCK_CY = 16;  // Vonigo pricing truck
+const EIGHTH_CY = 2;  // 1/8 of a 16 cu yd truck
+
 interface VonigoField { fieldID: number; fieldValue: string | null; optionID: number; }
 interface VonigoRelation { objectTypeID: number; objectID: number | string; name: string; relationType: string; isActive: boolean; }
 interface VonigoWorkOrder { objectID: string; name?: string; Fields: VonigoField[]; Relations: VonigoRelation[]; }
@@ -147,6 +155,125 @@ async function listDocs(token: string, keyName: 'quoteID' | 'jobID', keyVal: str
       const fileName = url.includes('#') ? decodeURIComponent(url.split('#').pop() || '') : '';
       return { objectID: x.objectID, fileName, downloadUrl: url };
     });
+}
+
+// ── AI helpers (P2) ───────────────────────────────────────────────────────────
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = ''; const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  return btoa(binary);
+}
+// Download one photo → an Anthropic base64 image block (Vonigo serves octet-stream; the bytes are JPEG).
+async function fetchImageBlock(url: string): Promise<Record<string, unknown> | null> {
+  const r = await fetch(url);
+  if (!r.ok) return null;
+  const buf = new Uint8Array(await r.arrayBuffer());
+  const ct = r.headers.get('content-type') || '';
+  const mt = ct.startsWith('image/') ? ct.split(';')[0].trim() : 'image/jpeg';
+  return { type: 'image', source: { type: 'base64', media_type: mt, data: uint8ToBase64(buf) } };
+}
+async function callAnthropic(model: string, system: string, userContent: unknown, maxTokens: number, label: string): Promise<Record<string, unknown>> {
+  if (!ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not configured');
+  const res = await fetch(ANTHROPIC_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: userContent }] }),
+  });
+  if (!res.ok) {
+    const bodyText = await res.text();
+    console.error(`[ny-estimate:${label}] Anthropic ${res.status} (request-id: ${res.headers.get('request-id') || 'n/a'}): ${bodyText.slice(0, 500)}`);
+    throw new Error(`AI request failed (Anthropic ${res.status})`);
+  }
+  const result = await res.json() as Record<string, unknown>;
+  if (result && (result.error || result.type === 'error')) {
+    throw new Error(((result.error as Record<string, unknown>)?.message as string) || 'Anthropic returned an error');
+  }
+  return result;
+}
+function anthropicText(result: Record<string, unknown>): string {
+  const content = (result?.content as Array<Record<string, unknown>>) || [];
+  return content.filter((b) => b.type === 'text').map((b) => String(b.text || '')).join('\n');
+}
+function anthropicUsage(result: Record<string, unknown>): { tokens_in: number; tokens_out: number } {
+  const u = (result?.usage as Record<string, number>) || {};
+  return { tokens_in: Number(u.input_tokens || 0), tokens_out: Number(u.output_tokens || 0) };
+}
+// Extract the first JSON object/array from a model reply (tolerates ``` fences / prose).
+function parseJsonLoose(text: string): unknown {
+  const t = String(text || '').replace(/```json/gi, '```').replace(/```/g, '');
+  const starts = [t.indexOf('{'), t.indexOf('[')].filter((i) => i >= 0);
+  if (starts.length === 0) throw new Error('no JSON in AI reply');
+  const start = Math.min(...starts);
+  const open = t[start]; const close = open === '{' ? '}' : ']';
+  let depth = 0;
+  for (let i = start; i < t.length; i++) {
+    if (t[i] === open) depth++;
+    else if (t[i] === close) { depth--; if (depth === 0) return JSON.parse(t.slice(start, i + 1)); }
+  }
+  throw new Error('unterminated JSON in AI reply');
+}
+
+interface Img { index: number; objectID: string | number; fileName: string; block: Record<string, unknown>; }
+
+// Download an estimate's photos (off the QUOTE via jobID) into indexed image blocks (parallel).
+async function downloadPhotos(token: string, jobID: string): Promise<Img[]> {
+  const docs = await listDocs(token, 'jobID', jobID);
+  const blocks = await Promise.all(docs.map((d) => fetchImageBlock(d.downloadUrl).catch(() => null)));
+  const imgs: Img[] = [];
+  let i = 0;
+  for (let k = 0; k < docs.length; k++) {
+    if (blocks[k]) imgs.push({ index: i++, objectID: docs[k].objectID, fileName: docs[k].fileName, block: blocks[k]! });
+  }
+  return imgs;
+}
+// §6 billing preview (final pricing is P4): min 1 cu yd, else round up to the next 1/8-truck (2 cu yd) step.
+function billedCuyd(total: number): number {
+  if (total <= 1) return 1;
+  return Math.ceil(total / EIGHTH_CY) * EIGHTH_CY;
+}
+// Run fn over items with bounded concurrency (Anthropic rate-limits ~many parallel calls).
+async function mapPool<T, R>(items: T[], concurrency: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
+  const results = new Array(items.length) as R[];
+  let idx = 0;
+  async function worker() { while (idx < items.length) { const cur = idx++; results[cur] = await fn(items[cur], cur); } }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return results;
+}
+
+const GROUP_SYSTEM =
+  'You are a junk-removal estimator grouping site photos by physical room/area. The photos come from ONE ' +
+  'estimate and may show each room from several angles or in close-up. Do NOT rely on any filename — judge ' +
+  'from the image content only. Group photos that show the same physical space together.';
+async function doGroup(imgs: Img[]): Promise<{ groups: Array<{ room_label: string; photo_indices: number[]; confidence?: number; note?: string }>; usage: { tokens_in: number; tokens_out: number } }> {
+  const content: unknown[] = [];
+  for (const im of imgs) { content.push({ type: 'text', text: `Photo [${im.index}]` }); content.push(im.block); }
+  content.push({ type: 'text', text:
+    `The ${imgs.length} photos above (labeled Photo [0]..[${imgs.length - 1}]) are from ONE junk-removal estimate. ` +
+    'Group them by physical room/area. Make ONE group per distinct room a person would name (e.g. Kitchen, ' +
+    'Basement, Garage, Master Bedroom, Bedroom 2). Do NOT split a single room into multiple groups for different ' +
+    'corners, angles, or zones — all photos of the same physical space go in ONE group. Every photo index must ' +
+    'appear in EXACTLY ONE group (never in two). Return ONLY JSON, no prose: ' +
+    '{"groups":[{"room_label":"string","photo_indices":[int,...],"confidence":0..1,"note":"string"}]}' });
+  const result = await callAnthropic(MODEL_GROUP, GROUP_SYSTEM, content, 1500, 'group');
+  const parsed = parseJsonLoose(anthropicText(result)) as { groups?: Array<{ room_label: string; photo_indices: number[]; confidence?: number; note?: string }> };
+  return { groups: parsed.groups || [], usage: anthropicUsage(result) };
+}
+
+const QUANTIFY_SYSTEM =
+  'You are a junk-removal estimator computing REMOVABLE volume from photos of ONE room. The photos are multiple ' +
+  'angles of the SAME space, so an item visible in several photos is the SAME item — count it ONCE. Never sum ' +
+  'per-photo volumes. Estimate each removable item\'s volume in cubic yards, then the room total in cubic yards.';
+async function doQuantifyRoom(roomLabel: string, imgs: Img[]): Promise<{ room_label: string; items: Array<{ name: string; qty: number; est_cuyd: number }>; volume_cuyd: number; confidence?: number; notes?: string; usage: { tokens_in: number; tokens_out: number } }> {
+  const content: unknown[] = [];
+  for (const im of imgs) { content.push({ type: 'text', text: `Photo of ${roomLabel}` }); content.push(im.block); }
+  content.push({ type: 'text', text:
+    `These ${imgs.length} photos all show the same room: "${roomLabel}". Build ONE combined inventory of the ` +
+    'removable items, counting each physical item ONCE across all angles. Then give the room\'s total removable ' +
+    'volume in cubic yards. Return ONLY JSON, no prose: ' +
+    '{"room_label":"string","items":[{"name":"string","qty":int,"est_cuyd":number}],"volume_cuyd":number,"confidence":0..1,"notes":"string"}' });
+  const result = await callAnthropic(MODEL_QUANTIFY, QUANTIFY_SYSTEM, content, 1500, 'quantify');
+  const p = parseJsonLoose(anthropicText(result)) as { room_label?: string; items?: Array<{ name: string; qty: number; est_cuyd: number }>; volume_cuyd?: number; confidence?: number; notes?: string };
+  return { room_label: p.room_label || roomLabel, items: p.items || [], volume_cuyd: Number(p.volume_cuyd || 0), confidence: p.confidence, notes: p.notes, usage: anthropicUsage(result) };
 }
 
 Deno.serve(async (req: Request) => {
@@ -294,6 +421,80 @@ Deno.serve(async (req: Request) => {
         existingPrice: parseFloat(getField(fields, F_PRICE)?.fieldValue || '0'),
       };
       return jsonResponse({ success: true, estimate, photos, photoCount: photos.length, reqId });
+    }
+
+    // ---------- action: group (Pass 1 — Haiku clusters photos into rooms) ----------
+    if (action === 'group') {
+      const jobID = String(body.jobID || '').trim();
+      if (!jobID) return jsonResponse({ success: false, error: 'jobID required', reqId }, 400);
+      const imgs = await downloadPhotos(token, jobID);
+      if (imgs.length === 0) return jsonResponse({ success: false, error: 'No photos on this estimate', reqId }, 404);
+      const { groups, usage } = await doGroup(imgs);
+      const assigned = new Set<number>();
+      for (const grp of groups) for (const i of (grp.photo_indices || [])) assigned.add(i);
+      const ungrouped = imgs.map((im) => im.index).filter((i) => !assigned.has(i));
+      return jsonResponse({
+        success: true, jobID,
+        photos: imgs.map((im) => ({ index: im.index, objectID: im.objectID, fileName: im.fileName })),
+        groups, ungrouped, model: MODEL_GROUP, usage, reqId,
+      });
+    }
+
+    // ---------- action: quantify (Pass 2 — Sonnet de-dups volume per room) ----------
+    if (action === 'quantify') {
+      const jobID = String(body.jobID || '').trim();
+      const groupsIn = (body.groups as Array<{ room_label: string; photo_indices: number[] }>) || [];
+      if (!jobID) return jsonResponse({ success: false, error: 'jobID required', reqId }, 400);
+      if (!Array.isArray(groupsIn) || groupsIn.length === 0) return jsonResponse({ success: false, error: 'groups required', reqId }, 400);
+      const imgs = await downloadPhotos(token, jobID);
+      if (imgs.length === 0) return jsonResponse({ success: false, error: 'No photos on this estimate', reqId }, 404);
+      const byIdx = new Map(imgs.map((im) => [im.index, im]));
+      const jobs = groupsIn.map((g) => ({ label: g.room_label, imgs: (g.photo_indices || []).map((i) => byIdx.get(i)).filter(Boolean) as Img[] })).filter((j) => j.imgs.length > 0);
+      const rooms = await mapPool(jobs, 4, async (j) => {
+        try { return await doQuantifyRoom(j.label, j.imgs); }
+        catch (err) { return { room_label: j.label, items: [], volume_cuyd: 0, confidence: 0, notes: 'quantify failed: ' + (err as Error).message, usage: { tokens_in: 0, tokens_out: 0 } }; }
+      });
+      const totalCuyd = rooms.reduce((s, r) => s + (r.volume_cuyd || 0), 0);
+      const tokens_in = rooms.reduce((s, r) => s + r.usage.tokens_in, 0);
+      const tokens_out = rooms.reduce((s, r) => s + r.usage.tokens_out, 0);
+      return jsonResponse({
+        success: true, jobID,
+        rooms: rooms.map(({ usage: _u, ...r }) => ({ ...r, volume_eighths: +(r.volume_cuyd / EIGHTH_CY).toFixed(2) })),
+        totalCuyd: +totalCuyd.toFixed(2), billedCuyd: billedCuyd(totalCuyd), truckFraction: +(totalCuyd / TRUCK_CY).toFixed(3),
+        model: MODEL_QUANTIFY, usage: { tokens_in, tokens_out }, reqId,
+      });
+    }
+
+    // ---------- action: analyze (chain group → quantify; downloads photos once) ----------
+    if (action === 'analyze') {
+      const jobID = String(body.jobID || '').trim();
+      if (!jobID) return jsonResponse({ success: false, error: 'jobID required', reqId }, 400);
+      const imgs = await downloadPhotos(token, jobID);
+      if (imgs.length === 0) return jsonResponse({ success: false, error: 'No photos on this estimate', reqId }, 404);
+      const g = await doGroup(imgs);
+      const byIdx = new Map(imgs.map((im) => [im.index, im]));
+      // Any photo Haiku left un-grouped → an "Other / Unsorted" bucket so nothing is silently dropped.
+      const assigned = new Set<number>();
+      for (const grp of g.groups) for (const i of (grp.photo_indices || [])) assigned.add(i);
+      const ungrouped = imgs.map((im) => im.index).filter((i) => !assigned.has(i));
+      const allGroups = ungrouped.length > 0
+        ? [...g.groups, { room_label: 'Other / Unsorted', photo_indices: ungrouped, confidence: 0.3, note: 'Photos the grouper did not assign — review these.' }]
+        : g.groups;
+      const jobs = allGroups.map((grp) => ({ label: grp.room_label, imgs: (grp.photo_indices || []).map((i) => byIdx.get(i)).filter(Boolean) as Img[] })).filter((j) => j.imgs.length > 0);
+      const rooms = await mapPool(jobs, 4, async (j) => {
+        try { return await doQuantifyRoom(j.label, j.imgs); }
+        catch (err) { return { room_label: j.label, items: [], volume_cuyd: 0, confidence: 0, notes: 'quantify failed: ' + (err as Error).message, usage: { tokens_in: 0, tokens_out: 0 } }; }
+      });
+      const totalCuyd = rooms.reduce((s, r) => s + (r.volume_cuyd || 0), 0);
+      const tokens_in = g.usage.tokens_in + rooms.reduce((s, r) => s + r.usage.tokens_in, 0);
+      const tokens_out = g.usage.tokens_out + rooms.reduce((s, r) => s + r.usage.tokens_out, 0);
+      return jsonResponse({
+        success: true, jobID, photoCount: imgs.length,
+        groups: allGroups, ungrouped,
+        rooms: rooms.map(({ usage: _u, ...r }) => ({ ...r, volume_eighths: +(r.volume_cuyd / EIGHTH_CY).toFixed(2) })),
+        totalCuyd: +totalCuyd.toFixed(2), billedCuyd: billedCuyd(totalCuyd), truckFraction: +(totalCuyd / TRUCK_CY).toFixed(3),
+        models: { group: MODEL_GROUP, quantify: MODEL_QUANTIFY }, usage: { tokens_in, tokens_out }, reqId,
+      });
     }
 
     return jsonResponse({ success: false, error: 'Unknown action: ' + action, reqId }, 400);
