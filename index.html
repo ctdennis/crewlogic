@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.106.2 | 2026-08-08">
+  <meta name="crewlogic-version" content="v5.106.3 | 2026-08-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14032,16 +14032,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     function ecDateLabel(epoch){ if (!epoch) return ''; const d = new Date(epoch*1000); return (d.getUTCMonth()+1)+'/'+d.getUTCDate(); }
     async function ecLoadList() {
-      ecBusy(true, 'Finding recent estimates with photos…');
+      ecBusy(true, 'Loading recent estimates…');
       document.getElementById('ecPhotos').innerHTML=''; document.getElementById('ecResults').innerHTML=''; document.getElementById('ecCalcBtn').style.display='none';
       const sel = document.getElementById('ecEstimateSel');
       try {
-        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'list', franchiseID: currentUser.franchiseID, days: 60 });
+        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'list', franchiseID: currentUser.franchiseID, days: 7 });
         if (!r || !r.success) { ecBusy(false,'Could not load estimates.'); sel.innerHTML='<option value="">error loading</option>'; return; }
         const ests = r.estimates || [];
-        if (!ests.length) { sel.innerHTML = '<option value="">No estimates with photos (last 60 days)</option>'; ecBusy(false,'No estimates with photos in the last 60 days.'); return; }
-        sel.innerHTML = '<option value="">— select an estimate ('+ests.length+') —</option>' + ests.map(e => '<option value="'+e.jobID+'">'+ecDateLabel(e.dateService)+' · '+_ecEsc(e.clientName)+' · '+e.photoCount+' photos · '+_ecEsc(e.zip)+'</option>').join('');
-        ecBusy(false, ests.length + ' estimate(s) with photos (last 60 days).');
+        if (!ests.length) { sel.innerHTML = '<option value="">No completed estimates (last 7 days)</option>'; ecBusy(false,'No completed estimates in the last 7 days.'); return; }
+        sel.innerHTML = '<option value="">— select an estimate ('+ests.length+') —</option>' + ests.map(e => '<option value="'+e.jobID+'">'+ecDateLabel(e.dateService)+' · '+_ecEsc(e.clientName)+' · '+_ecEsc(e.zip)+'</option>').join('');
+        ecBusy(false, ests.length + ' completed estimate(s), last 7 days.');
       } catch(_e){ ecBusy(false,'Error loading estimates.'); }
     }
 
@@ -14055,6 +14055,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'load', franchiseID: currentUser.franchiseID, jobID });
         if (!r || !r.success) { ecBusy(false,'Could not load estimate.'); return; }
         _ec.photos = (r.photos || []).map((p,i) => Object.assign({}, p, { index:i, room:'' }));
+        if (!_ec.photos.length) { document.getElementById('ecPhotos').innerHTML=''; ecBusy(false, 'This estimate has no photos loaded in Vonigo — pick another.'); return; }
         ecRenderPhotos();
         ecBusy(true, 'Preparing photos…');
         await ecDownscaleAll();

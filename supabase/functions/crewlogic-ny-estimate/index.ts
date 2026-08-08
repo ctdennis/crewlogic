@@ -374,17 +374,16 @@ Deno.serve(async (req: Request) => {
         if (onEst(wo) && !onEst(existing)) byJob[jobID] = wo;
       }
 
-      // Photo-count off the QUOTE (via jobID) per candidate — parallelized (a range can have many candidates).
-      const built = await mapPool(Object.keys(byJob), 6, async (jobID) => {
+      // Label-only listing (FAST): return every "Estimate Completed (Est. Only)" (9996) in the window, newest
+      // first. We deliberately do NOT probe each estimate for photos here — that doc-call-per-estimate is what
+      // made the list slow. Photos are pulled on select (load); a photo-less pick just shows "no photos".
+      const estimates = Object.keys(byJob).map((jobID) => {
         const wo = byJob[jobID];
         const fields = wo.Fields || [];
         const relations = wo.Relations || [];
         const label = getField(fields, F_LABEL)?.optionID || 0;
         const statusOpt = getField(fields, F_STATUS)?.optionID || 0;
         const addr = getField(fields, F_ADDRESS)?.fieldValue || '';
-        let photoCount = 0;
-        try { photoCount = (await listDocs(token, 'jobID', jobID)).length; } catch (_e) { photoCount = -1; }
-        if (photoCount === 0) return null; // only estimates that actually have photos (-1 = transient error, keep)
         return {
           jobID,
           workOrderID: wo.objectID,
@@ -400,11 +399,10 @@ Deno.serve(async (req: Request) => {
           isComplete: statusOpt === STATUS_COMPLETED || statusOpt === STATUS_ARCHIVED,
           dateService: parseInt(getField(fields, F_DATE_SERVICE)?.fieldValue || '0', 10),
           timeLabel: timeLabel(parseInt(getField(fields, F_TIME_MINUTES)?.fieldValue || '0', 10)),
-          photoCount,
-          hasPhotos: photoCount > 0,
+          photoCount: null,
+          hasPhotos: null,
         };
-      });
-      const estimates = built.filter(Boolean).sort((a, b) => (b!.dateService || 0) - (a!.dateService || 0));
+      }).sort((a, b) => (b.dateService || 0) - (a.dateService || 0));
       return jsonResponse({ success: true, count: estimates.length, estimates, reqId });
     }
 

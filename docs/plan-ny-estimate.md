@@ -333,9 +333,10 @@ Pass 2 = Sonnet** (§5.8); Haiku ~$1/$5, Sonnet ~$3/$15 per M tok; Pass-1 thumbs
     lazy-logs-in only when needed). Cuts the AI spend (873112 42-photo now well under the $0.45 full-res). Added a
     **sticky control bar** (status + progress bar + Calculate button + AI-spend readout, gated dev/super-admin) so
     it stays visible while scrolling; whole room card is clickable for details.
-  - **v3 (v5.106.2, owner):** dropped the date picker — `list` now scans the **recent ~60 days** and returns all
-    photo-bearing estimates newest-first (parallelized photo-count checks), so the picker is just a browsable list
-    ("8/5 · Prentice · 42 photos · 02790") — no date-guessing. (~30s scan, covered by the progress bar.)
+  - **v3 (v5.106.2→.3, owner):** dropped the date picker — `list` returns recent estimates newest-first as a
+    browsable dropdown (no date-guessing). **Speed fix (v5.106.3):** list by **label only** (9996 "Estimate
+    Completed (Est. Only)") over the **last 7 days**, WITHOUT the per-estimate photo probe (that doc-call-each was
+    the 30s cost) → **~4s**. Photos are pulled on select; a photo-less pick shows "no photos — pick another".
   - **Still to do:** editable per-room volume, reused markup panel (labor/discounts/surcharges), then P4 pricing+cost+margin.
 - **P4 — price + cost + margin:** Vonigo zip pricing (increment + minimum) + CrewLogic cost engine → margin roll-up.
 - **P5 — NY extras:** fold in Kevin's NY-unique pricing items.
