@@ -347,18 +347,21 @@ Deno.serve(async (req: Request) => {
         dateStart = dateEnd - (days + 1) * 86400;
       }
 
-      // Pull WorkOrders across the window (paginate; a multi-week range can span several pages).
+      // Pull WorkOrders across the window (full objects are needed to read label/client/zip; there is no
+      // server-side label filter in Vonigo, so a wide window is inherently heavier — the client loads a fast
+      // 7-day window first, then a wider one in the background).
+      const PAGE = 200;
       const all: VonigoWorkOrder[] = [];
       for (let pg = 1; pg <= 15; pg++) {
         const wr = await vonigoPost('/data/WorkOrders/', {
-          securityToken: token, franchiseID, pageNo: String(pg), pageSize: '200',
+          securityToken: token, franchiseID, pageNo: String(pg), pageSize: String(PAGE),
           sortMode: '1', sortDirection: '1', isCompleteObject: 'true',
           dateMode: '3', dateStart: String(dateStart), dateEnd: String(dateEnd),
         });
         if (wr.errNo !== 0) return jsonResponse({ success: false, error: 'Vonigo WorkOrders query failed: ' + (wr.errMsg || 'errNo ' + wr.errNo), reqId }, 502);
         const page: VonigoWorkOrder[] = wr.WorkOrders || [];
         all.push(...page);
-        if (page.length < 200) break;
+        if (page.length < PAGE) break;
       }
 
       // Filter to costable estimates (9996 only), dedupe by job (prefer the EST-route WO).
