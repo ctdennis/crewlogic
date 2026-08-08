@@ -331,81 +331,57 @@ Deno.serve(async (req: Request) => {
     }
 
     // ---------- action: list ----------
+    // Search QUOTES (= estimates), NOT work orders. Each quote carries `countDocuments` = its photo count, so we
+    // get the photo indicator for free and filter to estimates-WITH-photos in ONE query (~1.5s/30 days) — no
+    // per-estimate doc call, no WorkOrder scan. (The photos hang off the quote; the quote's `job` relation gives
+    // the 6-digit jobID for the downstream load/photo pull.)
     if (action === 'list') {
       const token = await getToken();
-      // Window (naive clock-face epochs — Vonigo date-field convention): a specific `date`, else the recent
-      // N days (default 45) so the client can just SHOW a list of estimates-with-photos — no date-guessing.
       const dateStr = String(body.date || '').trim();
       let dateStart: number, dateEnd: number;
       if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
         const [yy, mm, dd] = dateStr.split('-').map(Number);
         dateStart = naiveDayEpoch(yy, mm, dd); dateEnd = dateStart + 86400;
       } else {
-        const days = Math.min(Math.max(Number(body.days) || 45, 1), 120);
+        const days = Math.min(Math.max(Number(body.days) || 30, 1), 180);
         const now = new Date();
         dateEnd = naiveDayEpoch(now.getUTCFullYear(), now.getUTCMonth() + 1, now.getUTCDate()) + 86400;
         dateStart = dateEnd - (days + 1) * 86400;
       }
 
-      // Pull WorkOrders across the window (full objects are needed to read label/client/zip; there is no
-      // server-side label filter in Vonigo, so a wide window is inherently heavier — the client loads a fast
-      // 7-day window first, then a wider one in the background).
-      const PAGE = 200;
-      const all: VonigoWorkOrder[] = [];
-      for (let pg = 1; pg <= 15; pg++) {
-        const wr = await vonigoPost('/data/WorkOrders/', {
-          securityToken: token, franchiseID, pageNo: String(pg), pageSize: String(PAGE),
+      const allq: Array<Record<string, unknown>> = [];
+      for (let pg = 1; pg <= 12; pg++) {
+        const qr = await vonigoPost('/data/Quotes/', {
+          securityToken: token, franchiseID, pageNo: String(pg), pageSize: '200',
           sortMode: '1', sortDirection: '1', isCompleteObject: 'true',
           dateMode: '3', dateStart: String(dateStart), dateEnd: String(dateEnd),
         });
-        if (wr.errNo !== 0) return jsonResponse({ success: false, error: 'Vonigo WorkOrders query failed: ' + (wr.errMsg || 'errNo ' + wr.errNo), reqId }, 502);
-        const page: VonigoWorkOrder[] = wr.WorkOrders || [];
-        all.push(...page);
-        if (page.length < PAGE) break;
+        if (qr.errNo !== 0) return jsonResponse({ success: false, error: 'Vonigo Quotes query failed: ' + (qr.errMsg || 'errNo ' + qr.errNo), reqId }, 502);
+        const page = (qr.Quotes as Array<Record<string, unknown>>) || [];
+        allq.push(...page);
+        if (page.length < 200) break;
       }
 
-      // Filter to costable estimates (9996 only), dedupe by job (prefer the EST-route WO).
-      const byJob: Record<string, VonigoWorkOrder> = {};
-      for (const wo of all) {
-        if (!isCostableEstimate(wo)) continue;
-        const jobRel = rel(wo.Relations || [], 'job');
-        const jobID = jobRel?.objectID != null ? String(jobRel.objectID) : String(wo.objectID);
-        const existing = byJob[jobID];
-        if (!existing) { byJob[jobID] = wo; continue; }
-        // prefer the WO that is actually on the EST route
-        const onEst = (w: VonigoWorkOrder) => Number(rel(w.Relations || [], 'route')?.objectID) === EST_ROUTE_ID;
-        if (onEst(wo) && !onEst(existing)) byJob[jobID] = wo;
-      }
-
-      // Label-only listing (FAST): return every "Estimate Completed (Est. Only)" (9996) in the window, newest
-      // first. We deliberately do NOT probe each estimate for photos here — that doc-call-per-estimate is what
-      // made the list slow. Photos are pulled on select (load); a photo-less pick just shows "no photos".
-      const estimates = Object.keys(byJob).map((jobID) => {
-        const wo = byJob[jobID];
-        const fields = wo.Fields || [];
-        const relations = wo.Relations || [];
-        const label = getField(fields, F_LABEL)?.optionID || 0;
-        const statusOpt = getField(fields, F_STATUS)?.optionID || 0;
-        const addr = getField(fields, F_ADDRESS)?.fieldValue || '';
-        return {
-          jobID,
-          workOrderID: wo.objectID,
-          appointmentName: wo.name || '',
-          clientName: rel(relations, 'client')?.name || '',
-          address: addr,
-          zip: zipFromAddress(addr),
-          route: rel(relations, 'route')?.name || '',
-          labelOptionID: label,
-          labelName: LABEL_NAMES[label] || (getField(fields, F_LABEL)?.fieldValue || ''),
-          status: getField(fields, F_STATUS)?.fieldValue || '',
-          statusOptionID: statusOpt,
-          isComplete: statusOpt === STATUS_COMPLETED || statusOpt === STATUS_ARCHIVED,
-          dateService: parseInt(getField(fields, F_DATE_SERVICE)?.fieldValue || '0', 10),
-          timeLabel: timeLabel(parseInt(getField(fields, F_TIME_MINUTES)?.fieldValue || '0', 10)),
-          photoCount: null,
-          hasPhotos: null,
-        };
-      }).sort((a, b) => (b.dateService || 0) - (a.dateService || 0));
+      const ci = (v: unknown) => { const n = parseInt(String(v ?? '0'), 10); return Number.isFinite(n) ? n : 0; };
+      const estimates = allq
+        .filter((q) => ci(q.countDocuments) > 0)   // estimates that actually have photos
+        .map((q) => {
+          const rels = (q.Relations as VonigoRelation[]) || [];
+          const jobRel = rels.find((r) => r.relationType === 'job');
+          const loc = rels.find((r) => r.relationType === 'location1')?.name || '';
+          return {
+            quoteID: String(q.objectID),
+            jobID: jobRel?.objectID != null ? String(jobRel.objectID) : null,
+            clientName: rels.find((r) => r.relationType === 'client')?.name || '',
+            address: loc,
+            zip: zipFromAddress(loc),
+            photoCount: ci(q.countDocuments),
+            hasPhotos: true,
+            dateService: ci(q.dateService) || ci(q.dateCreated),
+            name: String(q.name || ''),
+          };
+        })
+        .sort((a, b) => (b.dateService || 0) - (a.dateService || 0));
       return jsonResponse({ success: true, count: estimates.length, estimates, reqId });
     }
 
