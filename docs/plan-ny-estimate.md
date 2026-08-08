@@ -179,8 +179,12 @@ multiple photos to the same object (proof it de-duped).
 
 - **Pass-1 image budget:** 42 thumbnails in one grouping call is fine for Claude; if an estimate ever has 100+, do we
   batch Pass 1? (Defer until we see a real NYC volume.)
-- **Auto-run vs. estimator-triggered:** does Pass 1 fire on load, or on an "Analyze photos" button? (Lean: button, so
-  the estimator isn't billed for a mis-load.)
+- **Auto-run (DECIDED 2026-08-08):** Pass 1 (`group`, Haiku — cheap) fires automatically as soon as the last photo
+  is ingested. Pass 2 (`quantify`, Sonnet — the spend) runs after the estimator confirms the room assignments.
+- **Room labels — canonical taxonomy (DECIDED):** the grouper labels from a fixed list (`ROOM_TAXONOMY`, served by
+  `action:'rooms'`); the P3 per-photo dropdown uses the same list. Handles the bedroom-numbering challenge
+  (Primary + Bedroom 1..8). Confirmed on 873112: labels came back clean (Basement, Kitchen, Primary Bedroom,
+  Bedroom 1..5, Garage, …).
 - **Model tier (DECIDED 2026-08-08):** **Pass 1 grouping → Haiku** (grouping is not the customer-facing number, and
   the estimator-review gate catches any miscluster, so Haiku is safe here and ~⅔ cheaper). **Pass 2 quantify/volume →
   Sonnet-class or better** (the volume rides the customer's price — identifier-adjacent, never Haiku).
@@ -212,14 +216,27 @@ Kevin** (TBD — awaiting his list).
 `margin = revenue (Vonigo zip price for the volume) − cost (CrewLogic setup)`, shown per estimate with the
 component breakdown.
 
-## 9. The screen (new)
+## 9. The "Estimate Costing" screen (P3 — owner design 2026-08-08)
 
-Distinct "NY Estimate" screen, reusing the estimator's components:
-- **Top:** date picker + estimates dropdown (not-completed / estimates-only) → Load.
-- **Photo list:** one card per photo — the image, AI description, editable cu-yd + eighths (adjust up/down).
+Distinct screen off the **"Estimate Costing" home card**, reusing the estimator's components.
+
+- **Top:** date picker + estimate dropdown (calls `list` — only 9996 estimates with photos) → Load.
+- **Ingest + auto-group:** load pulls the photos; **as soon as the last image is ingested, auto-run `group`**
+  (no button — owner). Photos render as they load; grouping fires on completion.
+- **Grouping review (per-photo room dropdown):** list each photo with a **room dropdown** the user can change.
+  Options come from the **canonical room taxonomy** (single source — the fn's `rooms` action / `ROOM_TAXONOMY`):
+  Primary Bedroom, Bedroom 1..8, Kitchen, Breakfast Nook, Dining Room, Pantry, Living Room, Family Room, Den,
+  Sunroom, Office, Playroom, Foyer, Entry, Mudroom, Breezeway, Hallway, Stairway, Landing, Basement, Attic,
+  Garage, Laundry Room, Workshop, Storage Room, Closet, Bathroom, Deck/Patio, Front/Side/Back Yard, Driveway,
+  Parking Lot, Shed, Other. (The grouper already labels from this list, so each photo's dropdown pre-selects the
+  AI's room; the bedroom-numbering challenge is handled by the fixed Bedroom 1..8 + Primary options.)
+- **Quantify:** after the user is satisfied with the room assignments, run `quantify` on the confirmed groups →
+  per-room de-duplicated item inventory + editable `volume_cuyd` (adjust up/down). Re-assigning a photo re-runs
+  only the affected rooms.
 - **Markup panel:** reused estimator inputs — labor, discounts, surcharges, truck volume, donation credit.
-- **Summary:** total volume → Vonigo-zip revenue (with minimum) − CrewLogic cost = **margin**, with breakdown.
-- Reuses dark-card / `.btn-surface` styling and the existing estimate/volume/cost components.
+- **Summary:** total volume → Vonigo-zip revenue (min 1 cy, 1/8-truck steps) − CrewLogic cost = **margin**.
+- Reuses dark-card / `.btn-surface` styling and the existing estimate/volume/cost components. **Additive-only to
+  `index.html`** (regression guard — new screen + card, no existing screen/route/function touched).
 
 ## 9b. Feature gating + pricing + cost governor (owner-decided 2026-08-08)
 

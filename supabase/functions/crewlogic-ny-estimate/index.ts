@@ -77,6 +77,18 @@ const MODEL_QUANTIFY = 'claude-sonnet-4-6';       // Pass 2 volume — identifie
 const TRUCK_CY = 16;  // Vonigo pricing truck
 const EIGHTH_CY = 2;  // 1/8 of a 16 cu yd truck
 
+// Canonical room taxonomy — the grouper labels from THIS list, and it's the P3 dropdown's option set
+// (single source of truth). Multiple bedrooms → "Bedroom 1".."Bedroom 8"; the main one → "Primary Bedroom".
+const ROOM_TAXONOMY = [
+  'Primary Bedroom', 'Bedroom 1', 'Bedroom 2', 'Bedroom 3', 'Bedroom 4', 'Bedroom 5', 'Bedroom 6', 'Bedroom 7', 'Bedroom 8',
+  'Kitchen', 'Breakfast Nook', 'Dining Room', 'Pantry',
+  'Living Room', 'Family Room', 'Den', 'Sunroom', 'Office', 'Playroom',
+  'Foyer', 'Entry', 'Mudroom', 'Breezeway', 'Hallway', 'Stairway', 'Landing',
+  'Basement', 'Attic', 'Garage', 'Laundry Room', 'Workshop', 'Storage Room', 'Closet', 'Bathroom',
+  'Deck / Patio', 'Front Yard', 'Side Yard', 'Back Yard', 'Driveway', 'Parking Lot', 'Shed',
+  'Other',
+];
+
 interface VonigoField { fieldID: number; fieldValue: string | null; optionID: number; }
 interface VonigoRelation { objectTypeID: number; objectID: number | string; name: string; relationType: string; isActive: boolean; }
 interface VonigoWorkOrder { objectID: string; name?: string; Fields: VonigoField[]; Relations: VonigoRelation[]; }
@@ -249,10 +261,12 @@ async function doGroup(imgs: Img[]): Promise<{ groups: Array<{ room_label: strin
   for (const im of imgs) { content.push({ type: 'text', text: `Photo [${im.index}]` }); content.push(im.block); }
   content.push({ type: 'text', text:
     `The ${imgs.length} photos above (labeled Photo [0]..[${imgs.length - 1}]) are from ONE junk-removal estimate. ` +
-    'Group them by physical room/area. Make ONE group per distinct room a person would name (e.g. Kitchen, ' +
-    'Basement, Garage, Master Bedroom, Bedroom 2). Do NOT split a single room into multiple groups for different ' +
-    'corners, angles, or zones — all photos of the same physical space go in ONE group. Every photo index must ' +
-    'appear in EXACTLY ONE group (never in two). Return ONLY JSON, no prose: ' +
+    'Group them by physical room/area. Make ONE group per distinct room — do NOT split a single room into multiple ' +
+    'groups for different corners, angles, or zones; all photos of the same physical space go in ONE group. Every ' +
+    'photo index must appear in EXACTLY ONE group (never in two, and do not omit any index). ' +
+    'Label each group with EXACTLY one name from this list: ' + ROOM_TAXONOMY.join(', ') + '. ' +
+    'For additional bedrooms use "Bedroom 1", "Bedroom 2", etc.; the main/largest bedroom is "Primary Bedroom". ' +
+    'If a space matches none, use "Other". Return ONLY JSON, no prose: ' +
     '{"groups":[{"room_label":"string","photo_indices":[int,...],"confidence":0..1,"note":"string"}]}' });
   const result = await callAnthropic(MODEL_GROUP, GROUP_SYSTEM, content, 1500, 'group');
   const parsed = parseJsonLoose(anthropicText(result)) as { groups?: Array<{ room_label: string; photo_indices: number[]; confidence?: number; note?: string }> };
@@ -286,6 +300,8 @@ Deno.serve(async (req: Request) => {
     const action = String(body.action || '').trim();
     const franchiseID = String(body.franchiseID || '').trim();
     if (!action) return jsonResponse({ success: false, error: 'action required', reqId }, 400);
+    // Static taxonomy — the P3 room dropdown reads its options from here (single source, no auth/Vonigo needed).
+    if (action === 'rooms') return jsonResponse({ success: true, rooms: ROOM_TAXONOMY, reqId });
     if (!franchiseID) return jsonResponse({ success: false, error: 'franchiseID required', reqId }, 400);
 
     const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
