@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.114.1 | 2026-08-09">
+  <meta name="crewlogic-version" content="v5.114.2 | 2026-08-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14282,12 +14282,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function ecToggleCost(key){ if (!_ec.cost.include) _ec.cost.include = {}; _ec.cost.include[key] = !ecInc(key); ecRecalcMargin(); }
     function ecRecalcMargin(){ const p = document.getElementById('ecMarginPanel'); if (p) p.innerHTML = ecMarginPanelHtml(); }
     function ecTk(n){ return (+((parseFloat(n)||0).toFixed(2))); }   // trucks to 2 decimals, no trailing zeros
-    async function ecCalcDistances(){
+    // auto=true: fired once automatically on first margin render — skip quietly if we can't route (no address / no
+    // truck home) and never nag; the user still has the manual button. auto=false: user-pressed Recalc, alerts on error.
+    async function ecCalcDistances(auto){
+      if (_ec.distCalcing) return;
       const cs = (currentUser && currentUser.costSettings) || {}; const m = ecMargin();
       const jobSite = (_ec.est && _ec.est.address) || '';
       const home = (cs.truckHome || '').trim();
-      if (!jobSite) { alert('This estimate has no job address to route from.'); return; }
-      if (!home) { alert('Set your Truck home location in Settings → Cost Analysis first.'); return; }
+      if (!jobSite) { if (!auto) alert('This estimate has no job address to route from.'); return; }
+      if (!home) { if (!auto) alert('Set your Truck home location in Settings → Cost Analysis first.'); return; }
+      _ec.distCalcing = true;
       const disp = m.sites[m.siteIdx], rec = m.recSites[m.recSiteIdx], don = m.donSites[m.donSiteIdx];
       const btn = document.getElementById('ecDistBtn'); if (btn) { btn.textContent = '⏳ Calculating…'; btn.disabled = true; }
       try {
@@ -14299,11 +14303,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           recyclingSite: (rec && rec.address) || null,
           donationSite: (don && don.address) || null
         });
+        _ec.distCalcing = false;
         if (data && data.success && data.distances) {
           _ec.cost.dist = data.distances; _ec.cost.driveMin = ''; _ec.cost.driveMiles = '';  // re-derive from fresh distances
           ecRecalcMargin();
-        } else { alert('Distance calculation failed: ' + ((data && data.error) || 'Unknown error')); if (btn) { btn.textContent = '🗺 Calculate distances'; btn.disabled = false; } }
-      } catch(e) { console.error(e); alert('Connection error calculating distances.'); if (btn) { btn.textContent = '🗺 Calculate distances'; btn.disabled = false; } }
+        } else { if (!auto) alert('Distance calculation failed: ' + ((data && data.error) || 'Unknown error')); if (btn) { btn.textContent = '🗺 Calculate distances'; btn.disabled = false; } }
+      } catch(e) { _ec.distCalcing = false; console.error(e); if (!auto) alert('Connection error calculating distances.'); if (btn) { btn.textContent = '🗺 Calculate distances'; btn.disabled = false; } }
     }
     function ecMarginPanelHtml(){
       const m = ecMargin();
@@ -14454,6 +14459,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         '<div id="ecAdjPanel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:14px 0;">'+ecAdjustmentsHtml()+'</div>' +
         '<div id="ecMarginPanel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:14px 0;">'+ecMarginPanelHtml()+'</div>';
       ecRecalcTotals();
+      // Auto-calculate drive distances on first margin render so Drive labor + Fuel populate without a manual tap;
+      // the user hits Recalc distances after changing a disposal/recycling/donation site. Fire-and-forget.
+      if (!_ec.cost.dist) ecCalcDistances(true);
     }
     // Priced items for a manual type, filtered from OUR loaded price book — mirrors the estimator's
     // populatePricedItems so the prices match to the penny (same blocks, same filter).
