@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.105.7 | 2026-08-07">
+  <meta name="crewlogic-version" content="v5.116.0 | 2026-08-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1454,6 +1454,16 @@
             <button id="estimatesSearchClear" onclick="clearEstimatesSearch()" style="display:none;position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);font-size:14px;cursor:pointer;padding:2px 6px;line-height:1;">×</button>
           </div>
         </div>
+        <!-- Estimate Costing toolbar (lives in the sticky header so the picker + Calculate stay pinned) -->
+        <div id="ecToolbar" style="display:none;flex-direction:column;gap:6px;align-items:stretch;">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <select class="form-select" id="ecEstimateSel" onchange="ecSelectEstimate()" style="flex:1;min-width:150px;font-size:13px;padding:6px 8px;"><option value="">Loading…</option></select>
+            <button id="ecCalcBtn" class="btn-surface" style="padding:7px 14px;font-weight:700;display:none;" onclick="ecQuantify()">Calculate volumes</button>
+            <span id="ecSpend" style="font-size:12px;color:var(--text-muted);display:none;white-space:nowrap;"></span>
+          </div>
+          <div id="ecProgress" style="display:none;height:3px;background:var(--bg-input);border-radius:2px;overflow:hidden;"><div style="height:100%;width:40%;background:var(--accent-green);animation:ecslide 1.1s ease-in-out infinite;"></div></div>
+          <div id="ecStatus" style="font-size:12px;color:var(--text-muted);"></div>
+        </div>
       </div>
     </div>
 
@@ -1504,6 +1514,12 @@
             <div class="module-icon">📐</div>
             <div class="module-name">Volume Check</div>
             <div class="module-desc">Quick AI volume check from photos — no job needed</div>
+          </div>
+
+          <div class="module-card fade-in fade-in-delay-2" id="estimateCostingCard" data-card="estimateCosting" onclick="openModule('estimateCosting')" style="display:none;">
+            <div class="module-icon">📸</div>
+            <div class="module-name">Estimate Costing</div>
+            <div class="module-desc">Cost a Vonigo estimate from photos → margin</div>
           </div>
 
           <div class="module-card fade-in fade-in-delay-3" id="routerCard" data-card="router" onclick="openModule('router')" style="display:none;">
@@ -8785,6 +8801,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (trucksCard) trucksCard.style.display = ''; // shown; per-user visibility handled by applyTileToggles() (default-off for non-owners)
       const truckAlertsCard = document.getElementById('truckAlertsCard'); // mobile-friendly alerts (owner-gated, no desktop-width restriction)
       if (truckAlertsCard) truckAlertsCard.style.display = ''; // shown; per-user visibility handled by applyTileToggles() (default-off for non-owners)
+      // Estimate Costing (reverse-estimate) — gated feature, entitlement default-off: dev + super-admin only for now
+      const ecCard = document.getElementById('estimateCostingCard');
+      // Estimate Costing prod access: dev env (all), franchise #90 (whole franchise), and Kevin McGill (NY #31) by user.
+      if (ecCard) ecCard.style.display = (IS_DEV_ENV || currentUser.franchiseID === '90' || currentUser.email === 'kevin@junkluggers.com') ? '' : 'none';
 
       // Job Router (R1) — recommends the best transfer station between the truck's LIVE position and the
       // next job, so it requires telematics ACTUALLY connected (not just "is an owner") AND a Vonigo
@@ -8891,7 +8911,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       'disposalRouterScreen',
       'storageScreen', 'storageResultsScreen',
       'mattressScreen', 'mattressResultsScreen',
-      'priceLookupScreen', 'promosScreen', 'backupScheduleScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'truckAlertsScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen'
+      'priceLookupScreen', 'promosScreen', 'backupScheduleScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'truckAlertsScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen', 'estimateCostingScreen'
     ];
 
     function hideAll() {
@@ -8929,10 +8949,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const bar = document.getElementById('secondaryToolbar');
       const editor = document.getElementById('editorToolbar');
       const list = document.getElementById('listToolbar');
+      const ec = document.getElementById('ecToolbar');
       if (!bar) return;
       if (editor) editor.style.display = which === 'editor' ? 'flex' : 'none';
       if (list) list.style.display = which === 'list' ? 'flex' : 'none';
-      bar.style.display = (which === 'editor' || which === 'list') ? 'block' : 'none';
+      if (ec) ec.style.display = which === 'estimateCosting' ? 'flex' : 'none';
+      bar.style.display = (which === 'editor' || which === 'list' || which === 'estimateCosting') ? 'block' : 'none';
       // After showing, sync button enablement state
       if (which === 'editor') updateEditorToolbarState();
     }
@@ -8972,6 +8994,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (editor) editor.style.display = 'none';
       const list = document.getElementById('listToolbar');
       if (list) list.style.display = 'none';
+      const ec = document.getElementById('ecToolbar');
+      if (ec) ec.style.display = 'none';
     }
 
     // ===== HOME SCREEN: drag-to-reorder card preference (per-user, DB-persisted) =====
@@ -13942,6 +13966,644 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       mjSendCommand(cmd); // -> dispatcher resolves slot/zoning -> standard confirm card -> mjExecute
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // ESTIMATE COSTING (internal: reverse-estimate) — Vonigo-first photo → AI volume → margin.
+    // Gated feature (dev + super-admin for now). Backend: crewlogic-ny-estimate (list/load/group/quantify/rooms)
+    // + crewlogic-ny-photo (public image proxy). See docs/plan-ny-estimate.md.
+    // ═══════════════════════════════════════════════════════════════════════
+    let _ec = { jobID: null, photos: [], rooms: [], roomOptions: [], busy: false, spend: 0, estimates: [], counts: {}, est: null, priceBook: [], adjustments: [], adjType: 'surcharge', cost: { crew: 2, hours: '', disposalSiteIdx: 0, recycleSiteIdx: 0, donateSiteIdx: 0, recyclePct: 0, donatePct: 0, targetMargin: 60, dist: null, driveMin: '', driveMiles: '', include: { disposal: true, labor: true, driveLabor: true, fuel: true, royalty: true } } };
+    const EC_PRICE = { group: { in: 3, out: 15 }, quantify: { in: 3, out: 15 } }; // $/M tokens (both passes now Sonnet)
+    function _ecEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+    function ecProxy(url){ return EDGE_BASE + '/crewlogic-ny-photo?u=' + encodeURIComponent(url); }
+    function ecStatus(msg){ const el = document.getElementById('ecStatus'); if (el) el.textContent = msg || ''; }
+    function ecBusy(on, msg){ const pr = document.getElementById('ecProgress'); if (pr) pr.style.display = on ? 'block' : 'none'; if (msg != null) ecStatus(msg); }
+    function ecCanSeeSpend(){ return IS_DEV_ENV || (currentUser && currentUser.email === 'charles.dennis@junkluggers.com'); }
+    function ecAddSpend(kind, usage){ if (!usage) return; const p = EC_PRICE[kind] || EC_PRICE.quantify; _ec.spend += (usage.tokens_in||0)/1e6*p.in + (usage.tokens_out||0)/1e6*p.out; ecRenderSpend(); }
+    function ecRenderSpend(){ const el = document.getElementById('ecSpend'); if (!el) return; if (ecCanSeeSpend()) { el.style.display=''; el.textContent = 'AI spend: $' + _ec.spend.toFixed(2); } else { el.style.display='none'; } }
+    // Client-side downscale (canvas) — cuts AI image tokens ~2/3 and avoids server-side image processing.
+    // crossOrigin + the CORS-clean proxy keep the canvas un-tainted so toDataURL works.
+    function ecDownscale(url, maxEdge){
+      return new Promise((resolve) => {
+        const im = new Image(); im.crossOrigin = 'anonymous';
+        im.onload = () => {
+          let w = im.naturalWidth, h = im.naturalHeight; const L = Math.max(w, h);
+          if (L > maxEdge) { const s = maxEdge / L; w = Math.round(w*s); h = Math.round(h*s); }
+          const c = document.createElement('canvas'); c.width = w; c.height = h;
+          c.getContext('2d').drawImage(im, 0, 0, w, h);
+          try { resolve(c.toDataURL('image/jpeg', 0.72).split(',')[1] || null); } catch(_e){ resolve(null); }
+        };
+        im.onerror = () => resolve(null);
+        im.src = url;
+      });
+    }
+    async function ecMapPool(items, n, fn){ const res = new Array(items.length); let i = 0; async function w(){ while (i < items.length) { const c = i++; res[c] = await fn(items[c], c); } } await Promise.all(Array.from({ length: Math.min(n, items.length) }, w)); return res; }
+    async function ecDownscaleAll(){
+      // Bounded concurrency — a burst of proxy fetches was dropping a couple of images. Each photo is fetched
+      // ONCE here (canvas), and the thumbnail then displays from this downscaled copy (no second proxy fetch).
+      let done = 0; const total = _ec.photos.length;
+      await ecMapPool(_ec.photos, 6, async (p) => { p.b64 = await ecDownscale(ecProxy(p.downloadUrl), 700); done++; ecStatus('Preparing photos ' + done + '/' + total + '…'); });
+    }
+    function ecImages(){ return _ec.photos.filter(p => p.b64).map(p => ({ index: p.index, b64: p.b64 })); }
+
+    async function ecEnsureScreen() {
+      if (document.getElementById('estimateCostingScreen')) return;
+      const div = document.createElement('div');
+      div.id = 'estimateCostingScreen';
+      div.style.display = 'none';
+      div.innerHTML =
+        '<div style="max-width:1100px;margin:0 auto;">' +
+          '<div id="ecPhotos" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;"></div>' +
+          '<div id="ecResults"></div>' +
+        '</div>' +
+        '<div id="ecRoomModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)ecCloseModal()">' +
+          '<div style="width:100%;max-width:520px;background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border);margin:auto;padding:16px;">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><div id="ecModalTitle" style="font-weight:700;font-size:16px;"></div><button class="btn-surface" style="padding:2px 10px;" onclick="ecCloseModal()">&times;</button></div>' +
+            '<div id="ecModalBody"></div>' +
+          '</div>' +
+        '</div>' +
+        '<div id="ecPhotoModal" style="display:none;position:fixed;inset:0;z-index:100001;background:rgba(0,0,0,0.9);align-items:center;justify-content:center;padding:16px;" onclick="if(event.target===this)ecClosePhoto()">' +
+          '<div style="max-width:min(1000px,96vw);max-height:96vh;display:flex;flex-direction:column;gap:10px;">' +
+            '<img id="ecPhotoImg" style="max-width:100%;max-height:80vh;object-fit:contain;border-radius:8px;background:#111;" alt="">' +
+            '<div style="display:flex;align-items:center;gap:10px;">' +
+              '<div id="ecPhotoRoom" style="flex:1;"></div>' +
+              '<button class="btn-surface" style="padding:6px 14px;" onclick="ecClosePhoto()">Close</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      document.getElementById('homeScreen').parentNode.appendChild(div);
+      if (!document.getElementById('ecKeyframes')) { const st = document.createElement('style'); st.id = 'ecKeyframes'; st.textContent = '@keyframes ecslide{0%{margin-left:-40%}100%{margin-left:100%}}'; document.head.appendChild(st); }
+      try { const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'rooms' }); if (r && r.success) _ec.roomOptions = r.rooms || []; } catch(_e){}
+    }
+
+    async function ecOpen() {
+      await ecEnsureScreen();
+      document.getElementById('estimateCostingScreen').style.display = 'block';
+      _ec.jobID = null; _ec.photos = []; _ec.rooms = []; _ec.spend = 0; _ec.estimates = []; _ec.counts = {}; _ec.est = null; _ec.priceBook = []; _ec.adjustments = []; _ec.adjType = 'surcharge'; _ec.cost = { crew: 2, hours: '', disposalSiteIdx: 0, recycleSiteIdx: 0, donateSiteIdx: 0, recyclePct: 0, donatePct: 0, targetMargin: 60, dist: null, driveMin: '', driveMiles: '', include: { disposal: true, labor: true, driveLabor: true, fuel: true, royalty: true } };
+      document.getElementById('ecPhotos').innerHTML = '';
+      document.getElementById('ecResults').innerHTML = '';
+      document.getElementById('ecCalcBtn').style.display = 'none';
+      ecRenderSpend(); ecBusy(false, '');
+      document.getElementById('ecEstimateSel').innerHTML = '<option value="">Loading…</option>';
+      ecLoadList();
+    }
+
+    function ecDateLabel(epoch){ if (!epoch) return ''; const d = new Date(epoch*1000); return (d.getUTCMonth()+1)+'/'+d.getUTCDate(); }
+    function ecFillEstimates(ests){
+      const sel = document.getElementById('ecEstimateSel');
+      if (!ests.length) { sel.innerHTML = '<option value="">No estimates with photos (last 30 days)</option>'; return; }
+      sel.innerHTML = '<option value="">— select an estimate ('+ests.length+') —</option>' +
+        ests.map(e => '<option value="'+e.jobID+'">'+(e.savedAt?'💾 ':'')+ecDateLabel(e.dateService)+' · '+_ecEsc(e.clientName)+' · '+e.photoCount+' photos · '+_ecEsc(e.zip)+'</option>').join('');
+    }
+    async function ecLoadList() {
+      ecBusy(true, 'Loading estimates with photos…');
+      document.getElementById('ecPhotos').innerHTML=''; document.getElementById('ecResults').innerHTML=''; document.getElementById('ecCalcBtn').style.display='none';
+      const sel = document.getElementById('ecEstimateSel');
+      try {
+        // Searches QUOTES (each carries its photo count) — one fast call returns estimates-with-photos, newest first.
+        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'list', franchiseID: currentUser.franchiseID, days: 30 });
+        if (!r || !r.success) { ecBusy(false,'Could not load estimates.'); sel.innerHTML='<option value="">error loading</option>'; return; }
+        const ests = r.estimates || [];
+        _ec.estimates = ests;
+        ecFillEstimates(ests);
+        ecBusy(false, ests.length ? (ests.length + ' estimate(s) with photos, last 30 days.') : 'No estimates with photos in the last 30 days.');
+      } catch(_e){ ecBusy(false,'Error loading estimates.'); }
+    }
+
+    async function ecSelectEstimate() {
+      const jobID = document.getElementById('ecEstimateSel').value;
+      document.getElementById('ecResults').innerHTML=''; document.getElementById('ecCalcBtn').style.display='none';
+      if (!jobID) { document.getElementById('ecPhotos').innerHTML=''; ecBusy(false,''); return; }
+      _ec.jobID = jobID; _ec.spend = 0; _ec.savedAt = null; _ec.rooms = []; _ec.cost = ecDefaultCost(); ecRenderSpend();
+      ecBusy(true, 'Loading photos…');
+      try {
+        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'load', franchiseID: currentUser.franchiseID, jobID });
+        if (!r || !r.success) { ecBusy(false,'Could not load estimate.'); return; }
+        _ec.est = r.estimate || null; _ec.adjustments = [];
+        // Load THIS estimate's price book (same edge fn + zip the estimator uses) into our own state — the
+        // Adjustments pickers price Surcharge/Labor/Single Item/Discount from it. Fire-and-forget; ready by Calculate.
+        const _pbReady = priceLookup({ zipCode: (r.estimate && r.estimate.zip) || '', franchiseID: currentUser.franchiseID, email: currentUser.email })
+          .then(pr => pr.json()).then(pd => { _ec.priceBook = (pd && pd.blocks) || []; }).catch(() => { _ec.priceBook = []; });
+        _ec.photos = (r.photos || []).map((p,i) => Object.assign({}, p, { index:i, room:'' }));
+        if (!_ec.photos.length) { document.getElementById('ecPhotos').innerHTML=''; ecBusy(false, 'This estimate has no photos loaded in Vonigo — pick another.'); return; }
+        // Load-saved: if this job already has a saved costing, restore it and skip the AI entirely.
+        ecBusy(true, 'Checking for a saved costing…');
+        let _saved = null;
+        try { const cg = await edgeFunctionCall('crewlogic-ny-estimate', { action:'costingGet', franchiseID: currentUser.franchiseID, jobID }); if (cg && cg.success) _saved = cg.costing; } catch(_e){}
+        // Load-saved renders the margin immediately (no AI wait), so the price book must be ready first —
+        // otherwise the recomputed Volume price reads an empty book and shows $0.
+        if (_saved && _saved.payload) { await _pbReady; ecLoadSaved(_saved); return; }
+        ecBusy(true, 'Preparing photos…');
+        await ecDownscaleAll();
+        ecRenderPhotos();
+        ecBusy(true, 'Grouping ' + _ec.photos.length + ' photos into rooms…');
+        await ecGroup();
+      } catch(_e){ ecBusy(false, 'Error loading estimate.'); }
+    }
+
+    function ecRoomSelect(idx, selected) {
+      const opts = _ec.roomOptions.length ? _ec.roomOptions : ['Other'];
+      return '<select class="form-select" style="font-size:12px;padding:4px 6px;margin-top:4px;width:100%;max-width:100%;box-sizing:border-box;" onchange="ecSetRoom('+idx+', this.value)">' +
+        '<option value="">— room —</option>' +
+        opts.map(o => '<option value="'+_ecEsc(o)+'"'+(o===selected?' selected':'')+'>'+_ecEsc(o)+'</option>').join('') +
+        '</select>';
+    }
+    // Measure the actual width and set an EXPLICIT column count (repeat(N,...)) — no auto-fill guesswork.
+    function ecFixPhotoCols(){
+      const grid = document.getElementById('ecPhotos'); if (!grid) return;
+      const w = grid.getBoundingClientRect().width || (grid.parentElement && grid.parentElement.getBoundingClientRect().width) || 320;
+      const cols = Math.max(2, Math.min(5, Math.floor(w / 115)));
+      grid.style.gridTemplateColumns = 'repeat(' + cols + ', minmax(0, 1fr))';
+    }
+    function ecRenderPhotos() {
+      const grid = document.getElementById('ecPhotos');
+      grid.style.display = 'grid';
+      grid.style.gap = '8px';
+      grid.innerHTML = _ec.photos.map(p => {
+        const src = p.b64 ? ('data:image/jpeg;base64,' + p.b64) : ecProxy(p.downloadUrl); // display the already-downscaled copy
+        return '<div id="ecPhotoCard'+p.index+'" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:5px;min-width:0;">' +
+          '<img src="'+src+'" loading="lazy" onclick="ecPhotoZoom('+p.index+')" title="Tap to enlarge" style="width:100%;height:88px;object-fit:cover;border-radius:6px;background:var(--bg-input);cursor:pointer;" alt="">' +
+          '<div id="ecRoomCell'+p.index+'">'+ecRoomSelect(p.index, p.room)+'</div>' +
+        '</div>';
+      }).join('');
+      ecFixPhotoCols();
+    }
+    window.addEventListener('resize', function(){ if (document.getElementById('ecPhotos') && (document.getElementById('ecPhotos').childElementCount)) ecFixPhotoCols(); });
+    function ecSetRoom(idx, val){ if (_ec.photos[idx]) { _ec.photos[idx].room = val; const c = document.getElementById('ecRoomCell'+idx); if (c) c.innerHTML = ecRoomSelect(idx, val); const card = document.getElementById('ecPhotoCard'+idx); if (card) card.style.border = (val && String(val).trim()) ? '1px solid var(--border)' : '2px solid #e05a4f'; } }
+    // Lightbox: click a thumbnail → full-size photo + the room dropdown, so you can read the room and assign it.
+    function ecPhotoZoom(i){
+      const p = _ec.photos[i]; if (!p) return;
+      document.getElementById('ecPhotoImg').src = ecProxy(p.downloadUrl);
+      document.getElementById('ecPhotoRoom').innerHTML = '<span style="color:var(--text-muted);font-size:12px;margin-right:6px;">Room:</span>' + ecRoomSelect(i, p.room);
+      document.getElementById('ecPhotoModal').style.display = 'flex';
+    }
+    function ecClosePhoto(){ const m = document.getElementById('ecPhotoModal'); if (m) m.style.display = 'none'; }
+
+    async function ecGroup() {
+      const images = ecImages();
+      if (!images.length) { ecBusy(false, 'No photos to group.'); return; }
+      try {
+        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'group', images });
+        if (!r || !r.success) { ecBusy(false, 'Grouping failed — set rooms manually, then Calculate.'); document.getElementById('ecCalcBtn').style.display=''; return; }
+        ecAddSpend('group', r.usage);
+        (r.groups||[]).forEach(g => (g.photo_indices||[]).forEach(i => { if (_ec.photos[i]) _ec.photos[i].room = g.room_label; }));
+        (r.ungrouped||[]).forEach(i => { if (_ec.photos[i] && !_ec.photos[i].room) _ec.photos[i].room = 'Other'; });
+        _ec.photos.forEach(p => { const c = document.getElementById('ecRoomCell'+p.index); if (c) c.innerHTML = ecRoomSelect(p.index, p.room); });
+        document.getElementById('ecCalcBtn').style.display = '';
+        ecBusy(false, 'Grouped into rooms — review the dropdowns, then Calculate volumes.');
+      } catch(_e){ ecBusy(false, 'Grouping error — set rooms manually, then Calculate.'); document.getElementById('ecCalcBtn').style.display=''; }
+    }
+
+    async function ecQuantify() {
+      if (_ec.busy || !_ec.jobID) return;
+      // Guard: every photo must have a room assigned before we quantify. An unlabeled photo would otherwise be
+      // silently bucketed into "Other" (p.room || 'Other'), so its volume counts but under the wrong room —
+      // force the estimator to assign everything (choosing "Other" explicitly is fine).
+      const unlabeled = _ec.photos.filter(p => !p.room || !String(p.room).trim());
+      if (unlabeled.length) {
+        _ec.photos.forEach(p => { const card = document.getElementById('ecPhotoCard'+p.index); if (card) card.style.border = (!p.room || !String(p.room).trim()) ? '2px solid #e05a4f' : '1px solid var(--border)'; });
+        const first = document.getElementById('ecPhotoCard'+unlabeled[0].index); if (first && first.scrollIntoView) first.scrollIntoView({ behavior:'smooth', block:'center' });
+        ecBusy(false, unlabeled.length + ' photo' + (unlabeled.length>1?'s':'') + ' still need a room (highlighted in red) — set the dropdown, or choose "Other", then Calculate.');
+        return;
+      }
+      const byRoom = {};
+      _ec.photos.forEach(p => { const rm = p.room || 'Other'; (byRoom[rm] = byRoom[rm] || []).push(p.index); });
+      const groups = Object.keys(byRoom).map(rm => ({ room_label: rm, photo_indices: byRoom[rm] }));
+      if (!groups.length) return;
+      _ec.busy = true; ecBusy(true, 'Calculating volumes — this can take up to a minute…');
+      document.getElementById('ecResults').innerHTML = '';
+      try {
+        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'quantify', images: ecImages(), groups });
+        if (!r || !r.success) { ecBusy(false, 'Volume calculation failed.'); _ec.busy=false; return; }
+        ecAddSpend('quantify', r.usage);
+        _ec.rooms = r.rooms || [];
+        ecRenderResults(r);
+        ecBusy(false, '');
+      } catch(_e){ ecBusy(false, 'Volume calculation error.'); }
+      _ec.busy = false;
+    }
+
+    function ecConf(c){ c = c||0; const col = c>=0.75?'#2e7d32':(c>=0.6?'#b8860b':'#c0392b'); return '<span style="background:'+col+';color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;">'+Math.round(c*100)+'%</span>'; }
+    function ecBilledCuyd(total){ if (total <= 1) return 1; return Math.ceil(total / 2) * 2; }
+    // Truck volume: 1 truck = 16 cu yd = 8 eighths (2 cu yd each). eighths 0 = "Minimum" (1 cu yd, per Vonigo).
+    function ecEighthsToCy(e){ return e <= 0 ? 1 : e * 2; }
+    function ecCyToEighths(cy){ cy = parseFloat(cy)||0; if (cy <= 1) return 0; return Math.max(1, Math.round(cy / 2)); } // round to nearest 1/8 truck
+    function ecFracLabel(e){
+      if (e <= 0) return 'Minimum';
+      const F = ['','1/8','1/4','3/8','1/2','5/8','3/4','7/8'];
+      const whole = Math.floor(e/8), rem = e%8, unit = whole === 1 ? 'truck' : 'trucks';
+      if (whole === 0) return F[rem];
+      return rem === 0 ? (whole+' '+unit) : (whole+' '+F[rem]+' '+unit);
+    }
+    function ecFracOptions(sel){ let o=''; for (let e=0;e<=40;e++){ o += '<option value="'+e+'"'+(e===sel?' selected':'')+'>'+ecFracLabel(e)+'</option>'; } return o; }
+    function ecRecalcTotals(){
+      const t = +(_ec.rooms.reduce((s,rm) => s + (parseFloat(rm.volume_cuyd)||0), 0)).toFixed(2);
+      const set = (id,v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+      set('ecTotalCuyd', t + ' cy'); set('ecBilled', ecBilledCuyd(t) + ' cy'); set('ecTrucks', (+(t/16).toFixed(2)) + '');
+      ecRecalcMargin();
+    }
+    // ── P4: revenue (tiered volume price from the book) + cost (cost_settings) = margin ──
+    const EC_TIER_LABEL = { 0.0625:'Minimum', 0.125:'1/8', 0.25:'1/4', 0.375:'3/8', 0.5:'1/2', 0.625:'5/8', 0.75:'3/4', 0.875:'7/8', 1:'Full' };
+    // Rate for a truck-fraction from OUR price book's Volume block (name-includes "volume", item-name-includes the tier label).
+    function ecVolRate(fraction){
+      const label = EC_TIER_LABEL[fraction]; if (!label) return 0;
+      const vol = (_ec.priceBook||[]).find(b => (b.name||'').toLowerCase().includes('volume')); if (!vol) return 0;
+      const it = (vol.items||[]).find(i => (i.name||'').toLowerCase().includes(label.toLowerCase()));
+      return it ? (parseFloat(it.value)||0) : 0;
+    }
+    function ecRoundTier(frac){ // snap a 0..1 partial to nearest priced tier (0, Minimum, 1/8 … 7/8)
+      const tiers = [0, 0.0625, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875];
+      let best = 0, bd = Infinity; tiers.forEach(t => { const d = Math.abs(frac - t); if (d < bd) { bd = d; best = t; } }); return best;
+    }
+    // Mirrors calcVolumePriceSplit: whole trucks at Full rate + fractional remainder at its tier rate.
+    function ecVolumePrice(totalTrucks){
+      const fullRate = ecVolRate(1); const whole = Math.floor(totalTrucks); const partial = totalTrucks - whole;
+      const rp = ecRoundTier(partial); return (whole * fullRate) + (rp > 0 ? ecVolRate(rp) : 0);
+    }
+    function ecMoney(v){ return (v<0?'-$':'$') + Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+    function ecTrucksLabel(trucks){
+      const whole = Math.floor(trucks); const rp = ecRoundTier(trucks - whole); const f = (rp>0 && rp<1) ? EC_TIER_LABEL[rp] : '';
+      if (whole===0 && !f) return '0 trucks';
+      if (whole===0) return f + ' truck';
+      if (!f) return whole + (whole===1 ? ' truck' : ' trucks');
+      return whole + ' ' + f + ' trucks';
+    }
+    function ecMargin(){
+      const cs = (currentUser && currentUser.costSettings) || {};
+      const c = _ec.cost || {};
+      const totalCuyd = _ec.rooms.reduce((s,rm) => s + (parseFloat(rm.volume_cuyd)||0), 0);
+      const trucks = totalCuyd / 16;
+      const volumePrice = ecVolumePrice(trucks);
+      const adjNet = ecAdjNet();
+      const price = volumePrice + adjNet;                         // what the customer pays
+      const recyclePct = Math.max(0, Math.min(100, parseFloat(c.recyclePct)||0)) / 100;
+      const donatePct  = Math.max(0, Math.min(100, parseFloat(c.donatePct)||0)) / 100;
+      const dispFrac = Math.max(0, 1 - recyclePct - donatePct);
+      const recycleTrucks = trucks * recyclePct;
+      const donateTrucks = trucks * donatePct;
+      const dispTrucks = trucks * dispFrac;                       // only landfilled volume incurs disposal
+      const sites = Array.isArray(cs.disposalSites) ? cs.disposalSites : [];
+      const siteIdx = sites.length ? Math.min(sites.length-1, Math.max(0, parseInt(c.disposalSiteIdx)||0)) : -1;
+      const site = siteIdx>=0 ? sites[siteIdx] : null;
+      const siteCost = (site && site.cost!=null) ? Number(site.cost) : (parseFloat(cs.disposalCost)||200);
+      const recSites = Array.isArray(cs.recyclingSites) ? cs.recyclingSites : [];
+      const recSiteIdx = recSites.length ? Math.min(recSites.length-1, Math.max(0, parseInt(c.recycleSiteIdx)||0)) : -1;
+      const recSite = recSiteIdx>=0 ? recSites[recSiteIdx] : null;
+      const recRevRate = (recSite && recSite.revenue!=null) ? Number(recSite.revenue) : (parseFloat(cs.recyclingRevenue)||0);
+      const donSites = Array.isArray(cs.donationSites) ? cs.donationSites : [];
+      const donSiteIdx = donSites.length ? Math.min(donSites.length-1, Math.max(0, parseInt(c.donateSiteIdx)||0)) : -1;
+      const recyclingRev = recycleTrucks * recRevRate;           // recycled loads earn revenue
+      const totalRevenue = price + recyclingRev;
+      const crewRate = parseFloat(cs.crewRate)||0;
+      const crew = Math.max(1, parseFloat(c.crew)||2);
+      const hoursIn = c.hours;
+      const hours = (hoursIn!==''&&hoursIn!=null) ? Math.max(0, parseFloat(hoursIn)||0) : Math.max(2, Math.round(trucks*3));
+      const disposal = dispTrucks * siteCost;
+      const labor = crew*hours*crewRate;
+      // Drive time + fuel — round trip yard→job→dump→yard. calcDistances returns home→job + job→disposal;
+      // the return dump→yard leg isn't returned, so approximate it with the home→job leg (dump is typically
+      // in the same home territory). driveMin/driveMiles are editable overrides of that estimate.
+      const dist = c.dist || null;
+      const autoMin = dist ? (2*(dist.homeMinutes||0) + (dist.disposalMinutes||0)) : 0;
+      const autoMiles = dist ? (2*(dist.homeMiles||0) + (dist.disposalMiles||0)) : 0;
+      const driveMin = (c.driveMin!==''&&c.driveMin!=null) ? Math.max(0, parseFloat(c.driveMin)||0) : autoMin;
+      const driveMiles = (c.driveMiles!==''&&c.driveMiles!=null) ? Math.max(0, parseFloat(c.driveMiles)||0) : autoMiles;
+      const mpg = parseFloat(cs.MPG)||10;
+      const fuelPrice = parseFloat(cs.fuelCost)||0;
+      const driveHours = driveMin/60;
+      const driveLabor = crew*driveHours*crewRate;
+      const fuel = mpg>0 ? (driveMiles/mpg)*fuelPrice : 0;
+      const royaltyFrac = (isFinite(parseFloat(cs.royaltyPct)) ? parseFloat(cs.royaltyPct) : 14) / 100;
+      const royalty = price * royaltyFrac;
+      const inc = c.include || {};
+      const useD = inc.disposal !== false, useL = inc.labor !== false, useDL = inc.driveLabor !== false, useF = inc.fuel !== false, useR = inc.royalty !== false;
+      const cost = (useD?disposal:0) + (useL?labor:0) + (useDL?driveLabor:0) + (useF?fuel:0) + (useR?royalty:0);
+      const margin = totalRevenue - cost;
+      const marginPct = totalRevenue>0 ? margin/totalRevenue*100 : 0;
+      const targetFrac = Math.max(0, Math.min(0.95, (parseFloat(c.targetMargin)||0)/100));
+      const fixed = (useD?disposal:0) + (useL?labor:0) + (useDL?driveLabor:0) + (useF?fuel:0);
+      const denom = 1 - (useR?royaltyFrac:0) - targetFrac;       // customer price to hit the target margin
+      const recPrice = denom>0 ? Math.max(0, (fixed - recyclingRev*(1-targetFrac)) / denom) : 0;
+      return { trucks, volumePrice, adjNet, price, recyclePct, donatePct, recycleTrucks, donateTrucks, dispTrucks, sites, siteIdx, siteCost, recSites, recSiteIdx, donSites, donSiteIdx, recRevRate, recyclingRev, totalRevenue, crew, hours, crewRate, disposal, labor, dist, driveMin, driveMiles, driveHours, mpg, fuelPrice, driveLabor, fuel, royalty, royaltyFrac, useD, useL, useDL, useF, useR, cost, margin, marginPct, targetFrac, recPrice };
+    }
+    function ecSetCost(f, val){ if (!_ec.cost) _ec.cost = {}; _ec.cost[f] = val; ecRecalcMargin(); }
+    function ecInc(key){ const inc = (_ec.cost||{}).include || {}; return inc[key] !== false; }
+    function ecToggleCost(key){ if (!_ec.cost.include) _ec.cost.include = {}; _ec.cost.include[key] = !ecInc(key); ecRecalcMargin(); }
+    function ecRecalcMargin(){ const p = document.getElementById('ecMarginPanel'); if (p) p.innerHTML = ecMarginPanelHtml(); }
+    function ecTk(n){ return (+((parseFloat(n)||0).toFixed(2))); }   // trucks to 2 decimals, no trailing zeros
+    // auto=true: fired once automatically on first margin render — skip quietly if we can't route (no address / no
+    // truck home) and never nag; the user still has the manual button. auto=false: user-pressed Recalc, alerts on error.
+    async function ecCalcDistances(auto){
+      if (_ec.distCalcing) return;
+      const cs = (currentUser && currentUser.costSettings) || {}; const m = ecMargin();
+      const jobSite = (_ec.est && _ec.est.address) || '';
+      const home = (cs.truckHome || '').trim();
+      if (!jobSite) { if (!auto) alert('This estimate has no job address to route from.'); return; }
+      if (!home) { if (!auto) alert('Set your Truck home location in Settings → Cost Analysis first.'); return; }
+      _ec.distCalcing = true;
+      const disp = m.sites[m.siteIdx], rec = m.recSites[m.recSiteIdx], don = m.donSites[m.donSiteIdx];
+      const btn = document.getElementById('ecDistBtn'); if (btn) { btn.textContent = '⏳ Calculating…'; btn.disabled = true; }
+      try {
+        const data = await edgeFunctionCall('crewlogic-estimate', {
+          action: 'calcDistances', email: currentUser.email, franchiseID: currentUser.franchiseID,
+          franchiseInternalID: currentUser.franchiseInternalID, tenantID: currentUser.tenantID,
+          truckHome: home, jobSite,
+          disposalSite: (disp && disp.address) || '',
+          recyclingSite: (rec && rec.address) || null,
+          donationSite: (don && don.address) || null
+        });
+        _ec.distCalcing = false;
+        if (data && data.success && data.distances) {
+          _ec.cost.dist = data.distances; _ec.cost.driveMin = ''; _ec.cost.driveMiles = '';  // re-derive from fresh distances
+          ecRecalcMargin();
+        } else { if (!auto) alert('Distance calculation failed: ' + ((data && data.error) || 'Unknown error')); if (btn) { btn.textContent = '🗺 Calculate distances'; btn.disabled = false; } }
+      } catch(e) { _ec.distCalcing = false; console.error(e); if (!auto) alert('Connection error calculating distances.'); if (btn) { btn.textContent = '🗺 Calculate distances'; btn.disabled = false; } }
+    }
+    function ecMarginPanelHtml(){
+      const m = ecMargin();
+      const row = (label, val, strong) => '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:13px;'+(strong?'font-weight:700;border-top:1px solid var(--border);margin-top:4px;padding-top:6px;':'')+'"><span'+(strong?'':' style="color:var(--text-muted);"')+'>'+label+'</span><span>'+ecMoney(val)+'</span></div>';
+      // Cost row with an include checkbox on the right; unchecked → greyed + struck-through, excluded from total.
+      const costRow = (key, labelHtml, val) => { const on = ecInc(key); return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;'+(on?'':'opacity:0.45;')+'">' +
+        '<span style="flex:1;color:var(--text-muted);">'+labelHtml+'</span>' +
+        '<span style="min-width:78px;text-align:right;'+(on?'':'text-decoration:line-through;')+'">'+ecMoney(val)+'</span>' +
+        '<input type="checkbox" '+(on?'checked':'')+' title="include in cost" onchange="ecToggleCost(\''+key+'\')" style="cursor:pointer;">' +
+      '</div>'; };
+      const pctInput = (label, key, val) => '<div style="display:flex;align-items:center;gap:3px;"><span style="font-size:11px;color:var(--text-muted);">'+label+'</span><input type="number" min="0" max="100" value="'+val+'" onchange="ecSetCost(\''+key+'\', this.value)" style="width:42px;text-align:right;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:4px;padding:3px 4px;font-size:12px;"><span style="font-size:11px;color:var(--text-muted);">%</span></div>';
+      const siteSelect = (label, sites, idx, key) => '<div style="display:flex;align-items:center;gap:4px;"><span style="font-size:11px;color:var(--text-muted);">'+label+'</span>' + (sites.length
+        ? '<select class="form-select" style="width:auto;font-size:12px;padding:4px 6px;" onchange="ecSetCost(\''+key+'\', this.value)">'+sites.map((s,i)=>'<option value="'+i+'"'+(i===idx?' selected':'')+'>'+_ecEsc(s.name)+(s.cost!=null?' — $'+Number(s.cost).toFixed(0):(s.revenue!=null?' — +$'+Number(s.revenue).toFixed(0):''))+'</option>').join('')+'</select>'
+        : '<span style="font-size:12px;color:var(--text-muted);">(none)</span>') + '</div>';
+      const numInput = (val, key, w, step) => '<input type="number" min="0"'+(step?' step="'+step+'"':'')+' value="'+val+'" onchange="ecSetCost(\''+key+'\', this.value)" style="width:'+w+'px;text-align:right;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:4px;padding:2px 4px;font-size:12px;">';
+      const targetPct = m.targetFrac*100;
+      // Literal traffic-light colors (NOT var(--accent-green) — dev overrides that to amber, which would make good == below-target).
+      const marginColor = m.marginPct >= targetPct ? '#22c55e' : (m.marginPct >= 0 ? '#e0a44f' : '#e05a4f');
+      const targetHit = m.marginPct >= targetPct;
+      // Dollar gap to target: margin minus the margin the target % requires on this revenue.
+      const tgtDiff = Math.round((m.margin - m.totalRevenue*m.targetFrac) * 100) / 100;
+      const tgtStatus = Math.abs(tgtDiff) < 0.005 ? 'at target' : (tgtDiff > 0 ? ecMoney(tgtDiff)+' above target' : ecMoney(Math.abs(tgtDiff))+' below target');
+      // Cost row whose label contains editable inputs (labor / drive labor / fuel).
+      const inputRow = (key, on, labelHtml, val) => '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;'+(on?'':'opacity:0.45;')+'">' +
+          '<span style="flex:1;color:var(--text-muted);white-space:nowrap;">'+labelHtml+'</span>' +
+          '<span style="min-width:78px;text-align:right;'+(on?'':'text-decoration:line-through;')+'">'+ecMoney(val)+'</span>' +
+          '<input type="checkbox" '+(on?'checked':'')+' title="include in cost" onchange="ecToggleCost(\''+key+'\')" style="cursor:pointer;"></div>';
+      const laborRow = inputRow('labor', m.useL, 'Labor '+numInput(m.crew,'crew',54)+' crew × '+numInput(m.hours,'hours',54,'0.25')+' h × $'+m.crewRate, m.labor);
+      const driveRow = inputRow('driveLabor', m.useDL, 'Drive labor '+numInput(m.driveMin,'driveMin',54)+' min × '+m.crew+' crew × $'+m.crewRate, m.driveLabor);
+      const fuelRow  = inputRow('fuel', m.useF, 'Fuel '+numInput(m.driveMiles,'driveMiles',54,'0.1')+' mi ÷ '+m.mpg+' mpg × $'+m.fuelPrice, m.fuel);
+      // Volume-reduction breakout: where the gross trucks went after recycling + donation are diverted from disposal.
+      const volBreakout = (m.recycleTrucks+m.donateTrucks) > 0 ? '<div style="font-size:11px;color:var(--text-muted);padding:0 0 5px 2px;margin-top:-3px;">gross '+ecTk(m.trucks)+' tk − recycling '+ecTk(m.recycleTrucks)+' − donation '+ecTk(m.donateTrucks)+' = '+ecTk(m.dispTrucks)+' tk to disposal</div>' : '';
+      const distBtn = '<div style="display:flex;align-items:center;gap:6px;">' +
+          '<button id="ecDistBtn" onclick="ecCalcDistances()" style="font-size:12px;padding:5px 10px;border-radius:6px;cursor:pointer;background:var(--btn-surface);border:1px solid var(--btn-surface-border);color:var(--text-primary);">🗺 '+(m.dist?'Recalc distances':'Calculate distances')+'</button>' +
+          (m.dist ? '<span style="font-size:11px;color:#22c55e;white-space:nowrap;">✓ ~'+ecTk(m.driveMiles)+' mi round trip</span>' : '<span style="font-size:11px;color:var(--text-muted);white-space:nowrap;">for drive labor + fuel</span>') +
+        '</div>';
+      return '<div style="font-weight:700;margin-bottom:10px;">Price &amp; margin <span style="font-size:12px;color:var(--text-muted);font-weight:400;">— optimize the price</span></div>' +
+        '<div style="display:flex;gap:12px 16px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">' +
+          pctInput('Recycle','recyclePct', +(m.recyclePct*100).toFixed(0)) + pctInput('Donate','donatePct', +(m.donatePct*100).toFixed(0)) +
+          siteSelect('Disposal', m.sites, m.siteIdx, 'disposalSiteIdx') +
+          siteSelect('Recycling', m.recSites, m.recSiteIdx, 'recycleSiteIdx') +
+          siteSelect('Donation', m.donSites, m.donSiteIdx, 'donateSiteIdx') +
+          distBtn +
+        '</div>' +
+        '<div style="display:flex;gap:14px 20px;flex-wrap:wrap;">' +
+          '<div style="flex:1;min-width:210px;">' +
+            '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Revenue</div>' +
+            row('Volume ('+ecTrucksLabel(m.trucks)+')', m.volumePrice) + row('Adjustments', m.adjNet) +
+            (m.recyclingRev>0 ? row('Recycling credit ('+ecTk(m.recycleTrucks)+' tk × $'+m.recRevRate+')', m.recyclingRev) : '') +
+            row('Total revenue', m.totalRevenue, true) +
+          '</div>' +
+          '<div style="flex:1;min-width:210px;">' +
+            '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Cost <span style="text-transform:none;font-weight:400;">(uncheck to exclude)</span></div>' +
+            costRow('disposal', 'Disposal ('+ecTk(m.dispTrucks)+' tk × $'+m.siteCost+')', m.disposal) +
+            volBreakout +
+            laborRow + driveRow + fuelRow +
+            costRow('royalty', 'Royalty ('+(m.royaltyFrac*100).toFixed(0)+'%)', m.royalty) +
+            row('Total cost', m.cost, true) +
+          '</div>' +
+        '</div>' +
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px;padding-top:10px;border-top:2px solid var(--border);">' +
+          '<span style="font-weight:700;font-size:15px;">Margin</span>' +
+          '<span style="font-weight:800;font-size:22px;color:'+marginColor+';">'+ecMoney(m.margin)+' <span style="font-size:14px;">('+m.marginPct.toFixed(1)+'%)</span></span>' +
+        '</div>' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--text-muted);">' +
+          '<span>Target '+numInput(+(m.targetFrac*100).toFixed(0),'targetMargin',40)+'% → recommended <b style="color:#22c55e;">'+ecMoney(m.recPrice)+'</b></span>' +
+          '<span style="color:'+marginColor+';font-weight:700;">'+(m.marginPct<0?'losing money':tgtStatus)+'</span>' +
+        '</div>' +
+        (ecVolRate(1) === 0 ? '<div style="font-size:11px;color:#e0a44f;margin-top:6px;">⚠️ Volume price $0 — price book not loaded for this zip.</div>' : '') +
+        '<div style="display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">' +
+          '<span style="font-size:11px;color:var(--text-muted);">'+(_ec.savedAt ? 'Saved '+ecSavedLabel(_ec.savedAt) : 'Not saved')+'</span>' +
+          '<button id="ecSaveBtn" onclick="ecSaveCosting()" style="padding:8px 18px;font-weight:700;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;cursor:pointer;">💾 Save costing</button>' +
+        '</div>';
+    }
+    function ecSavedLabel(ts){ try { return new Date(ts).toLocaleString([], { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }); } catch(_e){ return ''; } }
+    function ecDefaultCost(){ return { crew: 2, hours: '', disposalSiteIdx: 0, recycleSiteIdx: 0, donateSiteIdx: 0, recyclePct: 0, donatePct: 0, targetMargin: 60, dist: null, driveMin: '', driveMiles: '', include: { disposal: true, labor: true, driveLabor: true, fuel: true, royalty: true } }; }
+    // Restore a saved costing and render its results WITHOUT re-running the AI.
+    function ecLoadSaved(saved){
+      const pl = saved.payload || {};
+      _ec.rooms = Array.isArray(pl.rooms) ? pl.rooms : [];
+      _ec.adjustments = Array.isArray(pl.adjustments) ? pl.adjustments : [];
+      _ec.cost = Object.assign(ecDefaultCost(), pl.cost || {});
+      _ec.savedAt = saved.updated_at || saved.updatedAt || null;
+      if (Array.isArray(pl.photos)) { const rmap = new Map(pl.photos.map(x => [x.index, x.room])); _ec.photos.forEach(p => { if (rmap.has(p.index)) p.room = rmap.get(p.index); }); }
+      const grid = document.getElementById('ecPhotos'); if (grid) grid.style.display = 'none';
+      ecRenderResults({ rooms: _ec.rooms });
+      const banner = '<div style="background:var(--bg-card);border:1px solid var(--accent-green,#00E785);border-radius:10px;padding:10px 14px;margin:8px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+        '<span style="font-size:13px;">💾 Loaded saved costing <span style="color:var(--text-muted);">(saved '+ecSavedLabel(_ec.savedAt)+')</span></span>' +
+        '<span style="flex:1;"></span>' +
+        '<button onclick="ecReRunAI()" style="padding:6px 14px;font-weight:700;background:var(--btn-surface);border:1px solid var(--btn-surface-border);color:var(--text-primary);border-radius:7px;cursor:pointer;">↻ Re-run AI</button>' +
+      '</div>';
+      const res = document.getElementById('ecResults'); if (res) res.insertAdjacentHTML('afterbegin', banner);
+      ecBusy(false, '');
+    }
+    // Discard the saved snapshot and re-run grouping/quantify from the photos (uses AI quota).
+    async function ecReRunAI(){
+      if (!confirm('Re-run the AI on these photos? This replaces the saved rooms + volumes and uses AI quota.')) return;
+      _ec.savedAt = null; _ec.rooms = []; _ec.photos.forEach(p => p.room = '');
+      document.getElementById('ecResults').innerHTML = '';
+      const grid = document.getElementById('ecPhotos'); if (grid) grid.style.display = 'grid';
+      ecBusy(true, 'Preparing photos…');
+      await ecDownscaleAll(); ecRenderPhotos();
+      ecBusy(true, 'Grouping ' + _ec.photos.length + ' photos into rooms…');
+      await ecGroup();
+    }
+    async function ecSaveCosting(){
+      if (!_ec.jobID) return;
+      const m = ecMargin();
+      const totalCuyd = _ec.rooms.reduce((s,rm) => s + (parseFloat(rm.volume_cuyd)||0), 0);
+      const btn = document.getElementById('ecSaveBtn'); if (btn) { btn.textContent = '⏳ Saving…'; btn.disabled = true; }
+      const est = _ec.est || {};
+      const summary = { clientName: est.clientName||'', address: est.address||'', zip: est.zip||'', totalCuyd: +totalCuyd.toFixed(2), trucks: m.trucks, price: m.price, adjNet: m.adjNet, cost: m.cost, margin: m.margin, marginPct: m.marginPct };
+      const payload = {
+        rooms: _ec.rooms, adjustments: _ec.adjustments, cost: _ec.cost, spend: _ec.spend,
+        est: { clientName: est.clientName||'', address: est.address||'', zip: est.zip||'', quoteID: est.quoteID||'', workOrderID: est.workOrderID||'' },
+        photos: _ec.photos.map(p => ({ index: p.index, room: p.room, downloadUrl: p.downloadUrl })),
+        savedVersion: ((document.querySelector('meta[name="crewlogic-version"]')||{}).content||'').split('|')[0].trim()
+      };
+      try {
+        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'costingSave', franchiseID: currentUser.franchiseID, email: currentUser.email, jobID: _ec.jobID, quoteID: est.quoteID||null, summary, payload });
+        if (r && r.success) { _ec.savedAt = r.updatedAt; ecRecalcMargin(); }
+        else { alert('Save failed: ' + ((r && r.error) || 'Unknown error')); if (btn) { btn.textContent = '💾 Save costing'; btn.disabled = false; } }
+      } catch(e){ console.error(e); alert('Connection error saving costing.'); if (btn) { btn.textContent = '💾 Save costing'; btn.disabled = false; } }
+    }
+    function ecSetEighths(i, e){
+      const rm = _ec.rooms[i]; if (!rm) return;
+      rm.eighths = e; rm.volume_cuyd = ecEighthsToCy(e); rm.rawCy = ecEighthsToCy(e); // manual override sets the raw too
+      const lbl = document.getElementById('ecFracLbl'+i); if (lbl) lbl.textContent = ecFracLabel(e);
+      const cy = document.getElementById('ecRoomCy'+i); if (cy) cy.textContent = rm.volume_cuyd + ' cu yd';
+      ecRecalcTotals();
+    }
+    // Re-round a room from its raw volume after an item edit, re-render its body, update label + totals.
+    function ecRoomRecalc(i){
+      const rm = _ec.rooms[i]; if (!rm) return;
+      rm.eighths = ecCyToEighths(rm.rawCy); rm.volume_cuyd = ecEighthsToCy(rm.eighths);
+      const b = document.getElementById('ecRoomBody'+i); if (b) b.innerHTML = ecRoomBodyHtml(rm, i);
+      const lbl = document.getElementById('ecFracLbl'+i); if (lbl) lbl.textContent = ecFracLabel(rm.eighths);
+      ecRecalcTotals();
+    }
+    function ecSetItemQty(i, j, val){
+      const rm = _ec.rooms[i]; const it = rm && rm.items && rm.items[j]; if (!it) return;
+      const q0 = (parseFloat(it.qty) > 0) ? parseFloat(it.qty) : 1;
+      const perUnit = (parseFloat(it.est_cuyd)||0) / q0;
+      const newQty = Math.max(0, parseInt(val)||0);
+      const newCy = +(perUnit * newQty).toFixed(2);
+      rm.rawCy = Math.max(0, (parseFloat(rm.rawCy)||0) - (parseFloat(it.est_cuyd)||0) + newCy); // delta, no drift
+      it.qty = newQty; it.est_cuyd = newCy;
+      ecRoomRecalc(i);
+    }
+    function ecDeleteItem(i, j){
+      const rm = _ec.rooms[i]; const it = rm && rm.items && rm.items[j]; if (!it) return;
+      rm.rawCy = Math.max(0, (parseFloat(rm.rawCy)||0) - (parseFloat(it.est_cuyd)||0));
+      rm.items.splice(j, 1);
+      ecRoomRecalc(i);
+    }
+    function ecToggleRoom(i){
+      const b = document.getElementById('ecRoomBody'+i), a = document.getElementById('ecArrow'+i);
+      if (!b) return; const open = b.style.display === 'none'; b.style.display = open ? 'block' : 'none'; if (a) a.textContent = open ? '▾' : '▸';
+    }
+    function ecRoomBodyHtml(rm, i){
+      const photos = _ec.photos.filter(p => p.room === rm.room_label);   // b64 present on a fresh run; proxy on load-saved
+      const thumbs = photos.map(p => '<img src="'+(p.b64 ? 'data:image/jpeg;base64,'+p.b64 : ecProxy(p.downloadUrl))+'" onclick="ecPhotoZoom('+p.index+')" title="Tap to enlarge" style="width:78px;height:58px;object-fit:cover;border-radius:5px;cursor:pointer;">').join('');
+      const cell = 'padding:3px 4px;border-bottom:1px solid var(--border);';
+      const items = (rm.items||[]).map((it,j) =>
+        '<tr>' +
+          '<td style="'+cell+'">'+_ecEsc(it.name)+'</td>' +
+          '<td style="'+cell+'text-align:right;"><input type="number" min="0" value="'+(it.qty!=null?it.qty:1)+'" onchange="ecSetItemQty('+i+','+j+',this.value)" style="width:46px;text-align:right;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:4px;padding:2px 4px;font-size:12px;"></td>' +
+          '<td style="'+cell+'text-align:right;color:var(--text-muted);">'+it.est_cuyd+'</td>' +
+          '<td style="'+cell+'text-align:center;"><span onclick="ecDeleteItem('+i+','+j+')" title="Remove item" style="color:#e05a4f;cursor:pointer;font-weight:800;padding:0 6px;">×</span></td>' +
+        '</tr>').join('');
+      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">' +
+            '<span style="font-size:12px;color:var(--text-muted);">Truck volume:</span>' +
+            '<select class="form-select" style="width:auto;font-size:13px;padding:5px 8px;" onchange="ecSetEighths('+i+', +this.value)">'+ecFracOptions(rm.eighths)+'</select>' +
+            '<span id="ecRoomCy'+i+'" style="color:var(--text-muted);font-size:12px;">'+rm.volume_cuyd+' cu yd</span>' +
+            '<span style="flex:1;"></span>'+ecConf(rm.confidence) +
+          '</div>' +
+          (thumbs ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">'+thumbs+'</div>' : '') +
+          (items ? '<table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr><th style="text-align:left;color:var(--text-muted);font-size:11px;">Item</th><th style="text-align:right;color:var(--text-muted);font-size:11px;">Qty</th><th style="text-align:right;color:var(--text-muted);font-size:11px;">cu yd</th><th></th></tr></thead><tbody>'+items+'</tbody></table>' : '') +
+          (rm.notes ? '<div style="font-size:12px;color:var(--text-muted);font-style:italic;margin-top:8px;">'+_ecEsc(rm.notes)+'</div>' : '');
+    }
+    function ecRoomRow(rm, i){
+      const photos = _ec.photos.filter(p => p.room === rm.room_label);
+      return '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden;">' +
+        '<div onclick="ecToggleRoom('+i+')" style="display:flex;align-items:center;gap:10px;padding:11px 12px;cursor:pointer;">' +
+          '<span style="font-weight:700;flex:1;">'+_ecEsc(rm.room_label)+'</span>' +
+          '<span id="ecFracLbl'+i+'" style="font-weight:700;color:var(--accent-green);">'+ecFracLabel(rm.eighths)+'</span>' +
+          '<span style="color:var(--text-muted);font-size:12px;">'+photos.length+' 📷</span>' +
+          '<span id="ecArrow'+i+'" style="color:var(--text-muted);">▸</span>' +
+        '</div>' +
+        '<div id="ecRoomBody'+i+'" style="display:none;padding:0 12px 12px;">'+ecRoomBodyHtml(rm,i)+'</div>' +
+      '</div>';
+    }
+    function ecRenderResults(r) {
+      _ec.rooms.forEach(rm => { rm.rawCy = parseFloat(rm.volume_cuyd)||0; rm.eighths = ecCyToEighths(rm.rawCy); rm.volume_cuyd = ecEighthsToCy(rm.eighths); });
+      const grid = document.getElementById('ecPhotos'); if (grid) grid.style.display = 'none'; // photos now live inside their rooms
+      const rows = _ec.rooms.map((rm,i) => ecRoomRow(rm,i)).join('');
+      document.getElementById('ecResults').innerHTML =
+        '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:12px 0;display:flex;gap:20px;flex-wrap:wrap;">' +
+          '<div><div id="ecTotalCuyd" style="font-size:24px;font-weight:800;color:var(--accent-green);"></div><div style="font-size:12px;color:var(--text-muted);">total cu yd</div></div>' +
+          '<div><div id="ecBilled" style="font-size:24px;font-weight:800;color:var(--accent-green);"></div><div style="font-size:12px;color:var(--text-muted);">billed (min 1, 1/8-truck steps)</div></div>' +
+          '<div><div id="ecTrucks" style="font-size:24px;font-weight:800;color:var(--accent-green);"></div><div style="font-size:12px;color:var(--text-muted);">16-cy truckloads</div></div>' +
+        '</div>' +
+        '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Tap a room to see its photos + items and set its truck volume. Totals update live.</div>' +
+        rows +
+        '<div id="ecAdjPanel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:14px 0;">'+ecAdjustmentsHtml()+'</div>' +
+        '<div id="ecMarginPanel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:14px 0;">'+ecMarginPanelHtml()+'</div>';
+      ecRecalcTotals();
+      // Auto-calculate drive distances on first margin render so Drive labor + Fuel populate without a manual tap;
+      // the user hits Recalc distances after changing a disposal/recycling/donation site. Fire-and-forget.
+      if (!_ec.cost.dist) ecCalcDistances(true);
+    }
+    // Priced items for a manual type, filtered from OUR loaded price book — mirrors the estimator's
+    // populatePricedItems so the prices match to the penny (same blocks, same filter).
+    function ecPricedItems(type){
+      const blocks = _ec.priceBook || [];
+      const out = [];
+      const pushBlock = (b) => (b.items||[]).forEach(it => out.push({ priceItemID: it.priceItemID, name: it.name, value: Number(it.value)||0 }));
+      if (type === 'surcharge'){
+        blocks.filter(b => { const n=(b.name||'').toLowerCase(); return n.startsWith('surcharge') || n==='fuel surcharge'; }).forEach(pushBlock);
+        const vol = blocks.find(b => (b.name||'').toLowerCase().includes('volume'));
+        if (vol) (vol.items||[]).forEach(it => { if (!((it.name||'').toLowerCase().includes('truckload'))) out.push({ priceItemID: it.priceItemID, name: it.name, value: Number(it.value)||0 }); });
+      } else if (type === 'labor'){
+        const b = blocks.find(b => { const n=(b.name||'').toLowerCase(); return n==='additional labor' || n==='labor'; }); if (b) pushBlock(b);
+      } else if (type === 'singleitem'){
+        const b = blocks.find(b => (b.name||'').toLowerCase().includes('single item')); if (b) pushBlock(b);
+      } else if (type === 'discount'){
+        const b = blocks.find(b => (b.name||'').toLowerCase().includes('discount')); if (b) pushBlock(b);
+      }
+      return out;
+    }
+    function ecAdjNet(){ return (_ec.adjustments||[]).reduce((s,a) => s + (a.unitPrice||0)*(a.qty||0), 0); }
+    function ecRenderAdjPanel(){ const p = document.getElementById('ecAdjPanel'); if (p) p.innerHTML = ecAdjustmentsHtml(); ecRecalcMargin(); }
+    function ecAdjTypeChange(){
+      const t = document.getElementById('ecAdjType'); _ec.adjType = t ? t.value : 'surcharge';
+      const items = ecPricedItems(_ec.adjType); const sel = document.getElementById('ecAdjItem');
+      if (sel) sel.innerHTML = items.length
+        ? items.map(it => '<option value="'+it.priceItemID+'" data-price="'+it.value+'" data-name="'+_ecEsc(it.name)+'">'+_ecEsc(it.name)+' — $'+it.value.toFixed(2)+'</option>').join('')
+        : '<option value="">— none in price book —</option>';
+    }
+    function ecAdjAdd(){
+      const itemSel = document.getElementById('ecAdjItem'); const qtyEl = document.getElementById('ecAdjQty');
+      const opt = itemSel && itemSel.options[itemSel.selectedIndex];
+      if (!opt || !opt.value) return;
+      const type = (document.getElementById('ecAdjType')||{}).value || 'surcharge';
+      let unitPrice = parseFloat(opt.getAttribute('data-price'))||0;
+      if (type === 'discount' && unitPrice > 0) unitPrice = -unitPrice; // discounts subtract
+      _ec.adjustments.push({ type, name: opt.getAttribute('data-name') || opt.textContent, unitPrice, qty: Math.max(1, parseInt(qtyEl && qtyEl.value)||1) });
+      ecRenderAdjPanel();
+    }
+    function ecAdjDelete(i){ _ec.adjustments.splice(i,1); ecRenderAdjPanel(); }
+    function ecAdjustmentsHtml(){
+      const items = ecPricedItems(_ec.adjType || 'surcharge');
+      const typeOpts = [['surcharge','Surcharge'],['labor','Labor'],['singleitem','Single Item'],['discount','Discount']];
+      const lines = (_ec.adjustments||[]).map((a,i) => {
+        const tot = (a.unitPrice||0)*(a.qty||0);
+        return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px;">' +
+          '<span style="flex:1;">'+_ecEsc(a.name)+' <span style="color:var(--text-muted);font-size:11px;">('+a.type+')</span></span>' +
+          '<span style="color:var(--text-muted);font-size:12px;">'+a.qty+' × $'+Math.abs(a.unitPrice).toFixed(2)+'</span>' +
+          '<span style="font-weight:700;color:'+(tot<0?'#e05a4f':'var(--accent-green)')+';min-width:66px;text-align:right;">'+(tot<0?'-$':'$')+Math.abs(tot).toFixed(2)+'</span>' +
+          '<span onclick="ecAdjDelete('+i+')" title="Remove" style="color:#e05a4f;cursor:pointer;font-weight:800;padding:0 4px;">×</span>' +
+        '</div>';
+      }).join('');
+      const net = ecAdjNet();
+      const itemOpts = items.length
+        ? items.map(it => '<option value="'+it.priceItemID+'" data-price="'+it.value+'" data-name="'+_ecEsc(it.name)+'">'+_ecEsc(it.name)+' — $'+it.value.toFixed(2)+'</option>').join('')
+        : '<option value="">— price book loading / none —</option>';
+      return '<div style="font-weight:700;margin-bottom:8px;">Adjustments <span style="font-size:12px;color:var(--text-muted);font-weight:400;">— labor, surcharges, single items, discounts (priced from your book)</span></div>' +
+        (lines ? '<div style="margin-bottom:10px;">'+lines+'</div>' : '') +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+          '<select id="ecAdjType" class="form-select" style="width:auto;font-size:13px;padding:5px 8px;" onchange="ecAdjTypeChange()">'+typeOpts.map(t=>'<option value="'+t[0]+'"'+((_ec.adjType||'surcharge')===t[0]?' selected':'')+'>'+t[1]+'</option>').join('')+'</select>' +
+          '<select id="ecAdjItem" class="form-select" style="flex:1;min-width:140px;font-size:13px;padding:5px 8px;">'+itemOpts+'</select>' +
+          '<input id="ecAdjQty" type="number" min="1" value="1" style="width:54px;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:6px;padding:5px 6px;font-size:13px;">' +
+          '<button class="btn-surface" style="padding:6px 12px;font-weight:700;" onclick="ecAdjAdd()">Add</button>' +
+        '</div>' +
+        '<div style="margin-top:10px;font-size:13px;color:var(--text-muted);">Net adjustments: <span style="font-weight:700;color:var(--accent-green);">'+(net<0?'-$':'$')+Math.abs(net).toFixed(2)+'</span> <span style="font-size:11px;">(applied to margin next)</span></div>';
+    }
+    function ecRoomDetails(i) {
+      const rm = _ec.rooms[i]; if (!rm) return;
+      document.getElementById('ecModalTitle').textContent = rm.room_label + ' — ' + rm.volume_cuyd + ' cy';
+      const items = (rm.items||[]).map(it => '<tr><td style="padding:3px 4px;border-bottom:1px solid var(--border);">'+_ecEsc(it.name)+'</td><td style="padding:3px 4px;border-bottom:1px solid var(--border);text-align:right;">'+_ecEsc(it.qty)+'</td><td style="padding:3px 4px;border-bottom:1px solid var(--border);text-align:right;">'+it.est_cuyd+'</td></tr>').join('');
+      document.getElementById('ecModalBody').innerHTML =
+        '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr><th style="text-align:left;color:var(--text-muted);font-size:11px;">Item</th><th style="text-align:right;color:var(--text-muted);font-size:11px;">Qty</th><th style="text-align:right;color:var(--text-muted);font-size:11px;">cu yd</th></tr></thead><tbody>'+items+'</tbody></table>' +
+        (rm.notes?'<div style="font-size:12px;color:var(--text-muted);font-style:italic;margin-top:8px;">'+_ecEsc(rm.notes)+'</div>':'');
+      document.getElementById('ecRoomModal').style.display = 'flex';
+    }
+    function ecCloseModal(){ const m = document.getElementById('ecRoomModal'); if (m) m.style.display='none'; }
+
     function openModule(module) {
       // If in estimate editor with unsaved changes OR a discardable throwaway draft, prompt
       // first (same condition as promptSaveBeforeLeaving, so both exit paths behave alike).
@@ -13970,6 +14632,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('headerTitle').textContent = 'Yard Signs';
         currentScreen = 'signs';
         openSignsScreen();
+        return;
+      }
+      if (module === 'estimateCosting') {
+        document.getElementById('headerTitle').textContent = 'Estimate Costing';
+        currentScreen = 'estimateCosting';
+        showSecondaryToolbar('estimateCosting'); // picker + Calculate live in the sticky header
+        ecOpen();
         return;
       }
       if (module === 'trucks') {

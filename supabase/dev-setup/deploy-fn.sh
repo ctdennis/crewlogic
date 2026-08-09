@@ -42,6 +42,7 @@ PUBLIC=(
   crewlogic-vonigo-deep-backfill
   crewlogic-assignments
   crewlogic-followups-sync
+  crewlogic-ny-photo
 )
 
 case "$ENV" in
