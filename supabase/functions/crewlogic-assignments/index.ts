@@ -123,7 +123,7 @@ Deno.serve(async (req: Request) => {
     if (action === 'get') {
       const { data: trucks, error: tErr } = await db.from('franchise_trucks')
         .select('truck_key, name, vin, provider, sort_order, active')
-        .eq('franchise_id', franchiseInternalID).eq('active', true)
+        .eq('franchise_id', franchiseInternalID).eq('active', true).eq('out_of_service', false)  // disabled trucks aren't assignable
         .order('sort_order', { ascending: true });
       if (tErr) throw tErr;
 

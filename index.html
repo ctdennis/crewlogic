@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.116.0 | 2026-08-09">
+  <meta name="crewlogic-version" content="v5.120.3 | 2026-08-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -682,6 +682,7 @@
       background: var(--bg-card); border: 1px solid var(--border);
       border-radius: var(--radius); padding: 16px; margin-bottom: 14px;
     }
+    .dash-filter-summary::-webkit-details-marker { display: none; }
     .settings-tab {
       flex: 1;
       padding: 8px 4px;
@@ -1342,11 +1343,11 @@
   <div id="truckSetupModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)closeTruckSetup()">
     <div style="width:100%;max-width:460px;background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border);margin:auto;">
       <div style="position:sticky;top:0;background:var(--bg-card);display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-bottom:1px solid var(--border);border-radius:var(--radius) var(--radius) 0 0;z-index:1;">
-        <div style="font-size:18px;font-weight:800;color:var(--text-primary);">🚚 Truck map order</div>
+        <div style="font-size:18px;font-weight:800;color:var(--text-primary);">🚚 Manage Trucks</div>
         <button onclick="closeTruckSetup()" aria-label="Close" style="background:none;border:none;color:var(--text-muted);font-size:26px;line-height:1;cursor:pointer;padding:0 4px;">&times;</button>
       </div>
       <div style="padding:18px 22px;">
-        <div style="font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:16px;">Drag your trucks into the order you want — <b style="color:var(--text-primary);">on a phone, press and hold a truck, then drag</b>. The number on each green map dot follows this list, so <b style="color:var(--text-primary);">Truck 1</b> is always the same truck. Names come straight from Linxup/Motive.</div>
+        <div style="font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:16px;">Drag your trucks into the order you want — <b style="color:var(--text-primary);">on a phone, press and hold a truck, then drag</b>. The number on each green map dot follows this list, so <b style="color:var(--text-primary);">Truck 1</b> is always the same truck. Use <b style="color:var(--text-primary);">Disable</b> to mark a truck out of service — it shows black on the map and is removed from route assignment. Names come straight from Linxup/Motive.</div>
         <div id="truckSetupList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;"></div>
         <div id="truckSetupMsg" style="font-size:12.5px;color:var(--text-muted);min-height:16px;margin-bottom:12px;"></div>
         <div style="display:flex;gap:10px;">
@@ -1621,6 +1622,7 @@
         <div id="trucksLegend" style="display:none;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--text-muted,#6e8194);">
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:14px;border-radius:50%;flex:0 0 auto;background:#00E785;"></span> Truck · live</span>
           <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:14px;border-radius:50%;flex:0 0 auto;background:#6e8194;"></span> Truck · last report &gt;1h ago</span>
+          <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:14px;border-radius:50%;flex:0 0 auto;background:#0b0f14;border:1px solid #46596d;"></span> Truck · out of service</span>
           <span id="jobsLegendRoutes" style="display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap;"></span>
           <span id="lookaheadLegend" style="display:none;align-items:center;gap:6px;"><span style="width:12px;height:12px;border-radius:50%;flex:0 0 auto;background:#ff2bd6;border:2px solid #fff;box-shadow:0 0 0 1.5px rgba(0,0,0,.9);display:inline-flex;align-items:center;justify-content:center;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" style="display:block;"><polyline points="4 12.5 9.5 18 20 6.5"/></svg></span> Next 3 days (<span id="lookaheadLegendCount">0</span>)</span>
         </div>
@@ -1799,6 +1801,7 @@
           <button class="settings-tab" id="stab-tools" onclick="showSettingsTab('tools')">🛠 Tools</button>
           <button class="settings-tab" id="stab-trucks" onclick="showSettingsTab('trucks')">🚚 Trucks</button>
           <button class="settings-tab" id="stab-account" onclick="showSettingsTab('account')">⚙️ Account</button>
+          <button class="settings-tab" id="stab-routes" onclick="showSettingsTab('routes')" style="display:none;">🧭 Routes</button>
         </div>
 
         <!-- TAB: Franchise -->
@@ -2214,7 +2217,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               Connect your GPS provider to see your trucks live on the <strong>Where Are My Trucks?</strong> screen. Each provider has an <strong>API (pull)</strong> connection for live truck positions and an optional <strong>Webhook (push)</strong> for geofence alerts. You can configure both providers, but only one feeds the trucks map at a time.
             </div>
             <button onclick="openGeofenceGuide()" style="display:inline-flex;align-items:center;gap:7px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-size:13px;font-weight:700;padding:9px 14px;border-radius:var(--radius-sm);margin:0 8px 16px 0;cursor:pointer;">📖 Geofence setup guide</button>
-            <button onclick="openTruckSetup()" style="display:inline-flex;align-items:center;gap:7px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-size:13px;font-weight:700;padding:9px 14px;border-radius:var(--radius-sm);margin-bottom:16px;cursor:pointer;">🚚 Truck map order</button>
+            <button onclick="openTruckSetup()" style="display:inline-flex;align-items:center;gap:7px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-size:13px;font-weight:700;padding:9px 14px;border-radius:var(--radius-sm);margin-bottom:16px;cursor:pointer;">🚚 Manage Trucks</button>
 
             <!-- Which provider currently feeds the trucks map -->
             <div id="telematicsActiveHeader" style="font-size:13px;margin-bottom:16px;"></div>
@@ -2534,6 +2537,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <div id="toolsList">Loading…</div>
           </div>
         </div><!-- end tools tab -->
+
+        <!-- TAB: Routes (route classification) -->
+        <div id="stab-content-routes" style="display:none;">
+          <div class="settings-card fade-in fade-in-delay-2">
+            <div class="settings-card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+              <span>Route Classification</span>
+              <button onclick="renderRouteClassTab(true)" style="padding:6px 12px;background:var(--btn-surface);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;">↻ Reload</button>
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">
+              Classify each Vonigo route so CrewLogic knows which are estimate routes vs collection, etc. Your choice here is authoritative — it overrides Vonigo's route type (which is often mistyped). Used to scope Estimate Costing and group the dispatch board. Pre-filled from Vonigo; change any that are wrong.
+            </div>
+            <div id="routeClassList">Loading…</div>
+          </div>
+        </div><!-- end routes tab -->
 
       </div>
 
@@ -5370,14 +5387,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const trucks = data.trucks || [];
         if (!trucks.length) { list.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0;">No trucks found in your telematics account yet.</div>'; return; }
         list.innerHTML = trucks.map((t, i) => {
-          const chip = t.active
-            ? '<span class="tsetup-chip" style="background:rgba(0,231,133,.15);color:#00E785;">online</span>'
-            : '<span class="tsetup-chip" style="background:var(--bg-card);color:var(--text-muted);border:1px solid var(--border);">offline</span>';
-          return '<div class="tsetup-row" data-key="' + _truckEsc(t.key) + '">'
+          const oos = !!t.outOfService;
+          const chip = oos
+            ? '<span class="tsetup-chip" style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid #ef4444;">out of service</span>'
+            : (t.active
+              ? '<span class="tsetup-chip" style="background:rgba(0,231,133,.15);color:#00E785;">online</span>'
+              : '<span class="tsetup-chip" style="background:var(--bg-card);color:var(--text-muted);border:1px solid var(--border);">offline</span>');
+          const btn = '<button onclick="event.stopPropagation();_tsetupToggleService(this,\'' + _truckEsc(t.key) + '\',' + (!oos) + ')" title="' + (oos ? 'Return this truck to service' : 'Mark this truck out of service — shown black on the map, removed from route assignment + auto-assign') + '" style="flex:0 0 auto;font-size:11px;font-weight:700;padding:4px 10px;border-radius:6px;cursor:pointer;background:' + (oos ? 'var(--accent-green,#00E785)' : 'var(--btn-surface,#34485d)') + ';border:1px solid ' + (oos ? 'var(--accent-green,#00E785)' : 'var(--btn-surface-border,#46596d)') + ';color:' + (oos ? '#06121d' : 'var(--text-primary)') + ';">' + (oos ? 'Enable' : 'Disable') + '</button>';
+          return '<div class="tsetup-row" data-key="' + _truckEsc(t.key) + '"' + (oos ? ' style="opacity:.6;"' : '') + '>'
             + '<span class="tsetup-handle" title="Drag to reorder">⠿</span>'
             + '<span class="tsetup-num">' + (i + 1) + '</span>'
             + '<span class="tsetup-name">' + _truckEsc(t.name || t.key) + '</span>'
-            + chip + '</div>';
+            + chip + btn + '</div>';
         }).join('');
         _tsetupDragInit(list);
       } catch (e) {
@@ -5401,6 +5422,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         delayOnTouchOnly: true,
         onEnd: function () { _tsetupRenumber(container); }
       });
+    }
+    // Out-of-service toggle. Disabled trucks are hidden from the map/board + not auto-assigned; still listed
+    // here so they can be re-enabled. Reloads the modal + refreshes the live map to reflect the change.
+    async function _tsetupToggleService(btn, key, disable) {
+      if (!btn) return; btn.disabled = true; const prev = btn.textContent; btn.textContent = '…';
+      try {
+        const r = await edgeFunctionCall('crewlogic-trucks', { franchiseID: currentUser.franchiseInternalID, action: 'setService', truckKey: key, outOfService: disable });
+        if (r && r.success) { await openTruckSetup(); if (typeof showTrucks === 'function') { try { showTrucks(true); } catch (_) {} } }
+        else { btn.disabled = false; btn.textContent = prev; alert('Couldn\'t update the truck. Try again.'); }
+      } catch (e) { console.error('[truckSetup] setService failed', e); btn.disabled = false; btn.textContent = prev; alert('Connection error updating the truck.'); }
     }
     async function saveTruckOrder() {
       const list = document.getElementById('truckSetupList');
@@ -8804,7 +8835,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Estimate Costing (reverse-estimate) — gated feature, entitlement default-off: dev + super-admin only for now
       const ecCard = document.getElementById('estimateCostingCard');
       // Estimate Costing prod access: dev env (all), franchise #90 (whole franchise), and Kevin McGill (NY #31) by user.
-      if (ecCard) ecCard.style.display = (IS_DEV_ENV || currentUser.franchiseID === '90' || currentUser.email === 'kevin@junkluggers.com') ? '' : 'none';
+      const _ecAudience = (IS_DEV_ENV || currentUser.franchiseID === '90' || currentUser.email === 'kevin@junkluggers.com');
+      if (ecCard) ecCard.style.display = _ecAudience ? '' : 'none';
+      // Route Classification settings tab — same audience (owner-only tab; drives estimate-route scoping + board grouping).
+      const _routesTab = document.getElementById('stab-routes');
+      if (_routesTab) _routesTab.style.display = (_ecAudience && currentUser.role === 'owner') ? '' : 'none';
 
       // Job Router (R1) — recommends the best transfer station between the truck's LIVE position and the
       // next job, so it requires telematics ACTUALLY connected (not just "is an owner") AND a Vonigo
@@ -10565,13 +10600,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // skipped entirely and the truck stayed GREEN FOREVER. A missing lastUpdate is now
     // treated as stale — an unknown position is never reported as a live one.
     const TRUCK_STATE_COLOR = {
-      moving:  '#00E785',  // accent green — actually driving
-      parked:  '#38bdf8',  // sky blue — device reporting, sitting still. Deliberately distinct
-                           // from the route/measure line (#1e6fff) and National Account (#1f4e79).
-      stale:   '#6e8194',  // text-muted gray — no report in over an hour, or no timestamp at all
-      offline: '#ef4444',  // RED — device unplugged is a HIGH RISK: it hides the driver's activity from the GPS/dash-cam. Flag it loudly.
+      moving:   '#00E785',  // accent green — actually driving
+      parked:   '#38bdf8',  // sky blue — device reporting, sitting still. Deliberately distinct
+                            // from the route/measure line (#1e6fff) and National Account (#1f4e79).
+      stale:    '#6e8194',  // text-muted gray — no report in over an hour, or no timestamp at all
+      offline:  '#ef4444',  // RED — device unplugged is a HIGH RISK: it hides the driver's activity from the GPS/dash-cam. Flag it loudly.
+      disabled: '#0b0f14',  // near-black — owner-marked OUT OF SERVICE. Distinct from stale gray; white stroke keeps it visible on dark/satellite tiles.
     };
     function _truckState(t) {
+      if (t.outOfService) return 'disabled';   // owner-marked out of service — wins over any telematics state
       if (/offline|unplug/i.test(t.status || '')) return 'offline';
       if (!t.lastUpdate || (Date.now() - t.lastUpdate > 60 * 60000)) return 'stale';
       return (t.speed != null && t.speed > 0) ? 'moving' : 'parked';
@@ -10579,6 +10616,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _truckStateColor(t) { return TRUCK_STATE_COLOR[_truckState(t)] || TRUCK_STATE_COLOR.stale; }
     // Human-friendly movement/status label from the raw provider status + speed.
     function _truckStatusLabel(t) {
+      if (t.outOfService) return 'Out of service';
       const s = (t.status || '').toLowerCase();
       if (/offline|unplug/.test(s)) return 'Offline';
       if (t.speed != null && t.speed > 0) return 'Moving';
@@ -12398,6 +12436,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const codes = [...new Set(jobs.map(j => j.routeCode || '?'))].sort();
         routesData = codes.map(c => ({ code: c, jobs: jobs.filter(j => (j.routeCode || '?') === c), open: [] }));
       }
+      // Route-classification filter: show only routes whose CrewLogic type is checked in the multi-pick.
+      if (_boardVisibleTypes && _boardVisibleTypes.size < 5) routesData = routesData.filter(rt => _boardVisibleTypes.has(rt.crewlogicType || 'other'));
       const hdr = (data.dayLabel || '') + ' — ' + jobs.length + ' job' + (jobs.length !== 1 ? 's' : '') + ' · ' + routesData.length + ' route' + (routesData.length !== 1 ? 's' : '');
       if (!routesData.length) { r.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-size:13px;color:var(--text-muted);">No routes for ' + mjEsc(data.dayLabel || 'this day') + '.</div>'; return; }
       if (!container) _mjBoardByID = {}; // single-board screen resets; dashboard boards accumulate (job IDs unique)
@@ -12548,6 +12588,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // ===== Dispatch Dashboard (desktop) — source + destination boards side by side (re-entrant board) =====
     let _dashSrcDay = '', _dashDestDay = '';
+    // route-classification filter: multi-pick set of VISIBLE crewlogicTypes (all shown by default).
+    let _boardVisibleTypes = new Set(['estimate', 'junk', 'reserve', 'dispatch', 'other']);
+    let _dashCache = null;     // last aligned board data, so the filter re-renders without re-fetching Vonigo
     function _dashNavBtnCss() { return 'width:26px;height:26px;border-radius:6px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-size:12px;cursor:pointer;'; }
     function _dashDayLabel(dayID) {
       const today = mjNowParts().dayID;
@@ -12581,6 +12624,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<button id="dashMicBtn" onclick="dashMic()" title="Voice command" style="width:38px;height:38px;flex:0 0 auto;border-radius:50%;background:var(--accent-green);color:var(--accent-text);border:none;cursor:pointer;font-size:17px;">🎤</button>'
         +   '<input id="dashCmdInput" type="text" placeholder="…or type a command — e.g. “move the 2nd job on MA1REG to tomorrow at 10”" onkeydown="if(event.key===\'Enter\')dashSendCmd()" style="flex:1;min-width:240px;padding:9px 12px;font-size:13px;background:var(--bg-input,#253545);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);">'
         +   '<div id="dashCmdResult" style="flex:0 0 auto;font-size:12px;color:var(--text-muted);"></div>'
+        +   '<details id="dashRouteFilter" style="position:relative;flex:0 0 auto;">'
+        +     '<summary class="dash-filter-summary" title="Show only the checked route types on both boards" style="cursor:pointer;font-size:12px;padding:7px 10px;background:var(--bg-input,#253545);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);white-space:nowrap;list-style:none;">🔎 <span id="dashRouteFilterLbl">' + _dashFilterLabel() + '</span> ▾</summary>'
+        +     '<div style="position:absolute;z-index:60;top:calc(100% + 4px);left:0;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:6px 10px;box-shadow:0 6px 20px rgba(0,0,0,.45);min-width:180px;">'
+        +       RC_TYPES.map(t => '<label style="display:flex;align-items:center;gap:8px;padding:5px 2px;font-size:13px;cursor:pointer;white-space:nowrap;"><input type="checkbox" ' + (_boardVisibleTypes.has(t.v) ? 'checked' : '') + ' onchange="_dashToggleType(\'' + t.v + '\', this.checked)" style="cursor:pointer;"> ' + t.label + '</label>').join('')
+        +     '</div>'
+        +   '</details>'
         + '</div>'
         // schedules on TOP (two boards, route-aligned)
         + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start;margin-bottom:12px;">'
@@ -12890,7 +12939,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const src = await dashFetchDay(_dashSrcDay);
       const dest = await dashFetchDay(_dashDestDay);
       const codes = []; [...(src.routes || []), ...(dest.routes || [])].forEach(r => { if (r && r.code && !codes.includes(r.code)) codes.push(r.code); }); // preserve Vonigo's route order
-      const align = (dayRoutes) => codes.map(c => (dayRoutes || []).find(r => r.code === c) || { id: c, code: c, name: c, jobs: [], open: [] });
+      const typeByCode = {}; [...(src.routes || []), ...(dest.routes || [])].forEach(r => { if (r && r.code && r.crewlogicType && !typeByCode[r.code]) typeByCode[r.code] = r.crewlogicType; }); // so a placeholder inherits the same type as its real day
+      const align = (dayRoutes) => codes.map(c => (dayRoutes || []).find(r => r.code === c) || { id: c, code: c, name: c, jobs: [], open: [], crewlogicType: typeByCode[c] || 'other' });
       const srcR = align(src.routes), destR = align(dest.routes);
       // One time scale for both boards (aligned columns + equal size). Prefer the franchise's route hours
       // (boardStartMin/EndMin) spanning both days; fall back to job/slot-derived if hours are missing.
@@ -12899,6 +12949,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const axis = (sMin.length && eMax.length)
         ? { originH: Math.floor(Math.min(...sMin) / 60), endH: Math.ceil(Math.max(...eMax) / 60) }
         : _dashSharedAxis([srcR, destR]);
+      _dashCache = { srcR, destR, axis, srcDay: _dashSrcDay, destDay: _dashDestDay }; // for the route filter (re-render without re-fetch)
       await Promise.all([_mjLoadAssignData(_dashSrcDay), _mjLoadAssignData(_dashDestDay)]); // FW-59: assignments for BOTH days before render
       dashRenderBoard(_dashSrcDay, srcR, srcC, axis);
       dashRenderBoard(_dashDestDay, destR, destC, axis);
@@ -12915,6 +12966,24 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         originH: Number.isFinite(minT) ? Math.max(5, Math.min(7, Math.floor(minT / 60))) : 7,
         endH: Number.isFinite(maxT) ? Math.min(21, Math.max(17, Math.ceil(maxT / 60))) : 17,
       };
+    }
+    // Route filter (multi-pick): show only the checked route types. Re-renders BOTH boards from cached data (no re-fetch).
+    function _dashFilterLabel() {
+      const n = _boardVisibleTypes.size;
+      if (n >= 5) return 'Routes: all';
+      if (n === 0) return 'Routes: none';
+      if (n <= 2) return RC_TYPES.filter(t => _boardVisibleTypes.has(t.v)).map(t => t.label).join(', ');
+      return n + ' route types';
+    }
+    function _dashToggleType(v, on) {
+      if (on) _boardVisibleTypes.add(v); else _boardVisibleTypes.delete(v);
+      const lbl = document.getElementById('dashRouteFilterLbl'); if (lbl) lbl.textContent = _dashFilterLabel();
+      _dashRerenderBoards();
+    }
+    function _dashRerenderBoards() {
+      if (!_dashCache) return;
+      dashRenderBoard(_dashCache.srcDay, _dashCache.srcR, document.getElementById('dashSrcBoard'), _dashCache.axis);
+      dashRenderBoard(_dashCache.destDay, _dashCache.destR, document.getElementById('dashDestBoard'), _dashCache.axis);
     }
     function dashRenderBoard(dayID, routesData, container, axis) {
       if (!container) return;
@@ -26544,11 +26613,11 @@ RECYCLING & DONATION
     function showSettingsTab(tab) {
       // Defense-in-depth: owner-only tabs are never reachable by a non-owner, even via a deep-link
       // (e.g. a stale _pendingSettingsTab='pricebook'). Estimators get redirected to their Account tab.
-      const OWNER_ONLY = ['pricebook','pricing','franchise','cost','proposal','trucks'];
+      const OWNER_ONLY = ['pricebook','pricing','franchise','cost','proposal','trucks','routes'];
       if (OWNER_ONLY.indexOf(tab) !== -1 && !(currentUser && currentUser.role === 'owner')) {
         tab = 'account';
       }
-      ['franchise','cost','proposal','account','pricing','pricebook','customers','signs','tools','trucks'].forEach(t => {
+      ['franchise','cost','proposal','account','pricing','pricebook','customers','signs','tools','trucks','routes'].forEach(t => {
         const el = document.getElementById('stab-content-' + t);
         if (el) el.style.display = t === tab ? 'block' : 'none';
         const btn = document.getElementById('stab-' + t);
@@ -26574,6 +26643,60 @@ RECYCLING & DONATION
       if (tab === 'tools') renderToolsTab();
       // Render telematics (trucks) tab
       if (tab === 'trucks') renderTrucksTab();
+      // Render route classification tab
+      if (tab === 'routes') renderRouteClassTab();
+    }
+
+    // ===== ROUTE CLASSIFICATION (Settings → Routes) =====
+    // Owner classifies each Vonigo route into a CrewLogic category. Our value wins over Vonigo's routeTypeID
+    // (franchises mistype). Drives estimate-route scoping + dispatch board grouping. crewlogic-dispatch:
+    // classifyList (routes + saved/default category) and classifySet (upsert one).
+    const RC_TYPES = [
+      { v: 'estimate', label: 'Estimate' },
+      { v: 'junk', label: 'Junk Removal Only' },
+      { v: 'reserve', label: 'Reserved' },
+      { v: 'dispatch', label: 'Dispatch' },
+      { v: 'other', label: 'Regular / Other' },
+    ];
+    const _rcEsc = s => String(s == null ? '' : s).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+    let _rcRoutes = [];
+    async function renderRouteClassTab(force) {
+      const box = document.getElementById('routeClassList');
+      if (!box) return;
+      if (!force && _rcRoutes.length) { _rcPaint(); return; }
+      box.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0;">Loading routes from Vonigo…</div>';
+      try {
+        const r = await edgeFunctionCall('crewlogic-dispatch', { action: 'classifyList', franchiseID: currentUser.franchiseID });
+        if (!r || !r.success) { box.innerHTML = '<div style="color:#e0a44f;font-size:13px;">Couldn’t load routes' + (r && r.error ? ': ' + _rcEsc(r.error) : '') + '.</div>'; return; }
+        _rcRoutes = r.routes || [];
+        _rcPaint();
+      } catch (e) { console.error(e); box.innerHTML = '<div style="color:#e0a44f;font-size:13px;">Connection error loading routes.</div>'; }
+    }
+    function _rcPaint() {
+      const box = document.getElementById('routeClassList');
+      if (!box) return;
+      if (!_rcRoutes.length) { box.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">No routes returned for this franchise.</div>'; return; }
+      const opts = (sel) => RC_TYPES.map(t => '<option value="' + t.v + '"' + (t.v === sel ? ' selected' : '') + '>' + t.label + '</option>').join('');
+      box.innerHTML = _rcRoutes.map((rt, i) =>
+        '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;">' +
+          '<div style="flex:1;min-width:150px;">' +
+            '<div style="font-weight:600;font-size:14px;">' + _rcEsc(rt.name) + (rt.abbr ? ' <span style="color:var(--text-muted);font-weight:400;font-size:12px;">(' + _rcEsc(rt.abbr) + ')</span>' : '') + (rt.isActive ? '' : ' <span style="color:var(--text-muted);font-size:11px;">· inactive</span>') + '</div>' +
+            '<div style="font-size:11px;color:var(--text-muted);">Vonigo: ' + _rcEsc(rt.vonigoTypeLabel) + (rt.classified ? '' : ' · <span style="font-style:italic;">default</span>') + '</div>' +
+          '</div>' +
+          '<select id="rcSel' + i + '" onchange="rcSet(' + i + ', this.value)" style="font-size:13px;padding:6px 8px;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:6px;min-width:150px;">' + opts(rt.crewlogicType) + '</select>' +
+          '<span id="rcSave' + i + '" style="font-size:11px;min-width:20px;color:var(--accent-green,#00E785);"></span>' +
+        '</div>'
+      ).join('');
+    }
+    async function rcSet(i, val) {
+      const rt = _rcRoutes[i]; if (!rt) return;
+      const note = document.getElementById('rcSave' + i);
+      if (note) { note.textContent = '…'; note.style.color = 'var(--text-muted)'; }
+      try {
+        const r = await edgeFunctionCall('crewlogic-dispatch', { action: 'classifySet', franchiseID: currentUser.franchiseID, routeID: rt.routeID, name: rt.name, abbr: rt.abbr, vonigoTypeID: rt.vonigoTypeID, crewlogicType: val, email: currentUser.email });
+        if (r && r.success) { rt.crewlogicType = val; rt.classified = true; if (note) { note.textContent = '✓'; note.style.color = 'var(--accent-green,#00E785)'; } }
+        else if (note) { note.textContent = '✕'; note.style.color = '#e05a4f'; }
+      } catch (e) { console.error(e); if (note) { note.textContent = '✕'; note.style.color = '#e05a4f'; } }
     }
 
     // ===== CUSTOMERS (native customer store; crm_provider=none) =====

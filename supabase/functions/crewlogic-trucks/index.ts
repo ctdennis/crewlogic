@@ -97,15 +97,19 @@ async function ftRest(
 
 // Annotate live trucks with their saved sort order and sort (unknown last, name tiebreak).
 async function attachOrder(franchiseID: string, trucks: Truck[]): Promise<Truck[]> {
-  const res = await ftRest("?franchise_id=eq." + franchiseID + "&select=truck_key,sort_order");
-  const rows: Array<{ truck_key: string; sort_order: number }> = res.ok
+  const res = await ftRest("?franchise_id=eq." + franchiseID + "&select=truck_key,sort_order,out_of_service");
+  const rows: Array<{ truck_key: string; sort_order: number; out_of_service?: boolean }> = res.ok
     ? await res.json().catch(() => [])
     : [];
   const orderByKey = new Map(rows.map((r) => [r.truck_key, r.sort_order]));
+  const disabled = new Set(rows.filter((r) => r.out_of_service).map((r) => r.truck_key));
+  // Keep disabled trucks in the feed but FLAG them — the client colors them black on the map/list so
+  // dispatchers can see an out-of-service truck + where it is. They're excluded from ASSIGNMENT
+  // (crewlogic-assignments roster) + geofence auto-assign (crewlogic-motive-webhook), not from the map.
   const annotated = trucks.map((t) => {
     const key = truckKey(t);
     const so = orderByKey.has(key) ? (orderByKey.get(key) as number) : Number.MAX_SAFE_INTEGER;
-    return { ...t, key, sortOrder: so };
+    return { ...t, key, sortOrder: so, outOfService: disabled.has(key) };
   });
   annotated.sort((a, b) =>
     (a.sortOrder as number) - (b.sortOrder as number) ||
@@ -122,6 +126,7 @@ Deno.serve(async (req: Request) => {
   let provider = url.searchParams.get("provider") || "";
   let action = url.searchParams.get("action") || "";
   let order: string[] = [];
+  let svcTruckKey = "", svcOutOfService = false;   // setService params
   if (req.method === "POST") {
     const body = await req.json().catch(() => ({} as Record<string, unknown>));
     franchiseID = franchiseID || String((body as { franchiseID?: unknown }).franchiseID || "");
@@ -129,6 +134,8 @@ Deno.serve(async (req: Request) => {
     action = action || String((body as { action?: unknown }).action || "");
     const ord = (body as { order?: unknown }).order;
     if (Array.isArray(ord)) order = ord.map((k) => String(k));
+    svcTruckKey = String((body as { truckKey?: unknown }).truckKey || "");
+    svcOutOfService = !!(body as { outOfService?: unknown }).outOfService;
   }
 
   try {
@@ -152,6 +159,19 @@ Deno.serve(async (req: Request) => {
           )
         ));
         return jsonResponse({ success: true });
+      }
+
+      // setService: manual out-of-service toggle. A disabled truck is unusable — hidden from the map/list
+      // + board roster, and excluded from geofence auto-assign. Still listed in Truck Setup for re-enabling.
+      // Placed before the feed fetch so a truck can be disabled even when telematics is down.
+      if (action === "setService") {
+        if (!svcTruckKey) return jsonResponse({ success: false, error: "truckKey required" }, 400);
+        const upd = await ftRest(
+          "?franchise_id=eq." + franchiseID + "&truck_key=eq." + encodeURIComponent(svcTruckKey),
+          { method: "PATCH", body: { out_of_service: svcOutOfService, updated_at: new Date().toISOString() }, prefer: "return=minimal" },
+        );
+        if (!upd.ok) return jsonResponse({ success: false, error: "Couldn’t update truck." }, 500);
+        return jsonResponse({ success: true, truckKey: svcTruckKey, outOfService: svcOutOfService });
       }
 
       const result = await fetchTrucks(cred.provider, cred.token);
@@ -203,9 +223,9 @@ Deno.serve(async (req: Request) => {
         const liveByKey = new Map(trucks.map((t) => [truckKey(t), t]));
         const savedRes = await ftRest(
           "?franchise_id=eq." + franchiseID +
-            "&select=truck_key,name,vin,sort_order,active&order=sort_order",
+            "&select=truck_key,name,vin,sort_order,active,out_of_service&order=sort_order",
         );
-        const saved: Array<{ truck_key: string; name: string | null; vin: string | null; sort_order: number }> =
+        const saved: Array<{ truck_key: string; name: string | null; vin: string | null; sort_order: number; out_of_service?: boolean }> =
           savedRes.ok ? await savedRes.json().catch(() => []) : [];
         const list = saved.map((r) => {
           const live = liveByKey.get(r.truck_key) as Truck | undefined;
@@ -215,6 +235,7 @@ Deno.serve(async (req: Request) => {
             number: live ? (live.number ?? null) : null,
             vin: r.vin,
             active: !!live,
+            outOfService: !!r.out_of_service,
             sortOrder: r.sort_order,
           };
         });

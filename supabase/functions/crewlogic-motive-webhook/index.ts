@@ -43,7 +43,7 @@ async function autoAssignOnArrival(sb: SupabaseClient, franchiseId: string, rout
     const day = await franchiseToday(sb, franchiseId);
     // truck_key for the arrived vehicle (franchise_trucks.name === Motive vehicle number).
     const { data: truck } = await sb.from("franchise_trucks")
-      .select("truck_key").eq("franchise_id", franchiseId).eq("name", vehicleNumber).eq("active", true).maybeSingle();
+      .select("truck_key").eq("franchise_id", franchiseId).eq("name", vehicleNumber).eq("active", true).eq("out_of_service", false).maybeSingle();  // disabled trucks don't geofence-auto-assign
     const truckKey = truck?.truck_key;
     if (!truckKey) return;
     // EVERY truck that ARRIVES on a route's job gets assigned — APPEND, don't cap at one. If a crew was on

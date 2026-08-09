@@ -30,6 +30,32 @@ function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 }
 
+// ZIP → lat/lon centroid (zippopotam, free/keyless, US zips). Primary anchor: every franchise's weather is
+// pulled at its office ZIP, uniformly — not at state level (owner 2026-08-09).
+async function geocodeZip(zip: string): Promise<{ lat: number; lon: number } | null> {
+  try {
+    const r = await fetch(`https://api.zippopotam.us/us/${encodeURIComponent(zip)}`, { headers: { "User-Agent": UA } });
+    if (!r.ok) return null;
+    const d = await r.json() as { places?: Array<{ latitude?: string; longitude?: string }> };
+    const p = d?.places?.[0];
+    const lat = Number(p?.latitude), lon = Number(p?.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
+    return null;
+  } catch { return null; }
+}
+// Full-address fallback (Census) if the ZIP centroid lookup is unavailable.
+async function geocodeCensus(q: string): Promise<{ lat: number; lon: number } | null> {
+  try {
+    const u = `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encodeURIComponent(q)}&benchmark=Public_AR_Current&format=json`;
+    const r = await fetch(u, { headers: { "User-Agent": UA } });
+    if (!r.ok) return null;
+    const d = await r.json() as { result?: { addressMatches?: Array<{ coordinates?: { x: number; y: number } }> } };
+    const c = d?.result?.addressMatches?.[0]?.coordinates;
+    if (c && Number.isFinite(c.y) && Number.isFinite(c.x)) return { lat: c.y, lon: c.x };
+    return null;
+  } catch { return null; }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ success: false, error: "Method not allowed" }, 405);
@@ -40,25 +66,39 @@ Deno.serve(async (req: Request) => {
   try {
     let state = String(body.state || "").trim().toUpperCase();
     const franchiseID = String(body.franchiseID || "").trim();
+    let officeAddress = "", officeZip = "";
 
-    // Resolve the franchise's state from cost_settings when not passed explicitly.
+    // Resolve the franchise's office location from cost_settings when not passed explicitly.
     if (!state && franchiseID) {
       const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
       const { data } = await supabase.from("franchises").select("cost_settings")
         .eq("external_id", franchiseID).eq("tenant_id", TENANT_ID).single();
       const cs = (data?.cost_settings as Record<string, unknown>) || {};
       state = String(cs.officeState || "").trim().toUpperCase();
+      officeAddress = String(cs.officeAddress || "").trim();
+      officeZip = String(cs.officeZip || "").trim();
     }
-    if (!/^[A-Z]{2}$/.test(state)) return json({ success: true, state: state || null, alerts: [] }); // no usable state → no alerts
 
-    const res = await fetch(`https://api.weather.gov/alerts/active?area=${state}`, {
-      headers: { "User-Agent": UA, "Accept": "application/geo+json" },
-    });
+    // POINT alerts at the office ZIP for EVERY franchise — the office's own NWS zones, uniformly, never
+    // state-level (a NYC franchise got every borough + Long Island + upstate alert). ZIP centroid first
+    // (works for any franchise from just the zip); full office address as a fallback; state as last resort.
+    let pt: { lat: number; lon: number } | null = null;
+    if (officeZip) pt = await geocodeZip(officeZip);
+    if (!pt && officeAddress) pt = await geocodeCensus([officeAddress, officeZip, state].filter(Boolean).join(" "));
+    let url = "";
+    if (pt) url = `https://api.weather.gov/alerts/active?point=${pt.lat.toFixed(4)},${pt.lon.toFixed(4)}`;
+    if (!url) {
+      if (!/^[A-Z]{2}$/.test(state)) return json({ success: true, state: state || null, alerts: [] }); // no usable location → no alerts
+      url = `https://api.weather.gov/alerts/active?area=${state}`;
+    }
+
+    const res = await fetch(url, { headers: { "User-Agent": UA, "Accept": "application/geo+json" } });
     if (!res.ok) {
-      console.error("[weather] NWS HTTP", res.status, state);
+      console.error("[weather] NWS HTTP", res.status, url);
       return json({ success: false, error: "Weather service unavailable." }, 502);
     }
     const data = await res.json() as { features?: Array<{ properties?: Record<string, unknown> }> };
+    const seenEvent = new Set<string>();
     const alerts = (data.features || [])
       .map((f) => f.properties || {})
       .filter((p) => p.event && !SKIP.test(String(p.event)))
@@ -67,7 +107,9 @@ Deno.serve(async (req: Request) => {
         headline: p.headline || null, onset: p.onset || null, expires: p.expires || null,
         ends: p.ends || null, areaDesc: p.areaDesc || null, instruction: p.instruction || null,
       }))
-      .sort((a, b) => (SEV_RANK[String(b.severity)] || 0) - (SEV_RANK[String(a.severity)] || 0));
+      .sort((a, b) => (SEV_RANK[String(b.severity)] || 0) - (SEV_RANK[String(a.severity)] || 0))
+      .filter((a) => { const k = String(a.event); if (seenEvent.has(k)) return false; seenEvent.add(k); return true; }) // one per event type (drop per-zone dupes)
+      .slice(0, 5); // cap — the chip shows the top one + "+N", details lists at most these
 
     return json({ success: true, state, alerts });
   } catch (e) {
