@@ -381,9 +381,18 @@ Deno.serve(async (req: Request) => {
             hasPhotos: true,
             dateService: ci(q.dateService) || ci(q.dateCreated),
             name: String(q.name || ''),
+            savedAt: null as string | null,   // set below from estimate_costings — marks jobs with a saved costing
           };
         })
         .sort((a, b) => (b.dateService || 0) - (a.dateService || 0));
+      // Mark which estimates already have a saved costing (one query, whole page).
+      const jobIds = estimates.map((e) => e.jobID).filter(Boolean) as string[];
+      if (jobIds.length) {
+        const { data: saved } = await supabase.from('estimate_costings')
+          .select('vonigo_job_id, updated_at').eq('tenant_id', TENANT_ID).in('vonigo_job_id', jobIds);
+        const smap = new Map((saved || []).map((r: Record<string, unknown>) => [String(r.vonigo_job_id), r.updated_at as string]));
+        for (const e of estimates) if (e.jobID) e.savedAt = smap.get(String(e.jobID)) || null;
+      }
       return jsonResponse({ success: true, count: estimates.length, estimates, reqId });
     }
 
@@ -431,6 +440,53 @@ Deno.serve(async (req: Request) => {
         existingPrice: parseFloat(getField(fields, F_PRICE)?.fieldValue || '0'),
       };
       return jsonResponse({ success: true, estimate, photos, photoCount: photos.length, reqId });
+    }
+
+    // ---------- action: costingSave (upsert the saved margin snapshot; one current row per job) ----------
+    if (action === 'costingSave') {
+      const jobID = String(body.jobID || '').trim();
+      if (!jobID) return jsonResponse({ success: false, error: 'jobID required', reqId }, 400);
+      const { data: fr, error: fe } = await supabase
+        .from('franchises').select('id').eq('external_id', franchiseID).eq('tenant_id', TENANT_ID).single();
+      if (fe || !fr) return jsonResponse({ success: false, error: 'Franchise not found: ' + franchiseID, reqId }, 404);
+      const s = (body.summary || {}) as Record<string, unknown>;
+      const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+      const str = (v: unknown) => { const t = String(v ?? '').trim(); return t || null; };
+      const row = {
+        tenant_id: TENANT_ID,
+        franchise_id: (fr as { id: string }).id,
+        vonigo_job_id: jobID,
+        vonigo_quote_id: str(body.quoteID),
+        client_name: str(s.clientName),
+        job_address: str(s.address),
+        zip: str(s.zip),
+        total_cuyd: num(s.totalCuyd),
+        trucks: num(s.trucks),
+        price: num(s.price),
+        adj_net: num(s.adjNet),
+        cost_total: num(s.cost),
+        margin: num(s.margin),
+        margin_pct: num(s.marginPct),
+        payload: (body.payload && typeof body.payload === 'object') ? body.payload : {},
+        created_by: str(body.email),
+        updated_at: new Date().toISOString(),
+      };
+      const { data, error } = await supabase.from('estimate_costings')
+        .upsert(row, { onConflict: 'tenant_id,vonigo_job_id' })
+        .select('updated_at').single();
+      if (error) { console.error(`[ny-estimate:${reqId}] costingSave failed:`, error); return jsonResponse({ success: false, error: 'Save failed', reqId }, 500); }
+      return jsonResponse({ success: true, updatedAt: (data as { updated_at: string }).updated_at, reqId });
+    }
+
+    // ---------- action: costingGet (fetch the saved snapshot for a job → load-saved, skip AI) ----------
+    if (action === 'costingGet') {
+      const jobID = String(body.jobID || '').trim();
+      if (!jobID) return jsonResponse({ success: false, error: 'jobID required', reqId }, 400);
+      const { data, error } = await supabase.from('estimate_costings')
+        .select('vonigo_job_id, vonigo_quote_id, total_cuyd, trucks, price, margin, margin_pct, payload, updated_at')
+        .eq('tenant_id', TENANT_ID).eq('vonigo_job_id', jobID).maybeSingle();
+      if (error) { console.error(`[ny-estimate:${reqId}] costingGet failed:`, error); return jsonResponse({ success: false, error: 'Load failed', reqId }, 500); }
+      return jsonResponse({ success: true, costing: data || null, reqId });
     }
 
     // ---------- action: group (Pass 1 — Haiku clusters photos into rooms) ----------

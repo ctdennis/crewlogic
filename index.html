@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.114.2 | 2026-08-09">
+  <meta name="crewlogic-version" content="v5.115.0 | 2026-08-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14051,7 +14051,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const sel = document.getElementById('ecEstimateSel');
       if (!ests.length) { sel.innerHTML = '<option value="">No estimates with photos (last 30 days)</option>'; return; }
       sel.innerHTML = '<option value="">— select an estimate ('+ests.length+') —</option>' +
-        ests.map(e => '<option value="'+e.jobID+'">'+ecDateLabel(e.dateService)+' · '+_ecEsc(e.clientName)+' · '+e.photoCount+' photos · '+_ecEsc(e.zip)+'</option>').join('');
+        ests.map(e => '<option value="'+e.jobID+'">'+(e.savedAt?'💾 ':'')+ecDateLabel(e.dateService)+' · '+_ecEsc(e.clientName)+' · '+e.photoCount+' photos · '+_ecEsc(e.zip)+'</option>').join('');
     }
     async function ecLoadList() {
       ecBusy(true, 'Loading estimates with photos…');
@@ -14072,7 +14072,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const jobID = document.getElementById('ecEstimateSel').value;
       document.getElementById('ecResults').innerHTML=''; document.getElementById('ecCalcBtn').style.display='none';
       if (!jobID) { document.getElementById('ecPhotos').innerHTML=''; ecBusy(false,''); return; }
-      _ec.jobID = jobID; _ec.spend = 0; ecRenderSpend();
+      _ec.jobID = jobID; _ec.spend = 0; _ec.savedAt = null; _ec.rooms = []; _ec.cost = ecDefaultCost(); ecRenderSpend();
       ecBusy(true, 'Loading photos…');
       try {
         const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'load', franchiseID: currentUser.franchiseID, jobID });
@@ -14084,6 +14084,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           .then(pr => pr.json()).then(pd => { _ec.priceBook = (pd && pd.blocks) || []; }).catch(() => { _ec.priceBook = []; });
         _ec.photos = (r.photos || []).map((p,i) => Object.assign({}, p, { index:i, room:'' }));
         if (!_ec.photos.length) { document.getElementById('ecPhotos').innerHTML=''; ecBusy(false, 'This estimate has no photos loaded in Vonigo — pick another.'); return; }
+        // Load-saved: if this job already has a saved costing, restore it and skip the AI entirely.
+        ecBusy(true, 'Checking for a saved costing…');
+        let _saved = null;
+        try { const cg = await edgeFunctionCall('crewlogic-ny-estimate', { action:'costingGet', franchiseID: currentUser.franchiseID, jobID }); if (cg && cg.success) _saved = cg.costing; } catch(_e){}
+        if (_saved && _saved.payload) { ecLoadSaved(_saved); return; }
         ecBusy(true, 'Preparing photos…');
         await ecDownscaleAll();
         ecRenderPhotos();
@@ -14374,7 +14379,61 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '<span>Target '+numInput(+(m.targetFrac*100).toFixed(0),'targetMargin',40)+'% → recommended price <b style="color:#22c55e;">'+ecMoney(m.recPrice)+'</b></span>' +
           '<span style="color:'+marginColor+';font-weight:700;">'+(targetHit?'✓ at/above target':(m.marginPct>=0?'below target':'losing money'))+'</span>' +
         '</div>' +
-        (ecVolRate(1) === 0 ? '<div style="font-size:11px;color:#e0a44f;margin-top:6px;">⚠️ Volume price $0 — price book not loaded for this zip.</div>' : '');
+        (ecVolRate(1) === 0 ? '<div style="font-size:11px;color:#e0a44f;margin-top:6px;">⚠️ Volume price $0 — price book not loaded for this zip.</div>' : '') +
+        '<div style="display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">' +
+          '<span style="font-size:11px;color:var(--text-muted);">'+(_ec.savedAt ? 'Saved '+ecSavedLabel(_ec.savedAt) : 'Not saved')+'</span>' +
+          '<button id="ecSaveBtn" onclick="ecSaveCosting()" style="padding:8px 18px;font-weight:700;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;cursor:pointer;">💾 Save costing</button>' +
+        '</div>';
+    }
+    function ecSavedLabel(ts){ try { return new Date(ts).toLocaleString([], { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }); } catch(_e){ return ''; } }
+    function ecDefaultCost(){ return { crew: 2, hours: '', disposalSiteIdx: 0, recycleSiteIdx: 0, donateSiteIdx: 0, recyclePct: 0, donatePct: 0, targetMargin: 60, dist: null, driveMin: '', driveMiles: '', include: { disposal: true, labor: true, driveLabor: true, fuel: true, royalty: true } }; }
+    // Restore a saved costing and render its results WITHOUT re-running the AI.
+    function ecLoadSaved(saved){
+      const pl = saved.payload || {};
+      _ec.rooms = Array.isArray(pl.rooms) ? pl.rooms : [];
+      _ec.adjustments = Array.isArray(pl.adjustments) ? pl.adjustments : [];
+      _ec.cost = Object.assign(ecDefaultCost(), pl.cost || {});
+      _ec.savedAt = saved.updated_at || saved.updatedAt || null;
+      if (Array.isArray(pl.photos)) { const rmap = new Map(pl.photos.map(x => [x.index, x.room])); _ec.photos.forEach(p => { if (rmap.has(p.index)) p.room = rmap.get(p.index); }); }
+      const grid = document.getElementById('ecPhotos'); if (grid) grid.style.display = 'none';
+      ecRenderResults({ rooms: _ec.rooms });
+      const banner = '<div style="background:var(--bg-card);border:1px solid var(--accent-green,#00E785);border-radius:10px;padding:10px 14px;margin:8px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+        '<span style="font-size:13px;">💾 Loaded saved costing <span style="color:var(--text-muted);">(saved '+ecSavedLabel(_ec.savedAt)+')</span></span>' +
+        '<span style="flex:1;"></span>' +
+        '<button onclick="ecReRunAI()" style="padding:6px 14px;font-weight:700;background:var(--btn-surface);border:1px solid var(--btn-surface-border);color:var(--text-primary);border-radius:7px;cursor:pointer;">↻ Re-run AI</button>' +
+      '</div>';
+      const res = document.getElementById('ecResults'); if (res) res.insertAdjacentHTML('afterbegin', banner);
+      ecBusy(false, '');
+    }
+    // Discard the saved snapshot and re-run grouping/quantify from the photos (uses AI quota).
+    async function ecReRunAI(){
+      if (!confirm('Re-run the AI on these photos? This replaces the saved rooms + volumes and uses AI quota.')) return;
+      _ec.savedAt = null; _ec.rooms = []; _ec.photos.forEach(p => p.room = '');
+      document.getElementById('ecResults').innerHTML = '';
+      const grid = document.getElementById('ecPhotos'); if (grid) grid.style.display = 'grid';
+      ecBusy(true, 'Preparing photos…');
+      await ecDownscaleAll(); ecRenderPhotos();
+      ecBusy(true, 'Grouping ' + _ec.photos.length + ' photos into rooms…');
+      await ecGroup();
+    }
+    async function ecSaveCosting(){
+      if (!_ec.jobID) return;
+      const m = ecMargin();
+      const totalCuyd = _ec.rooms.reduce((s,rm) => s + (parseFloat(rm.volume_cuyd)||0), 0);
+      const btn = document.getElementById('ecSaveBtn'); if (btn) { btn.textContent = '⏳ Saving…'; btn.disabled = true; }
+      const est = _ec.est || {};
+      const summary = { clientName: est.clientName||'', address: est.address||'', zip: est.zip||'', totalCuyd: +totalCuyd.toFixed(2), trucks: m.trucks, price: m.price, adjNet: m.adjNet, cost: m.cost, margin: m.margin, marginPct: m.marginPct };
+      const payload = {
+        rooms: _ec.rooms, adjustments: _ec.adjustments, cost: _ec.cost, spend: _ec.spend,
+        est: { clientName: est.clientName||'', address: est.address||'', zip: est.zip||'', quoteID: est.quoteID||'', workOrderID: est.workOrderID||'' },
+        photos: _ec.photos.map(p => ({ index: p.index, room: p.room, downloadUrl: p.downloadUrl })),
+        savedVersion: ((document.querySelector('meta[name="crewlogic-version"]')||{}).content||'').split('|')[0].trim()
+      };
+      try {
+        const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'costingSave', franchiseID: currentUser.franchiseID, email: currentUser.email, jobID: _ec.jobID, quoteID: est.quoteID||null, summary, payload });
+        if (r && r.success) { _ec.savedAt = r.updatedAt; ecRecalcMargin(); }
+        else { alert('Save failed: ' + ((r && r.error) || 'Unknown error')); if (btn) { btn.textContent = '💾 Save costing'; btn.disabled = false; } }
+      } catch(e){ console.error(e); alert('Connection error saving costing.'); if (btn) { btn.textContent = '💾 Save costing'; btn.disabled = false; } }
     }
     function ecSetEighths(i, e){
       const rm = _ec.rooms[i]; if (!rm) return;
@@ -14412,8 +14471,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!b) return; const open = b.style.display === 'none'; b.style.display = open ? 'block' : 'none'; if (a) a.textContent = open ? '▾' : '▸';
     }
     function ecRoomBodyHtml(rm, i){
-      const photos = _ec.photos.filter(p => p.room === rm.room_label && p.b64);
-      const thumbs = photos.map(p => '<img src="data:image/jpeg;base64,'+p.b64+'" onclick="ecPhotoZoom('+p.index+')" title="Tap to enlarge" style="width:78px;height:58px;object-fit:cover;border-radius:5px;cursor:pointer;">').join('');
+      const photos = _ec.photos.filter(p => p.room === rm.room_label);   // b64 present on a fresh run; proxy on load-saved
+      const thumbs = photos.map(p => '<img src="'+(p.b64 ? 'data:image/jpeg;base64,'+p.b64 : ecProxy(p.downloadUrl))+'" onclick="ecPhotoZoom('+p.index+')" title="Tap to enlarge" style="width:78px;height:58px;object-fit:cover;border-radius:5px;cursor:pointer;">').join('');
       const cell = 'padding:3px 4px;border-bottom:1px solid var(--border);';
       const items = (rm.items||[]).map((it,j) =>
         '<tr>' +
@@ -14433,7 +14492,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           (rm.notes ? '<div style="font-size:12px;color:var(--text-muted);font-style:italic;margin-top:8px;">'+_ecEsc(rm.notes)+'</div>' : '');
     }
     function ecRoomRow(rm, i){
-      const photos = _ec.photos.filter(p => p.room === rm.room_label && p.b64);
+      const photos = _ec.photos.filter(p => p.room === rm.room_label);
       return '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden;">' +
         '<div onclick="ecToggleRoom('+i+')" style="display:flex;align-items:center;gap:10px;padding:11px 12px;cursor:pointer;">' +
           '<span style="font-weight:700;flex:1;">'+_ecEsc(rm.room_label)+'</span>' +
