@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.113.0 | 2026-08-09">
+  <meta name="crewlogic-version" content="v5.113.1 | 2026-08-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -13970,7 +13970,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Gated feature (dev + super-admin for now). Backend: crewlogic-ny-estimate (list/load/group/quantify/rooms)
     // + crewlogic-ny-photo (public image proxy). See docs/plan-ny-estimate.md.
     // ═══════════════════════════════════════════════════════════════════════
-    let _ec = { jobID: null, photos: [], rooms: [], roomOptions: [], busy: false, spend: 0, estimates: [], counts: {}, est: null, priceBook: [], adjustments: [], adjType: 'surcharge', cost: { crew: 2, hours: '', disposalSiteIdx: 0, recyclePct: 0, donatePct: 0, targetMargin: 60 } };
+    let _ec = { jobID: null, photos: [], rooms: [], roomOptions: [], busy: false, spend: 0, estimates: [], counts: {}, est: null, priceBook: [], adjustments: [], adjType: 'surcharge', cost: { crew: 2, hours: '', disposalSiteIdx: 0, recycleSiteIdx: 0, donateSiteIdx: 0, recyclePct: 0, donatePct: 0, targetMargin: 60, include: { disposal: true, labor: true, royalty: true } } };
     const EC_PRICE = { group: { in: 3, out: 15 }, quantify: { in: 3, out: 15 } }; // $/M tokens (both passes now Sonnet)
     function _ecEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
     function ecProxy(url){ return EDGE_BASE + '/crewlogic-ny-photo?u=' + encodeURIComponent(url); }
@@ -14037,7 +14037,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function ecOpen() {
       await ecEnsureScreen();
       document.getElementById('estimateCostingScreen').style.display = 'block';
-      _ec.jobID = null; _ec.photos = []; _ec.rooms = []; _ec.spend = 0; _ec.estimates = []; _ec.counts = {}; _ec.est = null; _ec.priceBook = []; _ec.adjustments = []; _ec.adjType = 'surcharge'; _ec.cost = { crew: 2, hours: '', disposalSiteIdx: 0, recyclePct: 0, donatePct: 0, targetMargin: 60 };
+      _ec.jobID = null; _ec.photos = []; _ec.rooms = []; _ec.spend = 0; _ec.estimates = []; _ec.counts = {}; _ec.est = null; _ec.priceBook = []; _ec.adjustments = []; _ec.adjType = 'surcharge'; _ec.cost = { crew: 2, hours: '', disposalSiteIdx: 0, recycleSiteIdx: 0, donateSiteIdx: 0, recyclePct: 0, donatePct: 0, targetMargin: 60, include: { disposal: true, labor: true, royalty: true } };
       document.getElementById('ecPhotos').innerHTML = '';
       document.getElementById('ecResults').innerHTML = '';
       document.getElementById('ecCalcBtn').style.display = 'none';
@@ -14226,7 +14226,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const siteIdx = sites.length ? Math.min(sites.length-1, Math.max(0, parseInt(c.disposalSiteIdx)||0)) : -1;
       const site = siteIdx>=0 ? sites[siteIdx] : null;
       const siteCost = (site && site.cost!=null) ? Number(site.cost) : (parseFloat(cs.disposalCost)||200);
-      const recRevRate = parseFloat(cs.recyclingRevenue)||0;
+      const recSites = Array.isArray(cs.recyclingSites) ? cs.recyclingSites : [];
+      const recSiteIdx = recSites.length ? Math.min(recSites.length-1, Math.max(0, parseInt(c.recycleSiteIdx)||0)) : -1;
+      const recSite = recSiteIdx>=0 ? recSites[recSiteIdx] : null;
+      const recRevRate = (recSite && recSite.revenue!=null) ? Number(recSite.revenue) : (parseFloat(cs.recyclingRevenue)||0);
+      const donSites = Array.isArray(cs.donationSites) ? cs.donationSites : [];
+      const donSiteIdx = donSites.length ? Math.min(donSites.length-1, Math.max(0, parseInt(c.donateSiteIdx)||0)) : -1;
       const recyclingRev = recycleTrucks * recRevRate;           // recycled loads earn revenue
       const totalRevenue = price + recyclingRev;
       const crewRate = parseFloat(cs.crewRate)||0;
@@ -14237,41 +14242,62 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const labor = crew*hours*crewRate;
       const royaltyFrac = (isFinite(parseFloat(cs.royaltyPct)) ? parseFloat(cs.royaltyPct) : 14) / 100;
       const royalty = price * royaltyFrac;
-      const cost = disposal + labor + royalty;
+      const inc = c.include || {};
+      const useD = inc.disposal !== false, useL = inc.labor !== false, useR = inc.royalty !== false;
+      const cost = (useD?disposal:0) + (useL?labor:0) + (useR?royalty:0);
       const margin = totalRevenue - cost;
       const marginPct = totalRevenue>0 ? margin/totalRevenue*100 : 0;
       const targetFrac = Math.max(0, Math.min(0.95, (parseFloat(c.targetMargin)||0)/100));
-      const denom = 1 - royaltyFrac - targetFrac;                // customer price to hit the target margin
-      const recPrice = denom>0 ? Math.max(0, ((disposal+labor) - recyclingRev*(1-targetFrac)) / denom) : 0;
-      return { trucks, volumePrice, adjNet, price, recyclePct, donatePct, recycleTrucks, dispTrucks, sites, siteIdx, siteCost, recyclingRev, totalRevenue, crew, hours, crewRate, disposal, labor, royalty, royaltyFrac, cost, margin, marginPct, targetFrac, recPrice };
+      const fixed = (useD?disposal:0) + (useL?labor:0);
+      const denom = 1 - (useR?royaltyFrac:0) - targetFrac;       // customer price to hit the target margin
+      const recPrice = denom>0 ? Math.max(0, (fixed - recyclingRev*(1-targetFrac)) / denom) : 0;
+      return { trucks, volumePrice, adjNet, price, recyclePct, donatePct, recycleTrucks, dispTrucks, sites, siteIdx, siteCost, recSites, recSiteIdx, donSites, donSiteIdx, recRevRate, recyclingRev, totalRevenue, crew, hours, crewRate, disposal, labor, royalty, royaltyFrac, useD, useL, useR, cost, margin, marginPct, targetFrac, recPrice };
     }
     function ecSetCost(f, val){ if (!_ec.cost) _ec.cost = {}; _ec.cost[f] = val; ecRecalcMargin(); }
+    function ecInc(key){ const inc = (_ec.cost||{}).include || {}; return inc[key] !== false; }
+    function ecToggleCost(key){ if (!_ec.cost.include) _ec.cost.include = {}; _ec.cost.include[key] = !ecInc(key); ecRecalcMargin(); }
     function ecRecalcMargin(){ const p = document.getElementById('ecMarginPanel'); if (p) p.innerHTML = ecMarginPanelHtml(); }
     function ecMarginPanelHtml(){
       const m = ecMargin();
       const row = (label, val, strong) => '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:13px;'+(strong?'font-weight:700;border-top:1px solid var(--border);margin-top:4px;padding-top:6px;':'')+'"><span'+(strong?'':' style="color:var(--text-muted);"')+'>'+label+'</span><span>'+ecMoney(val)+'</span></div>';
+      // Cost row with an include checkbox on the right; unchecked → greyed + struck-through, excluded from total.
+      const costRow = (key, labelHtml, val) => { const on = ecInc(key); return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;'+(on?'':'opacity:0.45;')+'">' +
+        '<span style="flex:1;color:var(--text-muted);">'+labelHtml+'</span>' +
+        '<span style="min-width:78px;text-align:right;'+(on?'':'text-decoration:line-through;')+'">'+ecMoney(val)+'</span>' +
+        '<input type="checkbox" '+(on?'checked':'')+' title="include in cost" onchange="ecToggleCost(\''+key+'\')" style="cursor:pointer;">' +
+      '</div>'; };
       const pctInput = (label, key, val) => '<div style="display:flex;align-items:center;gap:3px;"><span style="font-size:11px;color:var(--text-muted);">'+label+'</span><input type="number" min="0" max="100" value="'+val+'" onchange="ecSetCost(\''+key+'\', this.value)" style="width:42px;text-align:right;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:4px;padding:3px 4px;font-size:12px;"><span style="font-size:11px;color:var(--text-muted);">%</span></div>';
-      const siteOpts = m.sites.length ? m.sites.map((s,i)=>'<option value="'+i+'"'+(i===m.siteIdx?' selected':'')+'>'+_ecEsc(s.name)+' — $'+Number(s.cost).toFixed(0)+'</option>').join('') : '<option>(default '+ecMoney(m.siteCost).replace('.00','')+')</option>';
-      const marginColor = m.margin >= 0 ? 'var(--accent-green)' : '#e05a4f';
-      const targetHit = m.marginPct >= (m.targetFrac*100);
+      const siteSelect = (label, sites, idx, key) => '<div style="display:flex;align-items:center;gap:4px;"><span style="font-size:11px;color:var(--text-muted);">'+label+'</span>' + (sites.length
+        ? '<select class="form-select" style="width:auto;font-size:12px;padding:4px 6px;" onchange="ecSetCost(\''+key+'\', this.value)">'+sites.map((s,i)=>'<option value="'+i+'"'+(i===idx?' selected':'')+'>'+_ecEsc(s.name)+(s.cost!=null?' — $'+Number(s.cost).toFixed(0):(s.revenue!=null?' — +$'+Number(s.revenue).toFixed(0):''))+'</option>').join('')+'</select>'
+        : '<span style="font-size:12px;color:var(--text-muted);">(none)</span>') + '</div>';
+      const numInput = (val, key, w, step) => '<input type="number" min="0"'+(step?' step="'+step+'"':'')+' value="'+val+'" onchange="ecSetCost(\''+key+'\', this.value)" style="width:'+w+'px;text-align:right;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:4px;padding:2px 4px;font-size:12px;">';
+      const targetPct = m.targetFrac*100;
+      const marginColor = m.marginPct >= targetPct ? 'var(--accent-green)' : (m.marginPct >= 0 ? '#e0a44f' : '#e05a4f');
+      const targetHit = m.marginPct >= targetPct;
+      const laborRow = '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;'+(m.useL?'':'opacity:0.45;')+'">' +
+          '<span style="flex:1;color:var(--text-muted);white-space:nowrap;">Labor '+numInput(m.crew,'crew',32)+' crew × '+numInput(m.hours,'hours',44,'0.25')+' h × $'+m.crewRate+'</span>' +
+          '<span style="min-width:78px;text-align:right;'+(m.useL?'':'text-decoration:line-through;')+'">'+ecMoney(m.labor)+'</span>' +
+          '<input type="checkbox" '+(m.useL?'checked':'')+' title="include in cost" onchange="ecToggleCost(\'labor\')" style="cursor:pointer;"></div>';
       return '<div style="font-weight:700;margin-bottom:10px;">Price &amp; margin <span style="font-size:12px;color:var(--text-muted);font-weight:400;">— base (fuel + drive time added next)</span></div>' +
-        '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">' +
+        '<div style="display:flex;gap:12px 16px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">' +
           pctInput('Recycle','recyclePct', +(m.recyclePct*100).toFixed(0)) + pctInput('Donate','donatePct', +(m.donatePct*100).toFixed(0)) +
-          '<div style="display:flex;align-items:center;gap:4px;"><span style="font-size:11px;color:var(--text-muted);">Disposal site</span><select class="form-select" style="width:auto;font-size:12px;padding:4px 6px;" onchange="ecSetCost(\'disposalSiteIdx\', this.value)">'+siteOpts+'</select></div>' +
+          siteSelect('Disposal', m.sites, m.siteIdx, 'disposalSiteIdx') +
+          siteSelect('Recycling', m.recSites, m.recSiteIdx, 'recycleSiteIdx') +
+          siteSelect('Donation', m.donSites, m.donSiteIdx, 'donateSiteIdx') +
         '</div>' +
-        '<div style="display:flex;gap:14px;flex-wrap:wrap;">' +
-          '<div style="flex:1;min-width:190px;">' +
+        '<div style="display:flex;gap:14px 20px;flex-wrap:wrap;">' +
+          '<div style="flex:1;min-width:210px;">' +
             '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Revenue</div>' +
             row('Volume ('+ecTrucksLabel(m.trucks)+')', m.volumePrice) + row('Adjustments', m.adjNet) +
-            (m.recyclingRev>0 ? row('Recycling credit ('+(+m.recycleTrucks.toFixed(2))+' tk)', m.recyclingRev) : '') +
+            (m.recyclingRev>0 ? row('Recycling credit ('+(+m.recycleTrucks.toFixed(2))+' tk × $'+m.recRevRate+')', m.recyclingRev) : '') +
             row('Total revenue', m.totalRevenue, true) +
           '</div>' +
-          '<div style="flex:1;min-width:190px;">' +
-            '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Cost</div>' +
-            row('Disposal ('+(+m.dispTrucks.toFixed(2))+' tk × $'+m.siteCost+')', m.disposal) +
-            '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:13px;gap:6px;"><span style="color:var(--text-muted);white-space:nowrap;">Labor</span>' +
-              '<span style="text-align:right;"><input type="number" min="1" value="'+m.crew+'" onchange="ecSetCost(\'crew\', this.value)" style="width:32px;text-align:right;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:4px;padding:2px;font-size:12px;"> × <input type="number" min="0" value="'+m.hours+'" onchange="ecSetCost(\'hours\', this.value)" style="width:38px;text-align:right;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:4px;padding:2px;font-size:12px;">h × $'+m.crewRate+' = '+ecMoney(m.labor)+'</span></div>' +
-            row('Royalty ('+(m.royaltyFrac*100).toFixed(0)+'%)', m.royalty) + row('Total cost', m.cost, true) +
+          '<div style="flex:1;min-width:210px;">' +
+            '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Cost <span style="text-transform:none;font-weight:400;">(uncheck to exclude)</span></div>' +
+            costRow('disposal', 'Disposal ('+(+m.dispTrucks.toFixed(2))+' tk × $'+m.siteCost+')', m.disposal) +
+            laborRow +
+            costRow('royalty', 'Royalty ('+(m.royaltyFrac*100).toFixed(0)+'%)', m.royalty) +
+            row('Total cost', m.cost, true) +
           '</div>' +
         '</div>' +
         '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px;padding-top:10px;border-top:2px solid var(--border);">' +
@@ -14279,8 +14305,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '<span style="font-weight:800;font-size:22px;color:'+marginColor+';">'+ecMoney(m.margin)+' <span style="font-size:14px;">('+m.marginPct.toFixed(1)+'%)</span></span>' +
         '</div>' +
         '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--text-muted);">' +
-          '<span>Target <input type="number" min="0" max="95" value="'+(+(m.targetFrac*100).toFixed(0))+'" onchange="ecSetCost(\'targetMargin\', this.value)" style="width:40px;text-align:right;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:4px;padding:2px 4px;font-size:12px;">% → recommended price <b style="color:var(--accent-green);">'+ecMoney(m.recPrice)+'</b></span>' +
-          '<span style="color:'+(targetHit?'var(--accent-green)':'#e0a44f')+';font-weight:700;">'+(targetHit?'✓ at/above target':'below target')+'</span>' +
+          '<span>Target '+numInput(+(m.targetFrac*100).toFixed(0),'targetMargin',40)+'% → recommended price <b style="color:var(--accent-green);">'+ecMoney(m.recPrice)+'</b></span>' +
+          '<span style="color:'+marginColor+';font-weight:700;">'+(targetHit?'✓ at/above target':(m.marginPct>=0?'below target':'losing money'))+'</span>' +
         '</div>' +
         (ecVolRate(1) === 0 ? '<div style="font-size:11px;color:#e0a44f;margin-top:6px;">⚠️ Volume price $0 — price book not loaded for this zip.</div>' : '');
     }
