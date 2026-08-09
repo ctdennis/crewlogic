@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.111.1 | 2026-08-08">
+  <meta name="crewlogic-version" content="v5.112.0 | 2026-08-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -13970,7 +13970,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Gated feature (dev + super-admin for now). Backend: crewlogic-ny-estimate (list/load/group/quantify/rooms)
     // + crewlogic-ny-photo (public image proxy). See docs/plan-ny-estimate.md.
     // ═══════════════════════════════════════════════════════════════════════
-    let _ec = { jobID: null, photos: [], rooms: [], roomOptions: [], busy: false, spend: 0, estimates: [], counts: {}, est: null, priceBook: [], adjustments: [], adjType: 'surcharge' };
+    let _ec = { jobID: null, photos: [], rooms: [], roomOptions: [], busy: false, spend: 0, estimates: [], counts: {}, est: null, priceBook: [], adjustments: [], adjType: 'surcharge', cost: { crew: 2, hours: '' } };
     const EC_PRICE = { group: { in: 3, out: 15 }, quantify: { in: 3, out: 15 } }; // $/M tokens (both passes now Sonnet)
     function _ecEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
     function ecProxy(url){ return EDGE_BASE + '/crewlogic-ny-photo?u=' + encodeURIComponent(url); }
@@ -14037,7 +14037,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function ecOpen() {
       await ecEnsureScreen();
       document.getElementById('estimateCostingScreen').style.display = 'block';
-      _ec.jobID = null; _ec.photos = []; _ec.rooms = []; _ec.spend = 0; _ec.estimates = []; _ec.counts = {}; _ec.est = null; _ec.priceBook = []; _ec.adjustments = []; _ec.adjType = 'surcharge';
+      _ec.jobID = null; _ec.photos = []; _ec.rooms = []; _ec.spend = 0; _ec.estimates = []; _ec.counts = {}; _ec.est = null; _ec.priceBook = []; _ec.adjustments = []; _ec.adjType = 'surcharge'; _ec.cost = { crew: 2, hours: '' };
       document.getElementById('ecPhotos').innerHTML = '';
       document.getElementById('ecResults').innerHTML = '';
       document.getElementById('ecCalcBtn').style.display = 'none';
@@ -14181,6 +14181,73 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const t = +(_ec.rooms.reduce((s,rm) => s + (parseFloat(rm.volume_cuyd)||0), 0)).toFixed(2);
       const set = (id,v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
       set('ecTotalCuyd', t + ' cy'); set('ecBilled', ecBilledCuyd(t) + ' cy'); set('ecTrucks', (+(t/16).toFixed(2)) + '');
+      ecRecalcMargin();
+    }
+    // ── P4: revenue (tiered volume price from the book) + cost (cost_settings) = margin ──
+    const EC_TIER_LABEL = { 0.0625:'Minimum', 0.125:'1/8', 0.25:'1/4', 0.375:'3/8', 0.5:'1/2', 0.625:'5/8', 0.75:'3/4', 0.875:'7/8', 1:'Full' };
+    // Rate for a truck-fraction from OUR price book's Volume block (name-includes "volume", item-name-includes the tier label).
+    function ecVolRate(fraction){
+      const label = EC_TIER_LABEL[fraction]; if (!label) return 0;
+      const vol = (_ec.priceBook||[]).find(b => (b.name||'').toLowerCase().includes('volume')); if (!vol) return 0;
+      const it = (vol.items||[]).find(i => (i.name||'').toLowerCase().includes(label.toLowerCase()));
+      return it ? (parseFloat(it.value)||0) : 0;
+    }
+    function ecRoundTier(frac){ // snap a 0..1 partial to nearest priced tier (0, Minimum, 1/8 … 7/8)
+      const tiers = [0, 0.0625, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875];
+      let best = 0, bd = Infinity; tiers.forEach(t => { const d = Math.abs(frac - t); if (d < bd) { bd = d; best = t; } }); return best;
+    }
+    // Mirrors calcVolumePriceSplit: whole trucks at Full rate + fractional remainder at its tier rate.
+    function ecVolumePrice(totalTrucks){
+      const fullRate = ecVolRate(1); const whole = Math.floor(totalTrucks); const partial = totalTrucks - whole;
+      const rp = ecRoundTier(partial); return (whole * fullRate) + (rp > 0 ? ecVolRate(rp) : 0);
+    }
+    function ecMargin(){
+      const cs = (currentUser && currentUser.costSettings) || {};
+      const totalCuyd = _ec.rooms.reduce((s,rm) => s + (parseFloat(rm.volume_cuyd)||0), 0);
+      const trucks = totalCuyd / 16;
+      const volumePrice = ecVolumePrice(trucks);
+      const adjNet = ecAdjNet();
+      const revenue = volumePrice + adjNet;
+      const disposalCost = parseFloat(cs.disposalCost) || 200;
+      const crewRate = parseFloat(cs.crewRate) || 0;
+      const royaltyPct = parseFloat(cs.royaltyPct); const royaltyFrac = (isFinite(royaltyPct) ? royaltyPct : 14) / 100;
+      const crew = Math.max(1, parseFloat((_ec.cost||{}).crew) || 2);
+      const hoursIn = (_ec.cost||{}).hours;
+      const hours = (hoursIn !== '' && hoursIn != null) ? Math.max(0, parseFloat(hoursIn) || 0) : Math.max(2, Math.round(trucks * 3)); // default ~3 on-site hrs/truck
+      const disposal = Math.ceil(trucks) * disposalCost;         // dump trips ≈ trucks
+      const labor = crew * hours * crewRate;                     // on-site labor (no drive time yet)
+      const royalty = revenue * royaltyFrac;
+      const cost = disposal + labor + royalty;
+      const margin = revenue - cost;
+      const marginPct = revenue > 0 ? (margin / revenue) * 100 : 0;
+      return { trucks, volumePrice, adjNet, revenue, disposal, labor, royalty, cost, margin, marginPct, crew, hours, crewRate, disposalCost, royaltyFrac };
+    }
+    function ecSetCost(f, val){ if (!_ec.cost) _ec.cost = {}; _ec.cost[f] = val; ecRecalcMargin(); }
+    function ecRecalcMargin(){ const p = document.getElementById('ecMarginPanel'); if (p) p.innerHTML = ecMarginPanelHtml(); }
+    function ecMarginPanelHtml(){
+      const m = ecMargin();
+      const money = (v) => (v < 0 ? '-$' : '$') + Math.abs(v).toFixed(2);
+      const row = (label, val, strong) => '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:13px;'+(strong?'font-weight:700;border-top:1px solid var(--border);margin-top:4px;padding-top:6px;':'')+'"><span'+(strong?'':' style="color:var(--text-muted);"')+'>'+label+'</span><span>'+money(val)+'</span></div>';
+      const marginColor = m.margin >= 0 ? 'var(--accent-green)' : '#e05a4f';
+      return '<div style="font-weight:700;margin-bottom:10px;">Price &amp; margin <span style="font-size:12px;color:var(--text-muted);font-weight:400;">— base (fuel/drive time added once distances run)</span></div>' +
+        '<div style="display:flex;gap:14px;flex-wrap:wrap;">' +
+          '<div style="flex:1;min-width:180px;">' +
+            '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Revenue (price)</div>' +
+            row('Volume ('+(+m.trucks.toFixed(2))+' trucks)', m.volumePrice) + row('Adjustments', m.adjNet) + row('Total price', m.revenue, true) +
+          '</div>' +
+          '<div style="flex:1;min-width:180px;">' +
+            '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Cost</div>' +
+            row('Disposal ('+Math.ceil(m.trucks)+' × $'+m.disposalCost+')', m.disposal) +
+            '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:13px;"><span style="color:var(--text-muted);">Labor (crew×hrs×$'+m.crewRate+')</span>' +
+              '<span><input type="number" min="1" value="'+m.crew+'" onchange="ecSetCost(\'crew\', this.value)" style="width:38px;text-align:right;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:4px;padding:2px;font-size:12px;">×<input type="number" min="0" value="'+m.hours+'" onchange="ecSetCost(\'hours\', this.value)" style="width:42px;text-align:right;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:4px;padding:2px;font-size:12px;">h = '+money(m.labor)+'</span></div>' +
+            row('Royalty ('+(m.royaltyFrac*100).toFixed(0)+'%)', m.royalty) + row('Total cost', m.cost, true) +
+          '</div>' +
+        '</div>' +
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px;padding-top:10px;border-top:2px solid var(--border);">' +
+          '<span style="font-weight:700;font-size:15px;">Margin</span>' +
+          '<span style="font-weight:800;font-size:22px;color:'+marginColor+';">'+money(m.margin)+' <span style="font-size:14px;">('+m.marginPct.toFixed(1)+'%)</span></span>' +
+        '</div>' +
+        (ecVolRate(1) === 0 ? '<div style="font-size:11px;color:#e0a44f;margin-top:6px;">⚠️ Volume price is $0 — the price book hasn\'t loaded (or has no Volume tiers) for this zip.</div>' : '');
     }
     function ecSetEighths(i, e){
       const rm = _ec.rooms[i]; if (!rm) return;
@@ -14263,7 +14330,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Tap a room to see its photos + items and set its truck volume. Totals update live.</div>' +
         rows +
         '<div id="ecAdjPanel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:14px 0;">'+ecAdjustmentsHtml()+'</div>' +
-        '<div style="font-size:12px;color:var(--text-muted);margin-top:10px;">Pricing (Vonigo zip) + cost (CrewLogic Cost tab) → margin: coming next.</div>';
+        '<div id="ecMarginPanel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:14px 0;">'+ecMarginPanelHtml()+'</div>';
       ecRecalcTotals();
     }
     // Priced items for a manual type, filtered from OUR loaded price book — mirrors the estimator's
@@ -14286,7 +14353,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return out;
     }
     function ecAdjNet(){ return (_ec.adjustments||[]).reduce((s,a) => s + (a.unitPrice||0)*(a.qty||0), 0); }
-    function ecRenderAdjPanel(){ const p = document.getElementById('ecAdjPanel'); if (p) p.innerHTML = ecAdjustmentsHtml(); }
+    function ecRenderAdjPanel(){ const p = document.getElementById('ecAdjPanel'); if (p) p.innerHTML = ecAdjustmentsHtml(); ecRecalcMargin(); }
     function ecAdjTypeChange(){
       const t = document.getElementById('ecAdjType'); _ec.adjType = t ? t.value : 'surcharge';
       const items = ecPricedItems(_ec.adjType); const sel = document.getElementById('ecAdjItem');
