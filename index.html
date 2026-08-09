@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.116.0 | 2026-08-09">
+  <meta name="crewlogic-version" content="v5.117.0 | 2026-08-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1799,6 +1799,7 @@
           <button class="settings-tab" id="stab-tools" onclick="showSettingsTab('tools')">🛠 Tools</button>
           <button class="settings-tab" id="stab-trucks" onclick="showSettingsTab('trucks')">🚚 Trucks</button>
           <button class="settings-tab" id="stab-account" onclick="showSettingsTab('account')">⚙️ Account</button>
+          <button class="settings-tab" id="stab-routes" onclick="showSettingsTab('routes')" style="display:none;">🧭 Routes</button>
         </div>
 
         <!-- TAB: Franchise -->
@@ -2534,6 +2535,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <div id="toolsList">Loading…</div>
           </div>
         </div><!-- end tools tab -->
+
+        <!-- TAB: Routes (route classification) -->
+        <div id="stab-content-routes" style="display:none;">
+          <div class="settings-card fade-in fade-in-delay-2">
+            <div class="settings-card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+              <span>Route Classification</span>
+              <button onclick="renderRouteClassTab(true)" style="padding:6px 12px;background:var(--btn-surface);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;">↻ Reload</button>
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">
+              Classify each Vonigo route so CrewLogic knows which are estimate routes vs collection, etc. Your choice here is authoritative — it overrides Vonigo's route type (which is often mistyped). Used to scope Estimate Costing and group the dispatch board. Pre-filled from Vonigo; change any that are wrong.
+            </div>
+            <div id="routeClassList">Loading…</div>
+          </div>
+        </div><!-- end routes tab -->
 
       </div>
 
@@ -8804,7 +8819,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Estimate Costing (reverse-estimate) — gated feature, entitlement default-off: dev + super-admin only for now
       const ecCard = document.getElementById('estimateCostingCard');
       // Estimate Costing prod access: dev env (all), franchise #90 (whole franchise), and Kevin McGill (NY #31) by user.
-      if (ecCard) ecCard.style.display = (IS_DEV_ENV || currentUser.franchiseID === '90' || currentUser.email === 'kevin@junkluggers.com') ? '' : 'none';
+      const _ecAudience = (IS_DEV_ENV || currentUser.franchiseID === '90' || currentUser.email === 'kevin@junkluggers.com');
+      if (ecCard) ecCard.style.display = _ecAudience ? '' : 'none';
+      // Route Classification settings tab — same audience (owner-only tab; drives estimate-route scoping + board grouping).
+      const _routesTab = document.getElementById('stab-routes');
+      if (_routesTab) _routesTab.style.display = (_ecAudience && currentUser.role === 'owner') ? '' : 'none';
 
       // Job Router (R1) — recommends the best transfer station between the truck's LIVE position and the
       // next job, so it requires telematics ACTUALLY connected (not just "is an owner") AND a Vonigo
@@ -26544,11 +26563,11 @@ RECYCLING & DONATION
     function showSettingsTab(tab) {
       // Defense-in-depth: owner-only tabs are never reachable by a non-owner, even via a deep-link
       // (e.g. a stale _pendingSettingsTab='pricebook'). Estimators get redirected to their Account tab.
-      const OWNER_ONLY = ['pricebook','pricing','franchise','cost','proposal','trucks'];
+      const OWNER_ONLY = ['pricebook','pricing','franchise','cost','proposal','trucks','routes'];
       if (OWNER_ONLY.indexOf(tab) !== -1 && !(currentUser && currentUser.role === 'owner')) {
         tab = 'account';
       }
-      ['franchise','cost','proposal','account','pricing','pricebook','customers','signs','tools','trucks'].forEach(t => {
+      ['franchise','cost','proposal','account','pricing','pricebook','customers','signs','tools','trucks','routes'].forEach(t => {
         const el = document.getElementById('stab-content-' + t);
         if (el) el.style.display = t === tab ? 'block' : 'none';
         const btn = document.getElementById('stab-' + t);
@@ -26574,6 +26593,60 @@ RECYCLING & DONATION
       if (tab === 'tools') renderToolsTab();
       // Render telematics (trucks) tab
       if (tab === 'trucks') renderTrucksTab();
+      // Render route classification tab
+      if (tab === 'routes') renderRouteClassTab();
+    }
+
+    // ===== ROUTE CLASSIFICATION (Settings → Routes) =====
+    // Owner classifies each Vonigo route into a CrewLogic category. Our value wins over Vonigo's routeTypeID
+    // (franchises mistype). Drives estimate-route scoping + dispatch board grouping. crewlogic-dispatch:
+    // classifyList (routes + saved/default category) and classifySet (upsert one).
+    const RC_TYPES = [
+      { v: 'estimate', label: 'Estimate' },
+      { v: 'junk', label: 'Junk Removal Only' },
+      { v: 'reserve', label: 'Reschedule / Reserve' },
+      { v: 'dispatch', label: 'Dispatch' },
+      { v: 'other', label: 'Regular / Other' },
+    ];
+    const _rcEsc = s => String(s == null ? '' : s).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+    let _rcRoutes = [];
+    async function renderRouteClassTab(force) {
+      const box = document.getElementById('routeClassList');
+      if (!box) return;
+      if (!force && _rcRoutes.length) { _rcPaint(); return; }
+      box.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0;">Loading routes from Vonigo…</div>';
+      try {
+        const r = await edgeFunctionCall('crewlogic-dispatch', { action: 'classifyList', franchiseID: currentUser.franchiseID });
+        if (!r || !r.success) { box.innerHTML = '<div style="color:#e0a44f;font-size:13px;">Couldn’t load routes' + (r && r.error ? ': ' + _rcEsc(r.error) : '') + '.</div>'; return; }
+        _rcRoutes = r.routes || [];
+        _rcPaint();
+      } catch (e) { console.error(e); box.innerHTML = '<div style="color:#e0a44f;font-size:13px;">Connection error loading routes.</div>'; }
+    }
+    function _rcPaint() {
+      const box = document.getElementById('routeClassList');
+      if (!box) return;
+      if (!_rcRoutes.length) { box.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">No routes returned for this franchise.</div>'; return; }
+      const opts = (sel) => RC_TYPES.map(t => '<option value="' + t.v + '"' + (t.v === sel ? ' selected' : '') + '>' + t.label + '</option>').join('');
+      box.innerHTML = _rcRoutes.map((rt, i) =>
+        '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;">' +
+          '<div style="flex:1;min-width:150px;">' +
+            '<div style="font-weight:600;font-size:14px;">' + _rcEsc(rt.name) + (rt.abbr ? ' <span style="color:var(--text-muted);font-weight:400;font-size:12px;">(' + _rcEsc(rt.abbr) + ')</span>' : '') + (rt.isActive ? '' : ' <span style="color:var(--text-muted);font-size:11px;">· inactive</span>') + '</div>' +
+            '<div style="font-size:11px;color:var(--text-muted);">Vonigo: ' + _rcEsc(rt.vonigoTypeLabel) + (rt.classified ? '' : ' · <span style="font-style:italic;">default</span>') + '</div>' +
+          '</div>' +
+          '<select id="rcSel' + i + '" onchange="rcSet(' + i + ', this.value)" style="font-size:13px;padding:6px 8px;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:6px;min-width:150px;">' + opts(rt.crewlogicType) + '</select>' +
+          '<span id="rcSave' + i + '" style="font-size:11px;min-width:20px;color:var(--accent-green,#00E785);"></span>' +
+        '</div>'
+      ).join('');
+    }
+    async function rcSet(i, val) {
+      const rt = _rcRoutes[i]; if (!rt) return;
+      const note = document.getElementById('rcSave' + i);
+      if (note) { note.textContent = '…'; note.style.color = 'var(--text-muted)'; }
+      try {
+        const r = await edgeFunctionCall('crewlogic-dispatch', { action: 'classifySet', franchiseID: currentUser.franchiseID, routeID: rt.routeID, name: rt.name, abbr: rt.abbr, vonigoTypeID: rt.vonigoTypeID, crewlogicType: val, email: currentUser.email });
+        if (r && r.success) { rt.crewlogicType = val; rt.classified = true; if (note) { note.textContent = '✓'; note.style.color = 'var(--accent-green,#00E785)'; } }
+        else if (note) { note.textContent = '✕'; note.style.color = '#e05a4f'; }
+      } catch (e) { console.error(e); if (note) { note.textContent = '✕'; note.style.color = '#e05a4f'; } }
     }
 
     // ===== CUSTOMERS (native customer store; crm_provider=none) =====

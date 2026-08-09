@@ -33,6 +33,11 @@ const F = { status: 181, client: 183, address: 184, date: 185, duration: 186, ti
 // 245=Estimate Completed (Job), 9996=Estimate Completed (Est. Only), 9993=Lost. (Converted labels 9975/9970
 // stay ACTIVE until status Archived; National Account also grays only on Archived — handled by status.)
 const GRAY_LABELS = new Set([245, 9996, 9993]);
+// Vonigo routeTypeID → human label (from method 11; stable-ish tenant-wide, but franchises type routes
+// inconsistently — see franchise_route_types, where the owner's CrewLogic classification wins).
+const VONIGO_RT_LABEL: Record<number, string> = { 1: 'Regular', 101: 'Dumpster Rental / Junk Removal', 102: 'Junk Removal Only', 104: 'Pickup Truck', 105: 'Reserved / Reschedule', 108: 'All', 109: 'Estimate Only / Call Back', 112: 'Dispatch' };
+// routeTypeID → default CrewLogic category (pre-fills the classification dropdown; owner overrides).
+const RT_DEFAULT: Record<number, string> = { 109: 'estimate', 102: 'junk', 101: 'junk', 105: 'reserve', 112: 'dispatch' };
 
 const json = (d: unknown, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
 const supa = () => createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -480,6 +485,40 @@ Deno.serve(async (req: Request) => {
       const r = await vpost(token, '/resources/routes/', payload);
       // Surface the whole response for any non-list method (e.g. 11 = route-type definitions with stable routetypeID).
       return json({ success: true, count: (r.Routes || []).length, routes: r.Routes || [], raw: method !== '-1' ? r : undefined });
+    }
+
+    // classifyList — list this franchise's routes (Vonigo method 11 → routeTypeID) merged with the owner's saved
+    // CrewLogic classification. crewlogicType = saved value, else a default from the Vonigo routeTypeID, else 'other'.
+    if (action === 'classifyList') {
+      const r = await vpost(token, '/resources/routes/', { method: '11', isCompleteObject: 'true' });
+      const routes = (r.Routes || []) as Array<Record<string, unknown>>;
+      const ids = routes.map((rt) => String(rt.routeID));
+      const sb = supa();
+      const { data: saved } = await sb.from('franchise_route_types').select('vonigo_route_id, crewlogic_type').eq('tenant_id', TENANT_ID).in('vonigo_route_id', ids.length ? ids : ['']);
+      const smap = new Map((saved || []).map((x: Record<string, unknown>) => [String(x.vonigo_route_id), String(x.crewlogic_type)]));
+      const out = routes.map((rt) => {
+        const id = String(rt.routeID), vt = Number(rt.routeTypeID);
+        return { routeID: id, name: String(rt.routeName || ''), abbr: String(rt.routeAbbr || ''), vonigoTypeID: vt, vonigoTypeLabel: VONIGO_RT_LABEL[vt] || ('Type ' + vt), crewlogicType: smap.get(id) || RT_DEFAULT[vt] || 'other', classified: smap.has(id), isActive: String(rt.isActive).toLowerCase() === 'true' };
+      }).sort((a, b) => a.name.localeCompare(b.name));
+      return json({ success: true, count: out.length, routes: out });
+    }
+
+    // classifySet — upsert the owner's classification for one route (CrewLogic value is authoritative).
+    if (action === 'classifySet') {
+      const routeID = String(body.routeID || ''); const crewlogicType = String(body.crewlogicType || '');
+      const OK = new Set(['estimate', 'junk', 'reserve', 'dispatch', 'other']);
+      if (!routeID || !OK.has(crewlogicType)) return json({ success: false, error: 'routeID and a valid crewlogicType required' }, 400);
+      const sb = supa();
+      const { data: fr } = await sb.from('franchises').select('id').eq('external_id', franchiseID).eq('tenant_id', TENANT_ID).single();
+      if (!fr) return json({ success: false, error: 'franchise not found: ' + franchiseID }, 404);
+      const { error } = await sb.from('franchise_route_types').upsert({
+        tenant_id: TENANT_ID, franchise_id: (fr as { id: string }).id, vonigo_route_id: routeID,
+        route_name: body.name ? String(body.name) : null, route_abbr: body.abbr ? String(body.abbr) : null,
+        vonigo_route_type_id: body.vonigoTypeID != null ? Number(body.vonigoTypeID) : null,
+        crewlogic_type: crewlogicType, updated_by: body.email ? String(body.email) : null, updated_at: new Date().toISOString(),
+      }, { onConflict: 'tenant_id,vonigo_route_id' });
+      if (error) { console.error('[dispatch] classifySet failed:', error); return json({ success: false, error: 'save failed' }, 500); }
+      return json({ success: true });
     }
 
     // boardGrid (Phase 0): per-route grid for a day = jobs (occupied) + open availability slots.
