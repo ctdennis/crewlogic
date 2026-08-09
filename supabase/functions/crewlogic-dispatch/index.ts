@@ -474,8 +474,12 @@ Deno.serve(async (req: Request) => {
     // rawRoutes — READ ONLY. Dumps the untouched /resources/routes objects (isCompleteObject) so we can see
     // every field the API exposes per route (e.g. whether estimate routes are flagged structurally vs by name).
     if (action === 'rawRoutes') {
-      const r = await vpost(token, '/resources/routes/', { method: '-1', isCompleteObject: 'true' });
-      return json({ success: true, count: (r.Routes || []).length, routes: r.Routes || [] });
+      const method = String(body.method || '-1');
+      const payload: Record<string, string> = { method, isCompleteObject: 'true' };
+      if (body.objectID) payload.objectID = String(body.objectID);
+      const r = await vpost(token, '/resources/routes/', payload);
+      // Surface the whole response for any non-list method (e.g. 11 = route-type definitions with stable routetypeID).
+      return json({ success: true, count: (r.Routes || []).length, routes: r.Routes || [], raw: method !== '-1' ? r : undefined });
     }
 
     // boardGrid (Phase 0): per-route grid for a day = jobs (occupied) + open availability slots.
