@@ -471,6 +471,13 @@ Deno.serve(async (req: Request) => {
       return json({ success: true, dayID: body.dayID, count: jobs.length, jobs });
     }
 
+    // rawRoutes — READ ONLY. Dumps the untouched /resources/routes objects (isCompleteObject) so we can see
+    // every field the API exposes per route (e.g. whether estimate routes are flagged structurally vs by name).
+    if (action === 'rawRoutes') {
+      const r = await vpost(token, '/resources/routes/', { method: '-1', isCompleteObject: 'true' });
+      return json({ success: true, count: (r.Routes || []).length, routes: r.Routes || [] });
+    }
+
     // boardGrid (Phase 0): per-route grid for a day = jobs (occupied) + open availability slots.
     // Blocked/gray is implicit: a route with no open slots AND no jobs is closed/blocked for the day;
     // gaps between are not bookable. Availability already excludes manual blocks, so no BookOffs needed.
