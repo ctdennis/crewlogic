@@ -30,6 +30,20 @@ function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 }
 
+// Geocode the office location (Census, free/keyless) so we can pull NWS alerts for the office's OWN zones
+// instead of the whole state. Returns null on any miss → caller falls back to state-wide.
+async function geocodeCensus(q: string): Promise<{ lat: number; lon: number } | null> {
+  try {
+    const u = `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encodeURIComponent(q)}&benchmark=Public_AR_Current&format=json`;
+    const r = await fetch(u, { headers: { "User-Agent": UA } });
+    if (!r.ok) return null;
+    const d = await r.json() as { result?: { addressMatches?: Array<{ coordinates?: { x: number; y: number } }> } };
+    const c = d?.result?.addressMatches?.[0]?.coordinates;
+    if (c && Number.isFinite(c.y) && Number.isFinite(c.x)) return { lat: c.y, lon: c.x };
+    return null;
+  } catch { return null; }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ success: false, error: "Method not allowed" }, 405);
@@ -40,25 +54,38 @@ Deno.serve(async (req: Request) => {
   try {
     let state = String(body.state || "").trim().toUpperCase();
     const franchiseID = String(body.franchiseID || "").trim();
+    let officeAddress = "", officeZip = "";
 
-    // Resolve the franchise's state from cost_settings when not passed explicitly.
+    // Resolve the franchise's office location from cost_settings when not passed explicitly.
     if (!state && franchiseID) {
       const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
       const { data } = await supabase.from("franchises").select("cost_settings")
         .eq("external_id", franchiseID).eq("tenant_id", TENANT_ID).single();
       const cs = (data?.cost_settings as Record<string, unknown>) || {};
       state = String(cs.officeState || "").trim().toUpperCase();
+      officeAddress = String(cs.officeAddress || "").trim();
+      officeZip = String(cs.officeZip || "").trim();
     }
-    if (!/^[A-Z]{2}$/.test(state)) return json({ success: true, state: state || null, alerts: [] }); // no usable state → no alerts
 
-    const res = await fetch(`https://api.weather.gov/alerts/active?area=${state}`, {
-      headers: { "User-Agent": UA, "Accept": "application/geo+json" },
-    });
+    // Prefer POINT alerts at the office location — narrows to the office's OWN NWS zones instead of the whole
+    // state (a NYC franchise was getting every borough + Long Island + upstate alert). Fall back to state-wide.
+    let url = "";
+    if (officeAddress || officeZip) {
+      const pt = await geocodeCensus([officeAddress, officeZip, state].filter(Boolean).join(" "));
+      if (pt) url = `https://api.weather.gov/alerts/active?point=${pt.lat.toFixed(4)},${pt.lon.toFixed(4)}`;
+    }
+    if (!url) {
+      if (!/^[A-Z]{2}$/.test(state)) return json({ success: true, state: state || null, alerts: [] }); // no usable location → no alerts
+      url = `https://api.weather.gov/alerts/active?area=${state}`;
+    }
+
+    const res = await fetch(url, { headers: { "User-Agent": UA, "Accept": "application/geo+json" } });
     if (!res.ok) {
-      console.error("[weather] NWS HTTP", res.status, state);
+      console.error("[weather] NWS HTTP", res.status, url);
       return json({ success: false, error: "Weather service unavailable." }, 502);
     }
     const data = await res.json() as { features?: Array<{ properties?: Record<string, unknown> }> };
+    const seenEvent = new Set<string>();
     const alerts = (data.features || [])
       .map((f) => f.properties || {})
       .filter((p) => p.event && !SKIP.test(String(p.event)))
@@ -67,7 +94,9 @@ Deno.serve(async (req: Request) => {
         headline: p.headline || null, onset: p.onset || null, expires: p.expires || null,
         ends: p.ends || null, areaDesc: p.areaDesc || null, instruction: p.instruction || null,
       }))
-      .sort((a, b) => (SEV_RANK[String(b.severity)] || 0) - (SEV_RANK[String(a.severity)] || 0));
+      .sort((a, b) => (SEV_RANK[String(b.severity)] || 0) - (SEV_RANK[String(a.severity)] || 0))
+      .filter((a) => { const k = String(a.event); if (seenEvent.has(k)) return false; seenEvent.add(k); return true; }) // one per event type (drop per-zone dupes)
+      .slice(0, 5); // cap — the chip shows the top one + "+N", details lists at most these
 
     return json({ success: true, state, alerts });
   } catch (e) {
