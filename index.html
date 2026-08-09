@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.117.0 | 2026-08-09">
+  <meta name="crewlogic-version" content="v5.118.0 | 2026-08-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12417,6 +12417,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const codes = [...new Set(jobs.map(j => j.routeCode || '?'))].sort();
         routesData = codes.map(c => ({ code: c, jobs: jobs.filter(j => (j.routeCode || '?') === c), open: [] }));
       }
+      // Route-classification filter: hide routes whose CrewLogic type matches the selected "Hide …" value.
+      if (_boardHideType) routesData = routesData.filter(rt => (rt.crewlogicType || 'other') !== _boardHideType);
       const hdr = (data.dayLabel || '') + ' — ' + jobs.length + ' job' + (jobs.length !== 1 ? 's' : '') + ' · ' + routesData.length + ' route' + (routesData.length !== 1 ? 's' : '');
       if (!routesData.length) { r.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-size:13px;color:var(--text-muted);">No routes for ' + mjEsc(data.dayLabel || 'this day') + '.</div>'; return; }
       if (!container) _mjBoardByID = {}; // single-board screen resets; dashboard boards accumulate (job IDs unique)
@@ -12567,6 +12569,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // ===== Dispatch Dashboard (desktop) — source + destination boards side by side (re-entrant board) =====
     let _dashSrcDay = '', _dashDestDay = '';
+    let _boardHideType = '';   // route-classification filter: hide routes whose crewlogicType === this ('' = show all)
+    let _dashCache = null;     // last aligned board data, so the filter re-renders without re-fetching Vonigo
     function _dashNavBtnCss() { return 'width:26px;height:26px;border-radius:6px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-size:12px;cursor:pointer;'; }
     function _dashDayLabel(dayID) {
       const today = mjNowParts().dayID;
@@ -12600,6 +12604,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<button id="dashMicBtn" onclick="dashMic()" title="Voice command" style="width:38px;height:38px;flex:0 0 auto;border-radius:50%;background:var(--accent-green);color:var(--accent-text);border:none;cursor:pointer;font-size:17px;">🎤</button>'
         +   '<input id="dashCmdInput" type="text" placeholder="…or type a command — e.g. “move the 2nd job on MA1REG to tomorrow at 10”" onkeydown="if(event.key===\'Enter\')dashSendCmd()" style="flex:1;min-width:240px;padding:9px 12px;font-size:13px;background:var(--bg-input,#253545);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);">'
         +   '<div id="dashCmdResult" style="flex:0 0 auto;font-size:12px;color:var(--text-muted);"></div>'
+        +   '<select id="dashRouteFilter" onchange="_dashApplyFilter(this.value)" title="Hide routes of a type from both boards" style="flex:0 0 auto;font-size:12px;padding:7px 10px;background:var(--bg-input,#253545);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);">'
+        +     '<option value="">Filter: show all routes</option>'
+        +     RC_TYPES.map(t => '<option value="' + t.v + '"' + (t.v === _boardHideType ? ' selected' : '') + '>Hide ' + t.label + '</option>').join('')
+        +   '</select>'
         + '</div>'
         // schedules on TOP (two boards, route-aligned)
         + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start;margin-bottom:12px;">'
@@ -12909,7 +12917,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const src = await dashFetchDay(_dashSrcDay);
       const dest = await dashFetchDay(_dashDestDay);
       const codes = []; [...(src.routes || []), ...(dest.routes || [])].forEach(r => { if (r && r.code && !codes.includes(r.code)) codes.push(r.code); }); // preserve Vonigo's route order
-      const align = (dayRoutes) => codes.map(c => (dayRoutes || []).find(r => r.code === c) || { id: c, code: c, name: c, jobs: [], open: [] });
+      const typeByCode = {}; [...(src.routes || []), ...(dest.routes || [])].forEach(r => { if (r && r.code && r.crewlogicType && !typeByCode[r.code]) typeByCode[r.code] = r.crewlogicType; }); // so a placeholder inherits the same type as its real day
+      const align = (dayRoutes) => codes.map(c => (dayRoutes || []).find(r => r.code === c) || { id: c, code: c, name: c, jobs: [], open: [], crewlogicType: typeByCode[c] || 'other' });
       const srcR = align(src.routes), destR = align(dest.routes);
       // One time scale for both boards (aligned columns + equal size). Prefer the franchise's route hours
       // (boardStartMin/EndMin) spanning both days; fall back to job/slot-derived if hours are missing.
@@ -12918,6 +12927,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const axis = (sMin.length && eMax.length)
         ? { originH: Math.floor(Math.min(...sMin) / 60), endH: Math.ceil(Math.max(...eMax) / 60) }
         : _dashSharedAxis([srcR, destR]);
+      _dashCache = { srcR, destR, axis, srcDay: _dashSrcDay, destDay: _dashDestDay }; // for the route filter (re-render without re-fetch)
       await Promise.all([_mjLoadAssignData(_dashSrcDay), _mjLoadAssignData(_dashDestDay)]); // FW-59: assignments for BOTH days before render
       dashRenderBoard(_dashSrcDay, srcR, srcC, axis);
       dashRenderBoard(_dashDestDay, destR, destC, axis);
@@ -12934,6 +12944,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         originH: Number.isFinite(minT) ? Math.max(5, Math.min(7, Math.floor(minT / 60))) : 7,
         endH: Number.isFinite(maxT) ? Math.min(21, Math.max(17, Math.ceil(maxT / 60))) : 17,
       };
+    }
+    // Route filter: set the hide-type and re-render BOTH boards from the cached aligned data (no Vonigo re-fetch).
+    function _dashApplyFilter(val) {
+      _boardHideType = val || '';
+      if (!_dashCache) return;
+      dashRenderBoard(_dashCache.srcDay, _dashCache.srcR, document.getElementById('dashSrcBoard'), _dashCache.axis);
+      dashRenderBoard(_dashCache.destDay, _dashCache.destR, document.getElementById('dashDestBoard'), _dashCache.axis);
     }
     function dashRenderBoard(dayID, routesData, container, axis) {
       if (!container) return;

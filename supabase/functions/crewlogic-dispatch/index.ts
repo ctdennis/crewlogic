@@ -539,11 +539,15 @@ Deno.serve(async (req: Request) => {
         suggestSlotsFn(token, franchiseID, dayID, 30).catch(() => []),
         franchiseTz(franchiseID),
       ]);
+      // Owner's route classification (Estimate/Junk/Reserve/Dispatch/Other) — powers the board's hide-by-type filter.
+      const rids = routes.map((r: { id: string }) => String(r.id));
+      const { data: cls } = await supa().from('franchise_route_types').select('vonigo_route_id, crewlogic_type').eq('tenant_id', TENANT_ID).in('vonigo_route_id', rids.length ? rids : ['']);
+      const clsMap = new Map((cls || []).map((x: Record<string, unknown>) => [String(x.vonigo_route_id), String(x.crewlogic_type)]));
       const byId: Record<string, any> = {};
-      for (const r of routes) byId[r.id] = { id: r.id, code: r.code, name: r.name, isActive: r.isActive, jobs: [], open: [] };
+      for (const r of routes) byId[r.id] = { id: r.id, code: r.code, name: r.name, isActive: r.isActive, crewlogicType: clsMap.get(String(r.id)) || 'other', jobs: [], open: [] };
       for (const j of jobs) {
         const k = j.routeID; if (!k) continue;
-        if (!byId[k]) byId[k] = { id: k, code: j.routeCode, name: j.route, isActive: true, jobs: [], open: [] };
+        if (!byId[k]) byId[k] = { id: k, code: j.routeCode, name: j.route, isActive: true, crewlogicType: clsMap.get(String(k)) || 'other', jobs: [], open: [] };
         byId[k].jobs.push({ woID: j.woID, jobID: j.jobID, client: j.client, timeMin: j.timeMin, durationMin: j.durationMin, timeLabel: j.timeLabel, status: j.status, completed: j.completed, labelDone: j.labelDone, labelOpt: j.labelOpt, apptCount: j.apptCount, zoneID: j.zoneID, zoneName: j.zoneName, zip: j.zip, address: j.address, lat: j.lat, lon: j.lon, routeCode: j.routeCode, price: j.price, summary: j.summary, items: j.items, bookedOnline: j.bookedOnline, bookedSameDay: !!(j.dateCreated && j.dateService && ymdInTz(+j.dateCreated, tz) === ymdInTz(+j.dateService, tz)) });
       }
       for (const s of openSlots) { const k = String(s.routeID); if (byId[k]) byId[k].open.push({ startTime: s.startTime, label: s.label }); }
