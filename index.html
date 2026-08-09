@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.114.0 | 2026-08-09">
+  <meta name="crewlogic-version" content="v5.114.1 | 2026-08-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14112,7 +14112,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       grid.style.gap = '8px';
       grid.innerHTML = _ec.photos.map(p => {
         const src = p.b64 ? ('data:image/jpeg;base64,' + p.b64) : ecProxy(p.downloadUrl); // display the already-downscaled copy
-        return '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:5px;min-width:0;">' +
+        return '<div id="ecPhotoCard'+p.index+'" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:5px;min-width:0;">' +
           '<img src="'+src+'" loading="lazy" onclick="ecPhotoZoom('+p.index+')" title="Tap to enlarge" style="width:100%;height:88px;object-fit:cover;border-radius:6px;background:var(--bg-input);cursor:pointer;" alt="">' +
           '<div id="ecRoomCell'+p.index+'">'+ecRoomSelect(p.index, p.room)+'</div>' +
         '</div>';
@@ -14120,7 +14120,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       ecFixPhotoCols();
     }
     window.addEventListener('resize', function(){ if (document.getElementById('ecPhotos') && (document.getElementById('ecPhotos').childElementCount)) ecFixPhotoCols(); });
-    function ecSetRoom(idx, val){ if (_ec.photos[idx]) { _ec.photos[idx].room = val; const c = document.getElementById('ecRoomCell'+idx); if (c) c.innerHTML = ecRoomSelect(idx, val); } }
+    function ecSetRoom(idx, val){ if (_ec.photos[idx]) { _ec.photos[idx].room = val; const c = document.getElementById('ecRoomCell'+idx); if (c) c.innerHTML = ecRoomSelect(idx, val); const card = document.getElementById('ecPhotoCard'+idx); if (card) card.style.border = (val && String(val).trim()) ? '1px solid var(--border)' : '2px solid #e05a4f'; } }
     // Lightbox: click a thumbnail → full-size photo + the room dropdown, so you can read the room and assign it.
     function ecPhotoZoom(i){
       const p = _ec.photos[i]; if (!p) return;
@@ -14147,6 +14147,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     async function ecQuantify() {
       if (_ec.busy || !_ec.jobID) return;
+      // Guard: every photo must have a room assigned before we quantify. An unlabeled photo would otherwise be
+      // silently bucketed into "Other" (p.room || 'Other'), so its volume counts but under the wrong room —
+      // force the estimator to assign everything (choosing "Other" explicitly is fine).
+      const unlabeled = _ec.photos.filter(p => !p.room || !String(p.room).trim());
+      if (unlabeled.length) {
+        _ec.photos.forEach(p => { const card = document.getElementById('ecPhotoCard'+p.index); if (card) card.style.border = (!p.room || !String(p.room).trim()) ? '2px solid #e05a4f' : '1px solid var(--border)'; });
+        const first = document.getElementById('ecPhotoCard'+unlabeled[0].index); if (first && first.scrollIntoView) first.scrollIntoView({ behavior:'smooth', block:'center' });
+        ecBusy(false, unlabeled.length + ' photo' + (unlabeled.length>1?'s':'') + ' still need a room (highlighted in red) — set the dropdown, or choose "Other", then Calculate.');
+        return;
+      }
       const byRoom = {};
       _ec.photos.forEach(p => { const rm = p.room || 'Other'; (byRoom[rm] = byRoom[rm] || []).push(p.index); });
       const groups = Object.keys(byRoom).map(rm => ({ room_label: rm, photo_indices: byRoom[rm] }));
