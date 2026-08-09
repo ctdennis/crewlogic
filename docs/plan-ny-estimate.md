@@ -349,6 +349,16 @@ Pass 2 = Sonnet** (§5.8); Haiku ~$1/$5, Sonnet ~$3/$15 per M tok; Pass-1 thumbs
   - **Still to do:** reused markup panel (labor/discounts/surcharges), then P4 pricing+cost+margin.
 - **P4 — price + cost + margin:** Vonigo zip pricing (increment + minimum) + CrewLogic cost engine → margin roll-up.
 - **P5 — NY extras:** fold in Kevin's NY-unique pricing items.
+- **P6 — Vonigo write-back (FUTURE PHASE, owner-flagged 2026-08-09; v1 stays read-only).** After the margin
+  analysis, optionally push results back to Vonigo:
+  - **Post a NEW quote** (photos + volume charge + adjustment line items) — reuses the estimator's proven path:
+    `crewlogic-estimate` `submitQuote` (creates the Vonigo quote + charges) and `POST /data/documents/` method 3
+    (photo upload). The Adjustments panel already stores charges in Vonigo shape (`priceItemID`/`qty`/`unitPrice`),
+    and the volume maps to the estimator's volume charge — so they drop straight into that submit path.
+  - **Adjust an EXISTING quote** — more involved: Estimate Costing loads *from* an existing quote (we hold its
+    `quoteID`), so we could add charges to it or reconcile (add/edit/delete) its charges via Vonigo Edit (method 2)
+    calls; needs the per-charge objectIDs. Bigger than "post new."
+  - Nothing in v1 blocks this; the charge/photo shapes already line up. Gate + confirm-before-write when built.
 
 ## 11. Open items / blockers
 
