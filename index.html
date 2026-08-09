@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.113.3 | 2026-08-09">
+  <meta name="crewlogic-version" content="v5.114.0 | 2026-08-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -13970,7 +13970,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Gated feature (dev + super-admin for now). Backend: crewlogic-ny-estimate (list/load/group/quantify/rooms)
     // + crewlogic-ny-photo (public image proxy). See docs/plan-ny-estimate.md.
     // ═══════════════════════════════════════════════════════════════════════
-    let _ec = { jobID: null, photos: [], rooms: [], roomOptions: [], busy: false, spend: 0, estimates: [], counts: {}, est: null, priceBook: [], adjustments: [], adjType: 'surcharge', cost: { crew: 2, hours: '', disposalSiteIdx: 0, recycleSiteIdx: 0, donateSiteIdx: 0, recyclePct: 0, donatePct: 0, targetMargin: 60, include: { disposal: true, labor: true, royalty: true } } };
+    let _ec = { jobID: null, photos: [], rooms: [], roomOptions: [], busy: false, spend: 0, estimates: [], counts: {}, est: null, priceBook: [], adjustments: [], adjType: 'surcharge', cost: { crew: 2, hours: '', disposalSiteIdx: 0, recycleSiteIdx: 0, donateSiteIdx: 0, recyclePct: 0, donatePct: 0, targetMargin: 60, dist: null, driveMin: '', driveMiles: '', include: { disposal: true, labor: true, driveLabor: true, fuel: true, royalty: true } } };
     const EC_PRICE = { group: { in: 3, out: 15 }, quantify: { in: 3, out: 15 } }; // $/M tokens (both passes now Sonnet)
     function _ecEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
     function ecProxy(url){ return EDGE_BASE + '/crewlogic-ny-photo?u=' + encodeURIComponent(url); }
@@ -14037,7 +14037,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function ecOpen() {
       await ecEnsureScreen();
       document.getElementById('estimateCostingScreen').style.display = 'block';
-      _ec.jobID = null; _ec.photos = []; _ec.rooms = []; _ec.spend = 0; _ec.estimates = []; _ec.counts = {}; _ec.est = null; _ec.priceBook = []; _ec.adjustments = []; _ec.adjType = 'surcharge'; _ec.cost = { crew: 2, hours: '', disposalSiteIdx: 0, recycleSiteIdx: 0, donateSiteIdx: 0, recyclePct: 0, donatePct: 0, targetMargin: 60, include: { disposal: true, labor: true, royalty: true } };
+      _ec.jobID = null; _ec.photos = []; _ec.rooms = []; _ec.spend = 0; _ec.estimates = []; _ec.counts = {}; _ec.est = null; _ec.priceBook = []; _ec.adjustments = []; _ec.adjType = 'surcharge'; _ec.cost = { crew: 2, hours: '', disposalSiteIdx: 0, recycleSiteIdx: 0, donateSiteIdx: 0, recyclePct: 0, donatePct: 0, targetMargin: 60, dist: null, driveMin: '', driveMiles: '', include: { disposal: true, labor: true, driveLabor: true, fuel: true, royalty: true } };
       document.getElementById('ecPhotos').innerHTML = '';
       document.getElementById('ecResults').innerHTML = '';
       document.getElementById('ecCalcBtn').style.display = 'none';
@@ -14221,6 +14221,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const donatePct  = Math.max(0, Math.min(100, parseFloat(c.donatePct)||0)) / 100;
       const dispFrac = Math.max(0, 1 - recyclePct - donatePct);
       const recycleTrucks = trucks * recyclePct;
+      const donateTrucks = trucks * donatePct;
       const dispTrucks = trucks * dispFrac;                       // only landfilled volume incurs disposal
       const sites = Array.isArray(cs.disposalSites) ? cs.disposalSites : [];
       const siteIdx = sites.length ? Math.min(sites.length-1, Math.max(0, parseInt(c.disposalSiteIdx)||0)) : -1;
@@ -14240,23 +14241,60 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const hours = (hoursIn!==''&&hoursIn!=null) ? Math.max(0, parseFloat(hoursIn)||0) : Math.max(2, Math.round(trucks*3));
       const disposal = dispTrucks * siteCost;
       const labor = crew*hours*crewRate;
+      // Drive time + fuel — round trip yard→job→dump→yard. calcDistances returns home→job + job→disposal;
+      // the return dump→yard leg isn't returned, so approximate it with the home→job leg (dump is typically
+      // in the same home territory). driveMin/driveMiles are editable overrides of that estimate.
+      const dist = c.dist || null;
+      const autoMin = dist ? (2*(dist.homeMinutes||0) + (dist.disposalMinutes||0)) : 0;
+      const autoMiles = dist ? (2*(dist.homeMiles||0) + (dist.disposalMiles||0)) : 0;
+      const driveMin = (c.driveMin!==''&&c.driveMin!=null) ? Math.max(0, parseFloat(c.driveMin)||0) : autoMin;
+      const driveMiles = (c.driveMiles!==''&&c.driveMiles!=null) ? Math.max(0, parseFloat(c.driveMiles)||0) : autoMiles;
+      const mpg = parseFloat(cs.MPG)||10;
+      const fuelPrice = parseFloat(cs.fuelCost)||0;
+      const driveHours = driveMin/60;
+      const driveLabor = crew*driveHours*crewRate;
+      const fuel = mpg>0 ? (driveMiles/mpg)*fuelPrice : 0;
       const royaltyFrac = (isFinite(parseFloat(cs.royaltyPct)) ? parseFloat(cs.royaltyPct) : 14) / 100;
       const royalty = price * royaltyFrac;
       const inc = c.include || {};
-      const useD = inc.disposal !== false, useL = inc.labor !== false, useR = inc.royalty !== false;
-      const cost = (useD?disposal:0) + (useL?labor:0) + (useR?royalty:0);
+      const useD = inc.disposal !== false, useL = inc.labor !== false, useDL = inc.driveLabor !== false, useF = inc.fuel !== false, useR = inc.royalty !== false;
+      const cost = (useD?disposal:0) + (useL?labor:0) + (useDL?driveLabor:0) + (useF?fuel:0) + (useR?royalty:0);
       const margin = totalRevenue - cost;
       const marginPct = totalRevenue>0 ? margin/totalRevenue*100 : 0;
       const targetFrac = Math.max(0, Math.min(0.95, (parseFloat(c.targetMargin)||0)/100));
-      const fixed = (useD?disposal:0) + (useL?labor:0);
+      const fixed = (useD?disposal:0) + (useL?labor:0) + (useDL?driveLabor:0) + (useF?fuel:0);
       const denom = 1 - (useR?royaltyFrac:0) - targetFrac;       // customer price to hit the target margin
       const recPrice = denom>0 ? Math.max(0, (fixed - recyclingRev*(1-targetFrac)) / denom) : 0;
-      return { trucks, volumePrice, adjNet, price, recyclePct, donatePct, recycleTrucks, dispTrucks, sites, siteIdx, siteCost, recSites, recSiteIdx, donSites, donSiteIdx, recRevRate, recyclingRev, totalRevenue, crew, hours, crewRate, disposal, labor, royalty, royaltyFrac, useD, useL, useR, cost, margin, marginPct, targetFrac, recPrice };
+      return { trucks, volumePrice, adjNet, price, recyclePct, donatePct, recycleTrucks, donateTrucks, dispTrucks, sites, siteIdx, siteCost, recSites, recSiteIdx, donSites, donSiteIdx, recRevRate, recyclingRev, totalRevenue, crew, hours, crewRate, disposal, labor, dist, driveMin, driveMiles, driveHours, mpg, fuelPrice, driveLabor, fuel, royalty, royaltyFrac, useD, useL, useDL, useF, useR, cost, margin, marginPct, targetFrac, recPrice };
     }
     function ecSetCost(f, val){ if (!_ec.cost) _ec.cost = {}; _ec.cost[f] = val; ecRecalcMargin(); }
     function ecInc(key){ const inc = (_ec.cost||{}).include || {}; return inc[key] !== false; }
     function ecToggleCost(key){ if (!_ec.cost.include) _ec.cost.include = {}; _ec.cost.include[key] = !ecInc(key); ecRecalcMargin(); }
     function ecRecalcMargin(){ const p = document.getElementById('ecMarginPanel'); if (p) p.innerHTML = ecMarginPanelHtml(); }
+    function ecTk(n){ return (+((parseFloat(n)||0).toFixed(2))); }   // trucks to 2 decimals, no trailing zeros
+    async function ecCalcDistances(){
+      const cs = (currentUser && currentUser.costSettings) || {}; const m = ecMargin();
+      const jobSite = (_ec.est && _ec.est.address) || '';
+      const home = (cs.truckHome || '').trim();
+      if (!jobSite) { alert('This estimate has no job address to route from.'); return; }
+      if (!home) { alert('Set your Truck home location in Settings → Cost Analysis first.'); return; }
+      const disp = m.sites[m.siteIdx], rec = m.recSites[m.recSiteIdx], don = m.donSites[m.donSiteIdx];
+      const btn = document.getElementById('ecDistBtn'); if (btn) { btn.textContent = '⏳ Calculating…'; btn.disabled = true; }
+      try {
+        const data = await edgeFunctionCall('crewlogic-estimate', {
+          action: 'calcDistances', email: currentUser.email, franchiseID: currentUser.franchiseID,
+          franchiseInternalID: currentUser.franchiseInternalID, tenantID: currentUser.tenantID,
+          truckHome: home, jobSite,
+          disposalSite: (disp && disp.address) || '',
+          recyclingSite: (rec && rec.address) || null,
+          donationSite: (don && don.address) || null
+        });
+        if (data && data.success && data.distances) {
+          _ec.cost.dist = data.distances; _ec.cost.driveMin = ''; _ec.cost.driveMiles = '';  // re-derive from fresh distances
+          ecRecalcMargin();
+        } else { alert('Distance calculation failed: ' + ((data && data.error) || 'Unknown error')); if (btn) { btn.textContent = '🗺 Calculate distances'; btn.disabled = false; } }
+      } catch(e) { console.error(e); alert('Connection error calculating distances.'); if (btn) { btn.textContent = '🗺 Calculate distances'; btn.disabled = false; } }
+    }
     function ecMarginPanelHtml(){
       const m = ecMargin();
       const row = (label, val, strong) => '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:13px;'+(strong?'font-weight:700;border-top:1px solid var(--border);margin-top:4px;padding-top:6px;':'')+'"><span'+(strong?'':' style="color:var(--text-muted);"')+'>'+label+'</span><span>'+ecMoney(val)+'</span></div>';
@@ -14275,28 +14313,40 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Literal traffic-light colors (NOT var(--accent-green) — dev overrides that to amber, which would make good == below-target).
       const marginColor = m.marginPct >= targetPct ? '#22c55e' : (m.marginPct >= 0 ? '#e0a44f' : '#e05a4f');
       const targetHit = m.marginPct >= targetPct;
-      const laborRow = '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;'+(m.useL?'':'opacity:0.45;')+'">' +
-          '<span style="flex:1;color:var(--text-muted);white-space:nowrap;">Labor '+numInput(m.crew,'crew',54)+' crew × '+numInput(m.hours,'hours',54,'0.25')+' h × $'+m.crewRate+'</span>' +
-          '<span style="min-width:78px;text-align:right;'+(m.useL?'':'text-decoration:line-through;')+'">'+ecMoney(m.labor)+'</span>' +
-          '<input type="checkbox" '+(m.useL?'checked':'')+' title="include in cost" onchange="ecToggleCost(\'labor\')" style="cursor:pointer;"></div>';
-      return '<div style="font-weight:700;margin-bottom:10px;">Price &amp; margin <span style="font-size:12px;color:var(--text-muted);font-weight:400;">— base (fuel + drive time added next)</span></div>' +
+      // Cost row whose label contains editable inputs (labor / drive labor / fuel).
+      const inputRow = (key, on, labelHtml, val) => '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;'+(on?'':'opacity:0.45;')+'">' +
+          '<span style="flex:1;color:var(--text-muted);white-space:nowrap;">'+labelHtml+'</span>' +
+          '<span style="min-width:78px;text-align:right;'+(on?'':'text-decoration:line-through;')+'">'+ecMoney(val)+'</span>' +
+          '<input type="checkbox" '+(on?'checked':'')+' title="include in cost" onchange="ecToggleCost(\''+key+'\')" style="cursor:pointer;"></div>';
+      const laborRow = inputRow('labor', m.useL, 'Labor '+numInput(m.crew,'crew',54)+' crew × '+numInput(m.hours,'hours',54,'0.25')+' h × $'+m.crewRate, m.labor);
+      const driveRow = inputRow('driveLabor', m.useDL, 'Drive labor '+numInput(m.driveMin,'driveMin',54)+' min × '+m.crew+' crew × $'+m.crewRate, m.driveLabor);
+      const fuelRow  = inputRow('fuel', m.useF, 'Fuel '+numInput(m.driveMiles,'driveMiles',54,'0.1')+' mi ÷ '+m.mpg+' mpg × $'+m.fuelPrice, m.fuel);
+      // Volume-reduction breakout: where the gross trucks went after recycling + donation are diverted from disposal.
+      const volBreakout = (m.recycleTrucks+m.donateTrucks) > 0 ? '<div style="font-size:11px;color:var(--text-muted);padding:0 0 5px 2px;margin-top:-3px;">gross '+ecTk(m.trucks)+' tk − recycling '+ecTk(m.recycleTrucks)+' − donation '+ecTk(m.donateTrucks)+' = '+ecTk(m.dispTrucks)+' tk to disposal</div>' : '';
+      const distBtn = '<div style="display:flex;align-items:center;gap:6px;">' +
+          '<button id="ecDistBtn" onclick="ecCalcDistances()" style="font-size:12px;padding:5px 10px;border-radius:6px;cursor:pointer;background:var(--btn-surface);border:1px solid var(--btn-surface-border);color:var(--text-primary);">🗺 '+(m.dist?'Recalc distances':'Calculate distances')+'</button>' +
+          (m.dist ? '<span style="font-size:11px;color:#22c55e;white-space:nowrap;">✓ ~'+ecTk(m.driveMiles)+' mi round trip</span>' : '<span style="font-size:11px;color:var(--text-muted);white-space:nowrap;">for drive labor + fuel</span>') +
+        '</div>';
+      return '<div style="font-weight:700;margin-bottom:10px;">Price &amp; margin <span style="font-size:12px;color:var(--text-muted);font-weight:400;">— optimize the price</span></div>' +
         '<div style="display:flex;gap:12px 16px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">' +
           pctInput('Recycle','recyclePct', +(m.recyclePct*100).toFixed(0)) + pctInput('Donate','donatePct', +(m.donatePct*100).toFixed(0)) +
           siteSelect('Disposal', m.sites, m.siteIdx, 'disposalSiteIdx') +
           siteSelect('Recycling', m.recSites, m.recSiteIdx, 'recycleSiteIdx') +
           siteSelect('Donation', m.donSites, m.donSiteIdx, 'donateSiteIdx') +
+          distBtn +
         '</div>' +
         '<div style="display:flex;gap:14px 20px;flex-wrap:wrap;">' +
           '<div style="flex:1;min-width:210px;">' +
             '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Revenue</div>' +
             row('Volume ('+ecTrucksLabel(m.trucks)+')', m.volumePrice) + row('Adjustments', m.adjNet) +
-            (m.recyclingRev>0 ? row('Recycling credit ('+(+m.recycleTrucks.toFixed(2))+' tk × $'+m.recRevRate+')', m.recyclingRev) : '') +
+            (m.recyclingRev>0 ? row('Recycling credit ('+ecTk(m.recycleTrucks)+' tk × $'+m.recRevRate+')', m.recyclingRev) : '') +
             row('Total revenue', m.totalRevenue, true) +
           '</div>' +
           '<div style="flex:1;min-width:210px;">' +
             '<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Cost <span style="text-transform:none;font-weight:400;">(uncheck to exclude)</span></div>' +
-            costRow('disposal', 'Disposal ('+(+m.dispTrucks.toFixed(2))+' tk × $'+m.siteCost+')', m.disposal) +
-            laborRow +
+            costRow('disposal', 'Disposal ('+ecTk(m.dispTrucks)+' tk × $'+m.siteCost+')', m.disposal) +
+            volBreakout +
+            laborRow + driveRow + fuelRow +
             costRow('royalty', 'Royalty ('+(m.royaltyFrac*100).toFixed(0)+'%)', m.royalty) +
             row('Total cost', m.cost, true) +
           '</div>' +
