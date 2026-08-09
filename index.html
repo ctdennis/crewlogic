@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.118.0 | 2026-08-09">
+  <meta name="crewlogic-version" content="v5.119.0 | 2026-08-09">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -682,6 +682,7 @@
       background: var(--bg-card); border: 1px solid var(--border);
       border-radius: var(--radius); padding: 16px; margin-bottom: 14px;
     }
+    .dash-filter-summary::-webkit-details-marker { display: none; }
     .settings-tab {
       flex: 1;
       padding: 8px 4px;
@@ -12417,8 +12418,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const codes = [...new Set(jobs.map(j => j.routeCode || '?'))].sort();
         routesData = codes.map(c => ({ code: c, jobs: jobs.filter(j => (j.routeCode || '?') === c), open: [] }));
       }
-      // Route-classification filter: hide routes whose CrewLogic type matches the selected "Hide …" value.
-      if (_boardHideType) routesData = routesData.filter(rt => (rt.crewlogicType || 'other') !== _boardHideType);
+      // Route-classification filter: show only routes whose CrewLogic type is checked in the multi-pick.
+      if (_boardVisibleTypes && _boardVisibleTypes.size < 5) routesData = routesData.filter(rt => _boardVisibleTypes.has(rt.crewlogicType || 'other'));
       const hdr = (data.dayLabel || '') + ' — ' + jobs.length + ' job' + (jobs.length !== 1 ? 's' : '') + ' · ' + routesData.length + ' route' + (routesData.length !== 1 ? 's' : '');
       if (!routesData.length) { r.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-size:13px;color:var(--text-muted);">No routes for ' + mjEsc(data.dayLabel || 'this day') + '.</div>'; return; }
       if (!container) _mjBoardByID = {}; // single-board screen resets; dashboard boards accumulate (job IDs unique)
@@ -12569,7 +12570,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // ===== Dispatch Dashboard (desktop) — source + destination boards side by side (re-entrant board) =====
     let _dashSrcDay = '', _dashDestDay = '';
-    let _boardHideType = '';   // route-classification filter: hide routes whose crewlogicType === this ('' = show all)
+    // route-classification filter: multi-pick set of VISIBLE crewlogicTypes (all shown by default).
+    let _boardVisibleTypes = new Set(['estimate', 'junk', 'reserve', 'dispatch', 'other']);
     let _dashCache = null;     // last aligned board data, so the filter re-renders without re-fetching Vonigo
     function _dashNavBtnCss() { return 'width:26px;height:26px;border-radius:6px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-size:12px;cursor:pointer;'; }
     function _dashDayLabel(dayID) {
@@ -12604,10 +12606,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +   '<button id="dashMicBtn" onclick="dashMic()" title="Voice command" style="width:38px;height:38px;flex:0 0 auto;border-radius:50%;background:var(--accent-green);color:var(--accent-text);border:none;cursor:pointer;font-size:17px;">🎤</button>'
         +   '<input id="dashCmdInput" type="text" placeholder="…or type a command — e.g. “move the 2nd job on MA1REG to tomorrow at 10”" onkeydown="if(event.key===\'Enter\')dashSendCmd()" style="flex:1;min-width:240px;padding:9px 12px;font-size:13px;background:var(--bg-input,#253545);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);">'
         +   '<div id="dashCmdResult" style="flex:0 0 auto;font-size:12px;color:var(--text-muted);"></div>'
-        +   '<select id="dashRouteFilter" onchange="_dashApplyFilter(this.value)" title="Hide routes of a type from both boards" style="flex:0 0 auto;font-size:12px;padding:7px 10px;background:var(--bg-input,#253545);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);">'
-        +     '<option value="">Filter: show all routes</option>'
-        +     RC_TYPES.map(t => '<option value="' + t.v + '"' + (t.v === _boardHideType ? ' selected' : '') + '>Hide ' + t.label + '</option>').join('')
-        +   '</select>'
+        +   '<details id="dashRouteFilter" style="position:relative;flex:0 0 auto;">'
+        +     '<summary class="dash-filter-summary" title="Show only the checked route types on both boards" style="cursor:pointer;font-size:12px;padding:7px 10px;background:var(--bg-input,#253545);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);white-space:nowrap;list-style:none;">🔎 <span id="dashRouteFilterLbl">' + _dashFilterLabel() + '</span> ▾</summary>'
+        +     '<div style="position:absolute;z-index:60;top:calc(100% + 4px);left:0;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:6px 10px;box-shadow:0 6px 20px rgba(0,0,0,.45);min-width:180px;">'
+        +       RC_TYPES.map(t => '<label style="display:flex;align-items:center;gap:8px;padding:5px 2px;font-size:13px;cursor:pointer;white-space:nowrap;"><input type="checkbox" ' + (_boardVisibleTypes.has(t.v) ? 'checked' : '') + ' onchange="_dashToggleType(\'' + t.v + '\', this.checked)" style="cursor:pointer;"> ' + t.label + '</label>').join('')
+        +     '</div>'
+        +   '</details>'
         + '</div>'
         // schedules on TOP (two boards, route-aligned)
         + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start;margin-bottom:12px;">'
@@ -12945,9 +12949,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         endH: Number.isFinite(maxT) ? Math.min(21, Math.max(17, Math.ceil(maxT / 60))) : 17,
       };
     }
-    // Route filter: set the hide-type and re-render BOTH boards from the cached aligned data (no Vonigo re-fetch).
-    function _dashApplyFilter(val) {
-      _boardHideType = val || '';
+    // Route filter (multi-pick): show only the checked route types. Re-renders BOTH boards from cached data (no re-fetch).
+    function _dashFilterLabel() {
+      const n = _boardVisibleTypes.size;
+      if (n >= 5) return 'Routes: all';
+      if (n === 0) return 'Routes: none';
+      if (n <= 2) return RC_TYPES.filter(t => _boardVisibleTypes.has(t.v)).map(t => t.label).join(', ');
+      return n + ' route types';
+    }
+    function _dashToggleType(v, on) {
+      if (on) _boardVisibleTypes.add(v); else _boardVisibleTypes.delete(v);
+      const lbl = document.getElementById('dashRouteFilterLbl'); if (lbl) lbl.textContent = _dashFilterLabel();
+      _dashRerenderBoards();
+    }
+    function _dashRerenderBoards() {
       if (!_dashCache) return;
       dashRenderBoard(_dashCache.srcDay, _dashCache.srcR, document.getElementById('dashSrcBoard'), _dashCache.axis);
       dashRenderBoard(_dashCache.destDay, _dashCache.destR, document.getElementById('dashDestBoard'), _dashCache.axis);
@@ -26621,7 +26636,7 @@ RECYCLING & DONATION
     const RC_TYPES = [
       { v: 'estimate', label: 'Estimate' },
       { v: 'junk', label: 'Junk Removal Only' },
-      { v: 'reserve', label: 'Reschedule / Reserve' },
+      { v: 'reserve', label: 'Reserved' },
       { v: 'dispatch', label: 'Dispatch' },
       { v: 'other', label: 'Regular / Other' },
     ];

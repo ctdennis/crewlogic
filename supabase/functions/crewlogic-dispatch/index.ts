@@ -327,6 +327,16 @@ async function getRoutesFull(token: string, _dayID: string) {
     .filter((rt: any) => rt.isActive)
     .sort((a: any, b: any) => a.sequence - b.sequence);
 }
+// routeID → stable routeTypeID (method 11) — lets boardGrid default a route's category the SAME way Settings
+// pre-fills it (saved classification still wins), so a correctly-defaulted-but-unsaved route still filters.
+async function getRouteTypeMap(token: string): Promise<Record<string, number>> {
+  try {
+    const r = await vpost(token, '/resources/routes/', { method: '11', isCompleteObject: 'true' });
+    const m: Record<string, number> = {};
+    for (const x of ((r.Routes || []) as Array<Record<string, unknown>>)) m[String(x.routeID)] = Number(x.routeTypeID);
+    return m;
+  } catch { return {}; }
+}
 function pickRouteID(toId: Record<string, string>, route?: string): string | undefined {
   if (!route) return undefined;
   if (/^\d+$/.test(route)) return route;
@@ -530,7 +540,7 @@ Deno.serve(async (req: Request) => {
       // Board DISPLAY uses 30-min granularity = the route's RAW open time (like Vonigo), not "where a full
       // 120-min job fits" — otherwise the ~2h before each job reads as blocked/gray. The actual move/
       // duration writes still validate the real job length via the lock step.
-      const [routes, jobs, openSlots, tz] = await Promise.all([
+      const [routes, jobs, openSlots, tz, typeMap] = await Promise.all([
         getRoutesFull(token, dayID),
         // withCoords=true (FW-63): geocode each board job so the board-detail popup's directions link can
         // route to the exact PIN, not the address text (the text re-resolved to the Hampton Inn POI on the
@@ -538,16 +548,19 @@ Deno.serve(async (req: Request) => {
         listRouteJobs(token, franchiseID, dayID, undefined, true),
         suggestSlotsFn(token, franchiseID, dayID, 30).catch(() => []),
         franchiseTz(franchiseID),
+        getRouteTypeMap(token),   // routeID → routeTypeID, for the classification default
       ]);
-      // Owner's route classification (Estimate/Junk/Reserve/Dispatch/Other) — powers the board's hide-by-type filter.
+      // Owner's route classification (Estimate/Junk/Reserve/Dispatch/Other) — powers the board's route-type filter.
+      // Saved classification wins; else default from the Vonigo routeTypeID (same as Settings pre-fill); else 'other'.
       const rids = routes.map((r: { id: string }) => String(r.id));
       const { data: cls } = await supa().from('franchise_route_types').select('vonigo_route_id, crewlogic_type').eq('tenant_id', TENANT_ID).in('vonigo_route_id', rids.length ? rids : ['']);
       const clsMap = new Map((cls || []).map((x: Record<string, unknown>) => [String(x.vonigo_route_id), String(x.crewlogic_type)]));
+      const rtCat = (id: string) => clsMap.get(id) || RT_DEFAULT[typeMap[id]] || 'other';
       const byId: Record<string, any> = {};
-      for (const r of routes) byId[r.id] = { id: r.id, code: r.code, name: r.name, isActive: r.isActive, crewlogicType: clsMap.get(String(r.id)) || 'other', jobs: [], open: [] };
+      for (const r of routes) byId[r.id] = { id: r.id, code: r.code, name: r.name, isActive: r.isActive, crewlogicType: rtCat(String(r.id)), jobs: [], open: [] };
       for (const j of jobs) {
         const k = j.routeID; if (!k) continue;
-        if (!byId[k]) byId[k] = { id: k, code: j.routeCode, name: j.route, isActive: true, crewlogicType: clsMap.get(String(k)) || 'other', jobs: [], open: [] };
+        if (!byId[k]) byId[k] = { id: k, code: j.routeCode, name: j.route, isActive: true, crewlogicType: rtCat(String(k)), jobs: [], open: [] };
         byId[k].jobs.push({ woID: j.woID, jobID: j.jobID, client: j.client, timeMin: j.timeMin, durationMin: j.durationMin, timeLabel: j.timeLabel, status: j.status, completed: j.completed, labelDone: j.labelDone, labelOpt: j.labelOpt, apptCount: j.apptCount, zoneID: j.zoneID, zoneName: j.zoneName, zip: j.zip, address: j.address, lat: j.lat, lon: j.lon, routeCode: j.routeCode, price: j.price, summary: j.summary, items: j.items, bookedOnline: j.bookedOnline, bookedSameDay: !!(j.dateCreated && j.dateService && ymdInTz(+j.dateCreated, tz) === ymdInTz(+j.dateService, tz)) });
       }
       for (const s of openSlots) { const k = String(s.routeID); if (byId[k]) byId[k].open.push({ startTime: s.startTime, label: s.label }); }
