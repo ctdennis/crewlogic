@@ -103,13 +103,14 @@ async function attachOrder(franchiseID: string, trucks: Truck[]): Promise<Truck[
     : [];
   const orderByKey = new Map(rows.map((r) => [r.truck_key, r.sort_order]));
   const disabled = new Set(rows.filter((r) => r.out_of_service).map((r) => r.truck_key));
-  const annotated = trucks
-    .filter((t) => !disabled.has(truckKey(t)))   // out-of-service trucks are unusable → hidden from the map/list
-    .map((t) => {
-      const key = truckKey(t);
-      const so = orderByKey.has(key) ? (orderByKey.get(key) as number) : Number.MAX_SAFE_INTEGER;
-      return { ...t, key, sortOrder: so };
-    });
+  // Keep disabled trucks in the feed but FLAG them — the client colors them black on the map/list so
+  // dispatchers can see an out-of-service truck + where it is. They're excluded from ASSIGNMENT
+  // (crewlogic-assignments roster) + geofence auto-assign (crewlogic-motive-webhook), not from the map.
+  const annotated = trucks.map((t) => {
+    const key = truckKey(t);
+    const so = orderByKey.has(key) ? (orderByKey.get(key) as number) : Number.MAX_SAFE_INTEGER;
+    return { ...t, key, sortOrder: so, outOfService: disabled.has(key) };
+  });
   annotated.sort((a, b) =>
     (a.sortOrder as number) - (b.sortOrder as number) ||
     String(a.name ?? "").localeCompare(String(b.name ?? "")));
