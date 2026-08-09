@@ -30,8 +30,20 @@ function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 }
 
-// Geocode the office location (Census, free/keyless) so we can pull NWS alerts for the office's OWN zones
-// instead of the whole state. Returns null on any miss → caller falls back to state-wide.
+// ZIP → lat/lon centroid (zippopotam, free/keyless, US zips). Primary anchor: every franchise's weather is
+// pulled at its office ZIP, uniformly — not at state level (owner 2026-08-09).
+async function geocodeZip(zip: string): Promise<{ lat: number; lon: number } | null> {
+  try {
+    const r = await fetch(`https://api.zippopotam.us/us/${encodeURIComponent(zip)}`, { headers: { "User-Agent": UA } });
+    if (!r.ok) return null;
+    const d = await r.json() as { places?: Array<{ latitude?: string; longitude?: string }> };
+    const p = d?.places?.[0];
+    const lat = Number(p?.latitude), lon = Number(p?.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
+    return null;
+  } catch { return null; }
+}
+// Full-address fallback (Census) if the ZIP centroid lookup is unavailable.
 async function geocodeCensus(q: string): Promise<{ lat: number; lon: number } | null> {
   try {
     const u = `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encodeURIComponent(q)}&benchmark=Public_AR_Current&format=json`;
@@ -67,13 +79,14 @@ Deno.serve(async (req: Request) => {
       officeZip = String(cs.officeZip || "").trim();
     }
 
-    // Prefer POINT alerts at the office location — narrows to the office's OWN NWS zones instead of the whole
-    // state (a NYC franchise was getting every borough + Long Island + upstate alert). Fall back to state-wide.
+    // POINT alerts at the office ZIP for EVERY franchise — the office's own NWS zones, uniformly, never
+    // state-level (a NYC franchise got every borough + Long Island + upstate alert). ZIP centroid first
+    // (works for any franchise from just the zip); full office address as a fallback; state as last resort.
+    let pt: { lat: number; lon: number } | null = null;
+    if (officeZip) pt = await geocodeZip(officeZip);
+    if (!pt && officeAddress) pt = await geocodeCensus([officeAddress, officeZip, state].filter(Boolean).join(" "));
     let url = "";
-    if (officeAddress || officeZip) {
-      const pt = await geocodeCensus([officeAddress, officeZip, state].filter(Boolean).join(" "));
-      if (pt) url = `https://api.weather.gov/alerts/active?point=${pt.lat.toFixed(4)},${pt.lon.toFixed(4)}`;
-    }
+    if (pt) url = `https://api.weather.gov/alerts/active?point=${pt.lat.toFixed(4)},${pt.lon.toFixed(4)}`;
     if (!url) {
       if (!/^[A-Z]{2}$/.test(state)) return json({ success: true, state: state || null, alerts: [] }); // no usable location → no alerts
       url = `https://api.weather.gov/alerts/active?area=${state}`;
