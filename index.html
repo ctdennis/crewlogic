@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.111.0 | 2026-08-08">
+  <meta name="crewlogic-version" content="v5.111.1 | 2026-08-08">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -13970,7 +13970,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Gated feature (dev + super-admin for now). Backend: crewlogic-ny-estimate (list/load/group/quantify/rooms)
     // + crewlogic-ny-photo (public image proxy). See docs/plan-ny-estimate.md.
     // ═══════════════════════════════════════════════════════════════════════
-    let _ec = { jobID: null, photos: [], rooms: [], roomOptions: [], busy: false, spend: 0, estimates: [], counts: {}, markup: { labor: 0, surcharge: 0, discount: 0 } };
+    let _ec = { jobID: null, photos: [], rooms: [], roomOptions: [], busy: false, spend: 0, estimates: [], counts: {}, est: null, priceBook: [], adjustments: [], adjType: 'surcharge' };
     const EC_PRICE = { group: { in: 3, out: 15 }, quantify: { in: 3, out: 15 } }; // $/M tokens (both passes now Sonnet)
     function _ecEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
     function ecProxy(url){ return EDGE_BASE + '/crewlogic-ny-photo?u=' + encodeURIComponent(url); }
@@ -14037,7 +14037,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function ecOpen() {
       await ecEnsureScreen();
       document.getElementById('estimateCostingScreen').style.display = 'block';
-      _ec.jobID = null; _ec.photos = []; _ec.rooms = []; _ec.spend = 0; _ec.estimates = []; _ec.counts = {}; _ec.markup = { labor: 0, surcharge: 0, discount: 0 };
+      _ec.jobID = null; _ec.photos = []; _ec.rooms = []; _ec.spend = 0; _ec.estimates = []; _ec.counts = {}; _ec.est = null; _ec.priceBook = []; _ec.adjustments = []; _ec.adjType = 'surcharge';
       document.getElementById('ecPhotos').innerHTML = '';
       document.getElementById('ecResults').innerHTML = '';
       document.getElementById('ecCalcBtn').style.display = 'none';
@@ -14077,6 +14077,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       try {
         const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'load', franchiseID: currentUser.franchiseID, jobID });
         if (!r || !r.success) { ecBusy(false,'Could not load estimate.'); return; }
+        _ec.est = r.estimate || null; _ec.adjustments = [];
+        // Load THIS estimate's price book (same edge fn + zip the estimator uses) into our own state — the
+        // Adjustments pickers price Surcharge/Labor/Single Item/Discount from it. Fire-and-forget; ready by Calculate.
+        priceLookup({ zipCode: (r.estimate && r.estimate.zip) || '', franchiseID: currentUser.franchiseID, email: currentUser.email })
+          .then(pr => pr.json()).then(pd => { _ec.priceBook = (pd && pd.blocks) || []; }).catch(() => { _ec.priceBook = []; });
         _ec.photos = (r.photos || []).map((p,i) => Object.assign({}, p, { index:i, room:'' }));
         if (!_ec.photos.length) { document.getElementById('ecPhotos').innerHTML=''; ecBusy(false, 'This estimate has no photos loaded in Vonigo — pick another.'); return; }
         ecBusy(true, 'Preparing photos…');
@@ -14257,24 +14262,74 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         '</div>' +
         '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Tap a room to see its photos + items and set its truck volume. Totals update live.</div>' +
         rows +
-        ecMarkupHtml() +
+        '<div id="ecAdjPanel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:14px 0;">'+ecAdjustmentsHtml()+'</div>' +
         '<div style="font-size:12px;color:var(--text-muted);margin-top:10px;">Pricing (Vonigo zip) + cost (CrewLogic Cost tab) → margin: coming next.</div>';
       ecRecalcTotals();
     }
-    function ecMarkupNet(){ const m = _ec.markup||{}; return (parseFloat(m.labor)||0) + (parseFloat(m.surcharge)||0) - (parseFloat(m.discount)||0); }
-    function ecSetMarkup(f, val){ if (!_ec.markup) _ec.markup = {}; _ec.markup[f] = Math.max(0, parseFloat(val)||0); const el = document.getElementById('ecMarkupNet'); if (el) el.textContent = (ecMarkupNet()<0?'-$':'$') + Math.abs(ecMarkupNet()).toFixed(2); }
-    function ecMarkupHtml(){
-      const m = _ec.markup || {};
-      const fld = (label, key, hint) => '<div style="flex:1;min-width:96px;">' +
-        '<label style="display:block;font-size:11px;color:var(--text-muted);margin-bottom:3px;">'+label+'</label>' +
-        '<div style="display:flex;align-items:center;gap:3px;"><span style="color:var(--text-muted);font-size:13px;">$</span>' +
-        '<input type="number" min="0" step="1" value="'+(m[key]||0)+'" onchange="ecSetMarkup(\''+key+'\', this.value)" placeholder="'+(hint||'0')+'" style="width:100%;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:6px;padding:5px 6px;font-size:13px;box-sizing:border-box;"></div></div>';
-      const net = ecMarkupNet();
-      return '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:14px 0;">' +
-        '<div style="font-weight:700;margin-bottom:10px;">Adjustments <span style="font-size:12px;color:var(--text-muted);font-weight:400;">— things the AI didn\'t capture</span></div>' +
-        '<div style="display:flex;gap:10px;flex-wrap:wrap;">' + fld("Add'l labor",'labor') + fld('Surcharge','surcharge') + fld('Discount','discount') + '</div>' +
-        '<div style="margin-top:10px;font-size:13px;color:var(--text-muted);">Net adjustments: <span id="ecMarkupNet" style="font-weight:700;color:var(--accent-green);">'+(net<0?'-$':'$')+Math.abs(net).toFixed(2)+'</span> <span style="font-size:11px;">(applied to margin in the next step)</span></div>' +
-      '</div>';
+    // Priced items for a manual type, filtered from OUR loaded price book — mirrors the estimator's
+    // populatePricedItems so the prices match to the penny (same blocks, same filter).
+    function ecPricedItems(type){
+      const blocks = _ec.priceBook || [];
+      const out = [];
+      const pushBlock = (b) => (b.items||[]).forEach(it => out.push({ priceItemID: it.priceItemID, name: it.name, value: Number(it.value)||0 }));
+      if (type === 'surcharge'){
+        blocks.filter(b => { const n=(b.name||'').toLowerCase(); return n.startsWith('surcharge') || n==='fuel surcharge'; }).forEach(pushBlock);
+        const vol = blocks.find(b => (b.name||'').toLowerCase().includes('volume'));
+        if (vol) (vol.items||[]).forEach(it => { if (!((it.name||'').toLowerCase().includes('truckload'))) out.push({ priceItemID: it.priceItemID, name: it.name, value: Number(it.value)||0 }); });
+      } else if (type === 'labor'){
+        const b = blocks.find(b => { const n=(b.name||'').toLowerCase(); return n==='additional labor' || n==='labor'; }); if (b) pushBlock(b);
+      } else if (type === 'singleitem'){
+        const b = blocks.find(b => (b.name||'').toLowerCase().includes('single item')); if (b) pushBlock(b);
+      } else if (type === 'discount'){
+        const b = blocks.find(b => (b.name||'').toLowerCase().includes('discount')); if (b) pushBlock(b);
+      }
+      return out;
+    }
+    function ecAdjNet(){ return (_ec.adjustments||[]).reduce((s,a) => s + (a.unitPrice||0)*(a.qty||0), 0); }
+    function ecRenderAdjPanel(){ const p = document.getElementById('ecAdjPanel'); if (p) p.innerHTML = ecAdjustmentsHtml(); }
+    function ecAdjTypeChange(){
+      const t = document.getElementById('ecAdjType'); _ec.adjType = t ? t.value : 'surcharge';
+      const items = ecPricedItems(_ec.adjType); const sel = document.getElementById('ecAdjItem');
+      if (sel) sel.innerHTML = items.length
+        ? items.map(it => '<option value="'+it.priceItemID+'" data-price="'+it.value+'" data-name="'+_ecEsc(it.name)+'">'+_ecEsc(it.name)+' — $'+it.value.toFixed(2)+'</option>').join('')
+        : '<option value="">— none in price book —</option>';
+    }
+    function ecAdjAdd(){
+      const itemSel = document.getElementById('ecAdjItem'); const qtyEl = document.getElementById('ecAdjQty');
+      const opt = itemSel && itemSel.options[itemSel.selectedIndex];
+      if (!opt || !opt.value) return;
+      const type = (document.getElementById('ecAdjType')||{}).value || 'surcharge';
+      let unitPrice = parseFloat(opt.getAttribute('data-price'))||0;
+      if (type === 'discount' && unitPrice > 0) unitPrice = -unitPrice; // discounts subtract
+      _ec.adjustments.push({ type, name: opt.getAttribute('data-name') || opt.textContent, unitPrice, qty: Math.max(1, parseInt(qtyEl && qtyEl.value)||1) });
+      ecRenderAdjPanel();
+    }
+    function ecAdjDelete(i){ _ec.adjustments.splice(i,1); ecRenderAdjPanel(); }
+    function ecAdjustmentsHtml(){
+      const items = ecPricedItems(_ec.adjType || 'surcharge');
+      const typeOpts = [['surcharge','Surcharge'],['labor','Labor'],['singleitem','Single Item'],['discount','Discount']];
+      const lines = (_ec.adjustments||[]).map((a,i) => {
+        const tot = (a.unitPrice||0)*(a.qty||0);
+        return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px;">' +
+          '<span style="flex:1;">'+_ecEsc(a.name)+' <span style="color:var(--text-muted);font-size:11px;">('+a.type+')</span></span>' +
+          '<span style="color:var(--text-muted);font-size:12px;">'+a.qty+' × $'+Math.abs(a.unitPrice).toFixed(2)+'</span>' +
+          '<span style="font-weight:700;color:'+(tot<0?'#e05a4f':'var(--accent-green)')+';min-width:66px;text-align:right;">'+(tot<0?'-$':'$')+Math.abs(tot).toFixed(2)+'</span>' +
+          '<span onclick="ecAdjDelete('+i+')" title="Remove" style="color:#e05a4f;cursor:pointer;font-weight:800;padding:0 4px;">×</span>' +
+        '</div>';
+      }).join('');
+      const net = ecAdjNet();
+      const itemOpts = items.length
+        ? items.map(it => '<option value="'+it.priceItemID+'" data-price="'+it.value+'" data-name="'+_ecEsc(it.name)+'">'+_ecEsc(it.name)+' — $'+it.value.toFixed(2)+'</option>').join('')
+        : '<option value="">— price book loading / none —</option>';
+      return '<div style="font-weight:700;margin-bottom:8px;">Adjustments <span style="font-size:12px;color:var(--text-muted);font-weight:400;">— labor, surcharges, single items, discounts (priced from your book)</span></div>' +
+        (lines ? '<div style="margin-bottom:10px;">'+lines+'</div>' : '') +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+          '<select id="ecAdjType" class="form-select" style="width:auto;font-size:13px;padding:5px 8px;" onchange="ecAdjTypeChange()">'+typeOpts.map(t=>'<option value="'+t[0]+'"'+((_ec.adjType||'surcharge')===t[0]?' selected':'')+'>'+t[1]+'</option>').join('')+'</select>' +
+          '<select id="ecAdjItem" class="form-select" style="flex:1;min-width:140px;font-size:13px;padding:5px 8px;">'+itemOpts+'</select>' +
+          '<input id="ecAdjQty" type="number" min="1" value="1" style="width:54px;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:6px;padding:5px 6px;font-size:13px;">' +
+          '<button class="btn-surface" style="padding:6px 12px;font-weight:700;" onclick="ecAdjAdd()">Add</button>' +
+        '</div>' +
+        '<div style="margin-top:10px;font-size:13px;color:var(--text-muted);">Net adjustments: <span style="font-weight:700;color:var(--accent-green);">'+(net<0?'-$':'$')+Math.abs(net).toFixed(2)+'</span> <span style="font-size:11px;">(applied to margin next)</span></div>';
     }
     function ecRoomDetails(i) {
       const rm = _ec.rooms[i]; if (!rm) return;
