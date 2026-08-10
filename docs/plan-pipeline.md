@@ -5,6 +5,19 @@
 **Recognition reference (DONE/validated):** memory `vonigo-five-type-recognition` (probes vs #90, 2026-08-06/07).
 **Owner scope decision (2026-08-10):** build **all 5 types**, plan doc first.
 
+> **UPDATE 2026-08-10 (pm) — WO types re-sourced from the job mirror; earlier `followups` attempt retired.**
+> The three WorkOrder-derived types (**cancellations, unconverted estimates, UCBs**) now read from the local
+> **job mirror** (`job_appointments` + `job_source_snapshot`, kept fresh by `crewlogic-vonigo-import` — prod: every
+> 15 min + a nightly ~90-day backfill) instead of the pipeline scanning Vonigo WorkOrders itself. Full sync went
+> **~80s → ~5s** (the 120-day UCB scan is gone), we stop double-pulling WorkOrders, and cancellations/unconverted
+> now also carry **phone + email** (from the mirror's `customer_display`). Recognition reads the true status/label
+> from the stored `raw` WO so it matches the Vonigo-direct path exactly (the mirror's normalized `status` maps
+> 163→'working', which we do NOT rely on). **Leads (Clients) + cases** aren't jobs, so they still pull from Vonigo.
+> A prior, simpler follow-up attempt — `crewlogic-followups-sync` + `followups`/`followup_events` (0081) +
+> `plan-followups.md` — was **retired** (migration 0087; dev-only, zero prod footprint, Owner-approved). Follow-ups:
+> (a) extend the importer to capture the cancel **reason** into the mirror → then cancellations need zero Vonigo
+> either; (b) port the `followup_events` audit-log idea into the pipeline (touch history).
+>
 > **UPDATE 2026-08-10 — "cadence templates" became user-built "sequences."** The original plan seeded touches from hardcoded per-type *cadence templates*. Owner requirement shift (2026-08-10): make cadences **first-class, reusable, user-built objects** so an owner can, e.g., build a **"Realtor outreach"** sequence with its own steps and audience-targeted email/text copy, then **assign** any item to it. Implemented as `pipeline_sequences` + `pipeline_sequence_steps` (migration 0086); assigning an item seeds `pipeline_touches` from the sequence's steps; one sequence may be the **auto-default per type** (applied on sync). Five **starter sequences** ship seeded (Standard Lead, Reschedule Follow-up, Estimate Drip, Urgent Callback, Case Callback). Everywhere below, read "cadence template" as **"sequence."**
 
 ---

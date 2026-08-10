@@ -22,9 +22,8 @@ const VONIGO_BASE = 'https://junkluggers.vonigo.com/api/v1';
 const F = { woStatus: 181, woLabel: 201, woAddress: 184, woPrice: 813, woDate: 185, clientStage: 123, contactPhone: 1088, jobCancelCat: 974, jobCancelReason: 975, jobCancelComments: 973, caseNarr: 220, caseType: 219, casePhone: 228, caseEmail: 229 };
 const CANCEL_STATUS = new Set([162, 163]);      // Cancelled / Cancelled-Today
 const OPEN_STATUS = new Set([160, 161]);        // Open / Booked — the live (non-terminal) statuses
-const UCB_LOOKBACK_DAYS = 120;                  // URGENTCB is a persistent backlog; scan the max window Vonigo allows
 const EST_LABELS = new Set([9996, 9973, 9993]); // Est-Completed-EstOnly / Est-Only / Lost
-const UCB_ROUTE_ID = 2987;                       // "Pending - Other (URGENTCB)"
+// UCB lane is matched by route_name (~URGENTCB) off the mirror; the Vonigo route objectID (2987) is no longer needed.
 const ALL_TYPES = ['lead', 'unconverted_estimate', 'cancellation', 'ucb', 'case'];
 
 // Starter sequences seeded per franchise on first use (then owner-editable). Each is the auto-default for
@@ -289,89 +288,83 @@ Deno.serve(async (req: Request) => {
       source_object, source_external_id, last_synced_at: new Date().toISOString(), updated_at: new Date().toISOString(), ...extra,
     });
 
-    // Fetch WorkOrders pages CONCURRENTLY (they were sequential — ~4.5s/page × 12 = ~54s, and the 120-day UCB scan
-    // paid it in full). Firing the page requests in a bounded pool collapses the scan to roughly one page's time.
-    // We fire the full page range up front (Vonigo pageNo is 1-indexed; empty pages past the data return [] fast).
-    async function fetchWOPages(maxPages: number, ds: number, de: number, concurrency = 5): Promise<Record<string, unknown>[]> {
-      const pageNos = Array.from({ length: maxPages }, (_, i) => i + 1);
-      const pages = await mapPool(pageNos, concurrency, async (pg) => {
-        const r = await vpost('/data/WorkOrders/', { securityToken: token, franchiseID, pageNo: String(pg), pageSize: '200', sortMode: '1', sortDirection: '1', isCompleteObject: 'true', dateMode: '3', dateStart: String(ds), dateEnd: String(de) });
-        return r.errNo === 0 ? ((r.WorkOrders as Record<string, unknown>[]) || []) : [];
-      });
-      return pages.flat();
-    }
+    // WorkOrder-derived types (cancellation / unconverted_estimate / ucb) are READ FROM THE LOCAL JOB MIRROR
+    // (job_appointments + job_source_snapshot), which crewlogic-vonigo-import already keeps fresh (prod: every
+    // 15 min + a nightly ~90-day backfill). This replaces the old per-sync Vonigo WorkOrders scan (the 120-day UCB
+    // scan alone was ~57s) — now a couple of indexed DB reads. We read the TRUE status/label from the stored `raw`
+    // WO so recognition matches the Vonigo-direct path exactly (the mirror's normalized `status` maps 163→'working',
+    // which we must NOT rely on). Leads (Clients) and cases aren't jobs, so they still pull from Vonigo below.
+    const SNAP_SELECT = 'label_optionid, route_name, customer_display, import_total, raw, job_appointments!inner(source_external_id, scheduled_date, status)';
+    const mirrorWO = (row: Record<string, unknown>) => {
+      const ja = (row.job_appointments || {}) as Record<string, unknown>;
+      const raw = (row.raw || {}) as Record<string, unknown>;
+      const fields = (raw.Fields as VField[]) || []; const rels = (raw.Relations as VRel[]) || [];
+      const cd = (row.customer_display || {}) as Record<string, string | null>;
+      const woEpoch = parseInt(String(getField(fields, F.woDate)?.fieldValue || '0'), 10);
+      return {
+        woID: String(ja.source_external_id ?? ''), fields, rels, woEpoch,
+        status: getField(fields, F.woStatus)?.optionID || 0,
+        label: getField(fields, F.woLabel)?.optionID || 0,
+        base: {
+          customer_name: cd.name || rel(rels, 'client')?.name || '',
+          phone: cd.phone || null, email: cd.email || null,
+          address: getField(fields, F.woAddress)?.fieldValue || null,
+          amount: row.import_total != null ? Number(row.import_total) : num(getField(fields, F.woPrice)?.fieldValue),
+          occurred_at: iso(getField(fields, F.woDate)?.fieldValue), raw,
+        },
+      };
+    };
 
     // Passes A / A2 / B / C hit independent Vonigo endpoints and only push to `rows`, so run them CONCURRENTLY
     // (was sequential → the ~220 per-item Contact/Job lookups summed to ~80s; overlapping them cuts wall-time to
     // roughly the slowest single pass). Each pass is a self-contained async task; Promise.all awaits them below.
-    // ---- A) WorkOrders (recent window) → cancellation / unconverted_estimate ----
+    // ---- A) cancellation + unconverted_estimate — from the mirror (recent window by WO service date) ----
     const _passA = (want('cancellation') || want('unconverted_estimate')) ? (async () => {
-      const wos = await fetchWOPages(12, dateStart, dateEnd);
-      const cancels: { wo: Record<string, unknown>; base: Record<string, unknown> }[] = [];
-      for (const wo of wos) {
-        const fields = wo.Fields as VField[]; const rels = wo.Relations as VRel[];
-        const status = getField(fields, F.woStatus)?.optionID || 0;
-        const label = getField(fields, F.woLabel)?.optionID || 0;
-        const routeId = Number(rel(rels, 'route')?.objectID || 0);
-        const base = {
-          customer_name: rel(rels, 'client')?.name || '',
-          address: getField(fields, F.woAddress)?.fieldValue || '',
-          amount: num(getField(fields, F.woPrice)?.fieldValue),
-          occurred_at: iso(getField(fields, F.woDate)?.fieldValue),
-          raw: wo,
-        };
-        // Precedence: a cancelled status wins, then the estimate label. (UCB is handled in its own pass — pass A2 —
-        // because the URGENTCB lane is a date-independent backlog, not a recent-window thing; see below.)
-        void routeId;
-        if (CANCEL_STATUS.has(status) && want('cancellation')) cancels.push({ wo, base });
-        else if (EST_LABELS.has(label) && want('unconverted_estimate')) {
-          rows.push(mk('unconverted_estimate', 'workorder', String(wo.objectID), { ...base, reason: getField(fields, F.woLabel)?.fieldValue || String(label) }));
+      if (want('unconverted_estimate')) {
+        const { data } = await supabase.from('job_source_snapshot').select(SNAP_SELECT).eq('franchise_id', franchiseInternalID).in('label_optionid', [...EST_LABELS]);
+        for (const row of (data || []) as Record<string, unknown>[]) {
+          const w = mirrorWO(row);
+          if (!w.woID || (w.woEpoch && w.woEpoch < dateStart)) continue;   // recent window
+          rows.push(mk('unconverted_estimate', 'workorder', w.woID, { ...w.base, reason: getField(w.fields, F.woLabel)?.fieldValue || String(w.label) }));
         }
       }
-      // Enrich cancellations with the reason from the Job — /data/Jobs method:-2 by the job objectID returns the
-      // full (incl. cancelled) job. NOTE its Fields/Relations arrive at the RESPONSE top level, not under `.Job`.
-      await mapPool(cancels, 6, async ({ wo, base }) => {
-        let reason: string | null = null, detail: string | null = null;
-        const cached = knownCancelReason.get(String(wo.objectID));
-        if (cached && cached.reason) { reason = cached.reason; detail = cached.detail; } // already fetched — skip the Job call
-        else {
-          const jobID = rel(wo.Relations as VRel[], 'job')?.objectID;
-          if (jobID != null) {
-            try {
-              const jr = await vpost('/data/Jobs/', { securityToken: token, method: '-2', objectID: String(jobID), isCompleteObject: 'true' });
-              const jf = (jr.Fields as VField[]) || [];
-              const cat = getField(jf, F.jobCancelCat)?.fieldValue || '';
-              const rsn = getField(jf, F.jobCancelReason)?.fieldValue || '';
-              reason = [cat, rsn].filter(Boolean).join(' · ') || null;
-              detail = getField(jf, F.jobCancelComments)?.fieldValue || null;
-            } catch { /* reason optional */ }
+      if (want('cancellation')) {
+        // 162 Cancelled / 163 Cancelled-Today. The mirror normalizes those to 'cancelled'/'working'; we verify the
+        // raw optionID (CANCEL_STATUS) so the importer's status naming can't misclassify us.
+        const { data } = await supabase.from('job_source_snapshot').select(SNAP_SELECT).eq('franchise_id', franchiseInternalID).in('job_appointments.status', ['cancelled', 'working']);
+        const cands = ((data || []) as Record<string, unknown>[]).map(mirrorWO).filter((w) => w.woID && CANCEL_STATUS.has(w.status) && (!w.woEpoch || w.woEpoch >= dateStart));
+        // Reason still comes from the Vonigo Job (not mirrored) — cached, so only brand-new cancels hit Vonigo.
+        await mapPool(cands, 6, async (w) => {
+          let reason: string | null = null, detail: string | null = null;
+          const cached = knownCancelReason.get(w.woID);
+          if (cached && cached.reason) { reason = cached.reason; detail = cached.detail; }
+          else {
+            const jobID = rel(w.rels, 'job')?.objectID;
+            if (jobID != null) {
+              try {
+                const jr = await vpost('/data/Jobs/', { securityToken: token, method: '-2', objectID: String(jobID), isCompleteObject: 'true' });
+                const jf = (jr.Fields as VField[]) || [];
+                const cat = getField(jf, F.jobCancelCat)?.fieldValue || '';
+                const rsn = getField(jf, F.jobCancelReason)?.fieldValue || '';
+                reason = [cat, rsn].filter(Boolean).join(' · ') || null;
+                detail = getField(jf, F.jobCancelComments)?.fieldValue || null;
+              } catch { /* reason optional */ }
+            }
           }
-        }
-        rows.push(mk('cancellation', 'workorder', String(wo.objectID), { ...base, reason, detail }));
-      });
+          rows.push(mk('cancellation', 'workorder', w.woID, { ...w.base, reason, detail }));
+        });
+      }
     })() : Promise.resolve();
 
-    // ---- A2) UCB = WorkOrders on the URGENTCB lane (route 2987) that are still OPEN ----
-    // The URGENTCB lane is a persistent backlog that predates the recent window, so it gets its own wide scan
-    // (UCB_LOOKBACK_DAYS). We keep ONLY open statuses (160/161): cancelled WOs keep their last route (2987) but
-    // have dropped off the lane in Vonigo's view — including them would over-pull stale rows. (2026-08-10: #90's
-    // lane shows 4 open callbacks; a naive 30-day scan found 2, and a 120-day scan without the open filter found
-    // 12 — 8 of them cancelled. Open + wide window = the 4 the owner sees.)
+    // ---- A2) UCB = OPEN WorkOrders on the URGENTCB lane — from the mirror (no date window; the lane is a backlog) ----
+    // Keep ONLY open statuses (160/161): a cancelled WO keeps its last route (URGENTCB) but has dropped off the lane
+    // in Vonigo's view. (2026-08-10: #90's lane shows 4 open callbacks; a cancelled 5th, Shaw, correctly excluded.)
     const _passUCB = want('ucb') ? (async () => {
-      const ucbStart = dateEnd - (UCB_LOOKBACK_DAYS + 1) * 86400;
-      const wos = await fetchWOPages(12, ucbStart, dateEnd);
-      for (const wo of wos) {
-        const fields = wo.Fields as VField[]; const rels = wo.Relations as VRel[];
-        const status = getField(fields, F.woStatus)?.optionID || 0;
-        if (Number(rel(rels, 'route')?.objectID || 0) !== UCB_ROUTE_ID || !OPEN_STATUS.has(status)) continue;
-        rows.push(mk('ucb', 'workorder', String(wo.objectID), {
-          customer_name: rel(rels, 'client')?.name || '',
-          address: getField(fields, F.woAddress)?.fieldValue || '',
-          amount: num(getField(fields, F.woPrice)?.fieldValue),
-          occurred_at: iso(getField(fields, F.woDate)?.fieldValue),
-          reason: getField(fields, F.woLabel)?.fieldValue || null,
-          raw: wo,
-        }));
+      const { data } = await supabase.from('job_source_snapshot').select(SNAP_SELECT).eq('franchise_id', franchiseInternalID).ilike('route_name', '%urgentcb%');
+      for (const row of (data || []) as Record<string, unknown>[]) {
+        const w = mirrorWO(row);
+        if (!w.woID || !OPEN_STATUS.has(w.status)) continue;
+        rows.push(mk('ucb', 'workorder', w.woID, { ...w.base, reason: getField(w.fields, F.woLabel)?.fieldValue || null }));
       }
     })() : Promise.resolve();
 
