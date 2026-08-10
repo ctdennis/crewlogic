@@ -25,15 +25,32 @@ const EST_LABELS = new Set([9996, 9973, 9993]); // Est-Completed-EstOnly / Est-O
 const UCB_ROUTE_ID = 2987;                       // "Pending - Other (URGENTCB)"
 const ALL_TYPES = ['lead', 'unconverted_estimate', 'cancellation', 'ucb', 'case'];
 
-// Follow-up cadences (owner-tunable). d = days from when the cadence is started; ch = channel.
-const CADENCE_TEMPLATES: Record<string, { d: number; ch: string }[]> = {
-  'estimate-drip': [{ d: 1, ch: 'call' }, { d: 3, ch: 'email' }, { d: 7, ch: 'text' }, { d: 14, ch: 'call' }],
-  'reschedule-5day': [{ d: 5, ch: 'call' }],
-  'lead-followup': [{ d: 1, ch: 'call' }, { d: 2, ch: 'text' }, { d: 5, ch: 'email' }],
-  'ucb-now': [{ d: 0, ch: 'call' }],
-  'case-callback': [{ d: 1, ch: 'call' }],
-};
-const DEFAULT_CADENCE_BY_TYPE: Record<string, string> = { unconverted_estimate: 'estimate-drip', cancellation: 'reschedule-5day', lead: 'lead-followup', ucb: 'ucb-now', case: 'case-callback' };
+// Starter sequences seeded per franchise on first use (then owner-editable). Each is the auto-default for
+// its item type (hybrid: new items auto-enter it; the owner can reassign). Email/text steps carry a
+// template (merge fields {{first_name}}, {{franchise}}) the human sends — NO auto-send in v1.
+type SeqStep = { delay_value: number; delay_unit: string; channel: string; subject?: string; body?: string };
+const STARTER_SEQUENCES: { name: string; description: string; default_for_type: string; steps: SeqStep[] }[] = [
+  { name: 'Standard Lead', default_for_type: 'lead', description: 'Default follow-up for a new lead.', steps: [
+    { delay_value: 1, delay_unit: 'day', channel: 'call' },
+    { delay_value: 2, delay_unit: 'day', channel: 'text', body: 'Hi {{first_name}}, following up on your junk removal — happy to grab a time that works. — {{franchise}}' },
+    { delay_value: 5, delay_unit: 'day', channel: 'email', subject: 'Still looking to clear that clutter?', body: 'Hi {{first_name}},\n\nJust checking back — we’d love to help with your junk removal. Reply here or give us a call and we’ll get you scheduled.\n\nThanks,\n{{franchise}}' },
+  ] },
+  { name: 'Reschedule Follow-up', default_for_type: 'cancellation', description: 'Win back a cancelled / rescheduled job.', steps: [
+    { delay_value: 5, delay_unit: 'day', channel: 'call' },
+  ] },
+  { name: 'Estimate Drip', default_for_type: 'unconverted_estimate', description: 'Follow up on an estimate that hasn’t booked.', steps: [
+    { delay_value: 1, delay_unit: 'day', channel: 'call' },
+    { delay_value: 3, delay_unit: 'day', channel: 'email', subject: 'Your junk removal estimate', body: 'Hi {{first_name}},\n\nWanted to follow up on the estimate we put together — any questions, or shall we get you on the schedule?\n\n{{franchise}}' },
+    { delay_value: 7, delay_unit: 'day', channel: 'text', body: 'Hi {{first_name}}, still happy to honor your estimate — want me to book a time?' },
+    { delay_value: 14, delay_unit: 'day', channel: 'call' },
+  ] },
+  { name: 'Urgent Callback', default_for_type: 'ucb', description: 'Work the urgent call-back queue.', steps: [
+    { delay_value: 0, delay_unit: 'day', channel: 'call' },
+  ] },
+  { name: 'Case Callback', default_for_type: 'case', description: 'Call the customer about an open case.', steps: [
+    { delay_value: 1, delay_unit: 'day', channel: 'call' },
+  ] },
+];
 
 type VField = { fieldID: number; fieldValue?: string; optionID?: number };
 type VRel = { relationType: string; objectID?: number | string; name?: string };
@@ -58,11 +75,34 @@ function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
 }
 
-// Denormalize the item's next_action_at = earliest still-scheduled touch (or null).
-async function recomputeNext(supabase: ReturnType<typeof createClient>, itemId: string, franchiseInternalID: string) {
-  const { data: ts } = await supabase.from('pipeline_touches').select('due_at').eq('pipeline_item_id', itemId).eq('status', 'scheduled').order('due_at', { ascending: true }).limit(1);
-  const next = ts && ts.length ? (ts[0] as { due_at: string }).due_at : null;
-  await supabase.from('pipeline_items').update({ next_action_at: next, updated_at: new Date().toISOString() }).eq('id', itemId).eq('franchise_id', franchiseInternalID);
+type SB = ReturnType<typeof createClient>;
+// day/week/month delay → ISO (real month math for the month unit).
+function dueFrom(base: Date, value: number, unit: string): string {
+  const d = new Date(base.getTime());
+  if (unit === 'week') d.setUTCDate(d.getUTCDate() + value * 7);
+  else if (unit === 'month') d.setUTCMonth(d.getUTCMonth() + value);
+  else d.setUTCDate(d.getUTCDate() + value);
+  return d.toISOString();
+}
+// Seed a franchise's starter sequences once (idempotent — skips if any already exist).
+async function ensureStarterSequences(supabase: SB, tenant: string, franchiseInternalID: string) {
+  const { data: existing } = await supabase.from('pipeline_sequences').select('id').eq('franchise_id', franchiseInternalID).limit(1);
+  if (existing && existing.length) return;
+  for (const s of STARTER_SEQUENCES) {
+    const { data: seq } = await supabase.from('pipeline_sequences').insert({ tenant_id: tenant, franchise_id: franchiseInternalID, name: s.name, description: s.description, default_for_type: s.default_for_type }).select('id').single();
+    if (seq) await supabase.from('pipeline_sequence_steps').insert(s.steps.map((st, i) => ({ sequence_id: (seq as { id: string }).id, sort_order: i, delay_value: st.delay_value, delay_unit: st.delay_unit, channel: st.channel, subject: st.subject || null, body: st.body || null })));
+  }
+}
+// Put one item on a sequence: replace its scheduled touches with fresh ones from the sequence's steps,
+// anchored to `anchor` (default now). The next_action_at trigger keeps the tickler in sync.
+async function seedTouches(supabase: SB, itemId: string, seq: { id: string; name: string }, franchiseInternalID: string, anchor?: Date) {
+  const { data: steps } = await supabase.from('pipeline_sequence_steps').select('id, delay_value, delay_unit, channel').eq('sequence_id', seq.id).order('sort_order', { ascending: true });
+  await supabase.from('pipeline_touches').update({ status: 'skipped' }).eq('pipeline_item_id', itemId).eq('status', 'scheduled');
+  const base = anchor || new Date();
+  const touches = ((steps || []) as Record<string, unknown>[]).map((st) => ({ pipeline_item_id: itemId, sequence_step_id: st.id, due_at: dueFrom(base, Number(st.delay_value), String(st.delay_unit)), channel: st.channel, status: 'scheduled' }));
+  if (touches.length) await supabase.from('pipeline_touches').insert(touches);
+  await supabase.from('pipeline_items').update({ sequence_id: seq.id, cadence: seq.name, updated_at: new Date().toISOString() }).eq('id', itemId).eq('franchise_id', franchiseInternalID);
+  return touches.length;
 }
 
 async function resolveCreds(supabase: ReturnType<typeof createClient>, franchiseInternalId: string) {
@@ -96,7 +136,7 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || '').trim();
     const franchiseID = String(body.franchiseID || '').trim();
-    const ACTIONS = ['sync', 'list', 'update', 'dismiss', 'startCadence', 'touchDone', 'snooze'];
+    const ACTIONS = ['sync', 'list', 'update', 'dismiss', 'touchDone', 'snooze', 'seqList', 'seqSave', 'seqDelete', 'assignSequence', 'unassignSequence'];
     if (!ACTIONS.includes(action)) return json({ success: false, error: 'unknown action', reqId }, 400);
     if (!franchiseID) return json({ success: false, error: 'franchiseID required', reqId }, 400);
 
@@ -109,7 +149,7 @@ Deno.serve(async (req: Request) => {
 
     // ===== CRM actions (DB only; no Vonigo) =====
     if (action === 'list') {
-      const COLS = 'id, type, source_provider, source_external_id, customer_name, phone, email, address, zip, amount, reason, detail, occurred_at, stage, assigned_to, next_action_at, cadence, notes, last_synced_at';
+      const COLS = 'id, type, source_provider, source_external_id, customer_name, phone, email, address, zip, amount, reason, detail, occurred_at, stage, assigned_to, next_action_at, sequence_id, cadence, notes, last_synced_at';
       let q = supabase.from('pipeline_items').select(COLS).eq('franchise_id', franchiseInternalID);
       if (Array.isArray(body.types) && body.types.length) q = q.in('type', body.types.map(String));
       if (Array.isArray(body.stages) && body.stages.length) q = q.in('stage', body.stages.map(String));
@@ -143,37 +183,71 @@ Deno.serve(async (req: Request) => {
       if ('next_action_at' in p) patch.next_action_at = p.next_action_at || null;
       const { error } = await supabase.from('pipeline_items').update(patch).eq('id', id).eq('franchise_id', franchiseInternalID);
       if (error) throw error;
-      if (CLOSED.has(String(patch.stage || ''))) { // closing → skip open touches + clear the tickler
-        await supabase.from('pipeline_touches').update({ status: 'skipped' }).eq('pipeline_item_id', id).eq('status', 'scheduled');
-        await supabase.from('pipeline_items').update({ next_action_at: null }).eq('id', id).eq('franchise_id', franchiseInternalID);
-      }
+      // closing (won/lost/dismissed) → skip open touches; the trigger clears next_action_at.
+      if (CLOSED.has(String(patch.stage || ''))) await supabase.from('pipeline_touches').update({ status: 'skipped' }).eq('pipeline_item_id', id).eq('status', 'scheduled');
       return json({ success: true, reqId });
-    }
-
-    if (action === 'startCadence') {
-      const id = String(body.id || ''); if (!id) return json({ success: false, error: 'id required', reqId }, 400);
-      const { data: item } = await supabase.from('pipeline_items').select('type').eq('id', id).eq('franchise_id', franchiseInternalID).maybeSingle();
-      if (!item) return json({ success: false, error: 'not found', reqId }, 404);
-      const cadence = String(body.cadence || DEFAULT_CADENCE_BY_TYPE[(item as { type: string }).type] || '');
-      const tpl = CADENCE_TEMPLATES[cadence];
-      if (!tpl) return json({ success: false, error: 'unknown cadence', reqId }, 400);
-      await supabase.from('pipeline_touches').update({ status: 'skipped' }).eq('pipeline_item_id', id).eq('status', 'scheduled'); // replace any existing schedule
-      const t0 = Date.now();
-      const touches = tpl.map((s) => ({ pipeline_item_id: id, due_at: new Date(t0 + s.d * 86400000).toISOString(), channel: s.ch, status: 'scheduled' }));
-      await supabase.from('pipeline_touches').insert(touches);
-      const next = touches.reduce<string | null>((m, t) => (!m || t.due_at < m ? t.due_at : m), null);
-      await supabase.from('pipeline_items').update({ cadence, next_action_at: next, updated_at: new Date().toISOString() }).eq('id', id).eq('franchise_id', franchiseInternalID);
-      return json({ success: true, cadence, touches: touches.length, next_action_at: next, reqId });
     }
 
     if (action === 'touchDone' || action === 'snooze') {
       const touchId = String(body.touchId || ''); if (!touchId) return json({ success: false, error: 'touchId required', reqId }, 400);
       const { data: t } = await supabase.from('pipeline_touches').select('pipeline_item_id').eq('id', touchId).maybeSingle();
       if (!t || !(await ownItem(String((t as { pipeline_item_id: string }).pipeline_item_id)))) return json({ success: false, error: 'not found', reqId }, 404);
-      const itemId = String((t as { pipeline_item_id: string }).pipeline_item_id);
-      if (action === 'touchDone') await supabase.from('pipeline_touches').update({ status: 'done', done_at: new Date().toISOString() }).eq('id', touchId);
+      if (action === 'touchDone') await supabase.from('pipeline_touches').update({ status: 'done', done_at: new Date().toISOString() }).eq('id', touchId); // trigger recomputes next_action_at
       else { const dueAt = String(body.dueAt || ''); if (!dueAt) return json({ success: false, error: 'dueAt required', reqId }, 400); await supabase.from('pipeline_touches').update({ due_at: dueAt }).eq('id', touchId).eq('status', 'scheduled'); }
-      await recomputeNext(supabase, itemId, franchiseInternalID);
+      return json({ success: true, reqId });
+    }
+
+    // ===== SEQUENCES =====
+    if (action === 'seqList') {
+      await ensureStarterSequences(supabase, TENANT_ID, franchiseInternalID);
+      const { data: seqs } = await supabase.from('pipeline_sequences').select('*').eq('franchise_id', franchiseInternalID).order('created_at', { ascending: true });
+      const ids = (seqs || []).map((s: Record<string, unknown>) => s.id as string);
+      const stepsBySeq: Record<string, unknown[]> = {};
+      if (ids.length) {
+        const { data: steps } = await supabase.from('pipeline_sequence_steps').select('*').in('sequence_id', ids).order('sort_order', { ascending: true });
+        for (const st of (steps || []) as Record<string, unknown>[]) { const k = String(st.sequence_id); (stepsBySeq[k] = stepsBySeq[k] || []).push(st); }
+      }
+      return json({ success: true, sequences: (seqs || []).map((s: Record<string, unknown>) => ({ ...s, steps: stepsBySeq[s.id as string] || [] })), reqId });
+    }
+
+    if (action === 'seqSave') {
+      const s = (body.sequence || {}) as Record<string, unknown>;
+      const name = String(s.name || '').trim(); if (!name) return json({ success: false, error: 'name required', reqId }, 400);
+      const fields = { tenant_id: TENANT_ID, franchise_id: franchiseInternalID, name, description: s.description ? String(s.description) : null, default_for_type: s.default_for_type ? String(s.default_for_type) : null, active: s.active === false ? false : true, updated_at: new Date().toISOString() };
+      let seqId = s.id ? String(s.id) : '';
+      if (seqId) { if (!(await (async () => (await supabase.from('pipeline_sequences').select('id').eq('id', seqId).eq('franchise_id', franchiseInternalID).maybeSingle()).data)())) return json({ success: false, error: 'not found', reqId }, 404); await supabase.from('pipeline_sequences').update(fields).eq('id', seqId).eq('franchise_id', franchiseInternalID); }
+      else { const { data: ins, error } = await supabase.from('pipeline_sequences').insert(fields).select('id').single(); if (error || !ins) return json({ success: false, error: 'save failed', reqId }, 500); seqId = (ins as { id: string }).id; }
+      if (Array.isArray(s.steps)) { // replace the step set
+        await supabase.from('pipeline_sequence_steps').delete().eq('sequence_id', seqId);
+        const rows = (s.steps as Record<string, unknown>[]).map((st, i) => ({ sequence_id: seqId, sort_order: Number(st.sort_order ?? i), delay_value: Math.max(0, parseInt(String(st.delay_value ?? 0), 10) || 0), delay_unit: ['day', 'week', 'month'].includes(String(st.delay_unit)) ? String(st.delay_unit) : 'day', channel: ['call', 'email', 'text', 'task'].includes(String(st.channel)) ? String(st.channel) : 'call', subject: st.subject ? String(st.subject) : null, body: st.body ? String(st.body) : null }));
+        if (rows.length) await supabase.from('pipeline_sequence_steps').insert(rows);
+      }
+      return json({ success: true, id: seqId, reqId });
+    }
+
+    if (action === 'seqDelete') {
+      const seqId = String(body.sequenceId || ''); if (!seqId) return json({ success: false, error: 'sequenceId required', reqId }, 400);
+      await supabase.from('pipeline_items').update({ sequence_id: null, cadence: null }).eq('sequence_id', seqId).eq('franchise_id', franchiseInternalID); // detach items
+      const { error } = await supabase.from('pipeline_sequences').delete().eq('id', seqId).eq('franchise_id', franchiseInternalID);
+      if (error) throw error;
+      return json({ success: true, reqId });
+    }
+
+    if (action === 'assignSequence') {
+      const id = String(body.id || ''); const sequenceId = String(body.sequenceId || '');
+      if (!id || !sequenceId) return json({ success: false, error: 'id and sequenceId required', reqId }, 400);
+      if (!(await ownItem(id))) return json({ success: false, error: 'not found', reqId }, 404);
+      const { data: seq } = await supabase.from('pipeline_sequences').select('id, name').eq('id', sequenceId).eq('franchise_id', franchiseInternalID).maybeSingle();
+      if (!seq) return json({ success: false, error: 'sequence not found', reqId }, 404);
+      const n = await seedTouches(supabase, id, seq as { id: string; name: string }, franchiseInternalID);
+      return json({ success: true, touches: n, reqId });
+    }
+
+    if (action === 'unassignSequence') {
+      const id = String(body.id || ''); if (!id) return json({ success: false, error: 'id required', reqId }, 400);
+      if (!(await ownItem(id))) return json({ success: false, error: 'not found', reqId }, 404);
+      await supabase.from('pipeline_touches').update({ status: 'skipped' }).eq('pipeline_item_id', id).eq('status', 'scheduled'); // trigger clears next_action_at
+      await supabase.from('pipeline_items').update({ sequence_id: null, cadence: null, updated_at: new Date().toISOString() }).eq('id', id).eq('franchise_id', franchiseInternalID);
       return json({ success: true, reqId });
     }
 
@@ -300,6 +374,11 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // Which (type, external_id) already exist? → so we auto-seed ONLY brand-new items (not the whole backlog
+    // on every sync, and never re-seeding an item the owner deliberately took off its sequence).
+    const { data: existRows } = await supabase.from('pipeline_items').select('type, source_external_id').eq('franchise_id', franchiseInternalID);
+    const existKeys = new Set(((existRows || []) as Record<string, string>[]).map((r) => r.type + '|' + r.source_external_id));
+
     // ---- Upsert (merge-duplicates): only source-derived cols in the payload → CRM fields preserved. ----
     let upserted = 0;
     if (rows.length) {
@@ -307,9 +386,24 @@ Deno.serve(async (req: Request) => {
       if (error) { console.error(`[pipeline:${reqId}] upsert failed:`, error); return json({ success: false, error: 'Save failed', reqId }, 500); }
       upserted = rows.length;
     }
+
+    // Hybrid auto-default: brand-new items auto-enter their type's default sequence (schedule starts now).
+    const newKeys = new Set(rows.filter((r) => !existKeys.has(String(r.type) + '|' + String(r.source_external_id))).map((r) => String(r.type) + '|' + String(r.source_external_id)));
+    let autoSeeded = 0;
+    if (newKeys.size) {
+      await ensureStarterSequences(supabase, TENANT_ID, franchiseInternalID);
+      const { data: defs } = await supabase.from('pipeline_sequences').select('id, name, default_for_type').eq('franchise_id', franchiseInternalID).eq('active', true).not('default_for_type', 'is', null);
+      const defByType: Record<string, { id: string; name: string }> = {};
+      for (const d of (defs || []) as Record<string, string>[]) defByType[d.default_for_type] = { id: d.id, name: d.name };
+      const { data: freshItems } = await supabase.from('pipeline_items').select('id, type, source_external_id').eq('franchise_id', franchiseInternalID);
+      const toSeed = ((freshItems || []) as Record<string, unknown>[]).filter((i) => newKeys.has(String(i.type) + '|' + String(i.source_external_id)) && defByType[String(i.type)]);
+      await mapPool(toSeed, 8, (i) => seedTouches(supabase, String(i.id), defByType[String(i.type)], franchiseInternalID));
+      autoSeeded = toSeed.length;
+    }
+
     const counts: Record<string, number> = {};
     for (const t of ALL_TYPES) counts[t] = rows.filter((r) => r.type === t).length;
-    return json({ success: true, franchiseID, window: { dateStart, dateEnd, days }, upserted, counts, reqId });
+    return json({ success: true, franchiseID, window: { dateStart, dateEnd, days }, upserted, autoSeeded, counts, reqId });
   } catch (e) {
     if (e instanceof VonigoUnavailable) return json(VONIGO_DOWN_BODY, 503);
     console.error(`[pipeline:${reqId}] error:`, (e as Error)?.stack || String(e));
