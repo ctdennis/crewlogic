@@ -218,7 +218,13 @@ Deferred decisions (do NOT block P1): whose calendar (shared franchise vs per-as
 - **P4 — Dispatch-calendar reminders.** Red dots on the dispatch board's time axis for due follow-ups + click-to-popover activity list (Done/Snooze). In-app only. This is the "everything in one place" surface.
 - **P5 — Scheduled sync.** Daily multi-franchise sync cron + "Sync now"; retention window. (No auto-drip in v1 — touches stay human reminders.)
 - **P6 — QA + promote.** Right-sized test plan; owner-gated prod promotion (migrations + edge fn + cron + merge).
-- **Follow-up (open) — source-removal / staleness pruning.** Sync is upsert-only, so an item that leaves its source (a UCB callback gets booked → status leaves 160/161; a lead converts; a case closes) lingers as a ghost row. Add a per-type "close items no longer present in this sync" pass (mark `resolved`/`dismissed`, don't hard-delete — preserve CRM state). Owner-flagged class during the 2026-08-10 UCB fix. — *status: open, do in P5.*
+- **Source-removal / staleness reconciliation — DONE for WO types (2026-08-10).** Sync auto-resolves a
+  WO-derived item that no longer matches the mirror (unconverted estimate CONVERTED → label 245/9975/9970 e.g.
+  Prentice; cancellation rebooked; UCB booked off the lane): stage → `resolved`, open touches skipped, CRM
+  notes preserved, scoped to the recent window (UCB: whole set). Safe because these types read from the reliable
+  local mirror. `resolved` is now a closed stage (out of the attention view). Returned as `reconciled` in the sync
+  response. *Still open:* reconcile **leads/cases** (Vonigo-sourced — needs a completion guard against partial
+  Vonigo failures); optionally classify departures as `won` vs `lost` by re-checking the mirror label.
 - **Future (P7+):** **native adapter** (feed the same `pipeline_items` from CrewLogic's own data when the native build lands — no core changes); external calendar sync (ICS feed / Google Calendar API); automated drip (HubSpot/Mailchimp handoff, or internal per-franchise sender); Vonigo write-back (convert lead / close case); unified customer view (FK to `customers`); bulk actions; kanban; month calendar.
 
 ---

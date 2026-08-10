@@ -22,7 +22,8 @@ const VONIGO_BASE = 'https://junkluggers.vonigo.com/api/v1';
 const F = { woStatus: 181, woLabel: 201, woAddress: 184, woPrice: 813, woDate: 185, clientStage: 123, contactPhone: 1088, jobCancelCat: 974, jobCancelReason: 975, jobCancelComments: 973, caseNarr: 220, caseType: 219, casePhone: 228, caseEmail: 229 };
 const CANCEL_STATUS = new Set([162, 163]);      // Cancelled / Cancelled-Today
 const OPEN_STATUS = new Set([160, 161]);        // Open / Booked — the live (non-terminal) statuses
-const EST_LABELS = new Set([9996, 9973, 9993]); // Est-Completed-EstOnly / Est-Only / Lost
+const EST_LABELS = new Set([9996, 9973, 9993]); // Est-Completed-EstOnly / Est-Only / Lost  (NOT 245/9975/9970 = converted)
+const EST_LABEL_TEXT: Record<number, string> = { 9996: 'Est. completed — estimate only', 9973: 'Estimate only', 9993: 'Lost' };
 // UCB lane is matched by route_name (~URGENTCB) off the mirror; the Vonigo route objectID (2987) is no longer needed.
 const ALL_TYPES = ['lead', 'unconverted_estimate', 'cancellation', 'ucb', 'case'];
 
@@ -145,7 +146,7 @@ Deno.serve(async (req: Request) => {
     const { data: fr, error: fe } = await supabase.from('franchises').select('id').eq('external_id', franchiseID).eq('tenant_id', TENANT_ID).single();
     if (fe || !fr) return json({ success: false, error: 'Franchise not found: ' + franchiseID, reqId }, 404);
     const franchiseInternalID = (fr as { id: string }).id;
-    const CLOSED = new Set(['won', 'lost', 'dismissed']);
+    const CLOSED = new Set(['won', 'lost', 'dismissed', 'resolved']);
     const ownItem = async (id: string) => (await supabase.from('pipeline_items').select('id').eq('id', id).eq('franchise_id', franchiseInternalID).maybeSingle()).data; // franchise-scope guard
 
     // ===== CRM actions (DB only; no Vonigo) =====
@@ -156,7 +157,7 @@ Deno.serve(async (req: Request) => {
       if (Array.isArray(body.stages) && body.stages.length) q = q.in('stage', body.stages.map(String));
       if (body.assignee) q = q.eq('assigned_to', String(body.assignee));
       if (body.search) q = q.ilike('customer_name', '%' + String(body.search) + '%');
-      if (String(body.view || '') === 'attention') q = q.not('stage', 'in', '(won,lost,dismissed)');
+      if (String(body.view || '') === 'attention') q = q.not('stage', 'in', '(won,lost,dismissed,resolved)');
       q = q.order('next_action_at', { ascending: true, nullsFirst: false }).order('occurred_at', { ascending: false })
         .limit(Math.min(parseInt(String(body.limit || '400'), 10) || 400, 1000));
       const { data: items, error } = await q;
@@ -325,7 +326,7 @@ Deno.serve(async (req: Request) => {
         for (const row of (data || []) as Record<string, unknown>[]) {
           const w = mirrorWO(row);
           if (!w.woID || (w.woEpoch && w.woEpoch < dateStart)) continue;   // recent window
-          rows.push(mk('unconverted_estimate', 'workorder', w.woID, { ...w.base, reason: getField(w.fields, F.woLabel)?.fieldValue || String(w.label) }));
+          rows.push(mk('unconverted_estimate', 'workorder', w.woID, { ...w.base, reason: getField(w.fields, F.woLabel)?.fieldValue || EST_LABEL_TEXT[w.label] || String(w.label) }));
         }
       }
       if (want('cancellation')) {
@@ -449,9 +450,31 @@ Deno.serve(async (req: Request) => {
       autoSeeded = toSeed.length;
     }
 
+    // RECONCILE (auto-resolve): a WO-derived item that no longer matches the source has been handled in Vonigo —
+    // an unconverted estimate got CONVERTED (label → 245/9975/9970, e.g. Prentice), a cancellation got rebooked, a
+    // UCB got booked off the lane. The sync only UPSERTS current matches, so without this the stale row lingers as
+    // "still needs follow-up". We close it to `resolved` (leaves the worklist; findable under All) and skip its open
+    // touches. Scoped to the recent window for cancel/unconverted; UCB has no window (the lane is a backlog). SAFE
+    // here because these types come from the reliable local mirror — no partial-Vonigo-failure risk. We NEVER touch
+    // items the owner already closed, and we don't clobber notes. (Leads/cases come from Vonigo → not reconciled here.)
+    let reconciled = 0;
+    const winStartIso = new Date(dateStart * 1000).toISOString();
+    for (const t of ['cancellation', 'unconverted_estimate', 'ucb'].filter(want)) {
+      const seen = new Set(rows.filter((r) => r.type === t).map((r) => String(r.source_external_id)));
+      let q = supabase.from('pipeline_items').select('id, source_external_id').eq('franchise_id', franchiseInternalID).eq('type', t).not('stage', 'in', '(won,lost,dismissed,resolved)');
+      if (t !== 'ucb') q = q.gte('occurred_at', winStartIso);
+      const { data: openItems } = await q;
+      const gone = ((openItems || []) as Record<string, unknown>[]).filter((i) => !seen.has(String(i.source_external_id))).map((i) => String(i.id));
+      if (gone.length) {
+        await supabase.from('pipeline_items').update({ stage: 'resolved', updated_at: new Date().toISOString() }).in('id', gone);
+        await supabase.from('pipeline_touches').update({ status: 'skipped' }).in('pipeline_item_id', gone).eq('status', 'scheduled');
+        reconciled += gone.length;
+      }
+    }
+
     const counts: Record<string, number> = {};
     for (const t of ALL_TYPES) counts[t] = rows.filter((r) => r.type === t).length;
-    return json({ success: true, franchiseID, window: { dateStart, dateEnd, days }, upserted, autoSeeded, counts, reqId });
+    return json({ success: true, franchiseID, window: { dateStart, dateEnd, days }, upserted, autoSeeded, reconciled, counts, reqId });
   } catch (e) {
     if (e instanceof VonigoUnavailable) return json(VONIGO_DOWN_BODY, 503);
     console.error(`[pipeline:${reqId}] error:`, (e as Error)?.stack || String(e));
