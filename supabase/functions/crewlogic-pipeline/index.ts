@@ -159,7 +159,7 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || '').trim();
     const franchiseID = String(body.franchiseID || '').trim();
-    const ACTIONS = ['sync', 'list', 'update', 'dismiss', 'touchDone', 'snooze', 'seqList', 'seqSave', 'seqDelete', 'assignSequence', 'unassignSequence'];
+    const ACTIONS = ['sync', 'list', 'reminders', 'update', 'dismiss', 'touchDone', 'snooze', 'seqList', 'seqSave', 'seqDelete', 'assignSequence', 'unassignSequence'];
     if (!ACTIONS.includes(action)) return json({ success: false, error: 'unknown action', reqId }, 400);
     if (!franchiseID) return json({ success: false, error: 'franchiseID required', reqId }, 400);
 
@@ -194,6 +194,25 @@ Deno.serve(async (req: Request) => {
       const counts: Record<string, number> = {}; let open = 0;
       for (const r of (allT || []) as Record<string, string>[]) { counts[r.type] = (counts[r.type] || 0) + 1; if (!CLOSED.has(r.stage)) open++; }
       return json({ success: true, items: out, counts, open, total: out.length, reqId });
+    }
+
+    // Compact due-reminder feed for the Dispatch follow-ups rail + day dots. Open items with a scheduled next
+    // touch, ordered by due; carries the touchId so the rail's Done/Snooze can act without a second lookup.
+    if (action === 'reminders') {
+      const { data: items } = await supabase.from('pipeline_items')
+        .select('id, type, customer_name, phone, email, next_action_at, stage')
+        .eq('franchise_id', franchiseInternalID)
+        .not('next_action_at', 'is', null)
+        .not('stage', 'in', '(won,lost,dismissed,resolved)')
+        .order('next_action_at', { ascending: true }).limit(300);
+      const ids = (items || []).map((i: Record<string, unknown>) => i.id as string);
+      const touchByItem: Record<string, { touchId: string; dueAt: string; channel: string }> = {};
+      if (ids.length) {
+        const { data: ts } = await supabase.from('pipeline_touches').select('id, pipeline_item_id, due_at, channel').eq('status', 'scheduled').in('pipeline_item_id', ids).order('due_at', { ascending: true });
+        for (const t of (ts || []) as Record<string, unknown>[]) { const k = String(t.pipeline_item_id); if (!touchByItem[k]) touchByItem[k] = { touchId: t.id as string, dueAt: t.due_at as string, channel: t.channel as string }; }
+      }
+      const out = (items || []).map((i: Record<string, unknown>) => ({ ...i, nextTouch: touchByItem[i.id as string] || null })).filter((i) => i.nextTouch);
+      return json({ success: true, reminders: out, reqId });
     }
 
     if (action === 'update' || action === 'dismiss') {

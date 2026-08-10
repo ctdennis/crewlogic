@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.121.2 | 2026-08-10">
+  <meta name="crewlogic-version" content="v5.122.0 | 2026-08-10">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12611,6 +12611,89 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (dayID === mjAddDays(today, 1)) return 'Tomorrow';
       return mjDayLabelFromID(dayID);
     }
+    // ── P4: Follow-ups rail on the Dispatch screen — pipeline reminders (calls/emails due) in one place ──────────
+    let _dashReminders = [];
+    function _dueDayID(iso) { const d = new Date(iso); return '' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0'); }
+    function _dashFuBucket(iso) {
+      const d = new Date(iso); d.setHours(0, 0, 0, 0);
+      const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+      const diff = Math.round((d - t0) / 86400000);
+      if (diff < 0) return 'overdue'; if (diff === 0) return 'today'; if (diff <= 7) return 'week'; return 'later';
+    }
+    async function renderDashFollowups() {
+      const host = document.getElementById('dashFollowups'); if (!host) return;
+      // Pipeline is a gated feature (dev / super-admin / tester) — stay silent otherwise (and on prod where the fn isn't deployed).
+      if (!(IS_DEV_ENV || (currentUser && (currentUser.email === 'charles.dennis@junkluggers.com' || currentUser.subscriptionStatus === 'tester')))) { host.innerHTML = ''; return; }
+      plEnsureStyles(); // the snooze modal reuses the pipeline .pl-btn/.pl-mback styles
+      let rem = [];
+      try { const r = await plApi('reminders', {}); if (r && r.success) rem = r.reminders || []; } catch (e) { console.error('[dashFu] load', e); }
+      _dashReminders = rem;
+      const g = { overdue: [], today: [], week: [] };
+      for (const r of rem) { if (!r.nextTouch) continue; const b = _dashFuBucket(r.nextTouch.dueAt); if (g[b]) g[b].push(r); }
+      const total = g.overdue.length + g.today.length + g.week.length;
+      if (!total) { host.innerHTML = ''; _dashUpdateDueChips(); return; }
+      const sec = (title, arr, color) => !arr.length ? '' :
+        '<div style="margin-top:6px;"><div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:' + color + ';margin:0 0 4px 2px;">' + title + ' (' + arr.length + ')</div>'
+        + arr.slice(0, 60).map(_dashFuRowHtml).join('') + '</div>';
+      host.innerHTML =
+        '<details open style="border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);">'
+        + '<summary style="cursor:pointer;list-style:none;padding:9px 12px;font-size:13px;font-weight:800;color:var(--text-primary);display:flex;align-items:center;gap:8px;">'
+        + '🔔 Follow-ups due'
+        + (g.overdue.length ? '<span style="font-size:11px;font-weight:800;padding:1px 8px;border-radius:999px;background:rgba(224,90,79,.16);color:#fca5a5;border:1px solid rgba(224,90,79,.38);">' + g.overdue.length + ' overdue</span>' : '')
+        + '<span style="font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;background:rgba(224,164,79,.14);color:#f2c17d;border:1px solid rgba(224,164,79,.34);">' + g.today.length + ' today</span>'
+        + '<span style="margin-left:auto;font-size:11px;color:var(--text-muted);">▾</span></summary>'
+        + '<div style="padding:4px 10px 10px;max-height:34vh;overflow-y:auto;">' + sec('Overdue', g.overdue, '#e05a4f') + sec('Today', g.today, '#e0a44f') + sec('This week', g.week, '#7dd3fc') + '</div>'
+        + '</details>';
+      _dashUpdateDueChips();
+    }
+    function _dashFuRowHtml(r) {
+      const t = PL_TYPES.find(x => x.key === r.type) || { icon: '•', short: r.type, color: '#6e8194' };
+      const nt = r.nextTouch, w = plWhen(nt.dueAt);
+      const chips = [];
+      if (r.phone) { chips.push('<a href="tel:' + plTel(r.phone) + '" style="text-decoration:none;">📞</a>'); chips.push('<a href="sms:' + plTel(r.phone) + '" style="text-decoration:none;">💬</a>'); }
+      if (r.email) chips.push('<a href="mailto:' + _escHtml(r.email) + '" style="text-decoration:none;">✉️</a>');
+      return '<div style="display:flex;align-items:center;gap:8px;padding:6px 6px;border-top:1px solid var(--border,#2c3e50);font-size:12.5px;">'
+        + '<span style="font-size:10px;font-weight:800;text-transform:uppercase;padding:2px 6px;border-radius:999px;background:' + t.color + '22;color:' + t.color + ';white-space:nowrap;">' + t.icon + ' ' + t.short + '</span>'
+        + '<span style="font-weight:700;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px;">' + _escHtml(r.customer_name || 'Unknown') + '</span>'
+        + '<span style="font-weight:700;color:' + (w.over ? '#fca5a5' : 'var(--text-muted)') + ';white-space:nowrap;">' + (PL_CHAN[nt.channel] || '•') + ' ' + w.txt + '</span>'
+        + '<span style="display:inline-flex;gap:7px;font-size:14px;">' + chips.join('') + '</span>'
+        + '<span style="margin-left:auto;display:inline-flex;gap:6px;">'
+        + '<button onclick="_dashFuDone(\'' + r.id + '\',\'' + (nt.touchId || '') + '\')" title="Mark done" style="padding:4px 9px;border-radius:6px;border:1px solid var(--accent-green,#22c55e);background:var(--accent-green,#22c55e);color:var(--accent-text,#0b0f14);font-weight:800;font-size:11px;cursor:pointer;">✓</button>'
+        + '<button onclick="_dashFuSnooze(\'' + (nt.touchId || '') + '\')" title="Snooze" style="padding:4px 9px;border-radius:6px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:11px;cursor:pointer;">⏰</button>'
+        + '</span></div>';
+    }
+    function _dashUpdateDueChips() {
+      for (const side of ['src', 'dest']) {
+        const day = side === 'src' ? _dashSrcDay : _dashDestDay;
+        const chip = document.getElementById('dashDue-' + side); if (!chip) continue;
+        const n = (_dashReminders || []).filter(r => r.nextTouch && _dueDayID(r.nextTouch.dueAt) === day).length;
+        if (n > 0) { chip.style.display = ''; chip.textContent = '🔔 ' + n; } else { chip.style.display = 'none'; }
+      }
+    }
+    function _dashFuScrollToDay() { const h = document.getElementById('dashFollowups'); if (h) h.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    async function _dashFuDone(itemId, touchId) {
+      if (!touchId) return;
+      const r = await plApi('touchDone', { touchId });
+      if (!r || !r.success) { alert('Could not mark done.'); return; }
+      renderDashFollowups();
+    }
+    function _dashFuSnooze(touchId) {
+      if (!touchId) return;
+      plModal('<h3>Snooze follow-up</h3><div style="color:var(--text-muted);font-size:12px;margin:2px 0 10px;">Push the next touch out to…</div>'
+        + '<div style="display:flex;gap:8px;flex-wrap:wrap;">'
+        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + touchId + '\',1)">Tomorrow</button>'
+        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + touchId + '\',3)">+3 days</button>'
+        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + touchId + '\',7)">+1 week</button></div>'
+        + '<div style="display:flex;justify-content:flex-end;margin-top:16px;"><button class="pl-btn" onclick="plCloseModal()">Cancel</button></div>');
+    }
+    async function _dashDoSnooze(touchId, days) {
+      plCloseModal();
+      const d = new Date(); d.setHours(9, 0, 0, 0); d.setDate(d.getDate() + days);
+      const r = await plApi('snooze', { touchId, dueAt: d.toISOString() });
+      if (!r || !r.success) { alert('Could not snooze.'); return; }
+      renderDashFollowups();
+    }
+
     function dashDayPickerHTML(side, dayID) {
       const sideLbl = side === 'src' ? 'Source' : 'Destination';
       return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">'
@@ -12618,6 +12701,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + '<button onclick="dashShiftDay(\'' + side + '\',-1)" style="' + _dashNavBtnCss() + '">◀</button>'
         + '<span id="dashDayLbl-' + side + '" style="font-size:13px;font-weight:700;color:var(--text-primary);min-width:104px;text-align:center;">' + mjEsc(_dashDayLabel(dayID)) + '</span>'
         + '<button onclick="dashShiftDay(\'' + side + '\',1)" style="' + _dashNavBtnCss() + '">▶</button>'
+        + '<span id="dashDue-' + side + '" onclick="_dashFuScrollToDay(\'' + side + '\')" title="Follow-ups due on this day" style="display:none;cursor:pointer;font-size:11px;font-weight:800;padding:2px 8px;border-radius:999px;background:rgba(224,90,79,.16);color:#fca5a5;border:1px solid rgba(224,90,79,.38);"></span>'
         + '<input type="date" id="dashDayDate-' + side + '" value="' + (String(dayID).slice(0,4)+'-'+String(dayID).slice(4,6)+'-'+String(dayID).slice(6,8)) + '" onchange="dashSetDay(\'' + side + '\',this.value)" title="Jump to a date" style="font-size:12px;padding:5px 7px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);color-scheme:dark;">'
         + '<button onclick="dashReloadOne(\'' + side + '\',true)" title="Refresh this board" style="' + _dashNavBtnCss() + ';margin-left:auto;">🔄</button>'
         + '</div>';
@@ -12644,6 +12728,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +     '</div>'
         +   '</details>'
         + '</div>'
+        // P4: pipeline follow-ups rail — due calls/emails/texts in one place (self-contained; filled by renderDashFollowups)
+        + '<div id="dashFollowups" style="margin-bottom:12px;"></div>'
         // schedules on TOP (two boards, route-aligned)
         + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start;margin-bottom:12px;">'
         +   '<div style="border:1px solid var(--border);border-radius:var(--radius);padding:8px;background:var(--bg-card);min-width:0;">' + dashDayPickerHTML('src', _dashSrcDay) + '<div id="dashSrcBoard"></div></div>'
@@ -12908,6 +12994,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const inp = document.getElementById('dashDayDate-' + side);
       if (inp) inp.value = String(dayID).slice(0, 4) + '-' + String(dayID).slice(4, 6) + '-' + String(dayID).slice(6, 8);
       dashReloadOne(side, true); // reload ONLY this board — no full dashboard rebuild, no map remount, no blank flash
+      _dashUpdateDueChips(); // refresh this side's follow-up day-dot from the cached reminders
     }
     function dashShiftDay(side, delta) {
       dashApplyDay(side, mjAddDays(side === 'src' ? _dashSrcDay : _dashDestDay, delta));
@@ -15255,6 +15342,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _dashSrcDay = _dashOpenToday;
         _dashDestDay = mjAddDays(_dashOpenToday, 1);
         renderDashboard();
+        renderDashFollowups(); // P4: pipeline follow-ups rail + day-dots
         _startBoardAutoRefresh();
         return;
       }
