@@ -13,6 +13,12 @@
 > now also carry **phone + email** (from the mirror's `customer_display`). Recognition reads the true status/label
 > from the stored `raw` WO so it matches the Vonigo-direct path exactly (the mirror's normalized `status` maps
 > 163→'working', which we do NOT rely on). **Leads (Clients) + cases** aren't jobs, so they still pull from Vonigo.
+> **Unconverted recognition (2026-08-10):** the estimate WO's own label is unreliable for conversion — a converted
+> estimate keeps its "Estimate Completed" label on the `-1` visit and books a **sibling `-2` WO labeled "Estimate
+> Converted" (9970/9975)**. So an estimate counts as unconverted only if its **job has no 9970/9975 sibling** (owner
+> insight). Implemented via a job_id set. Known gap: a future-dated `-2` beyond the import's ~7-day-forward window
+> isn't in the mirror → widen `crewlogic-vonigo-import` daysForward to close it (follow-up).
+>
 > A prior, simpler follow-up attempt — `crewlogic-followups-sync` + `followups`/`followup_events` (0081) +
 > `plan-followups.md` — was **retired** (migration 0087; dev-only, zero prod footprint, Owner-approved). Follow-ups:
 > (a) extend the importer to capture the cancel **reason** into the mirror → then cancellations need zero Vonigo

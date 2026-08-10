@@ -24,6 +24,9 @@ const CANCEL_STATUS = new Set([162, 163]);      // Cancelled / Cancelled-Today
 const OPEN_STATUS = new Set([160, 161]);        // Open / Booked — the live (non-terminal) statuses
 const EST_LABELS = new Set([9996, 9973, 9993]); // Est-Completed-EstOnly / Est-Only / Lost  (NOT 245/9975/9970 = converted)
 const EST_LABEL_TEXT: Record<number, string> = { 9996: 'Est. completed — estimate only', 9973: 'Estimate only', 9993: 'Lost' };
+// A converted estimate books a SIBLING WorkOrder (the "-2") labeled "Estimate Converted" under the same job.
+// If a job has one of these, its estimate visit is NOT unconverted (even though the -1 keeps its estimate label).
+const CONVERTED_LABELS = new Set([9970, 9975]); // Est-Converted-EstOnly / Est-Converted-Job
 // UCB lane is matched by route_name (~URGENTCB) off the mirror; the Vonigo route objectID (2987) is no longer needed.
 const ALL_TYPES = ['lead', 'unconverted_estimate', 'cancellation', 'ucb', 'case'];
 
@@ -295,7 +298,7 @@ Deno.serve(async (req: Request) => {
     // scan alone was ~57s) — now a couple of indexed DB reads. We read the TRUE status/label from the stored `raw`
     // WO so recognition matches the Vonigo-direct path exactly (the mirror's normalized `status` maps 163→'working',
     // which we must NOT rely on). Leads (Clients) and cases aren't jobs, so they still pull from Vonigo below.
-    const SNAP_SELECT = 'label_optionid, route_name, customer_display, import_total, raw, job_appointments!inner(source_external_id, scheduled_date, status)';
+    const SNAP_SELECT = 'label_optionid, route_name, customer_display, import_total, raw, job_appointments!inner(source_external_id, scheduled_date, status, job_id)';
     const mirrorWO = (row: Record<string, unknown>) => {
       const ja = (row.job_appointments || {}) as Record<string, unknown>;
       const raw = (row.raw || {}) as Record<string, unknown>;
@@ -303,7 +306,7 @@ Deno.serve(async (req: Request) => {
       const cd = (row.customer_display || {}) as Record<string, string | null>;
       const woEpoch = parseInt(String(getField(fields, F.woDate)?.fieldValue || '0'), 10);
       return {
-        woID: String(ja.source_external_id ?? ''), fields, rels, woEpoch,
+        woID: String(ja.source_external_id ?? ''), jobId: String(ja.job_id ?? ''), fields, rels, woEpoch,
         status: getField(fields, F.woStatus)?.optionID || 0,
         label: getField(fields, F.woLabel)?.optionID || 0,
         base: {
@@ -322,10 +325,15 @@ Deno.serve(async (req: Request) => {
     // ---- A) cancellation + unconverted_estimate — from the mirror (recent window by WO service date) ----
     const _passA = (want('cancellation') || want('unconverted_estimate')) ? (async () => {
       if (want('unconverted_estimate')) {
+        // First: the jobs that have booked (a WO labeled "Estimate Converted", 9970/9975). Their estimate visit is
+        // converted even though the -1 keeps its "Estimate Completed" label — so we exclude it. (Owner 2026-08-10.)
+        const { data: convRows } = await supabase.from('job_source_snapshot').select('job_appointments!inner(job_id)').eq('franchise_id', franchiseInternalID).in('label_optionid', [...CONVERTED_LABELS]);
+        const convertedJobs = new Set(((convRows || []) as Record<string, unknown>[]).map((r) => String((r.job_appointments as Record<string, unknown>)?.job_id ?? '')));
         const { data } = await supabase.from('job_source_snapshot').select(SNAP_SELECT).eq('franchise_id', franchiseInternalID).in('label_optionid', [...EST_LABELS]);
         for (const row of (data || []) as Record<string, unknown>[]) {
           const w = mirrorWO(row);
-          if (!w.woID || (w.woEpoch && w.woEpoch < dateStart)) continue;   // recent window
+          if (!w.woID || (w.woEpoch && w.woEpoch < dateStart)) continue;         // recent window
+          if (w.jobId && convertedJobs.has(w.jobId)) continue;                    // job already converted (has an Est-Converted sibling)
           rows.push(mk('unconverted_estimate', 'workorder', w.woID, { ...w.base, reason: getField(w.fields, F.woLabel)?.fieldValue || EST_LABEL_TEXT[w.label] || String(w.label) }));
         }
       }
