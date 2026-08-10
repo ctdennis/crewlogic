@@ -21,6 +21,8 @@ const VONIGO_BASE = 'https://junkluggers.vonigo.com/api/v1';
 // Vonigo field / recognition constants (live ONLY here — never leak into pipeline_items or the UI).
 const F = { woStatus: 181, woLabel: 201, woAddress: 184, woPrice: 813, woDate: 185, clientStage: 123, contactPhone: 1088, jobCancelCat: 974, jobCancelReason: 975, jobCancelComments: 973, caseNarr: 220, caseType: 219, casePhone: 228, caseEmail: 229 };
 const CANCEL_STATUS = new Set([162, 163]);      // Cancelled / Cancelled-Today
+const OPEN_STATUS = new Set([160, 161]);        // Open / Booked — the live (non-terminal) statuses
+const UCB_LOOKBACK_DAYS = 120;                  // URGENTCB is a persistent backlog; scan the max window Vonigo allows
 const EST_LABELS = new Set([9996, 9973, 9993]); // Est-Completed-EstOnly / Est-Only / Lost
 const UCB_ROUTE_ID = 2987;                       // "Pending - Other (URGENTCB)"
 const ALL_TYPES = ['lead', 'unconverted_estimate', 'cancellation', 'ucb', 'case'];
@@ -274,8 +276,8 @@ Deno.serve(async (req: Request) => {
       source_object, source_external_id, last_synced_at: new Date().toISOString(), updated_at: new Date().toISOString(), ...extra,
     });
 
-    // ---- A) WorkOrders window → cancellation / unconverted_estimate / ucb ----
-    if (want('cancellation') || want('unconverted_estimate') || want('ucb')) {
+    // ---- A) WorkOrders (recent window) → cancellation / unconverted_estimate ----
+    if (want('cancellation') || want('unconverted_estimate')) {
       const wos: Record<string, unknown>[] = [];
       for (let pg = 1; pg <= 12; pg++) {
         const r = await vpost('/data/WorkOrders/', { securityToken: token, franchiseID, pageNo: String(pg), pageSize: '200', sortMode: '1', sortDirection: '1', isCompleteObject: 'true', dateMode: '3', dateStart: String(dateStart), dateEnd: String(dateEnd) });
@@ -297,12 +299,12 @@ Deno.serve(async (req: Request) => {
           occurred_at: iso(getField(fields, F.woDate)?.fieldValue),
           raw: wo,
         };
-        // Precedence: cancelled status wins, then estimate label, then the URGENTCB route.
+        // Precedence: a cancelled status wins, then the estimate label. (UCB is handled in its own pass — pass A2 —
+        // because the URGENTCB lane is a date-independent backlog, not a recent-window thing; see below.)
+        void routeId;
         if (CANCEL_STATUS.has(status) && want('cancellation')) cancels.push({ wo, base });
         else if (EST_LABELS.has(label) && want('unconverted_estimate')) {
           rows.push(mk('unconverted_estimate', 'workorder', String(wo.objectID), { ...base, reason: getField(fields, F.woLabel)?.fieldValue || String(label) }));
-        } else if (routeId === UCB_ROUTE_ID && want('ucb')) {
-          rows.push(mk('ucb', 'workorder', String(wo.objectID), base));
         }
       }
       // Enrich cancellations with the reason from the Job — /data/Jobs method:-2 by the job objectID returns the
@@ -322,6 +324,36 @@ Deno.serve(async (req: Request) => {
         }
         rows.push(mk('cancellation', 'workorder', String(wo.objectID), { ...base, reason, detail }));
       });
+    }
+
+    // ---- A2) UCB = WorkOrders on the URGENTCB lane (route 2987) that are still OPEN ----
+    // The URGENTCB lane is a persistent backlog that predates the recent window, so it gets its own wide scan
+    // (UCB_LOOKBACK_DAYS). We keep ONLY open statuses (160/161): cancelled WOs keep their last route (2987) but
+    // have dropped off the lane in Vonigo's view — including them would over-pull stale rows. (2026-08-10: #90's
+    // lane shows 4 open callbacks; a naive 30-day scan found 2, and a 120-day scan without the open filter found
+    // 12 — 8 of them cancelled. Open + wide window = the 4 the owner sees.)
+    if (want('ucb')) {
+      const ucbEnd = dateEnd;
+      const ucbStart = dateEnd - (UCB_LOOKBACK_DAYS + 1) * 86400;
+      for (let pg = 1; pg <= 12; pg++) {
+        const r = await vpost('/data/WorkOrders/', { securityToken: token, franchiseID, pageNo: String(pg), pageSize: '200', sortMode: '1', sortDirection: '1', isCompleteObject: 'true', dateMode: '3', dateStart: String(ucbStart), dateEnd: String(ucbEnd) });
+        if (r.errNo !== 0) break;
+        const page = (r.WorkOrders as Record<string, unknown>[]) || [];
+        for (const wo of page) {
+          const fields = wo.Fields as VField[]; const rels = wo.Relations as VRel[];
+          const status = getField(fields, F.woStatus)?.optionID || 0;
+          if (Number(rel(rels, 'route')?.objectID || 0) !== UCB_ROUTE_ID || !OPEN_STATUS.has(status)) continue;
+          rows.push(mk('ucb', 'workorder', String(wo.objectID), {
+            customer_name: rel(rels, 'client')?.name || '',
+            address: getField(fields, F.woAddress)?.fieldValue || '',
+            amount: num(getField(fields, F.woPrice)?.fieldValue),
+            occurred_at: iso(getField(fields, F.woDate)?.fieldValue),
+            reason: getField(fields, F.woLabel)?.fieldValue || null,
+            raw: wo,
+          }));
+        }
+        if (page.length < 200) break;
+      }
     }
 
     // ---- B) Leads = Clients (created-date) with stage 123 == "Lead"; phone/email from the Contact ----

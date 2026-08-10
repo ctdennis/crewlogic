@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.121.0 | 2026-08-10">
+  <meta name="crewlogic-version" content="v5.121.1 | 2026-08-10">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14727,10 +14727,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         #pipelineScreen .pl-btn{padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap;}
         #pipelineScreen .pl-btn.acc{background:var(--accent-green);border-color:var(--accent-green);color:var(--accent-text,#0b0f14);}
         #pipelineScreen .pl-btn:disabled{opacity:.5;cursor:default;}
-        #pipelineScreen .pl-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
-        #pipelineScreen .pl-type-chip{display:inline-flex;align-items:center;gap:5px;padding:6px 11px;border-radius:999px;border:1px solid var(--border,#2c3e50);background:var(--bg-card,#1e2f40);color:var(--text-muted);font-size:12px;font-weight:700;cursor:pointer;user-select:none;}
-        #pipelineScreen .pl-type-chip.on{color:var(--text-primary);}
-        #pipelineScreen .pl-type-chip .cnt{opacity:.75;font-variant-numeric:tabular-nums;}
+        #pipelineScreen .pl-filterbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;}
+        #pipelineScreen .pl-filter-summary{cursor:pointer;font-size:12px;font-weight:700;padding:8px 11px;background:var(--bg-input,#253545);border:1px solid var(--border,#2c3e50);border-radius:var(--radius-sm);color:var(--text-primary);white-space:nowrap;list-style:none;}
+        #pipelineScreen .pl-filter-summary::-webkit-details-marker{display:none;}
+        #pipelineScreen .pl-filter-menu{position:absolute;z-index:60;top:calc(100% + 4px);left:0;background:var(--bg-card,#1e2f40);border:1px solid var(--border,#2c3e50);border-radius:8px;padding:6px 10px;box-shadow:0 6px 20px rgba(0,0,0,.45);min-width:210px;}
+        #pipelineScreen .pl-filter-menu label{display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:13px;font-weight:600;color:var(--text-primary);cursor:pointer;white-space:nowrap;}
+        #pipelineScreen .pl-filter-menu label .cnt{margin-left:auto;opacity:.6;font-variant-numeric:tabular-nums;}
         #pipelineScreen .pl-search{flex:1;min-width:160px;padding:8px 11px;border-radius:var(--radius-sm);border:1px solid var(--border,#2c3e50);background:var(--bg-input,#253545);color:var(--text-primary);font-size:13px;}
         #pipelineScreen .pl-viewtog{display:flex;border:1px solid var(--border,#2c3e50);border-radius:var(--radius-sm);overflow:hidden;}
         #pipelineScreen .pl-viewtog button{padding:8px 12px;background:var(--bg-card,#1e2f40);color:var(--text-muted);border:none;font-size:12px;font-weight:700;cursor:pointer;}
@@ -14820,11 +14822,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function plPaint() {
       const scr = document.getElementById('pipelineScreen');
       const totalOpen = _plOpen;
-      const chips = PL_TYPES.map(t => {
-        const on = _plTypeFilter.has(t.key);
-        const c = _plCounts[t.key] || 0;
-        return `<span class="pl-type-chip ${on ? 'on' : ''}" style="${on ? 'border-color:' + t.color + ';background:' + t.color + '22' : ''}" onclick="plToggleType('${t.key}')">${t.icon} ${t.label} <span class="cnt">${c}</span></span>`;
-      }).join('');
+      const menu = PL_TYPES.map(t =>
+        `<label><input type="checkbox" ${_plTypeFilter.has(t.key) ? 'checked' : ''} onchange="plToggleType('${t.key}', this.checked)"> ${t.icon} ${t.label} <span class="cnt">${_plCounts[t.key] || 0}</span></label>`
+      ).join('');
 
       const rows = plVisible().map(plRowHtml).join('');
       const body = rows || `<div class="pl-empty">Nothing here.${_plView === 'attention' ? ' Everything open has been worked, or try “All”.' : ''}<br>Tap <b>Sync now</b> to pull the latest from Vonigo.</div>`;
@@ -14845,25 +14845,32 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               <button class="pl-btn acc" id="plSyncBtn" onclick="plSync()">↻ Sync now</button>
             </div>
           </div>
-          <div class="pl-chips">${chips}</div>
-          <div style="margin-bottom:12px;"><input class="pl-search" id="plSearchInput" placeholder="Search by customer name…" value="${_escHtml(_plSearch)}" oninput="plSearch(this.value)"></div>
+          <div class="pl-filterbar">
+            <details id="plTypeFilter" style="position:relative;flex:0 0 auto;">
+              <summary class="pl-filter-summary" title="Show only the checked types">🔎 <span id="plTypeFilterLbl">${_plFilterLabel()}</span> ▾</summary>
+              <div class="pl-filter-menu">${menu}</div>
+            </details>
+            <input class="pl-search" id="plSearchInput" placeholder="Search by customer name…" value="${_escHtml(_plSearch)}" oninput="plSearch(this.value)">
+          </div>
           <div id="plList">${body}</div>
         </div>`;
       // keep focus/caret in search after repaint
       if (document.activeElement && document.activeElement.id === 'plSearchInput') { const el = document.getElementById('plSearchInput'); el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
     }
 
-    // Repaint only the list (used after a filter/search toggle — avoids stealing focus/scroll on the header)
+    function _plFilterLabel() {
+      const n = _plTypeFilter.size, total = PL_TYPES.length;
+      if (n >= total) return 'All types';
+      if (n === 0) return 'No types';
+      if (n <= 2) return PL_TYPES.filter(t => _plTypeFilter.has(t.key)).map(t => t.short).join(', ');
+      return n + ' types';
+    }
+
+    // Repaint only the list (used after a filter/search toggle — keeps the filter dropdown open & search focus/scroll)
     function plPaintList() {
       const el = document.getElementById('plList'); if (!el) return plPaint();
       const rows = plVisible().map(plRowHtml).join('');
       el.innerHTML = rows || `<div class="pl-empty">Nothing matches.</div>`;
-      // refresh chip active state + counts without touching the search box
-      document.querySelectorAll('#pipelineScreen .pl-type-chip').forEach((chip, i) => {
-        const t = PL_TYPES[i]; if (!t) return; const on = _plTypeFilter.has(t.key);
-        chip.classList.toggle('on', on);
-        chip.style.cssText = on ? 'border-color:' + t.color + ';background:' + t.color + '22' : '';
-      });
     }
 
     function plRowHtml(it) {
@@ -14918,8 +14925,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // ── filters / view ────────────────────────────────────────────────
-    function plToggleType(key) {
-      if (_plTypeFilter.has(key)) { if (_plTypeFilter.size > 1) _plTypeFilter.delete(key); else return; } else _plTypeFilter.add(key);
+    function plToggleType(key, on) {
+      if (on) _plTypeFilter.add(key); else _plTypeFilter.delete(key);
+      const lbl = document.getElementById('plTypeFilterLbl'); if (lbl) lbl.textContent = _plFilterLabel();
       plPaintList();
     }
     function plSetView(v) { if (_plView === v) return; _plView = v; renderPipeline(); }
