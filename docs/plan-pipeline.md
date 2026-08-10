@@ -133,14 +133,14 @@ pipeline_touches
 - **On-demand refresh** from the UI (a "Sync now" / date-range pull) for a deeper look-back.
 - Not minute-critical (unlike dispatch), so daily + on-demand is enough. **Open for Owner:** daily fine, or faster?
 
-**Retention / look-back window:** how far back to pull + keep (leads/estimates can be worth chasing for months; cancellations too). **Open for Owner** — propose a rolling 90-day active window (matches FW-58 retention), items older than that aged out unless still "working".
+**Retention / look-back window:** **rolling 30 days** (Owner 2026-08-10) — daily sync pulls the last 30 days; on-demand "Sync now" can reach further. Items already in the pipeline stay (with their CRM state) even as they age past 30 days until worked to won/lost/dismissed; the 30-day window only bounds what NEW items get pulled.
 
 ---
 
 ## 6. Pipeline UI
 
 - **Home card:** "Pipeline" (customer-facing name TBD — Owner call; e.g. "Follow-ups" / "Pipeline" / "Win-back").
-- **The Pipeline screen** (manage the items) — **type tabs + counts** (Leads N · Estimates N · Cancellations N · Callbacks N · Cases N) with a default "**needs attention**" filter (new + touches due/overdue, most-overdue first). Per item row: customer, contact chips (📞 call / 💬 text / ✉️ email — reuse DR board helpers), amount/date, reason/note (cancellations show category+reason; cases show the narrative note), the **cadence + next touch** ("Next: call · due Aug 15"), and CRM controls: **stage** dropdown, **assign to** (franchise users), **notes**, **dismiss**. Working a touch = "Done" (logs it, opens the next in the cadence) or "Snooze/reschedule" (moves `due_at`).
+- **The Pipeline screen — ONE unified list, not tabs** (Owner 2026-08-10: the whole point is centralization — these are scattered all over Vonigo; don't make users search in five places). Every item (lead / estimate / cancellation / callback / case) is **one row in a single list**, each row carrying a **type badge/indicator** (colored chip: Lead · Estimate · Cancellation · Callback · Case). A **type filter** (multi-pick chips with counts, same pattern as the dispatch route-type filter) narrows the list; default view = "**needs attention**" (new + touches due/overdue, most-overdue first). Per item row: **type badge**, customer, contact chips (📞 call / 💬 text / ✉️ email — reuse DR board helpers), amount/date, reason/note (cancellations show category+reason; cases show the narrative note), the **cadence + next touch** ("Next: call · due Aug 15"), and CRM controls: **stage** dropdown, **assign to**, **notes**, **dismiss**. Working a touch = "Done" (logs it, opens the next in the cadence) or "Snooze/reschedule" (moves `due_at`).
 - **Reminders live IN THE DISPATCH CALENDAR — one place** (Owner 2026-08-10). The dispatch board already has a time axis across the top; a **red dot next to a time** marks that follow-up activities are due then. **Click the dot → a popover lists the due activities** (customer, type, action, call/text/email chips, "Done/Snooze") — so the dispatcher sees follow-ups right alongside the day's jobs without leaving the board. In-app only (no email/text reminders in v1). The standalone Pipeline screen is where you *manage* the pipeline; the dispatch calendar is where due reminders *surface*.
 - **Filters (Pipeline screen):** by stage, assignee, due window. Search by name.
 - Later: bulk actions (assign N, email N) like the DR board; CSV export; kanban; a dedicated month calendar if the dispatch-board dots aren't enough.
@@ -162,7 +162,7 @@ pipeline_touches
 
 - **P1 — Schema + pull (server).** Migrations `pipeline_items` + `pipeline_touches`; `crewlogic-pipeline` `sync` implementing all 5 recipes; API-smoke each type against #90 (+ #31) on dev.
 - **P2 — List + CRM update (server).** `list` (filter by type/stage/assignee/due) and `update`/`dismiss`/`touchDone`/`snooze`; cadence-template seeding of touches on stage entry; CRM/touch fields preserved on re-sync. Smoke.
-- **P3 — Pipeline screen (client).** Pipeline card + screen: type tabs/counts, item rows with contact chips + next-touch + CRM controls, "needs attention" default. Gate to #90 + Kevin initially.
+- **P3 — Pipeline screen (client).** Pipeline card + screen: ONE unified list with per-row type badge + a multi-pick type filter + counts, item rows with contact chips + next-touch + CRM controls, "needs attention" default. Gate: open to **testers** (see §8.9) — not #90/Kevin-specific.
 - **P4 — Dispatch-calendar reminders.** Red dots on the dispatch board's time axis for due follow-ups + click-to-popover activity list (Done/Snooze). In-app only. This is the "everything in one place" surface.
 - **P5 — Scheduled sync.** Daily multi-franchise sync cron + "Sync now"; retention window. (No auto-drip in v1 — touches stay human reminders.)
 - **P6 — QA + promote.** Right-sized test plan; owner-gated prod promotion (migrations + edge fn + cron + merge).
@@ -179,12 +179,14 @@ pipeline_touches
 4. **Reminders surface IN THE DISPATCH CALENDAR** (one place) — red dot on the board's time axis → click → due activities. In-app only.
 5. **v1 read-only to Vonigo** (CrewLogic-side follow-up only), like Estimate Costing v1.
 
+**Resolved (Owner 2026-08-10, round 2):**
+6. **Look-back = 30 days** (rolling), daily auto-sync + on-demand "Sync now". (Was 90; 30 is enough.)
+7. **Gating = open to all testers** (not #90/Kevin-specific). Gate on tester access (dev + `subscription_status='tester'` + super-admin). **Monetization:** Pipeline is a **new sellable feature** needing its own entitlement/feature-flag and a **potential price bump** — track under the payments plan; ship gated-to-testers now, wire the paid entitlement before general availability. (See `docs/plan-payments.md` + memory `payments-processor-and-seats-decision`.)
+8. **Cases = build it, but NO per-type tabs.** One centralized list (§6): all types in a single list with a per-row type badge + a type filter. The whole point is one place, not five.
+
 **Still to confirm before/at P1:**
-6. **Cadence templates** — are the proposed per-type cadences (§6 table) about right for a first pass? (Config, easy to tune later.)
-7. **Assignment** — assign items to franchise users (estimators/owner)? Default owner of a new item? (Or a single shared queue in v1?)
-8. **Sync cadence + look-back** — daily auto-sync + on-demand "Sync now", rolling 90-day window: OK?
-9. **Gating** — start gated to #90 + Kevin (like Estimate Costing), expand after validation?
-10. **Cases scope** — #90 has 0 active; build the plumbing now (shows empty for #90) or defer the Cases tab? (Lean: build it, it's cheap.)
+9. **Cadence templates** — are the proposed per-type cadences (§6 table) about right for a first pass? (Config, easy to tune later.) — *lean: use the defaults.*
+10. **Assignment** — v1 keeps an `assigned_to` field but defaults to a **shared franchise queue** (assignment optional), OK? Or force per-user assignment?
 
 ---
 
