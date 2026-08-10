@@ -1,9 +1,11 @@
 # Plan — Vonigo → CrewLogic Follow-up Pipeline (all 5 ops types)
 
-**Status:** DRAFT — awaiting Owner approval (do not build yet).
+**Status:** APPROVED — building on `dev`. P1 (schema+sync), P2 (list/CRM server), P2.5 (sequences), and **P3 (Pipeline screen + Sequence builder, v5.121.0)** are done on dev; nothing on prod yet.
 **Tracks:** Hub FW "Vonigo date-range pull → CRM pipeline" + task #28 ("manage 5 ops types").
 **Recognition reference (DONE/validated):** memory `vonigo-five-type-recognition` (probes vs #90, 2026-08-06/07).
 **Owner scope decision (2026-08-10):** build **all 5 types**, plan doc first.
+
+> **UPDATE 2026-08-10 — "cadence templates" became user-built "sequences."** The original plan seeded touches from hardcoded per-type *cadence templates*. Owner requirement shift (2026-08-10): make cadences **first-class, reusable, user-built objects** so an owner can, e.g., build a **"Realtor outreach"** sequence with its own steps and audience-targeted email/text copy, then **assign** any item to it. Implemented as `pipeline_sequences` + `pipeline_sequence_steps` (migration 0086); assigning an item seeds `pipeline_touches` from the sequence's steps; one sequence may be the **auto-default per type** (applied on sync). Five **starter sequences** ship seeded (Standard Lead, Reschedule Follow-up, Estimate Drip, Urgent Callback, Case Callback). Everywhere below, read "cadence template" as **"sequence."**
 
 ---
 
@@ -196,9 +198,10 @@ Deferred decisions (do NOT block P1): whose calendar (shared franchise vs per-as
 
 ## 7. Build phases
 
-- **P1 — Schema + pull (server).** Migrations `pipeline_items` + `pipeline_touches`; `crewlogic-pipeline` `sync` implementing all 5 recipes; API-smoke each type against #90 (+ #31) on dev.
-- **P2 — List + CRM update (server).** `list` (filter by type/stage/assignee/due) and `update`/`dismiss`/`touchDone`/`snooze`; cadence-template seeding of touches on stage entry; CRM/touch fields preserved on re-sync. Smoke.
-- **P3 — Pipeline screen (client).** Pipeline card + screen: ONE unified list with per-row type badge + a multi-pick type filter + counts, item rows with contact chips + next-touch + CRM controls, "needs attention" default. Gate: open to **testers** (see §8.9) — not #90/Kevin-specific.
+- **P1 — Schema + pull (server). ✅ dev.** Migrations `pipeline_items` + `pipeline_touches`; `crewlogic-pipeline` `sync` implementing all 5 recipes; API-smoke each type against #90 on dev (237 items auto-seeded).
+- **P2 — List + CRM update (server). ✅ dev.** `list` (filter by type/stage/assignee/due) and `update`/`dismiss`/`touchDone`/`snooze`; CRM/touch fields preserved on re-sync. Smoke.
+- **P2.5 — Sequences (server). ✅ dev.** Migration 0086 (`pipeline_sequences` + `pipeline_sequence_steps` + `sequence_id`/`sequence_step_id` link cols + `pipeline_touch_recompute_next()` trigger that keeps `next_action_at` = earliest scheduled touch). Actions `seqList`/`seqSave`/`seqDelete`/`assignSequence`/`unassignSequence`; 5 starter sequences seeded per franchise; assigning an item seeds its touches (day/week/month delays). Verified vs #90 (634 touches; custom "Realtor" sequence assign).
+- **P3 — Pipeline screen + Sequence builder (client). ✅ dev (v5.121.0).** Pipeline card + `#pipelineScreen`: ONE unified list with per-row type badge + a multi-pick type filter + counts, "needs attention" default, item rows with contact chips (call/text/email), next-touch pill, stage + sequence dropdowns, Done/Snooze/Note/Dismiss, and a template **Compose** (merges `{{first_name}}`/`{{franchise}}` into the step's email/text) + **Sync now**. **Sequence builder** modal: create/edit/delete sequences, add/remove steps (delay value+unit, channel, email subject/text body). Gate: dev / super-admin / any **tester** franchise (§8.9). `renderPipeline()` and the `pl*` functions in `index.html`.
 - **P4 — Dispatch-calendar reminders.** Red dots on the dispatch board's time axis for due follow-ups + click-to-popover activity list (Done/Snooze). In-app only. This is the "everything in one place" surface.
 - **P5 — Scheduled sync.** Daily multi-franchise sync cron + "Sync now"; retention window. (No auto-drip in v1 — touches stay human reminders.)
 - **P6 — QA + promote.** Right-sized test plan; owner-gated prod promotion (migrations + edge fn + cron + merge).

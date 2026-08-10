@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.120.3 | 2026-08-09">
+  <meta name="crewlogic-version" content="v5.121.0 | 2026-08-10">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1523,6 +1523,12 @@
             <div class="module-desc">Cost a Vonigo estimate from photos → margin</div>
           </div>
 
+          <div class="module-card fade-in fade-in-delay-2" id="pipelineCard" data-card="pipeline" onclick="openModule('pipeline')" style="display:none;">
+            <div class="module-icon">🗂️</div>
+            <div class="module-name">Follow-up Pipeline</div>
+            <div class="module-desc">Leads, unconverted estimates &amp; cancellations to work</div>
+          </div>
+
           <div class="module-card fade-in fade-in-delay-3" id="routerCard" data-card="router" onclick="openModule('router')" style="display:none;">
             <div class="module-icon">🚛</div>
             <div class="module-name">Route Optimizer</div>
@@ -1717,6 +1723,8 @@
       <!-- DISPATCH DASHBOARD (desktop) — multi-pane layout injected by renderDashboard() -->
       <div id="dashboardScreen" style="display:none;box-sizing:border-box;padding:12px 24px 32px;"></div>
       <div id="estimatesDashboardScreen" style="display:none;box-sizing:border-box;padding:12px 24px 32px;"></div>
+      <!-- FOLLOW-UP PIPELINE — unified list of leads / unconverted estimates / cancellations / UCBs / cases + sequence builder (renderPipeline) -->
+      <div id="pipelineScreen" style="display:none;box-sizing:border-box;padding:12px 16px 32px;"></div>
 
       <!-- JOB PLAN -->
       <div class="job-plan-section" id="jobPlanScreen">
@@ -8837,6 +8845,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Estimate Costing prod access: dev env (all), franchise #90 (whole franchise), and Kevin McGill (NY #31) by user.
       const _ecAudience = (IS_DEV_ENV || currentUser.franchiseID === '90' || currentUser.email === 'kevin@junkluggers.com');
       if (ecCard) ecCard.style.display = _ecAudience ? '' : 'none';
+      // Follow-up Pipeline — gated feature: dev env (all), super-admin, and any tester franchise. New paid feature
+      // (entitlement + price bump to follow); testers get it now to validate before commercial rollout.
+      const plCard = document.getElementById('pipelineCard');
+      const _pipelineAudience = (IS_DEV_ENV || currentUser.email === 'charles.dennis@junkluggers.com' || currentUser.subscriptionStatus === 'tester');
+      if (plCard) plCard.style.display = _pipelineAudience ? '' : 'none';
       // Route Classification settings tab — same audience (owner-only tab; drives estimate-route scoping + board grouping).
       const _routesTab = document.getElementById('stab-routes');
       if (_routesTab) _routesTab.style.display = (_ecAudience && currentUser.role === 'owner') ? '' : 'none';
@@ -8946,7 +8959,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       'disposalRouterScreen',
       'storageScreen', 'storageResultsScreen',
       'mattressScreen', 'mattressResultsScreen',
-      'priceLookupScreen', 'promosScreen', 'backupScheduleScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'truckAlertsScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen', 'estimateCostingScreen'
+      'priceLookupScreen', 'promosScreen', 'backupScheduleScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'truckAlertsScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen', 'estimateCostingScreen', 'pipelineScreen'
     ];
 
     function hideAll() {
@@ -14673,6 +14686,451 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function ecCloseModal(){ const m = document.getElementById('ecRoomModal'); if (m) m.style.display='none'; }
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+    // FOLLOW-UP PIPELINE (P3) — unified worklist of the 5 Vonigo ops types + reusable sequences.
+    // Server: crewlogic-pipeline (list/update/dismiss/touchDone/snooze/assignSequence/unassignSequence/
+    // seqList/seqSave/seqDelete/sync). Items + their scheduled touches are provider-agnostic; only the
+    // sync adapter is Vonigo-specific. Gated to dev / super-admin / testers (see applyOwnerCards).
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+    const PL_TYPES = [
+      { key: 'lead',                 label: 'Leads',              short: 'Lead',        icon: '🌱', color: '#22c55e' },
+      { key: 'unconverted_estimate', label: 'Unconverted est.',   short: 'Unconverted', icon: '📝', color: '#e0a44f' },
+      { key: 'cancellation',         label: 'Cancellations',      short: 'Cancelled',   icon: '✖️', color: '#e05a4f' },
+      { key: 'ucb',                  label: 'Urgent callbacks',   short: 'Urgent CB',   icon: '📞', color: '#f43f5e' },
+      { key: 'case',                 label: 'Cases',              short: 'Case',        icon: '🛟', color: '#8b5cf6' }
+    ];
+    const PL_STAGES = [
+      { key: 'new', label: 'New' }, { key: 'contacted', label: 'Contacted' }, { key: 'working', label: 'Working' },
+      { key: 'won', label: 'Won' }, { key: 'lost', label: 'Lost' }, { key: 'resolved', label: 'Resolved' }, { key: 'dismissed', label: 'Dismissed' }
+    ];
+    const PL_CHAN = { call: '📞', email: '✉️', text: '💬', task: '✓', note: '📝' };
+
+    let _plItems = [], _plSeqs = [], _plCounts = {}, _plOpen = 0;
+    let _plView = 'attention';   // 'attention' (open only) | 'all'
+    let _plTypeFilter = new Set(PL_TYPES.map(t => t.key));
+    let _plSearch = '';
+    let _plBusy = false;
+
+    function plApi(action, extra) {
+      return edgeFunctionCall('crewlogic-pipeline', Object.assign({ action, franchiseID: currentUser.franchiseID }, extra || {}));
+    }
+
+    function plEnsureStyles() {
+      if (document.getElementById('plStyles')) return;
+      const st = document.createElement('style'); st.id = 'plStyles';
+      st.textContent = `
+        #pipelineScreen .pl-wrap{max-width:900px;margin:0 auto;}
+        #pipelineScreen .pl-head{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:12px;}
+        #pipelineScreen .pl-title{font-size:20px;font-weight:800;color:var(--text-primary);}
+        #pipelineScreen .pl-sub{font-size:12px;color:var(--text-muted);margin-top:2px;}
+        #pipelineScreen .pl-actions{display:flex;gap:8px;flex-wrap:wrap;}
+        #pipelineScreen .pl-btn{padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap;}
+        #pipelineScreen .pl-btn.acc{background:var(--accent-green);border-color:var(--accent-green);color:var(--accent-text,#0b0f14);}
+        #pipelineScreen .pl-btn:disabled{opacity:.5;cursor:default;}
+        #pipelineScreen .pl-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
+        #pipelineScreen .pl-type-chip{display:inline-flex;align-items:center;gap:5px;padding:6px 11px;border-radius:999px;border:1px solid var(--border,#2c3e50);background:var(--bg-card,#1e2f40);color:var(--text-muted);font-size:12px;font-weight:700;cursor:pointer;user-select:none;}
+        #pipelineScreen .pl-type-chip.on{color:var(--text-primary);}
+        #pipelineScreen .pl-type-chip .cnt{opacity:.75;font-variant-numeric:tabular-nums;}
+        #pipelineScreen .pl-search{flex:1;min-width:160px;padding:8px 11px;border-radius:var(--radius-sm);border:1px solid var(--border,#2c3e50);background:var(--bg-input,#253545);color:var(--text-primary);font-size:13px;}
+        #pipelineScreen .pl-viewtog{display:flex;border:1px solid var(--border,#2c3e50);border-radius:var(--radius-sm);overflow:hidden;}
+        #pipelineScreen .pl-viewtog button{padding:8px 12px;background:var(--bg-card,#1e2f40);color:var(--text-muted);border:none;font-size:12px;font-weight:700;cursor:pointer;}
+        #pipelineScreen .pl-viewtog button.on{background:var(--btn-surface,#34485d);color:var(--text-primary);}
+        #pipelineScreen .pl-row{border:1px solid var(--border,#2c3e50);border-left-width:4px;border-radius:var(--radius-sm);background:var(--bg-card,#1e2f40);padding:12px 13px;margin-bottom:10px;}
+        #pipelineScreen .pl-row .r1{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+        #pipelineScreen .pl-name{font-size:15px;font-weight:800;color:var(--text-primary);line-height:1.25;}
+        #pipelineScreen .pl-badge{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;padding:2px 7px;border-radius:999px;margin-left:2px;}
+        #pipelineScreen .pl-amt{font-size:14px;font-weight:800;color:var(--text-primary);font-variant-numeric:tabular-nums;white-space:nowrap;}
+        #pipelineScreen .pl-meta{font-size:12px;color:var(--text-muted);margin-top:4px;line-height:1.5;}
+        #pipelineScreen .pl-contact{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;}
+        #pipelineScreen .pl-chip{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:999px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-size:12px;font-weight:700;text-decoration:none;cursor:pointer;}
+        #pipelineScreen .pl-foot{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:11px;padding-top:10px;border-top:1px solid var(--border,#2c3e50);}
+        #pipelineScreen .pl-next{font-size:12px;font-weight:700;padding:5px 10px;border-radius:999px;background:rgba(56,189,248,.12);color:#7dd3fc;border:1px solid rgba(56,189,248,.3);}
+        #pipelineScreen .pl-next.over{background:rgba(224,90,79,.14);color:#fca5a5;border-color:rgba(224,90,79,.4);}
+        #pipelineScreen .pl-next.none{background:transparent;color:var(--text-muted);border-color:var(--border,#2c3e50);}
+        #pipelineScreen select.pl-sel{padding:6px 8px;border-radius:var(--radius-sm);border:1px solid var(--border,#2c3e50);background:var(--bg-input,#253545);color:var(--text-primary);font-size:12px;font-weight:700;cursor:pointer;}
+        #pipelineScreen .pl-mini{padding:6px 9px;border-radius:var(--radius-sm);border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-size:12px;font-weight:700;cursor:pointer;}
+        #pipelineScreen .pl-mini.go{background:var(--accent-green);border-color:var(--accent-green);color:var(--accent-text,#0b0f14);}
+        #pipelineScreen .pl-spacer{flex:1;}
+        #pipelineScreen .pl-empty{text-align:center;color:var(--text-muted);padding:48px 16px;font-size:14px;}
+        .pl-mback{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:400;display:flex;align-items:flex-start;justify-content:center;padding:24px 12px;overflow-y:auto;}
+        .pl-mcard{background:var(--bg-secondary,#182634);border:1px solid var(--border,#2c3e50);border-radius:var(--radius,12px);width:100%;max-width:560px;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.5);}
+        .pl-mcard h3{font-size:17px;font-weight:800;color:var(--text-primary);margin:0 0 3px;}
+        .pl-mcard .lbl{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin:12px 0 5px;}
+        .pl-mcard input,.pl-mcard textarea,.pl-mcard select{width:100%;box-sizing:border-box;padding:9px 11px;border-radius:var(--radius-sm);border:1px solid var(--border,#2c3e50);background:var(--bg-input,#253545);color:var(--text-primary);font-size:13px;font-family:inherit;}
+        .pl-mcard textarea{resize:vertical;min-height:60px;line-height:1.5;}
+        .pl-step{border:1px solid var(--border,#2c3e50);border-radius:var(--radius-sm);padding:10px;margin-bottom:9px;background:var(--bg-card,#1e2f40);}
+        .pl-step .srow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+        .pl-seqcard{display:flex;align-items:center;gap:10px;border:1px solid var(--border,#2c3e50);border-radius:var(--radius-sm);padding:11px;margin-bottom:8px;background:var(--bg-card,#1e2f40);}
+        .pl-seqcard .nm{font-weight:800;color:var(--text-primary);font-size:14px;}
+        .pl-seqcard .ds{font-size:11.5px;color:var(--text-muted);margin-top:2px;}
+        .pl-defbadge{font-size:10px;font-weight:800;text-transform:uppercase;padding:2px 6px;border-radius:999px;background:rgba(34,197,94,.15);color:#4ade80;border:1px solid rgba(34,197,94,.3);}
+      `;
+      document.head.appendChild(st);
+    }
+
+    async function renderPipeline() {
+      plEnsureStyles();
+      const scr = document.getElementById('pipelineScreen');
+      scr.innerHTML = '<div class="pl-wrap"><div class="pl-empty">Loading pipeline…</div></div>';
+      await plLoad();
+    }
+
+    async function plLoad() {
+      try {
+        const [listRes, seqRes] = await Promise.all([
+          plApi('list', { view: _plView === 'attention' ? 'attention' : '' }),
+          plApi('seqList', {})
+        ]);
+        if (listRes && listRes.success) { _plItems = listRes.items || []; _plCounts = listRes.counts || {}; _plOpen = listRes.open || 0; }
+        else { console.error('[pipeline] list failed', listRes && listRes.error); _plItems = []; }
+        if (seqRes && seqRes.success) _plSeqs = seqRes.sequences || [];
+      } catch (e) { console.error('[pipeline] load error', e); }
+      plPaint();
+    }
+
+    function plFirstName(name) {
+      const s = String(name || '').trim(); if (!s) return 'there';
+      if (s.includes(',')) { const p = s.split(',').map(x => x.trim()); return (p[1] || p[0] || 'there').split(/\s+/)[0]; }
+      return s.split(/\s+/)[0];
+    }
+    function plMerge(tpl, it) {
+      return String(tpl || '')
+        .replace(/\{\{\s*first_name\s*\}\}/gi, plFirstName(it.customer_name))
+        .replace(/\{\{\s*name\s*\}\}/gi, it.customer_name || '')
+        .replace(/\{\{\s*franchise\s*\}\}/gi, currentUser.franchiseName || 'The Junkluggers');
+    }
+    function plWhen(iso) {
+      if (!iso) return { txt: 'No follow-up', over: false, none: true };
+      const d = new Date(iso), now = new Date();
+      const days = Math.floor((d.setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 86400000);
+      const base = new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      if (days < 0) return { txt: base + ' · overdue', over: true, none: false };
+      if (days === 0) return { txt: 'Today', over: false, none: false };
+      if (days === 1) return { txt: 'Tomorrow', over: false, none: false };
+      return { txt: base, over: false, none: false };
+    }
+    function plDate(iso) { return iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : ''; }
+    function plTel(p) { return String(p || '').replace(/[^0-9+]/g, ''); }
+
+    function plVisible() {
+      const q = _plSearch.trim().toLowerCase();
+      return _plItems.filter(it => _plTypeFilter.has(it.type) && (!q || String(it.customer_name || '').toLowerCase().includes(q)));
+    }
+
+    function plPaint() {
+      const scr = document.getElementById('pipelineScreen');
+      const totalOpen = _plOpen;
+      const chips = PL_TYPES.map(t => {
+        const on = _plTypeFilter.has(t.key);
+        const c = _plCounts[t.key] || 0;
+        return `<span class="pl-type-chip ${on ? 'on' : ''}" style="${on ? 'border-color:' + t.color + ';background:' + t.color + '22' : ''}" onclick="plToggleType('${t.key}')">${t.icon} ${t.label} <span class="cnt">${c}</span></span>`;
+      }).join('');
+
+      const rows = plVisible().map(plRowHtml).join('');
+      const body = rows || `<div class="pl-empty">Nothing here.${_plView === 'attention' ? ' Everything open has been worked, or try “All”.' : ''}<br>Tap <b>Sync now</b> to pull the latest from Vonigo.</div>`;
+
+      scr.innerHTML = `
+        <div class="pl-wrap">
+          <div class="pl-head">
+            <div>
+              <div class="pl-title">Follow-up Pipeline</div>
+              <div class="pl-sub">${totalOpen} open across leads, unconverted estimates, cancellations, urgent callbacks &amp; cases</div>
+            </div>
+            <div class="pl-actions">
+              <div class="pl-viewtog">
+                <button class="${_plView === 'attention' ? 'on' : ''}" onclick="plSetView('attention')">Needs attention</button>
+                <button class="${_plView === 'all' ? 'on' : ''}" onclick="plSetView('all')">All</button>
+              </div>
+              <button class="pl-btn" onclick="plOpenSequences()">⚙️ Sequences</button>
+              <button class="pl-btn acc" id="plSyncBtn" onclick="plSync()">↻ Sync now</button>
+            </div>
+          </div>
+          <div class="pl-chips">${chips}</div>
+          <div style="margin-bottom:12px;"><input class="pl-search" id="plSearchInput" placeholder="Search by customer name…" value="${_escHtml(_plSearch)}" oninput="plSearch(this.value)"></div>
+          <div id="plList">${body}</div>
+        </div>`;
+      // keep focus/caret in search after repaint
+      if (document.activeElement && document.activeElement.id === 'plSearchInput') { const el = document.getElementById('plSearchInput'); el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+    }
+
+    // Repaint only the list (used after a filter/search toggle — avoids stealing focus/scroll on the header)
+    function plPaintList() {
+      const el = document.getElementById('plList'); if (!el) return plPaint();
+      const rows = plVisible().map(plRowHtml).join('');
+      el.innerHTML = rows || `<div class="pl-empty">Nothing matches.</div>`;
+      // refresh chip active state + counts without touching the search box
+      document.querySelectorAll('#pipelineScreen .pl-type-chip').forEach((chip, i) => {
+        const t = PL_TYPES[i]; if (!t) return; const on = _plTypeFilter.has(t.key);
+        chip.classList.toggle('on', on);
+        chip.style.cssText = on ? 'border-color:' + t.color + ';background:' + t.color + '22' : '';
+      });
+    }
+
+    function plRowHtml(it) {
+      const t = PL_TYPES.find(x => x.key === it.type) || { icon: '•', label: it.type, short: it.type, color: '#6e8194' };
+      const nt = it.nextTouch;
+      const seq = _plSeqs.find(s => s.id === it.sequence_id);
+      const w = plWhen(nt ? nt.dueAt : null);
+      // contact chips
+      const chips = [];
+      if (it.phone) { chips.push(`<a class="pl-chip" href="tel:${plTel(it.phone)}">📞 Call</a>`); chips.push(`<a class="pl-chip" href="sms:${plTel(it.phone)}">💬 Text</a>`); }
+      if (it.email) chips.push(`<a class="pl-chip" href="mailto:${_escHtml(it.email)}">✉️ Email</a>`);
+      if (seq && nt && (nt.channel === 'email' || nt.channel === 'text')) chips.push(`<button class="pl-chip" onclick="plCompose('${it.id}')">📄 Template</button>`);
+      if (it.vonigo_link) chips.push(`<a class="pl-chip" href="${_escHtml(it.vonigo_link)}" target="_blank" rel="noopener">↗ Vonigo</a>`);
+      // meta line
+      const meta = [];
+      if (it.reason) meta.push(_escHtml(it.reason));
+      if (it.detail) meta.push('“' + _escHtml(it.detail) + '”');
+      if (it.address) meta.push(_escHtml(it.address));
+      if (it.occurred_at) meta.push(plDate(it.occurred_at));
+      // stage + sequence selects
+      const stageSel = `<select class="pl-sel" title="Stage" onchange="plSetStage('${it.id}', this.value)">` +
+        PL_STAGES.map(s => `<option value="${s.key}" ${it.stage === s.key ? 'selected' : ''}>${s.label}</option>`).join('') + `</select>`;
+      const seqSel = `<select class="pl-sel" title="Sequence" onchange="plAssignSeq('${it.id}', this.value)">` +
+        `<option value="">No sequence</option>` +
+        _plSeqs.map(s => `<option value="${s.id}" ${it.sequence_id === s.id ? 'selected' : ''}>${_escHtml(s.name)}</option>`).join('') + `</select>`;
+      const nextPill = `<span class="pl-next ${w.over ? 'over' : ''} ${w.none ? 'none' : ''}">${nt ? (PL_CHAN[nt.channel] || '•') + ' ' : ''}${w.txt}</span>`;
+      const touchBtns = nt
+        ? `<button class="pl-mini go" onclick="plTouchDone('${it.id}','${nt.id || ''}')">✓ Done</button><button class="pl-mini" onclick="plSnooze('${nt.id || ''}')">⏰ Snooze</button>`
+        : '';
+      return `
+        <div class="pl-row" style="border-left-color:${t.color};">
+          <div class="r1">
+            <div>
+              <span class="pl-name">${_escHtml(it.customer_name || 'Unknown')}</span>
+              <span class="pl-badge" style="background:${t.color}22;color:${t.color};">${t.short}</span>
+            </div>
+            ${it.amount ? `<div class="pl-amt">$${Number(it.amount).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>` : ''}
+          </div>
+          ${meta.length ? `<div class="pl-meta">${meta.join(' · ')}</div>` : ''}
+          ${chips.length ? `<div class="pl-contact">${chips.join('')}</div>` : ''}
+          <div class="pl-foot">
+            ${nextPill}
+            ${touchBtns}
+            <span class="pl-spacer"></span>
+            ${seqSel}
+            ${stageSel}
+            <button class="pl-mini" title="Add a note" onclick="plNote('${it.id}')">📝</button>
+            <button class="pl-mini" title="Dismiss" onclick="plDismiss('${it.id}')">✕</button>
+          </div>
+          ${it.notes ? `<div class="pl-meta" style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border,#2c3e50);">📝 ${_escHtml(it.notes)}</div>` : ''}
+        </div>`;
+    }
+
+    // ── filters / view ────────────────────────────────────────────────
+    function plToggleType(key) {
+      if (_plTypeFilter.has(key)) { if (_plTypeFilter.size > 1) _plTypeFilter.delete(key); else return; } else _plTypeFilter.add(key);
+      plPaintList();
+    }
+    function plSetView(v) { if (_plView === v) return; _plView = v; renderPipeline(); }
+    let _plSearchTmr = null;
+    function plSearch(v) { _plSearch = v; clearTimeout(_plSearchTmr); _plSearchTmr = setTimeout(plPaintList, 140); }
+
+    async function plSync() {
+      if (_plBusy) return; _plBusy = true;
+      const btn = document.getElementById('plSyncBtn'); if (btn) { btn.disabled = true; btn.textContent = '↻ Syncing…'; }
+      try {
+        const r = await plApi('sync', { days: 30 });
+        if (!r || !r.success) { alert('Sync failed: ' + ((r && r.error) || 'unknown error')); }
+      } catch (e) { console.error('[pipeline] sync', e); alert('Sync failed. Please try again.'); }
+      _plBusy = false;
+      await plLoad();
+    }
+
+    // ── item mutations ────────────────────────────────────────────────
+    async function plSetStage(id, stage) {
+      const r = await plApi('update', { id, patch: { stage } });
+      if (!r || !r.success) { alert('Could not update stage.'); }
+      await plLoad(); // closing a stage skips touches → next-touch pill changes
+    }
+    async function plAssignSeq(id, sequenceId) {
+      const r = sequenceId ? await plApi('assignSequence', { id, sequenceId }) : await plApi('unassignSequence', { id });
+      if (!r || !r.success) { alert('Could not change the sequence.'); }
+      await plLoad();
+    }
+    async function plTouchDone(id, touchId) {
+      if (!touchId) return;
+      const r = await plApi('touchDone', { touchId });
+      if (!r || !r.success) { alert('Could not mark done.'); }
+      await plLoad();
+    }
+    async function plDismiss(id) {
+      if (!confirm('Dismiss this item? It leaves the worklist (find it again under “All”).')) return;
+      const r = await plApi('dismiss', { id });
+      if (!r || !r.success) { alert('Could not dismiss.'); }
+      await plLoad();
+    }
+    function plNote(id) {
+      const it = _plItems.find(x => x.id === id); if (!it) return;
+      plModal(`
+        <h3>Note</h3>
+        <div class="pl-sub" style="color:var(--text-muted);font-size:12px;margin-bottom:6px;">${_escHtml(it.customer_name || '')}</div>
+        <textarea id="plNoteTa" rows="5" placeholder="Add context for the next touch…">${_escHtml(it.notes || '')}</textarea>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
+          <button class="pl-btn" onclick="plCloseModal()">Cancel</button>
+          <button class="pl-btn acc" onclick="plSaveNote('${id}')">Save note</button>
+        </div>`);
+    }
+    async function plSaveNote(id) {
+      const notes = (document.getElementById('plNoteTa') || {}).value || '';
+      plCloseModal();
+      const r = await plApi('update', { id, patch: { notes } });
+      if (!r || !r.success) { alert('Could not save note.'); }
+      await plLoad();
+    }
+    function plSnooze(touchId) {
+      if (!touchId) return;
+      plModal(`
+        <h3>Snooze follow-up</h3>
+        <div class="pl-sub" style="color:var(--text-muted);font-size:12px;margin-bottom:10px;">Push the next touch out to…</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="pl-btn" onclick="plDoSnooze('${touchId}',1)">Tomorrow</button>
+          <button class="pl-btn" onclick="plDoSnooze('${touchId}',3)">+3 days</button>
+          <button class="pl-btn" onclick="plDoSnooze('${touchId}',7)">+1 week</button>
+          <button class="pl-btn" onclick="plDoSnooze('${touchId}',14)">+2 weeks</button>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:16px;"><button class="pl-btn" onclick="plCloseModal()">Cancel</button></div>`);
+    }
+    async function plDoSnooze(touchId, days) {
+      plCloseModal();
+      const d = new Date(); d.setHours(9, 0, 0, 0); d.setDate(d.getDate() + days);
+      const r = await plApi('snooze', { touchId, dueAt: d.toISOString() });
+      if (!r || !r.success) { alert('Could not snooze.'); }
+      await plLoad();
+    }
+    function plCompose(id) {
+      const it = _plItems.find(x => x.id === id); if (!it) return;
+      const seq = _plSeqs.find(s => s.id === it.sequence_id);
+      const ch = it.nextTouch && it.nextTouch.channel;
+      const step = seq && (seq.steps || []).find(s => s.channel === ch) || (seq && (seq.steps || []).find(s => s.channel === 'email' || s.channel === 'text'));
+      if (!step) { alert('No template on this sequence step yet — add one under ⚙️ Sequences.'); return; }
+      const subj = plMerge(step.subject, it), bodyTxt = plMerge(step.body, it);
+      const sendBtn = ch === 'text' && it.phone
+        ? `<a class="pl-btn acc" href="sms:${plTel(it.phone)}?&body=${encodeURIComponent(bodyTxt)}">💬 Open text</a>`
+        : (it.email ? `<a class="pl-btn acc" href="mailto:${_escHtml(it.email)}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(bodyTxt)}">✉️ Open email</a>` : '');
+      plModal(`
+        <h3>Template · ${_escHtml(it.customer_name || '')}</h3>
+        ${step.channel === 'email' ? `<div class="lbl">Subject</div><input id="plCompSubj" value="${_escHtml(subj)}">` : ''}
+        <div class="lbl">Message</div>
+        <textarea id="plCompBody" rows="7">${_escHtml(bodyTxt)}</textarea>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
+          <button class="pl-btn" onclick="plCopyCompose()">Copy</button>
+          ${sendBtn}
+          <button class="pl-btn" onclick="plCloseModal()">Close</button>
+        </div>`);
+    }
+    function plCopyCompose() {
+      const b = document.getElementById('plCompBody'); if (!b) return;
+      const s = document.getElementById('plCompSubj');
+      const txt = (s ? s.value + '\n\n' : '') + b.value;
+      if (navigator.clipboard) navigator.clipboard.writeText(txt);
+      const btn = event && event.target; if (btn) { btn.textContent = 'Copied ✓'; setTimeout(() => { btn.textContent = 'Copy'; }, 1400); }
+    }
+
+    // ── modal primitive ───────────────────────────────────────────────
+    function plModal(html) {
+      let m = document.getElementById('plModalHost');
+      if (!m) { m = document.createElement('div'); m.id = 'plModalHost'; document.body.appendChild(m); }
+      m.innerHTML = `<div class="pl-mback" onclick="if(event.target===this)plCloseModal()"><div class="pl-mcard">${html}</div></div>`;
+    }
+    function plCloseModal() { const m = document.getElementById('plModalHost'); if (m) m.innerHTML = ''; }
+
+    // ── sequences (builder) ───────────────────────────────────────────
+    function plOpenSequences() {
+      const cards = _plSeqs.map(s => {
+        const def = s.default_for_type ? (PL_TYPES.find(t => t.key === s.default_for_type) || {}).label : '';
+        const n = (s.steps || []).length;
+        return `<div class="pl-seqcard">
+          <div style="flex:1;">
+            <div class="nm">${_escHtml(s.name)} ${def ? `<span class="pl-defbadge">Default · ${_escHtml(def)}</span>` : ''}</div>
+            <div class="ds">${n} step${n === 1 ? '' : 's'}${s.description ? ' · ' + _escHtml(s.description) : ''}</div>
+          </div>
+          <button class="pl-mini" onclick="plEditSeq('${s.id}')">Edit</button>
+          <button class="pl-mini" onclick="plDeleteSeq('${s.id}','${_escHtml(s.name).replace(/'/g, '')}')">Delete</button>
+        </div>`;
+      }).join('');
+      plModal(`
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <h3>Sequences</h3>
+          <button class="pl-btn acc" onclick="plEditSeq('')">+ New sequence</button>
+        </div>
+        <div class="pl-sub" style="color:var(--text-muted);font-size:12px;margin:2px 0 14px;">A sequence is a reusable list of timed touches (call/email/text) with templates. Assign an item to a sequence to schedule its follow-ups. Mark one as the default for a type to auto-apply on sync.</div>
+        ${cards || '<div class="pl-empty" style="padding:24px;">No sequences yet.</div>'}
+        <div style="display:flex;justify-content:flex-end;margin-top:14px;"><button class="pl-btn" onclick="plCloseModal()">Close</button></div>`);
+    }
+
+    let _plSeqEdit = null;
+    function plEditSeq(id) {
+      const src = id ? _plSeqs.find(s => s.id === id) : null;
+      _plSeqEdit = src
+        ? JSON.parse(JSON.stringify({ id: src.id, name: src.name, description: src.description || '', default_for_type: src.default_for_type || '', steps: (src.steps || []).map(st => ({ delay_value: st.delay_value, delay_unit: st.delay_unit, channel: st.channel, subject: st.subject || '', body: st.body || '' })) }))
+        : { id: '', name: '', description: '', default_for_type: '', steps: [{ delay_value: 1, delay_unit: 'day', channel: 'call', subject: '', body: '' }] };
+      plRenderSeqEditor();
+    }
+    function plRenderSeqEditor() {
+      const e = _plSeqEdit;
+      const typeOpts = `<option value="">— none —</option>` + PL_TYPES.map(t => `<option value="${t.key}" ${e.default_for_type === t.key ? 'selected' : ''}>${t.label}</option>`).join('');
+      const steps = e.steps.map((st, i) => `
+        <div class="pl-step">
+          <div class="srow">
+            <span style="font-weight:800;color:var(--text-muted);font-size:12px;">Step ${i + 1}</span>
+            <span style="color:var(--text-muted);font-size:12px;">after</span>
+            <input type="number" min="0" style="width:64px;" value="${st.delay_value}" onchange="plStepField(${i},'delay_value',this.value)">
+            <select style="width:auto;" onchange="plStepField(${i},'delay_unit',this.value)">
+              ${['day', 'week', 'month'].map(u => `<option value="${u}" ${st.delay_unit === u ? 'selected' : ''}>${u}${st.delay_value == 1 ? '' : 's'}</option>`).join('')}
+            </select>
+            <select style="width:auto;" onchange="plStepField(${i},'channel',this.value)">
+              ${['call', 'email', 'text', 'task'].map(c => `<option value="${c}" ${st.channel === c ? 'selected' : ''}>${PL_CHAN[c]} ${c}</option>`).join('')}
+            </select>
+            <span class="pl-spacer"></span>
+            <button class="pl-mini" onclick="plStepRemove(${i})">✕</button>
+          </div>
+          ${(st.channel === 'email' || st.channel === 'text') ? `
+            <div style="margin-top:8px;">
+              ${st.channel === 'email' ? `<input placeholder="Subject" value="${_escHtml(st.subject)}" onchange="plStepField(${i},'subject',this.value)" style="margin-bottom:6px;">` : ''}
+              <textarea rows="3" placeholder="Message — use {{first_name}}, {{name}}, {{franchise}}" onchange="plStepField(${i},'body',this.value)">${_escHtml(st.body)}</textarea>
+            </div>` : ''}
+        </div>`).join('');
+      plModal(`
+        <h3>${e.id ? 'Edit' : 'New'} sequence</h3>
+        <div class="lbl">Name</div>
+        <input id="plSeqName" value="${_escHtml(e.name)}" placeholder="e.g. Realtor outreach" onchange="_plSeqEdit.name=this.value">
+        <div class="lbl">Description <span style="text-transform:none;font-weight:600;">(optional)</span></div>
+        <input value="${_escHtml(e.description)}" placeholder="Short note about when to use this" onchange="_plSeqEdit.description=this.value">
+        <div class="lbl">Auto-default for type <span style="text-transform:none;font-weight:600;">(optional — new items of this type get this sequence on sync)</span></div>
+        <select onchange="_plSeqEdit.default_for_type=this.value">${typeOpts}</select>
+        <div class="lbl">Steps</div>
+        ${steps}
+        <button class="pl-btn" style="margin-top:2px;" onclick="plStepAdd()">+ Add step</button>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+          <button class="pl-btn" onclick="plOpenSequences()">Back</button>
+          <button class="pl-btn acc" onclick="plSaveSeq()">Save sequence</button>
+        </div>`);
+    }
+    function plStepField(i, k, v) { if (!_plSeqEdit || !_plSeqEdit.steps[i]) return; _plSeqEdit.steps[i][k] = (k === 'delay_value') ? Math.max(0, parseInt(v, 10) || 0) : v; if (k === 'channel') plRenderSeqEditor(); }
+    function plStepAdd() { _plSeqEdit.steps.push({ delay_value: _plSeqEdit.steps.length ? 3 : 1, delay_unit: 'day', channel: 'call', subject: '', body: '' }); plRenderSeqEditor(); }
+    function plStepRemove(i) { _plSeqEdit.steps.splice(i, 1); if (!_plSeqEdit.steps.length) _plSeqEdit.steps.push({ delay_value: 1, delay_unit: 'day', channel: 'call', subject: '', body: '' }); plRenderSeqEditor(); }
+    async function plSaveSeq() {
+      const nameEl = document.getElementById('plSeqName'); if (nameEl) _plSeqEdit.name = nameEl.value;
+      if (!(_plSeqEdit.name || '').trim()) { alert('Give the sequence a name.'); return; }
+      const seq = { name: _plSeqEdit.name.trim(), description: _plSeqEdit.description || null, default_for_type: _plSeqEdit.default_for_type || null,
+        steps: _plSeqEdit.steps.map((st, i) => ({ sort_order: i, delay_value: st.delay_value, delay_unit: st.delay_unit, channel: st.channel, subject: st.subject || null, body: st.body || null })) };
+      if (_plSeqEdit.id) seq.id = _plSeqEdit.id;
+      const r = await plApi('seqSave', { sequence: seq });
+      if (!r || !r.success) { alert('Could not save sequence: ' + ((r && r.error) || 'unknown')); return; }
+      const seqRes = await plApi('seqList', {}); if (seqRes && seqRes.success) _plSeqs = seqRes.sequences || [];
+      plOpenSequences();
+      plPaint(); // sequence dropdowns on rows reflect the new/edited sequence
+    }
+    async function plDeleteSeq(id, name) {
+      if (!confirm('Delete sequence “' + name + '”? Items on it keep their scheduled touches but are detached.')) return;
+      const r = await plApi('seqDelete', { sequenceId: id });
+      if (!r || !r.success) { alert('Could not delete.'); return; }
+      const seqRes = await plApi('seqList', {}); if (seqRes && seqRes.success) _plSeqs = seqRes.sequences || [];
+      await plLoad();
+      plOpenSequences();
+    }
+
     function openModule(module) {
       // If in estimate editor with unsaved changes OR a discardable throwaway draft, prompt
       // first (same condition as promptSaveBeforeLeaving, so both exit paths behave alike).
@@ -14708,6 +15166,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         currentScreen = 'estimateCosting';
         showSecondaryToolbar('estimateCosting'); // picker + Calculate live in the sticky header
         ecOpen();
+        return;
+      }
+      if (module === 'pipeline') {
+        document.getElementById('pipelineScreen').style.display = 'block';
+        document.getElementById('headerTitle').textContent = 'Follow-up Pipeline';
+        currentScreen = 'pipeline';
+        renderPipeline();
         return;
       }
       if (module === 'trucks') {
