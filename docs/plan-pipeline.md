@@ -16,8 +16,12 @@
 > **Unconverted recognition (2026-08-10):** the estimate WO's own label is unreliable for conversion — a converted
 > estimate keeps its "Estimate Completed" label on the `-1` visit and books a **sibling `-2` WO labeled "Estimate
 > Converted" (9970/9975)**. So an estimate counts as unconverted only if its **job has no 9970/9975 sibling** (owner
-> insight). Implemented via a job_id set. Known gap: a future-dated `-2` beyond the import's ~7-day-forward window
-> isn't in the mirror → widen `crewlogic-vonigo-import` daysForward to close it (follow-up).
+> insight). Implemented via a job_id set (free fast-path). **Gap closed by the email trail (2026-08-10):** a
+> future-dated `-2` isn't in the mirror, but conversion fires a **"…Work Order, ID: `<job>-2`…" email** at booking
+> time. So for estimates still looking unconverted after the sibling check, the sync calls `/data/Emails/ {jobID}`
+> and treats a `-2` reference as converted — verdict cached in `pipeline_conversion_cache` (0088; `converted`=
+> permanent, `false` re-checked after a 12h TTL, bounded to the small open-estimate set). Root fix remains a
+> **Vonigo conversion webhook** (worth requesting); the email trail is the best available until then.
 >
 > A prior, simpler follow-up attempt — `crewlogic-followups-sync` + `followups`/`followup_events` (0081) +
 > `plan-followups.md` — was **retired** (migration 0087; dev-only, zero prod footprint, Owner-approved). Follow-ups:

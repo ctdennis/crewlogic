@@ -27,6 +27,7 @@ const EST_LABEL_TEXT: Record<number, string> = { 9996: 'Est. completed — estim
 // A converted estimate books a SIBLING WorkOrder (the "-2") labeled "Estimate Converted" under the same job.
 // If a job has one of these, its estimate visit is NOT unconverted (even though the -1 keeps its estimate label).
 const CONVERTED_LABELS = new Set([9970, 9975]); // Est-Converted-EstOnly / Est-Converted-Job
+const UNCONV_RECHECK_HOURS = 12;                // how often to re-check a still-unconverted estimate's email trail
 // UCB lane is matched by route_name (~URGENTCB) off the mirror; the Vonigo route objectID (2987) is no longer needed.
 const ALL_TYPES = ['lead', 'unconverted_estimate', 'cancellation', 'ucb', 'case'];
 
@@ -130,6 +131,23 @@ async function vonigoLogin(username: string, md5: string): Promise<string> {
 }
 async function vpost(path: string, body: Record<string, unknown>) {
   return await vonigoJson(await fetch(VONIGO_BASE + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }));
+}
+
+// Estimate conversion via the Vonigo email trail: a converted estimate books a SECOND work order (the "-2"), which
+// fires a "…Work Order, ID: <job>-2…" email. That email is created at booking time, so it exists even when the -2
+// job is future-dated and not yet in the local mirror (the case the label heuristic misses). Reschedules stay on
+// "-1", so a reference to "-2" (or higher) means a new booked job = converted.
+async function estimateConvertedByEmail(token: string, jobExtId: string): Promise<boolean> {
+  const digits = jobExtId.replace(/[^0-9]/g, '');
+  if (!digits) return false;
+  const r = await vpost('/data/Emails/', { securityToken: token, sortMode: '1', sortDirection: '0', jobID: digits });
+  if (r.errNo !== 0) return false;
+  const re = new RegExp('Work Order, ID:\\s*' + digits + '-(\\d+)');
+  for (const e of (r.Emails as Record<string, unknown>[]) || []) {
+    const m = String(e.name || '').match(re);
+    if (m && parseInt(m[1], 10) >= 2) return true;
+  }
+  return false;
 }
 
 Deno.serve(async (req: Request) => {
@@ -306,7 +324,7 @@ Deno.serve(async (req: Request) => {
       const cd = (row.customer_display || {}) as Record<string, string | null>;
       const woEpoch = parseInt(String(getField(fields, F.woDate)?.fieldValue || '0'), 10);
       return {
-        woID: String(ja.source_external_id ?? ''), jobId: String(ja.job_id ?? ''), fields, rels, woEpoch,
+        woID: String(ja.source_external_id ?? ''), jobId: String(ja.job_id ?? ''), jobExtId: String(rel(rels, 'job')?.objectID ?? ''), fields, rels, woEpoch,
         status: getField(fields, F.woStatus)?.optionID || 0,
         label: getField(fields, F.woLabel)?.optionID || 0,
         base: {
@@ -325,15 +343,35 @@ Deno.serve(async (req: Request) => {
     // ---- A) cancellation + unconverted_estimate — from the mirror (recent window by WO service date) ----
     const _passA = (want('cancellation') || want('unconverted_estimate')) ? (async () => {
       if (want('unconverted_estimate')) {
-        // First: the jobs that have booked (a WO labeled "Estimate Converted", 9970/9975). Their estimate visit is
-        // converted even though the -1 keeps its "Estimate Completed" label — so we exclude it. (Owner 2026-08-10.)
+        // Fast-path (free): a job with an in-mirror "Estimate Converted" sibling (9970/9975) is converted — exclude
+        // its estimate visit even though the -1 keeps its "Estimate Completed" label. (Owner 2026-08-10.)
         const { data: convRows } = await supabase.from('job_source_snapshot').select('job_appointments!inner(job_id)').eq('franchise_id', franchiseInternalID).in('label_optionid', [...CONVERTED_LABELS]);
         const convertedJobs = new Set(((convRows || []) as Record<string, unknown>[]).map((r) => String((r.job_appointments as Record<string, unknown>)?.job_id ?? '')));
         const { data } = await supabase.from('job_source_snapshot').select(SNAP_SELECT).eq('franchise_id', franchiseInternalID).in('label_optionid', [...EST_LABELS]);
-        for (const row of (data || []) as Record<string, unknown>[]) {
-          const w = mirrorWO(row);
-          if (!w.woID || (w.woEpoch && w.woEpoch < dateStart)) continue;         // recent window
-          if (w.jobId && convertedJobs.has(w.jobId)) continue;                    // job already converted (has an Est-Converted sibling)
+        const cands = ((data || []) as Record<string, unknown>[]).map(mirrorWO)
+          .filter((w) => w.woID && !(w.woEpoch && w.woEpoch < dateStart) && !(w.jobId && convertedJobs.has(w.jobId)));
+
+        // Fallback (email trail): catch conversions the mirror can't see yet (the -2 job is future-dated). Only check
+        // jobs we haven't recently verified; cache the verdict (converted = permanent, unconverted re-checked after TTL).
+        const jobIds = [...new Set(cands.map((w) => w.jobExtId).filter(Boolean))];
+        const cache = new Map<string, boolean>();
+        if (jobIds.length) {
+          const { data: cc } = await supabase.from('pipeline_conversion_cache').select('job_external_id, converted, checked_at').eq('franchise_id', franchiseInternalID).in('job_external_id', jobIds);
+          const staleMs = UNCONV_RECHECK_HOURS * 3600 * 1000, nowMs = Date.now();
+          const fresh = new Set<string>();
+          for (const r of (cc || []) as Record<string, unknown>[]) {
+            const conv = !!r.converted; cache.set(String(r.job_external_id), conv);
+            if (conv || (nowMs - Date.parse(String(r.checked_at))) <= staleMs) fresh.add(String(r.job_external_id)); // no re-check needed
+          }
+          const toCheck = jobIds.filter((jid) => !fresh.has(jid));
+          if (toCheck.length) {
+            const results = await mapPool(toCheck, 6, async (jid) => ({ jid, converted: await estimateConvertedByEmail(token, jid) }));
+            await supabase.from('pipeline_conversion_cache').upsert(results.map((r) => ({ franchise_id: franchiseInternalID, job_external_id: r.jid, converted: r.converted, checked_at: new Date().toISOString() })), { onConflict: 'franchise_id,job_external_id' });
+            for (const r of results) cache.set(r.jid, r.converted);
+          }
+        }
+        for (const w of cands) {
+          if (w.jobExtId && cache.get(w.jobExtId)) continue;   // converted per the email trail
           rows.push(mk('unconverted_estimate', 'workorder', w.woID, { ...w.base, reason: getField(w.fields, F.woLabel)?.fieldValue || EST_LABEL_TEXT[w.label] || String(w.label) }));
         }
       }
