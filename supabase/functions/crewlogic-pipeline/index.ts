@@ -25,6 +25,16 @@ const EST_LABELS = new Set([9996, 9973, 9993]); // Est-Completed-EstOnly / Est-O
 const UCB_ROUTE_ID = 2987;                       // "Pending - Other (URGENTCB)"
 const ALL_TYPES = ['lead', 'unconverted_estimate', 'cancellation', 'ucb', 'case'];
 
+// Follow-up cadences (owner-tunable). d = days from when the cadence is started; ch = channel.
+const CADENCE_TEMPLATES: Record<string, { d: number; ch: string }[]> = {
+  'estimate-drip': [{ d: 1, ch: 'call' }, { d: 3, ch: 'email' }, { d: 7, ch: 'text' }, { d: 14, ch: 'call' }],
+  'reschedule-5day': [{ d: 5, ch: 'call' }],
+  'lead-followup': [{ d: 1, ch: 'call' }, { d: 2, ch: 'text' }, { d: 5, ch: 'email' }],
+  'ucb-now': [{ d: 0, ch: 'call' }],
+  'case-callback': [{ d: 1, ch: 'call' }],
+};
+const DEFAULT_CADENCE_BY_TYPE: Record<string, string> = { unconverted_estimate: 'estimate-drip', cancellation: 'reschedule-5day', lead: 'lead-followup', ucb: 'ucb-now', case: 'case-callback' };
+
 type VField = { fieldID: number; fieldValue?: string; optionID?: number };
 type VRel = { relationType: string; objectID?: number | string; name?: string };
 const getField = (fields: VField[] | undefined, id: number) => (fields || []).find((f) => f.fieldID === id);
@@ -46,6 +56,13 @@ async function mapPool<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
+}
+
+// Denormalize the item's next_action_at = earliest still-scheduled touch (or null).
+async function recomputeNext(supabase: ReturnType<typeof createClient>, itemId: string, franchiseInternalID: string) {
+  const { data: ts } = await supabase.from('pipeline_touches').select('due_at').eq('pipeline_item_id', itemId).eq('status', 'scheduled').order('due_at', { ascending: true }).limit(1);
+  const next = ts && ts.length ? (ts[0] as { due_at: string }).due_at : null;
+  await supabase.from('pipeline_items').update({ next_action_at: next, updated_at: new Date().toISOString() }).eq('id', itemId).eq('franchise_id', franchiseInternalID);
 }
 
 async function resolveCreds(supabase: ReturnType<typeof createClient>, franchiseInternalId: string) {
@@ -79,15 +96,90 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || '').trim();
     const franchiseID = String(body.franchiseID || '').trim();
-    if (action !== 'sync') return json({ success: false, error: 'unknown action', reqId }, 400);
+    const ACTIONS = ['sync', 'list', 'update', 'dismiss', 'startCadence', 'touchDone', 'snooze'];
+    if (!ACTIONS.includes(action)) return json({ success: false, error: 'unknown action', reqId }, 400);
     if (!franchiseID) return json({ success: false, error: 'franchiseID required', reqId }, 400);
-    const types: string[] = Array.isArray(body.types) && body.types.length ? body.types.map(String) : ALL_TYPES;
-    const want = (t: string) => types.includes(t);
 
     const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
     const { data: fr, error: fe } = await supabase.from('franchises').select('id').eq('external_id', franchiseID).eq('tenant_id', TENANT_ID).single();
     if (fe || !fr) return json({ success: false, error: 'Franchise not found: ' + franchiseID, reqId }, 404);
     const franchiseInternalID = (fr as { id: string }).id;
+    const CLOSED = new Set(['won', 'lost', 'dismissed']);
+    const ownItem = async (id: string) => (await supabase.from('pipeline_items').select('id').eq('id', id).eq('franchise_id', franchiseInternalID).maybeSingle()).data; // franchise-scope guard
+
+    // ===== CRM actions (DB only; no Vonigo) =====
+    if (action === 'list') {
+      const COLS = 'id, type, source_provider, source_external_id, customer_name, phone, email, address, zip, amount, reason, detail, occurred_at, stage, assigned_to, next_action_at, cadence, notes, last_synced_at';
+      let q = supabase.from('pipeline_items').select(COLS).eq('franchise_id', franchiseInternalID);
+      if (Array.isArray(body.types) && body.types.length) q = q.in('type', body.types.map(String));
+      if (Array.isArray(body.stages) && body.stages.length) q = q.in('stage', body.stages.map(String));
+      if (body.assignee) q = q.eq('assigned_to', String(body.assignee));
+      if (body.search) q = q.ilike('customer_name', '%' + String(body.search) + '%');
+      if (String(body.view || '') === 'attention') q = q.not('stage', 'in', '(won,lost,dismissed)');
+      q = q.order('next_action_at', { ascending: true, nullsFirst: false }).order('occurred_at', { ascending: false })
+        .limit(Math.min(parseInt(String(body.limit || '400'), 10) || 400, 1000));
+      const { data: items, error } = await q;
+      if (error) throw error;
+      const ids = (items || []).map((i: Record<string, unknown>) => i.id as string);
+      const touchByItem: Record<string, { dueAt: string; channel: string }> = {};
+      if (ids.length) {
+        const { data: ts } = await supabase.from('pipeline_touches').select('pipeline_item_id, due_at, channel').eq('status', 'scheduled').in('pipeline_item_id', ids).order('due_at', { ascending: true });
+        for (const t of (ts || []) as Record<string, unknown>[]) { const k = String(t.pipeline_item_id); if (!touchByItem[k]) touchByItem[k] = { dueAt: t.due_at as string, channel: t.channel as string }; }
+      }
+      const out = (items || []).map((i: Record<string, unknown>) => ({ ...i, nextTouch: touchByItem[i.id as string] || null }));
+      const { data: allT } = await supabase.from('pipeline_items').select('type, stage').eq('franchise_id', franchiseInternalID);
+      const counts: Record<string, number> = {}; let open = 0;
+      for (const r of (allT || []) as Record<string, string>[]) { counts[r.type] = (counts[r.type] || 0) + 1; if (!CLOSED.has(r.stage)) open++; }
+      return json({ success: true, items: out, counts, open, total: out.length, reqId });
+    }
+
+    if (action === 'update' || action === 'dismiss') {
+      const id = String(body.id || ''); if (!id) return json({ success: false, error: 'id required', reqId }, 400);
+      if (!(await ownItem(id))) return json({ success: false, error: 'not found', reqId }, 404);
+      const p = (body.patch || {}) as Record<string, unknown>;
+      const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (action === 'dismiss') patch.stage = 'dismissed';
+      for (const k of ['stage', 'assigned_to', 'notes', 'cadence']) if (k in p) patch[k] = p[k] == null ? null : String(p[k]);
+      if ('next_action_at' in p) patch.next_action_at = p.next_action_at || null;
+      const { error } = await supabase.from('pipeline_items').update(patch).eq('id', id).eq('franchise_id', franchiseInternalID);
+      if (error) throw error;
+      if (CLOSED.has(String(patch.stage || ''))) { // closing → skip open touches + clear the tickler
+        await supabase.from('pipeline_touches').update({ status: 'skipped' }).eq('pipeline_item_id', id).eq('status', 'scheduled');
+        await supabase.from('pipeline_items').update({ next_action_at: null }).eq('id', id).eq('franchise_id', franchiseInternalID);
+      }
+      return json({ success: true, reqId });
+    }
+
+    if (action === 'startCadence') {
+      const id = String(body.id || ''); if (!id) return json({ success: false, error: 'id required', reqId }, 400);
+      const { data: item } = await supabase.from('pipeline_items').select('type').eq('id', id).eq('franchise_id', franchiseInternalID).maybeSingle();
+      if (!item) return json({ success: false, error: 'not found', reqId }, 404);
+      const cadence = String(body.cadence || DEFAULT_CADENCE_BY_TYPE[(item as { type: string }).type] || '');
+      const tpl = CADENCE_TEMPLATES[cadence];
+      if (!tpl) return json({ success: false, error: 'unknown cadence', reqId }, 400);
+      await supabase.from('pipeline_touches').update({ status: 'skipped' }).eq('pipeline_item_id', id).eq('status', 'scheduled'); // replace any existing schedule
+      const t0 = Date.now();
+      const touches = tpl.map((s) => ({ pipeline_item_id: id, due_at: new Date(t0 + s.d * 86400000).toISOString(), channel: s.ch, status: 'scheduled' }));
+      await supabase.from('pipeline_touches').insert(touches);
+      const next = touches.reduce<string | null>((m, t) => (!m || t.due_at < m ? t.due_at : m), null);
+      await supabase.from('pipeline_items').update({ cadence, next_action_at: next, updated_at: new Date().toISOString() }).eq('id', id).eq('franchise_id', franchiseInternalID);
+      return json({ success: true, cadence, touches: touches.length, next_action_at: next, reqId });
+    }
+
+    if (action === 'touchDone' || action === 'snooze') {
+      const touchId = String(body.touchId || ''); if (!touchId) return json({ success: false, error: 'touchId required', reqId }, 400);
+      const { data: t } = await supabase.from('pipeline_touches').select('pipeline_item_id').eq('id', touchId).maybeSingle();
+      if (!t || !(await ownItem(String((t as { pipeline_item_id: string }).pipeline_item_id)))) return json({ success: false, error: 'not found', reqId }, 404);
+      const itemId = String((t as { pipeline_item_id: string }).pipeline_item_id);
+      if (action === 'touchDone') await supabase.from('pipeline_touches').update({ status: 'done', done_at: new Date().toISOString() }).eq('id', touchId);
+      else { const dueAt = String(body.dueAt || ''); if (!dueAt) return json({ success: false, error: 'dueAt required', reqId }, 400); await supabase.from('pipeline_touches').update({ due_at: dueAt }).eq('id', touchId).eq('status', 'scheduled'); }
+      await recomputeNext(supabase, itemId, franchiseInternalID);
+      return json({ success: true, reqId });
+    }
+
+    // ===== sync (Vonigo adapter) — fall-through =====
+    const types: string[] = Array.isArray(body.types) && body.types.length ? body.types.map(String) : ALL_TYPES;
+    const want = (t: string) => types.includes(t);
     const creds = await resolveCreds(supabase, franchiseInternalID);
     if (!creds) return json({ success: false, error: 'No Vonigo credentials for franchise ' + franchiseID, reqId }, 404);
 
