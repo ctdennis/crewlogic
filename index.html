@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.121.1 | 2026-08-10">
+  <meta name="crewlogic-version" content="v5.121.2 | 2026-08-10">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14766,6 +14766,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         .pl-seqcard .nm{font-weight:800;color:var(--text-primary);font-size:14px;}
         .pl-seqcard .ds{font-size:11.5px;color:var(--text-muted);margin-top:2px;}
         .pl-defbadge{font-size:10px;font-weight:800;text-transform:uppercase;padding:2px 6px;border-radius:999px;background:rgba(34,197,94,.15);color:#4ade80;border:1px solid rgba(34,197,94,.3);}
+        .pl-syncov{position:fixed;inset:0;background:rgba(8,12,18,.72);z-index:500;display:flex;align-items:center;justify-content:center;padding:24px;}
+        .pl-syncbox{background:var(--bg-secondary,#182634);border:1px solid var(--border,#2c3e50);border-radius:var(--radius,12px);padding:26px 30px;max-width:340px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5);}
+        .pl-spin{width:34px;height:34px;margin:0 auto 14px;border:3px solid var(--border,#2c3e50);border-top-color:var(--accent-green,#22c55e);border-radius:50%;animation:pl-spin 0.8s linear infinite;}
+        @keyframes pl-spin{to{transform:rotate(360deg);}}
+        .pl-synctitle{font-size:15px;font-weight:800;color:var(--text-primary);}
+        .pl-syncsub{font-size:12.5px;color:var(--text-muted);margin-top:6px;line-height:1.5;}
       `;
       document.head.appendChild(st);
     }
@@ -14934,15 +14940,26 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _plSearchTmr = null;
     function plSearch(v) { _plSearch = v; clearTimeout(_plSearchTmr); _plSearchTmr = setTimeout(plPaintList, 140); }
 
+    function plSyncOverlay(show) {
+      let o = document.getElementById('plSyncOverlay');
+      if (show) {
+        if (!o) { o = document.createElement('div'); o.id = 'plSyncOverlay'; o.className = 'pl-syncov'; document.body.appendChild(o); }
+        o.innerHTML = '<div class="pl-syncbox"><div class="pl-spin"></div><div class="pl-synctitle">Syncing from Vonigo…</div><div class="pl-syncsub">Pulling your latest leads, estimates, cancellations &amp; callbacks. The first sync can take up to a minute; after that it’s quick.</div></div>';
+        o.style.display = 'flex';
+      } else if (o) { o.style.display = 'none'; o.innerHTML = ''; }
+    }
     async function plSync() {
       if (_plBusy) return; _plBusy = true;
       const btn = document.getElementById('plSyncBtn'); if (btn) { btn.disabled = true; btn.textContent = '↻ Syncing…'; }
+      plSyncOverlay(true);
+      let ok = true;
       try {
         const r = await plApi('sync', { days: 30 });
-        if (!r || !r.success) { alert('Sync failed: ' + ((r && r.error) || 'unknown error')); }
-      } catch (e) { console.error('[pipeline] sync', e); alert('Sync failed. Please try again.'); }
+        if (!r || !r.success) { ok = false; plSyncOverlay(false); alert('Sync failed: ' + ((r && r.error) || 'unknown error')); }
+      } catch (e) { ok = false; console.error('[pipeline] sync', e); plSyncOverlay(false); alert('Sync failed. Please try again.'); }
       _plBusy = false;
-      await plLoad();
+      if (ok) { await plLoad(); }   // repaint with fresh data
+      plSyncOverlay(false);
     }
 
     // ── item mutations ────────────────────────────────────────────────

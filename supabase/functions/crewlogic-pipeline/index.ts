@@ -270,22 +270,43 @@ Deno.serve(async (req: Request) => {
     try { token = await vonigoLogin(creds.vonigo_username, creds.vonigo_md5); }
     catch { return json(VONIGO_DOWN_BODY, 503); }
 
+    // Incremental cache: what we ALREADY have for leads (phone/email) and cancellations (reason). The per-item
+    // Vonigo enrichment calls (a Contact fetch per lead, a Job fetch per cancel) dominate the sync time (~220 calls
+    // for #90). Once we've fetched an item's contact/reason it doesn't change, so a repeat "Sync now" reuses the
+    // stored value and skips the call → the first sync is slow, every re-sync is fast.
+    const knownLeadContact = new Map<string, { phone: string | null; email: string | null }>();
+    const knownCancelReason = new Map<string, { reason: string | null; detail: string | null }>();
+    {
+      const { data: kl } = await supabase.from('pipeline_items').select('source_external_id, phone, email').eq('franchise_id', franchiseInternalID).eq('type', 'lead');
+      for (const r of (kl || []) as Record<string, string | null>[]) knownLeadContact.set(String(r.source_external_id), { phone: r.phone, email: r.email });
+      const { data: kc } = await supabase.from('pipeline_items').select('source_external_id, reason, detail').eq('franchise_id', franchiseInternalID).eq('type', 'cancellation');
+      for (const r of (kc || []) as Record<string, string | null>[]) knownCancelReason.set(String(r.source_external_id), { reason: r.reason, detail: r.detail });
+    }
+
     const rows: Record<string, unknown>[] = [];
     const mk = (type: string, source_object: string, source_external_id: string, extra: Record<string, unknown>) => ({
       tenant_id: TENANT_ID, franchise_id: franchiseInternalID, type, source_provider: 'vonigo',
       source_object, source_external_id, last_synced_at: new Date().toISOString(), updated_at: new Date().toISOString(), ...extra,
     });
 
+    // Fetch WorkOrders pages CONCURRENTLY (they were sequential — ~4.5s/page × 12 = ~54s, and the 120-day UCB scan
+    // paid it in full). Firing the page requests in a bounded pool collapses the scan to roughly one page's time.
+    // We fire the full page range up front (Vonigo pageNo is 1-indexed; empty pages past the data return [] fast).
+    async function fetchWOPages(maxPages: number, ds: number, de: number, concurrency = 5): Promise<Record<string, unknown>[]> {
+      const pageNos = Array.from({ length: maxPages }, (_, i) => i + 1);
+      const pages = await mapPool(pageNos, concurrency, async (pg) => {
+        const r = await vpost('/data/WorkOrders/', { securityToken: token, franchiseID, pageNo: String(pg), pageSize: '200', sortMode: '1', sortDirection: '1', isCompleteObject: 'true', dateMode: '3', dateStart: String(ds), dateEnd: String(de) });
+        return r.errNo === 0 ? ((r.WorkOrders as Record<string, unknown>[]) || []) : [];
+      });
+      return pages.flat();
+    }
+
+    // Passes A / A2 / B / C hit independent Vonigo endpoints and only push to `rows`, so run them CONCURRENTLY
+    // (was sequential → the ~220 per-item Contact/Job lookups summed to ~80s; overlapping them cuts wall-time to
+    // roughly the slowest single pass). Each pass is a self-contained async task; Promise.all awaits them below.
     // ---- A) WorkOrders (recent window) → cancellation / unconverted_estimate ----
-    if (want('cancellation') || want('unconverted_estimate')) {
-      const wos: Record<string, unknown>[] = [];
-      for (let pg = 1; pg <= 12; pg++) {
-        const r = await vpost('/data/WorkOrders/', { securityToken: token, franchiseID, pageNo: String(pg), pageSize: '200', sortMode: '1', sortDirection: '1', isCompleteObject: 'true', dateMode: '3', dateStart: String(dateStart), dateEnd: String(dateEnd) });
-        if (r.errNo !== 0) break;
-        const page = (r.WorkOrders as Record<string, unknown>[]) || [];
-        wos.push(...page);
-        if (page.length < 200) break;
-      }
+    const _passA = (want('cancellation') || want('unconverted_estimate')) ? (async () => {
+      const wos = await fetchWOPages(12, dateStart, dateEnd);
       const cancels: { wo: Record<string, unknown>; base: Record<string, unknown> }[] = [];
       for (const wo of wos) {
         const fields = wo.Fields as VField[]; const rels = wo.Relations as VRel[];
@@ -309,22 +330,26 @@ Deno.serve(async (req: Request) => {
       }
       // Enrich cancellations with the reason from the Job — /data/Jobs method:-2 by the job objectID returns the
       // full (incl. cancelled) job. NOTE its Fields/Relations arrive at the RESPONSE top level, not under `.Job`.
-      await mapPool(cancels, 5, async ({ wo, base }) => {
-        const jobID = rel(wo.Relations as VRel[], 'job')?.objectID;
+      await mapPool(cancels, 6, async ({ wo, base }) => {
         let reason: string | null = null, detail: string | null = null;
-        if (jobID != null) {
-          try {
-            const jr = await vpost('/data/Jobs/', { securityToken: token, method: '-2', objectID: String(jobID), isCompleteObject: 'true' });
-            const jf = (jr.Fields as VField[]) || [];
-            const cat = getField(jf, F.jobCancelCat)?.fieldValue || '';
-            const rsn = getField(jf, F.jobCancelReason)?.fieldValue || '';
-            reason = [cat, rsn].filter(Boolean).join(' · ') || null;
-            detail = getField(jf, F.jobCancelComments)?.fieldValue || null;
-          } catch { /* reason optional */ }
+        const cached = knownCancelReason.get(String(wo.objectID));
+        if (cached && cached.reason) { reason = cached.reason; detail = cached.detail; } // already fetched — skip the Job call
+        else {
+          const jobID = rel(wo.Relations as VRel[], 'job')?.objectID;
+          if (jobID != null) {
+            try {
+              const jr = await vpost('/data/Jobs/', { securityToken: token, method: '-2', objectID: String(jobID), isCompleteObject: 'true' });
+              const jf = (jr.Fields as VField[]) || [];
+              const cat = getField(jf, F.jobCancelCat)?.fieldValue || '';
+              const rsn = getField(jf, F.jobCancelReason)?.fieldValue || '';
+              reason = [cat, rsn].filter(Boolean).join(' · ') || null;
+              detail = getField(jf, F.jobCancelComments)?.fieldValue || null;
+            } catch { /* reason optional */ }
+          }
         }
         rows.push(mk('cancellation', 'workorder', String(wo.objectID), { ...base, reason, detail }));
       });
-    }
+    })() : Promise.resolve();
 
     // ---- A2) UCB = WorkOrders on the URGENTCB lane (route 2987) that are still OPEN ----
     // The URGENTCB lane is a persistent backlog that predates the recent window, so it gets its own wide scan
@@ -332,50 +357,46 @@ Deno.serve(async (req: Request) => {
     // have dropped off the lane in Vonigo's view — including them would over-pull stale rows. (2026-08-10: #90's
     // lane shows 4 open callbacks; a naive 30-day scan found 2, and a 120-day scan without the open filter found
     // 12 — 8 of them cancelled. Open + wide window = the 4 the owner sees.)
-    if (want('ucb')) {
-      const ucbEnd = dateEnd;
+    const _passUCB = want('ucb') ? (async () => {
       const ucbStart = dateEnd - (UCB_LOOKBACK_DAYS + 1) * 86400;
-      for (let pg = 1; pg <= 12; pg++) {
-        const r = await vpost('/data/WorkOrders/', { securityToken: token, franchiseID, pageNo: String(pg), pageSize: '200', sortMode: '1', sortDirection: '1', isCompleteObject: 'true', dateMode: '3', dateStart: String(ucbStart), dateEnd: String(ucbEnd) });
-        if (r.errNo !== 0) break;
-        const page = (r.WorkOrders as Record<string, unknown>[]) || [];
-        for (const wo of page) {
-          const fields = wo.Fields as VField[]; const rels = wo.Relations as VRel[];
-          const status = getField(fields, F.woStatus)?.optionID || 0;
-          if (Number(rel(rels, 'route')?.objectID || 0) !== UCB_ROUTE_ID || !OPEN_STATUS.has(status)) continue;
-          rows.push(mk('ucb', 'workorder', String(wo.objectID), {
-            customer_name: rel(rels, 'client')?.name || '',
-            address: getField(fields, F.woAddress)?.fieldValue || '',
-            amount: num(getField(fields, F.woPrice)?.fieldValue),
-            occurred_at: iso(getField(fields, F.woDate)?.fieldValue),
-            reason: getField(fields, F.woLabel)?.fieldValue || null,
-            raw: wo,
-          }));
-        }
-        if (page.length < 200) break;
+      const wos = await fetchWOPages(12, ucbStart, dateEnd);
+      for (const wo of wos) {
+        const fields = wo.Fields as VField[]; const rels = wo.Relations as VRel[];
+        const status = getField(fields, F.woStatus)?.optionID || 0;
+        if (Number(rel(rels, 'route')?.objectID || 0) !== UCB_ROUTE_ID || !OPEN_STATUS.has(status)) continue;
+        rows.push(mk('ucb', 'workorder', String(wo.objectID), {
+          customer_name: rel(rels, 'client')?.name || '',
+          address: getField(fields, F.woAddress)?.fieldValue || '',
+          amount: num(getField(fields, F.woPrice)?.fieldValue),
+          occurred_at: iso(getField(fields, F.woDate)?.fieldValue),
+          reason: getField(fields, F.woLabel)?.fieldValue || null,
+          raw: wo,
+        }));
       }
-    }
+    })() : Promise.resolve();
 
     // ---- B) Leads = Clients (created-date) with stage 123 == "Lead"; phone/email from the Contact ----
-    if (want('lead')) {
-      const leads: Record<string, unknown>[] = [];
-      for (let pg = 1; pg <= 20; pg++) {
+    const _passLeads = want('lead') ? (async () => {
+      // Clients pages fetched concurrently (was 20 sequential pages). Read the plural `Clients` key, keep stage=="Lead".
+      const clientPages = await mapPool(Array.from({ length: 20 }, (_, i) => i + 1), 5, async (pg) => {
         const r = await vpost('/data/Clients/', { securityToken: token, franchiseID, method: '-1', dateMode: '1', dateStart: String(dateStart), dateEnd: String(dateEnd), pageNo: String(pg), pageSize: '50', isCompleteObject: 'true' });
-        if (r.errNo !== 0) break;
-        const page = (r.Clients as Record<string, unknown>[]) || [];
-        for (const c of page) { if ((getField(c.Fields as VField[], F.clientStage)?.fieldValue || '') === 'Lead') leads.push(c); }
-        if (page.length < 50) break;
-      }
-      await mapPool(leads, 5, async (c) => {
+        return r.errNo === 0 ? ((r.Clients as Record<string, unknown>[]) || []) : [];
+      });
+      const leads = clientPages.flat().filter((c) => (getField(c.Fields as VField[], F.clientStage)?.fieldValue || '') === 'Lead');
+      await mapPool(leads, 6, async (c) => {
         const fields = c.Fields as VField[]; const rels = c.Relations as VRel[];
         let phone: string | null = null, email: string | null = null;
-        const contactId = rel(rels, 'contact')?.objectID;
-        if (contactId != null) {
-          try {
-            const cr = await vpost('/data/Contacts/', { securityToken: token, method: '0', objectID: String(contactId), isCompleteObject: 'true' });
-            const ct = (cr.Contacts && cr.Contacts[0]) || null;
-            if (ct) { const cf = ct.Fields as VField[]; phone = getField(cf, F.contactPhone)?.fieldValue || null; email = emailish(cf); }
-          } catch { /* contact optional */ }
+        const cachedC = knownLeadContact.get(String(c.objectID));
+        if (cachedC && cachedC.phone) { phone = cachedC.phone; email = cachedC.email; } // already fetched — skip the Contact call
+        else {
+          const contactId = rel(rels, 'contact')?.objectID;
+          if (contactId != null) {
+            try {
+              const cr = await vpost('/data/Contacts/', { securityToken: token, method: '0', objectID: String(contactId), isCompleteObject: 'true' });
+              const ct = (cr.Contacts && cr.Contacts[0]) || null;
+              if (ct) { const cf = ct.Fields as VField[]; phone = getField(cf, F.contactPhone)?.fieldValue || null; email = emailish(cf); }
+            } catch { /* contact optional */ }
+          }
         }
         rows.push(mk('lead', 'client', String(c.objectID), {
           customer_name: String(c.name || ''), phone, email,
@@ -383,10 +404,10 @@ Deno.serve(async (req: Request) => {
           occurred_at: iso(c.dateCreated), raw: c,
         }));
       });
-    }
+    })() : Promise.resolve();
 
     // ---- C) Cases = /data/Cases plural key (franchise's own) ----
-    if (want('case')) {
+    const _passCases = want('case') ? (async () => {
       for (let pg = 1; pg <= 6; pg++) {
         const r = await vpost('/data/Cases/', { securityToken: token, franchiseID, sortMode: '1', sortDirection: '1', pageNo: String(pg), pageSize: '50', isCompleteObject: 'true' });
         if (r.errNo !== 0) break;
@@ -404,7 +425,9 @@ Deno.serve(async (req: Request) => {
         }
         if (page.length < 50) break;
       }
-    }
+    })() : Promise.resolve();
+
+    await Promise.all([_passA, _passUCB, _passLeads, _passCases]);
 
     // Which (type, external_id) already exist? → so we auto-seed ONLY brand-new items (not the whole backlog
     // on every sync, and never re-seeding an item the owner deliberately took off its sequence).
