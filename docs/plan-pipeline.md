@@ -83,7 +83,7 @@ pipeline_items
   -- CRM workflow (CrewLogic-owned; preserved across re-syncs)
   stage             text default 'new'   -- new | contacted | working | won | lost | resolved | dismissed
   assigned_to       text             -- profile email/id
-  next_action_at    date             -- the tickler date the calendar/alerts fire on (= next open touch's due date)
+  next_action_at    timestamptz      -- the tickler the calendar/alerts fire on (= next open touch's due_at)
   cadence           text             -- which follow-up template is running (e.g. 'estimate-drip', 'reschedule-5day')
   notes             text
   -- housekeeping
@@ -99,7 +99,9 @@ pipeline_items
 pipeline_touches
   id                uuid pk
   pipeline_item_id  uuid not null references pipeline_items(id) on delete cascade
-  due_at            date not null    -- when this touch should happen (drives calendar + alerts)
+  due_at            timestamptz not null  -- when this touch is due (drives calendar + alerts). timestamptz (not date)
+                                          -- so a timed appointment can sync 1:1 to an external calendar later; an
+                                          -- all-day reminder just uses local-midnight.
   channel           text             -- call | email | text | note
   status            text default 'scheduled'  -- scheduled | done | skipped
   auto              boolean default false     -- true = a drip step CrewLogic can send automatically (email/text)
@@ -157,6 +159,20 @@ pipeline_touches
 | Case | `case-callback` | call d1 (surface the note) |
 
 ---
+
+## External calendar integration (Google Calendar etc.) — DEFERRED (post-v1)
+
+**Not gating P1.** In v1, reminders live in the CrewLogic dispatch calendar (red dots). Pushing them out to a calendar *program* is a later phase that just reads from `pipeline_touches`. Options captured so we build P1 calendar-ready:
+
+- **A · ICS subscription feed** (one-way, universal) — a secret per-user/franchise `.ics` URL any calendar app subscribes to. Cheap; works with Google/Apple/Outlook. Caveat: **Google refreshes external ICS slowly (hours) with weak alerting**; Apple/Outlook refresh fast.
+- **B · Google Calendar API push** (real-time, native reminders) — create/update events in a shared "CrewLogic Pipeline" Google calendar via OAuth. Incremental for us (we already use Google sign-in → add the `calendar.events` scope). Google-only.
+- **C · CalDAV** (two-way) — heavy; only if the calendar must edit back into CrewLogic. Skip unless needed.
+
+Recommended phasing: native dispatch reminders (v1) → **A** ICS feed (universal overlay) → **B** Google API push to a shared pipeline calendar (real-time Google alerts).
+
+Deferred decisions (do NOT block P1): whose calendar (shared franchise vs per-assignee), reminders-only vs appointments too, which apps to support.
+
+**The one P1-affecting choice:** to keep later calendar sync migration-free, `pipeline_touches.due_at` is a **`timestamptz`** (supports timed appointments, not just all-day date reminders), and future sync columns (e.g. `calendar_event_id`, `calendar_synced_at`) are additive later. Reflected in §4.
 
 ## 7. Build phases
 
