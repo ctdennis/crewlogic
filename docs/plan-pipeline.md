@@ -48,11 +48,31 @@ Per-type behavior (Owner context, 2026-08-10):
 
 Three layers, reusing existing infrastructure where possible:
 
-1. **Pull** — new edge fn **`crewlogic-pipeline`** (MD5 Vonigo login via `_shared/vonigo.ts`; graceful-down handling already there). Actions: `sync`, `list`, `update`, `dismiss`.
-2. **Store** — one relational table **`pipeline_items`** (per the "no JSON blobs for entity data" rule: queryable fields as columns + a `raw` jsonb snapshot for provenance). Optionally links to the FW-58 `customers` row when we already hold that customer.
-3. **UI** — a new home card + **Pipeline** screen (tabs per type, per-item CRM controls, call/text/email like the outage-DR board).
+1. **Pull (per-provider ADAPTER)** — edge fn **`crewlogic-pipeline`**, action `sync` dispatches to a source adapter. **v1 = the Vonigo adapter** (MD5 login via `_shared/vonigo.ts`, the 5 recipes). The adapter's only job is to emit `pipeline_items` in the shared shape.
+2. **Store (provider-agnostic core)** — one relational table **`pipeline_items`** + `pipeline_touches` (queryable columns + `raw` jsonb snapshot). The CRM/workflow fields (stage, assignee, touches, cadence, notes) are **source-independent**. Optionally links to the FW-58 `customers` row.
+3. **UI + follow-up engine (provider-agnostic)** — the Pipeline screen (unified list, type filter, CRM controls), the touch/cadence engine, and the dispatch-calendar reminders all operate on `pipeline_items`/`pipeline_touches` with **zero Vonigo coupling**.
 
-Reuse: `_shared/vonigo.ts` (login + VonigoUnavailable→503), the WorkOrders-by-date pull pattern from `crewlogic-todays-workorders`/`crewlogic-dispatch`, the contact phone/email fetch pattern, and the DR board's call/text/email link helpers.
+### Provider-agnostic — reusable for the native build
+
+**Directive (Owner 2026-08-10): build the pipeline so it drops straight onto the native (non-Vonigo) build.** Same principle as the FW-58 canonical model ("adding a CRM = rows, not columns"). Only the **sync adapter** is provider-specific; the **core is built once**:
+
+| Layer | Vonigo (v1) | Native build (later) | Reuse |
+|---|---|---|---|
+| Store (`pipeline_items` + `pipeline_touches`) | `source_provider='vonigo'` | `source_provider='native'` | **100% shared** |
+| Follow-up engine (touches, cadences, stages, calendar reminders) | — | — | **100% shared** |
+| UI (unified list, type filter, CRM controls, dispatch dots) | — | — | **100% shared** |
+| **Sync adapter** (recognize the 5 types) | Vonigo recipes | Native equivalents (below) | **swapped** |
+
+**The 5 types map cleanly onto native CrewLogic data** (so the native adapter is the only new code):
+- **Lead** — a native customer/lead record with no booked job (vs Vonigo Client stage 123).
+- **Unconverted estimate** — a native `estimates` row not tied to a booked/won job (vs Vonigo label 9996/9973/9993). *(Estimate Costing already writes native estimate data — a natural feeder.)*
+- **Cancellation** — a native job with a cancelled status + reason (vs Vonigo WO 162/163 + Job 974/975).
+- **Callback (UCB)** — a native "needs callback" flag/queue (vs the URGENTCB route).
+- **Case** — a native case/issue record (vs `/data/Cases`).
+
+So: **P1 builds the provider-agnostic core + the Vonigo adapter.** When the native build lands, we add a `native` adapter feeding the same table — no change to storage, engine, or UI. Keep every Vonigo-specific detail INSIDE the adapter; never let a Vonigo id/field/label leak into `pipeline_items` columns, the engine, or the UI (it lives only in `source_external_id` + `raw`).
+
+Reuse from existing code: `_shared/vonigo.ts` (login + VonigoUnavailable→503), the WorkOrders-by-date + contact phone/email fetch patterns, and the DR board's call/text/email helpers.
 
 ---
 
@@ -65,9 +85,9 @@ pipeline_items
   franchise_id      uuid not null
   type              text not null    -- lead | unconverted_estimate | cancellation | ucb | case
   -- provenance / idempotency
-  source_provider   text default 'vonigo'
-  source_object     text             -- client | workorder | job | case
-  source_external_id text not null   -- Vonigo objectID (client/WO/case id)
+  source_provider   text default 'vonigo'  -- adapter discriminator: vonigo | native | (future CRMs)
+  source_object     text             -- client | workorder | job | case | native-estimate | ...
+  source_external_id text not null   -- the source system's id (Vonigo objectID, or native row id)
   vonigo_link       text             -- deep link into Vonigo
   -- denormalized customer + item detail (load-bearing for the list, no blob-cracking)
   customer_name     text
@@ -182,7 +202,7 @@ Deferred decisions (do NOT block P1): whose calendar (shared franchise vs per-as
 - **P4 — Dispatch-calendar reminders.** Red dots on the dispatch board's time axis for due follow-ups + click-to-popover activity list (Done/Snooze). In-app only. This is the "everything in one place" surface.
 - **P5 — Scheduled sync.** Daily multi-franchise sync cron + "Sync now"; retention window. (No auto-drip in v1 — touches stay human reminders.)
 - **P6 — QA + promote.** Right-sized test plan; owner-gated prod promotion (migrations + edge fn + cron + merge).
-- **Future (P7+):** automated drip (HubSpot/Mailchimp handoff, or internal per-franchise sender); Vonigo write-back (convert lead / close case); unified customer view (FK to `customers`); bulk actions; kanban; month calendar.
+- **Future (P7+):** **native adapter** (feed the same `pipeline_items` from CrewLogic's own data when the native build lands — no core changes); external calendar sync (ICS feed / Google Calendar API); automated drip (HubSpot/Mailchimp handoff, or internal per-franchise sender); Vonigo write-back (convert lead / close case); unified customer view (FK to `customers`); bulk actions; kanban; month calendar.
 
 ---
 
