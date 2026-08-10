@@ -118,6 +118,7 @@ Deno.serve(async (req: Request) => {
         wos.push(...page);
         if (page.length < 200) break;
       }
+      const cancels: { wo: Record<string, unknown>; base: Record<string, unknown> }[] = [];
       for (const wo of wos) {
         const fields = wo.Fields as VField[]; const rels = wo.Relations as VRel[];
         const status = getField(fields, F.woStatus)?.optionID || 0;
@@ -131,16 +132,30 @@ Deno.serve(async (req: Request) => {
           raw: wo,
         };
         // Precedence: cancelled status wins, then estimate label, then the URGENTCB route.
-        if (CANCEL_STATUS.has(status) && want('cancellation')) {
-          // reason (Job fields 974/975/973) is a P2 follow-up — the WO's job relation carries the job NUMBER,
-          // and /data/Jobs returns a shallow Job (0 fields) by it; needs the internal Job objectID / correct search.
-          rows.push(mk('cancellation', 'workorder', String(wo.objectID), base));
-        } else if (EST_LABELS.has(label) && want('unconverted_estimate')) {
+        if (CANCEL_STATUS.has(status) && want('cancellation')) cancels.push({ wo, base });
+        else if (EST_LABELS.has(label) && want('unconverted_estimate')) {
           rows.push(mk('unconverted_estimate', 'workorder', String(wo.objectID), { ...base, reason: getField(fields, F.woLabel)?.fieldValue || String(label) }));
         } else if (routeId === UCB_ROUTE_ID && want('ucb')) {
           rows.push(mk('ucb', 'workorder', String(wo.objectID), base));
         }
       }
+      // Enrich cancellations with the reason from the Job — /data/Jobs method:-2 by the job objectID returns the
+      // full (incl. cancelled) job. NOTE its Fields/Relations arrive at the RESPONSE top level, not under `.Job`.
+      await mapPool(cancels, 5, async ({ wo, base }) => {
+        const jobID = rel(wo.Relations as VRel[], 'job')?.objectID;
+        let reason: string | null = null, detail: string | null = null;
+        if (jobID != null) {
+          try {
+            const jr = await vpost('/data/Jobs/', { securityToken: token, method: '-2', objectID: String(jobID), isCompleteObject: 'true' });
+            const jf = (jr.Fields as VField[]) || [];
+            const cat = getField(jf, F.jobCancelCat)?.fieldValue || '';
+            const rsn = getField(jf, F.jobCancelReason)?.fieldValue || '';
+            reason = [cat, rsn].filter(Boolean).join(' · ') || null;
+            detail = getField(jf, F.jobCancelComments)?.fieldValue || null;
+          } catch { /* reason optional */ }
+        }
+        rows.push(mk('cancellation', 'workorder', String(wo.objectID), { ...base, reason, detail }));
+      });
     }
 
     // ---- B) Leads = Clients (created-date) with stage 123 == "Lead"; phone/email from the Contact ----
