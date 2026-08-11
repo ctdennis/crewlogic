@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.123.2 | 2026-08-11">
+  <meta name="crewlogic-version" content="v5.123.3 | 2026-08-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8891,7 +8891,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Follow-up Pipeline — gated feature: dev env (all), super-admin, and any tester franchise. New paid feature
       // (entitlement + price bump to follow); testers get it now to validate before commercial rollout.
       const plCard = document.getElementById('pipelineCard');
-      const _pipelineAudience = (IS_DEV_ENV || currentUser.email === 'charles.dennis@junkluggers.com' || currentUser.subscriptionStatus === 'tester');
+      // Pipeline is #90-only on prod for now (Owner 2026-08-11) — dev env (all), super-admin, and franchise #90.
+      const _pipelineAudience = (IS_DEV_ENV || currentUser.franchiseID === '90' || currentUser.email === 'charles.dennis@junkluggers.com');
       if (plCard) plCard.style.display = _pipelineAudience ? '' : 'none';
       // Route Classification settings tab — same audience (owner-only tab; drives estimate-route scoping + board grouping).
       const _routesTab = document.getElementById('stab-routes');
@@ -12666,7 +12667,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function renderDashFollowups() {
       const host = document.getElementById('dashFollowups'); if (!host) return;
       // Pipeline is a gated feature (dev / super-admin / tester) — stay silent otherwise (and on prod where the fn isn't deployed).
-      if (!(IS_DEV_ENV || (currentUser && (currentUser.email === 'charles.dennis@junkluggers.com' || currentUser.subscriptionStatus === 'tester')))) { host.innerHTML = ''; return; }
+      if (!(IS_DEV_ENV || (currentUser && (currentUser.franchiseID === '90' || currentUser.email === 'charles.dennis@junkluggers.com')))) { host.innerHTML = ''; return; }
       plEnsureStyles(); // the snooze modal reuses the pipeline .pl-btn/.pl-mback styles
       let rem = [];
       try { const r = await plApi('reminders', {}); if (r && r.success) rem = r.reminders || []; } catch (e) { console.error('[dashFu] load', e); }
