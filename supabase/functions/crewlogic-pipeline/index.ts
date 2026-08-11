@@ -245,13 +245,33 @@ Deno.serve(async (req: Request) => {
       return json({ success: true, reqId });
     }
 
-    if (action === 'touchDone' || action === 'snooze') {
+    if (action === 'touchDone') {
       const touchId = String(body.touchId || ''); if (!touchId) return json({ success: false, error: 'touchId required', reqId }, 400);
       const { data: t } = await supabase.from('pipeline_touches').select('pipeline_item_id').eq('id', touchId).maybeSingle();
       if (!t || !(await ownItem(String((t as { pipeline_item_id: string }).pipeline_item_id)))) return json({ success: false, error: 'not found', reqId }, 404);
-      if (action === 'touchDone') await supabase.from('pipeline_touches').update({ status: 'done', done_at: new Date().toISOString() }).eq('id', touchId); // trigger recomputes next_action_at
-      else { const dueAt = String(body.dueAt || ''); if (!dueAt) return json({ success: false, error: 'dueAt required', reqId }, 400); await supabase.from('pipeline_touches').update({ due_at: dueAt }).eq('id', touchId).eq('status', 'scheduled'); }
+      await supabase.from('pipeline_touches').update({ status: 'done', done_at: new Date().toISOString() }).eq('id', touchId); // trigger recomputes next_action_at
       return json({ success: true, reqId });
+    }
+    if (action === 'snooze') {
+      // Reschedule the WHOLE remaining follow-up plan for an item: shift EVERY scheduled touch so the earliest
+      // lands on `dueAt`, preserving the spacing of later steps. (Owner 2026-08-11: "push this out to next week"
+      // must defer the customer — a single-touch snooze left the next sequence step surfacing the very next day.)
+      const dueAt = String(body.dueAt || ''); if (!dueAt) return json({ success: false, error: 'dueAt required', reqId }, 400);
+      const target = new Date(dueAt).getTime(); if (!Number.isFinite(target)) return json({ success: false, error: 'bad dueAt', reqId }, 400);
+      let itemId = String(body.itemId || '');
+      if (!itemId) { // back-compat: derive the item from a touchId
+        const tid = String(body.touchId || ''); if (!tid) return json({ success: false, error: 'itemId or touchId required', reqId }, 400);
+        const { data: t } = await supabase.from('pipeline_touches').select('pipeline_item_id').eq('id', tid).maybeSingle();
+        if (!t) return json({ success: false, error: 'not found', reqId }, 404);
+        itemId = String((t as { pipeline_item_id: string }).pipeline_item_id);
+      }
+      if (!(await ownItem(itemId))) return json({ success: false, error: 'not found', reqId }, 404);
+      const { data: ts } = await supabase.from('pipeline_touches').select('id, due_at').eq('pipeline_item_id', itemId).eq('status', 'scheduled').order('due_at', { ascending: true });
+      const list = (ts || []) as { id: string; due_at: string }[];
+      if (!list.length) return json({ success: true, shifted: 0, reqId });
+      const delta = target - new Date(list[0].due_at).getTime();
+      for (const t of list) { const nd = new Date(new Date(t.due_at).getTime() + delta).toISOString(); await supabase.from('pipeline_touches').update({ due_at: nd }).eq('id', t.id); }
+      return json({ success: true, shifted: list.length, reqId });
     }
 
     // ===== SEQUENCES =====

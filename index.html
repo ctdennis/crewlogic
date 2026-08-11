@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.8 | 2026-08-11">
+  <meta name="crewlogic-version" content="v5.124.9 | 2026-08-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12558,9 +12558,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:14px;">' + _mjDoneHtml + (showTruck ? _mjDialControlHTML() : '') + '</span></div>';
       h += '<div class="mj-scroll" style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);-webkit-overflow-scrolling:touch;">';
       h += '<div style="position:relative;min-width:' + (LW + TWc + trackW) + 'px;">';
+      // P4: ONE follow-up marker per board/day. Follow-ups are "due this day", not at a clock time — a dot per
+      // touch-time made the same customers cluster at arbitrary 9am(snooze)/12:30(seed) times. A single count
+      // badge, pinned in the sticky left header cell; click → that day's list. (Owner 2026-08-11.)
+      let _fuCount = 0, _fuOver = false;
+      if (data.dayID && _dashReminders && _dashReminders.length) {
+        const _now = new Date();
+        _dashReminders.forEach(rr => { if (_dueDayID(rr.nextTouch.dueAt) === String(data.dayID)) { _fuCount++; if (new Date(rr.nextTouch.dueAt) < _now) _fuOver = true; } });
+      }
+      const _fuBadge = _fuCount ? '<div onclick="plDayActivities(\'' + mjEsc(String(data.dayID)) + '\',event)" title="' + _fuCount + ' follow-up' + (_fuCount !== 1 ? 's' : '') + ' due — click for the list" style="display:inline-flex;align-items:center;gap:1px;height:15px;padding:0 5px;border-radius:999px;background:' + (_fuOver ? '#e05a4f' : '#e0a44f') + ';color:#0b0f14;font-size:9.5px;font-weight:800;cursor:pointer;">🔔' + _fuCount + '</div>' : '';
       // time header
       h += '<div style="display:flex;height:20px;border-bottom:1px solid var(--border);">';
-      h += '<div style="position:sticky;left:0;z-index:3;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);"></div>';
+      h += '<div style="position:sticky;left:0;z-index:4;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;">' + _fuBadge + '</div>';
       if (showTruck) h += '<div style="position:sticky;left:' + LW + 'px;z-index:3;width:' + TW + 'px;flex:0 0 ' + TW + 'px;background:var(--bg-card);border-right:1px solid var(--border);display:flex;align-items:center;padding:0 5px;font-size:9px;font-weight:700;color:var(--text-muted);letter-spacing:.3px;">TRUCK</div>';
       h += '<div style="position:relative;width:' + trackW + 'px;background:' + grid + ';">';
       for (let hh = originH; hh < endH; hh++) h += '<div style="position:absolute;left:' + ((hh - originH) * PXH) + 'px;top:4px;font-size:9.5px;color:var(--text-muted);background:var(--bg-card);padding:0 3px;">' + mjEsc(mjHourLabel(hh)) + '</div>';
@@ -12636,19 +12645,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           h += '<div title="Now" style="position:absolute;left:' + nx + 'px;top:20px;width:2px;height:' + laneH + 'px;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
         }
       }
-      // P4: pipeline follow-up dots on the time axis — one per reminder due THIS board's day, at its due time.
-      // Click a dot → that day's follow-up list. (Browser-local time; exact for the ET/#90 audience.)
-      if (data.dayID && _dashReminders && _dashReminders.length) {
-        const _seenDot = new Set();
-        _dashReminders.forEach(rr => {
-          if (_dueDayID(rr.nextTouch.dueAt) !== String(data.dayID)) return;
-          const cm = Math.max(startMin, Math.min(endH * 60, _dueMin(rr.nextTouch.dueAt)));
-          const dx = Math.round(LW + TWc + ((cm - startMin) / 60) * PXH);
-          if (_seenDot.has(dx)) return; _seenDot.add(dx); // times can collide → one dot per pixel-slot
-          const col = (new Date(rr.nextTouch.dueAt) < new Date()) ? '#e05a4f' : '#e0a44f'; // overdue = red, upcoming = amber
-          h += '<div onclick="plDayActivities(\'' + mjEsc(String(data.dayID)) + '\',event)" title="Follow-up due — click for this day’s list" style="position:absolute;left:' + (dx - 5) + 'px;top:3px;width:10px;height:10px;border-radius:50%;background:' + col + ';border:1.5px solid var(--bg-card);box-shadow:0 0 0 1px ' + col + ';z-index:7;cursor:pointer;"></div>';
-        });
-      }
       h += '</div></div>';
       h += '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);">Hover (desktop) or tap (mobile) a job for details.</div>';
       r.innerHTML = h;
@@ -12696,7 +12692,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + '<span style="display:inline-flex;gap:9px;font-size:15px;">' + chips.join('') + '</span>'
         + '<span style="display:inline-flex;gap:6px;">'
         + '<button onclick="event.stopPropagation();_dashFuDone(\'' + r.id + '\',\'' + (nt.touchId || '') + '\')" title="Mark done" style="padding:4px 9px;border-radius:6px;border:1px solid var(--accent-green,#22c55e);background:var(--accent-green,#22c55e);color:var(--accent-text,#0b0f14);font-weight:800;font-size:11px;cursor:pointer;">✓</button>'
-        + '<button onclick="event.stopPropagation();_dashFuSnooze(\'' + (nt.touchId || '') + '\')" title="Reschedule" style="padding:4px 9px;border-radius:6px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:11px;cursor:pointer;">⏰</button>'
+        + '<button onclick="event.stopPropagation();_dashFuSnooze(\'' + r.id + '\')" title="Reschedule" style="padding:4px 9px;border-radius:6px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:11px;cursor:pointer;">⏰</button>'
         + '<span style="color:var(--text-muted);font-size:15px;">›</span>'
         + '</span></div>';
     }
@@ -12728,34 +12724,34 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!r || !r.success) { alert('Could not mark done.'); return; }
       await loadDashReminders(); _plRefreshDayModal();
     }
-    function _dashFuSnooze(touchId) {
-      if (!touchId) return;
+    function _dashFuSnooze(itemId) {
+      if (!itemId) return;
       const pad = n => String(n).padStart(2, '0');
       const today = new Date(); const isoToday = today.getFullYear() + '-' + pad(today.getMonth() + 1) + '-' + pad(today.getDate());
       const tmr = new Date(); tmr.setDate(tmr.getDate() + 1); const isoTmr = tmr.getFullYear() + '-' + pad(tmr.getMonth() + 1) + '-' + pad(tmr.getDate());
-      plModal('<h3>Reschedule follow-up</h3><div style="color:var(--text-muted);font-size:12.5px;margin:2px 0 12px;">When should this come up next?</div>'
+      plModal('<h3>Reschedule follow-up</h3><div style="color:var(--text-muted);font-size:12.5px;margin:2px 0 12px;">When should this come up next? (moves the whole follow-up plan for this customer.)</div>'
         + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">'
-        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + touchId + '\',1)">Tomorrow</button>'
-        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + touchId + '\',3)">In 3 days</button>'
-        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + touchId + '\',7)">In a week</button></div>'
+        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + itemId + '\',1)">Tomorrow</button>'
+        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + itemId + '\',3)">In 3 days</button>'
+        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + itemId + '\',7)">In a week</button></div>'
         + '<div class="lbl">Or pick a date</div>'
         + '<div style="display:flex;gap:8px;align-items:center;">'
         + '<input type="date" id="plSnoozeDate" value="' + isoTmr + '" min="' + isoToday + '" style="flex:1;color-scheme:dark;">'
-        + '<button class="pl-btn acc" onclick="_dashDoSnoozeDate(\'' + touchId + '\')">Set date</button></div>'
+        + '<button class="pl-btn acc" onclick="_dashDoSnoozeDate(\'' + itemId + '\')">Set date</button></div>'
         + '<div style="display:flex;justify-content:flex-end;margin-top:16px;"><button class="pl-btn" onclick="plCloseModal()">Cancel</button></div>');
     }
-    async function _dashDoSnooze(touchId, days) {
+    async function _dashDoSnooze(itemId, days) {
       plCloseModal();
       const d = new Date(); d.setHours(9, 0, 0, 0); d.setDate(d.getDate() + days);
-      const r = await plApi('snooze', { touchId, dueAt: d.toISOString() });
+      const r = await plApi('snooze', { itemId, dueAt: d.toISOString() });
       if (!r || !r.success) { alert('Could not reschedule.'); return; }
       await loadDashReminders(); _plRefreshDayModal();
     }
-    async function _dashDoSnoozeDate(touchId) {
+    async function _dashDoSnoozeDate(itemId) {
       const el = document.getElementById('plSnoozeDate'); const v = el && el.value; if (!v) { alert('Pick a date first.'); return; }
       plCloseModal();
       const d = new Date(v + 'T09:00:00'); // 9am local on the chosen day (franchise-local; exact for the ET/#90 audience)
-      const r = await plApi('snooze', { touchId, dueAt: d.toISOString() });
+      const r = await plApi('snooze', { itemId, dueAt: d.toISOString() });
       if (!r || !r.success) { alert('Could not reschedule.'); return; }
       await loadDashReminders(); _plRefreshDayModal();
     }
