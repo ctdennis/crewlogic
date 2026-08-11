@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.9 | 2026-08-11">
+  <meta name="crewlogic-version" content="v5.124.10 | 2026-08-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12558,22 +12558,41 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:14px;">' + _mjDoneHtml + (showTruck ? _mjDialControlHTML() : '') + '</span></div>';
       h += '<div class="mj-scroll" style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);-webkit-overflow-scrolling:touch;">';
       h += '<div style="position:relative;min-width:' + (LW + TWc + trackW) + 'px;">';
-      // P4: ONE follow-up marker per board/day. Follow-ups are "due this day", not at a clock time — a dot per
-      // touch-time made the same customers cluster at arbitrary 9am(snooze)/12:30(seed) times. A single count
-      // badge, pinned in the sticky left header cell; click → that day's list. (Owner 2026-08-11.)
-      let _fuCount = 0, _fuOver = false;
+      // P4: bucket this board-day's follow-ups by hour-cell for the DEDICATED dot row (below). Follow-ups are
+      // "due this day", not at a clock time, so we collapse to one dot per hour-cell (centered), in its own row
+      // that doesn't overlay the hour labels. (Owner 2026-08-11.)
+      const _fuByHour = {}; let _hasFu = false;
       if (data.dayID && _dashReminders && _dashReminders.length) {
-        const _now = new Date();
-        _dashReminders.forEach(rr => { if (_dueDayID(rr.nextTouch.dueAt) === String(data.dayID)) { _fuCount++; if (new Date(rr.nextTouch.dueAt) < _now) _fuOver = true; } });
+        const _fuNow = new Date();
+        _dashReminders.forEach(rr => {
+          if (_dueDayID(rr.nextTouch.dueAt) !== String(data.dayID)) return;
+          let hh = Math.floor(_dueMin(rr.nextTouch.dueAt) / 60);
+          if (hh < originH) hh = originH; if (hh >= endH) hh = endH - 1;
+          if (!_fuByHour[hh]) _fuByHour[hh] = { n: 0, over: false };
+          _fuByHour[hh].n++; if (new Date(rr.nextTouch.dueAt) < _fuNow) _fuByHour[hh].over = true; _hasFu = true;
+        });
       }
-      const _fuBadge = _fuCount ? '<div onclick="plDayActivities(\'' + mjEsc(String(data.dayID)) + '\',event)" title="' + _fuCount + ' follow-up' + (_fuCount !== 1 ? 's' : '') + ' due — click for the list" style="display:inline-flex;align-items:center;gap:1px;height:15px;padding:0 5px;border-radius:999px;background:' + (_fuOver ? '#e05a4f' : '#e0a44f') + ';color:#0b0f14;font-size:9.5px;font-weight:800;cursor:pointer;">🔔' + _fuCount + '</div>' : '';
-      // time header
+      const _fuRowH = _hasFu ? 13 : 0; // the follow-up row's height (0 when the day has none) — offsets the now-line
+      // time header (hour labels)
       h += '<div style="display:flex;height:20px;border-bottom:1px solid var(--border);">';
-      h += '<div style="position:sticky;left:0;z-index:4;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;">' + _fuBadge + '</div>';
+      h += '<div style="position:sticky;left:0;z-index:3;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);"></div>';
       if (showTruck) h += '<div style="position:sticky;left:' + LW + 'px;z-index:3;width:' + TW + 'px;flex:0 0 ' + TW + 'px;background:var(--bg-card);border-right:1px solid var(--border);display:flex;align-items:center;padding:0 5px;font-size:9px;font-weight:700;color:var(--text-muted);letter-spacing:.3px;">TRUCK</div>';
       h += '<div style="position:relative;width:' + trackW + 'px;background:' + grid + ';">';
       for (let hh = originH; hh < endH; hh++) h += '<div style="position:absolute;left:' + ((hh - originH) * PXH) + 'px;top:4px;font-size:9.5px;color:var(--text-muted);background:var(--bg-card);padding:0 3px;">' + mjEsc(mjHourLabel(hh)) + '</div>';
       h += '</div></div>';
+      // P4: DEDICATED follow-up dot row — a small dot centered in each hour-cell that has a follow-up due this
+      // day; click → that day's list. Its own row, so it never overlays the hour labels.
+      if (_hasFu) {
+        h += '<div style="display:flex;height:' + _fuRowH + 'px;border-bottom:1px solid var(--border);background:var(--bg-card);">';
+        h += '<div style="position:sticky;left:0;z-index:3;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);"></div>';
+        if (showTruck) h += '<div style="position:sticky;left:' + LW + 'px;z-index:3;width:' + TW + 'px;flex:0 0 ' + TW + 'px;background:var(--bg-card);border-right:1px solid var(--border);"></div>';
+        h += '<div style="position:relative;width:' + trackW + 'px;">';
+        Object.keys(_fuByHour).forEach(hh => {
+          const b = _fuByHour[hh], cx = ((Number(hh) - originH) + 0.5) * PXH, col = b.over ? '#e05a4f' : '#e0a44f';
+          h += '<div onclick="plDayActivities(\'' + mjEsc(String(data.dayID)) + '\',event)" title="' + b.n + ' follow-up' + (b.n !== 1 ? 's' : '') + ' — click for the day’s list" style="position:absolute;left:' + (cx - 4) + 'px;top:2px;width:8px;height:8px;border-radius:50%;background:' + col + ';cursor:pointer;box-shadow:0 0 0 1px rgba(0,0,0,.35);"></div>';
+        });
+        h += '</div></div>';
+      }
       // route lanes — ALL routes (empty/closed included). Base = blocked-gray; green bands = open slots.
       routesData.forEach((rt) => {
         const rc = rt.code || '?';
@@ -12642,7 +12661,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const nx = LW + TWc + ((nowMin - startMin) / 60) * PXH, laneH = ROW * routesData.length;
           nowX = nx;
           h += '<div title="Now" style="position:absolute;left:' + (nx - 3) + 'px;top:12px;width:8px;height:8px;border-radius:50%;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
-          h += '<div title="Now" style="position:absolute;left:' + nx + 'px;top:20px;width:2px;height:' + laneH + 'px;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
+          h += '<div title="Now" style="position:absolute;left:' + nx + 'px;top:' + (20 + _fuRowH) + 'px;width:2px;height:' + laneH + 'px;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
         }
       }
       h += '</div></div>';
