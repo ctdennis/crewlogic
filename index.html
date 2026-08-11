@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.123.0 | 2026-08-11">
+  <meta name="crewlogic-version" content="v5.123.1 | 2026-08-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -8572,14 +8572,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (crc) crc.style.display = isSuperAdmin ? 'block' : 'none';
 
       if (role === 'owner') {
+        // Restore the FULL owner Settings surface — a prior estimator render in the same SPA session (e.g. testing a
+        // delegated login, then switching back) may have hidden the tab bar / individual tabs / credential cards.
+        // The owner view must reset them so it's idempotent (this was the "no tab bar, stuck on Branding" bug).
+        const _tabBar = document.getElementById('settingsTabBar'); if (_tabBar) _tabBar.style.display = '';
+        ['franchise', 'cost', 'proposal', 'pricing', 'signs', 'tools', 'trucks', 'account'].forEach(function (t) {
+          const b = document.getElementById('stab-' + t); if (b) b.style.display = ''; // (pricebook/customers/routes are shown by their own conditional logic below)
+        });
+        const _fInfo = document.getElementById('franchiseInfoCard'); if (_fInfo) _fInfo.style.display = '';
         // Show team card
         const teamCard = document.getElementById('teamMembersCard');
         if (teamCard) teamCard.style.display = 'block';
         loadTeamMembers();
-        // Native (no-CRM) tenants have no Vonigo connection — hide the Vonigo Integration
-        // credentials card. Cache-safe: hide only when submission_target is explicitly 'none'.
+        // Native (no-CRM) tenants have no Vonigo connection — hide the Vonigo Integration credentials card; else show
+        // it (reset in case an estimator render hid it). Cache-safe: hide only when submission_target is 'none'.
         const _vonigoCardOwner = document.getElementById('vonigoCard');
-        if (_vonigoCardOwner && currentUser.submissionTarget === 'none') _vonigoCardOwner.style.display = 'none';
+        if (_vonigoCardOwner) _vonigoCardOwner.style.display = (currentUser.submissionTarget === 'none') ? 'none' : '';
       } else {
         // Estimator — hide all owner-only features
 
