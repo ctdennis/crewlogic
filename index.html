@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.0 | 2026-08-11">
+  <meta name="crewlogic-version" content="v5.124.1 | 2026-08-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15209,10 +15209,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // ── item detail modal (rich Vonigo context + deep-link) ───────────
     function plRawVal(raw, fid) { const f = ((raw && raw.Fields) || []).find(x => x.fieldID === fid); return f ? (f.fieldValue || '') : ''; }
     function plRawRel(raw, type) { return ((raw && raw.Relations) || []).find(r => r.relationType === type) || null; }
-    // Vonigo deep-link. WorkOrder types (cancellation/unconverted/ucb) belong to a JOB → the Job page. Leads
-    // (Client) + Cases don't have a Job page — pattern TBD (Owner to supply), so null for now.
+    // Vonigo deep-link (Owner-supplied patterns 2026-08-11):
+    //  • WorkOrder types (cancellation/unconverted/ucb) → the parent JOB page (Job_Main.aspx?jobID).
+    //  • Case → the case task page (Case_TaskMain.aspx?taskID = the case objectID; verify when a live case exists —
+    //    #90 currently has none).
+    //  • Lead → Vonigo opens Clients inside a frameset, so there's no clean per-lead deep-link — no button (the
+    //    modal still shows full lead context: name, phone, email, address, notes).
     function plVonigoLink(item) {
-      if (item.type === 'lead' || item.type === 'case') return null;
+      if (item.type === 'lead') return null;
+      if (item.type === 'case') {
+        const tid = String(item.source_external_id || '');
+        return tid ? 'https://junkluggers.vonigo.com/Client/Case/Case_TaskMain.aspx?taskID=' + encodeURIComponent(tid) : null;
+      }
       const jobRel = plRawRel(item.raw, 'job');
       const jobId = jobRel && jobRel.objectID;
       return jobId ? 'https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(jobId)) : null;
