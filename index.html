@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.12 | 2026-08-11">
+  <meta name="crewlogic-version" content="v5.124.13 | 2026-08-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12561,17 +12561,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // P4: bucket this board-day's follow-ups by hour-cell for the DEDICATED dot row (below). Follow-ups are
       // "due this day", not at a clock time, so we collapse to one dot per hour-cell (centered), in its own row
       // that doesn't overlay the hour labels. (Owner 2026-08-11.)
-      const _fuByHour = {}; let _hasFu = false;
+      // Follow-ups carry NO real clock time (their "time" is just when the sync ran, e.g. 5:27 PM), so placing a
+      // dot by that time pushes it off the working-hours board. Instead: ONE count pill per day, anchored at the
+      // start of the day (always visible) in the dedicated row. Click → the day's list. (Owner 2026-08-11.)
+      let _fuCount = 0, _fuOver = false; const _fuNow = new Date();
       if (data.dayID && _dashReminders && _dashReminders.length) {
-        const _fuNow = new Date();
         _dashReminders.forEach(rr => {
           if (_dueDayID(rr.nextTouch.dueAt) !== String(data.dayID)) return;
-          let hh = Math.floor(_dueMin(rr.nextTouch.dueAt) / 60);
-          if (hh < originH) hh = originH; if (hh >= endH) hh = endH - 1;
-          if (!_fuByHour[hh]) _fuByHour[hh] = { n: 0, over: false };
-          _fuByHour[hh].n++; if (new Date(rr.nextTouch.dueAt) < _fuNow) _fuByHour[hh].over = true; _hasFu = true;
+          _fuCount++; if (new Date(rr.nextTouch.dueAt) < _fuNow) _fuOver = true;
         });
       }
+      const _hasFu = _fuCount > 0;
       // Always show the follow-up row on BOTH dashboard boards (consistency); elsewhere only when it has dots.
       const _isDashBoard = !!(container && (container.id === 'dashSrcBoard' || container.id === 'dashDestBoard'));
       const _showFuRow = _isDashBoard || _hasFu;
@@ -12590,10 +12590,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         h += '<div title="Follow-ups due" style="position:sticky;left:0;z-index:3;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:9px;opacity:.5;">🔔</div>';
         if (showTruck) h += '<div style="position:sticky;left:' + LW + 'px;z-index:3;width:' + TW + 'px;flex:0 0 ' + TW + 'px;background:var(--bg-card);border-right:1px solid var(--border);"></div>';
         h += '<div style="position:relative;width:' + trackW + 'px;">';
-        Object.keys(_fuByHour).forEach(hh => {
-          const b = _fuByHour[hh], cx = ((Number(hh) - originH) + 0.5) * PXH, col = b.over ? '#e05a4f' : '#e0a44f';
-          h += '<div onclick="plDayActivities(\'' + mjEsc(String(data.dayID)) + '\',event)" title="' + b.n + ' follow-up' + (b.n !== 1 ? 's' : '') + ' — click for the day’s list" style="position:absolute;left:' + (cx - 4) + 'px;top:2px;width:8px;height:8px;border-radius:50%;background:' + col + ';cursor:pointer;box-shadow:0 0 0 1px rgba(0,0,0,.35);"></div>';
-        });
+        if (_hasFu) {
+          const _cx = 0.5 * PXH, _col = _fuOver ? '#e05a4f' : '#e0a44f'; // start-of-day cell, always visible
+          h += '<div onclick="plDayActivities(\'' + mjEsc(String(data.dayID)) + '\',event)" title="' + _fuCount + ' follow-up' + (_fuCount !== 1 ? 's' : '') + ' due — click for the day’s list" style="position:absolute;left:' + (_cx - 8) + 'px;top:1px;display:inline-flex;align-items:center;justify-content:center;min-width:15px;height:11px;padding:0 3px;border-radius:999px;background:' + _col + ';color:#0b0f14;font-size:9px;font-weight:800;cursor:pointer;">' + _fuCount + '</div>';
+        }
         h += '</div></div>';
       }
       // route lanes — ALL routes (empty/closed included). Base = blocked-gray; green bands = open slots.
