@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.123.3 | 2026-08-11">
+  <meta name="crewlogic-version" content="v5.124.0 | 2026-08-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14897,6 +14897,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         .pl-seqcard .nm{font-weight:800;color:var(--text-primary);font-size:14px;}
         .pl-seqcard .ds{font-size:11.5px;color:var(--text-muted);margin-top:2px;}
         .pl-defbadge{font-size:10px;font-weight:800;text-transform:uppercase;padding:2px 6px;border-radius:999px;background:rgba(34,197,94,.15);color:#4ade80;border:1px solid rgba(34,197,94,.3);}
+        #pipelineScreen .pl-group-hdr{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin:14px 2px 6px;display:flex;align-items:center;gap:8px;}
+        #pipelineScreen .pl-group-hdr:first-child{margin-top:2px;}
+        #pipelineScreen .pl-group-hdr .cnt{font-size:11px;font-weight:700;color:var(--text-muted);background:var(--bg-input,#253545);border:1px solid var(--border,#2c3e50);border-radius:999px;padding:1px 8px;}
+        .pl-detail-grid{display:flex;flex-direction:column;margin-top:8px;}
+        .pl-kv{display:flex;justify-content:space-between;gap:14px;padding:7px 0;border-bottom:1px solid var(--border,#2c3e50);font-size:13px;align-items:baseline;}
+        .pl-kv .k{color:var(--text-muted);white-space:nowrap;flex:0 0 auto;font-weight:600;}
+        .pl-kv .v{color:var(--text-primary);text-align:right;word-break:break-word;}
         .pl-syncov{position:fixed;inset:0;background:rgba(8,12,18,.72);z-index:500;display:flex;align-items:center;justify-content:center;padding:24px;}
         .pl-syncbox{background:var(--bg-secondary,#182634);border:1px solid var(--border,#2c3e50);border-radius:var(--radius,12px);padding:26px 30px;max-width:340px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5);}
         .pl-spin{width:34px;height:34px;margin:0 auto 14px;border:3px solid var(--border,#2c3e50);border-top-color:var(--accent-green,#22c55e);border-radius:50%;animation:pl-spin 0.8s linear infinite;}
@@ -14956,6 +14963,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return _plItems.filter(it => _plTypeFilter.has(it.type) && (!q || String(it.customer_name || '').toLowerCase().includes(q)));
     }
 
+    // Grouped, oldest-first rendering (Owner 2026-08-11): sort BY GROUP (cases first), and within each group by
+    // date oldest→newest, so the most-aged items to work surface at the top. Group order is easy to re-order.
+    const PL_GROUP_ORDER = ['case', 'ucb', 'cancellation', 'unconverted_estimate', 'lead'];
+    function plGroupedHtml(items) {
+      let html = '';
+      for (const key of PL_GROUP_ORDER) {
+        const g = items.filter(i => i.type === key)
+          .sort((a, b) => String(a.occurred_at || '9999').localeCompare(String(b.occurred_at || '9999'))); // oldest first, nulls last
+        if (!g.length) continue;
+        const t = PL_TYPES.find(x => x.key === key) || { icon: '•', label: key };
+        html += `<div class="pl-group-hdr">${t.icon} ${t.label} <span class="cnt">${g.length}</span></div>` + g.map(plRowHtml).join('');
+      }
+      return html;
+    }
+
     function plPaint() {
       const scr = document.getElementById('pipelineScreen');
       const totalOpen = _plOpen;
@@ -14963,7 +14985,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         `<label><input type="checkbox" ${_plTypeFilter.has(t.key) ? 'checked' : ''} onchange="plToggleType('${t.key}', this.checked)"> ${t.icon} ${t.label} <span class="cnt">${_plCounts[t.key] || 0}</span></label>`
       ).join('');
 
-      const rows = plVisible().map(plRowHtml).join('');
+      const rows = plGroupedHtml(plVisible());
       const body = rows || `<div class="pl-empty">Nothing here.${_plView === 'attention' ? ' Everything open has been worked, or try “All”.' : ''}<br>Tap <b>Sync now</b> to pull the latest from Vonigo.</div>`;
 
       scr.innerHTML = `
@@ -15006,7 +15028,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Repaint only the list (used after a filter/search toggle — keeps the filter dropdown open & search focus/scroll)
     function plPaintList() {
       const el = document.getElementById('plList'); if (!el) return plPaint();
-      const rows = plVisible().map(plRowHtml).join('');
+      const rows = plGroupedHtml(plVisible());
       el.innerHTML = rows || `<div class="pl-empty">Nothing matches.</div>`;
     }
 
@@ -15039,9 +15061,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         : '';
       return `
         <div class="pl-row" style="border-left-color:${t.color};">
-          <div class="r1">
+          <div class="r1" onclick="plOpenDetail('${it.id}')" style="cursor:pointer;" title="View full details">
             <div>
-              <span class="pl-name">${_escHtml(it.customer_name || 'Unknown')}</span>
+              <span class="pl-name">${_escHtml(it.customer_name || 'Unknown')} <span style="font-size:12px;color:var(--text-muted);font-weight:400;">ⓘ</span></span>
               <span class="pl-badge" style="background:${t.color}22;color:${t.color};">${t.short}</span>
             </div>
             ${it.amount ? `<div class="pl-amt">$${Number(it.amount).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>` : ''}
@@ -15054,6 +15076,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <span class="pl-spacer"></span>
             ${seqSel}
             ${stageSel}
+            <button class="pl-mini" title="Full details" onclick="plOpenDetail('${it.id}')">ⓘ</button>
             <button class="pl-mini" title="Add a note" onclick="plNote('${it.id}')">📝</button>
             <button class="pl-mini" title="Dismiss" onclick="plDismiss('${it.id}')">✕</button>
           </div>
@@ -15181,6 +15204,67 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const txt = (s ? s.value + '\n\n' : '') + b.value;
       if (navigator.clipboard) navigator.clipboard.writeText(txt);
       const btn = event && event.target; if (btn) { btn.textContent = 'Copied ✓'; setTimeout(() => { btn.textContent = 'Copy'; }, 1400); }
+    }
+
+    // ── item detail modal (rich Vonigo context + deep-link) ───────────
+    function plRawVal(raw, fid) { const f = ((raw && raw.Fields) || []).find(x => x.fieldID === fid); return f ? (f.fieldValue || '') : ''; }
+    function plRawRel(raw, type) { return ((raw && raw.Relations) || []).find(r => r.relationType === type) || null; }
+    // Vonigo deep-link. WorkOrder types (cancellation/unconverted/ucb) belong to a JOB → the Job page. Leads
+    // (Client) + Cases don't have a Job page — pattern TBD (Owner to supply), so null for now.
+    function plVonigoLink(item) {
+      if (item.type === 'lead' || item.type === 'case') return null;
+      const jobRel = plRawRel(item.raw, 'job');
+      const jobId = jobRel && jobRel.objectID;
+      return jobId ? 'https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(jobId)) : null;
+    }
+    async function plOpenDetail(id) {
+      plModal('<div style="padding:28px;text-align:center;color:var(--text-muted);">Loading details…</div>');
+      let d; try { d = await plApi('detail', { id }); } catch (e) { d = null; }
+      if (!d || !d.success) { plModal('<h3>Couldn’t load</h3><div class="pl-sub" style="color:var(--text-muted);font-size:12px;">' + _escHtml((d && d.error) || 'Please try again.') + '</div><div style="display:flex;justify-content:flex-end;margin-top:14px;"><button class="pl-btn" onclick="plCloseModal()">Close</button></div>'); return; }
+      plModal(plDetailHtml(d.item, d.touches || [], d.sequenceName));
+    }
+    function plDetailHtml(item, touches, seqName) {
+      const t = PL_TYPES.find(x => x.key === item.type) || { icon: '•', short: item.type, color: '#6e8194' };
+      const raw = item.raw || {};
+      const kv = (label, val) => (val || val === 0) ? `<div class="pl-kv"><span class="k">${label}</span><span class="v">${_escHtml(String(val))}</span></div>` : '';
+      const dateStr = item.occurred_at ? new Date(item.occurred_at).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : '';
+      const dateLabel = { lead: 'Lead created', cancellation: 'Service date', unconverted_estimate: 'Estimate date', ucb: 'Callback date', case: 'Case opened' }[item.type] || 'Date';
+      const summary = plRawVal(raw, 200), items = plRawVal(raw, 10336), routeRel = plRawRel(raw, 'route');
+      const chips = [];
+      if (item.phone) { chips.push(`<a class="pl-chip" href="tel:${plTel(item.phone)}">📞 Call</a>`); chips.push(`<a class="pl-chip" href="sms:${plTel(item.phone)}">💬 Text</a>`); }
+      if (item.email) chips.push(`<a class="pl-chip" href="mailto:${_escHtml(item.email)}">✉️ Email</a>`);
+      const vlink = plVonigoLink(item);
+      const upcoming = (touches || []).filter(x => x.status === 'scheduled');
+      const touchList = upcoming.length
+        ? upcoming.map(x => `<div class="pl-kv"><span class="k">${PL_CHAN[x.channel] || '•'} ${x.channel}</span><span class="v">${plDate(x.due_at)}</span></div>`).join('')
+        : '<div class="pl-sub" style="color:var(--text-muted);font-size:12px;padding:4px 0;">No scheduled follow-ups.</div>';
+      return ''
+        + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">'
+        +   `<div><h3 style="margin:0 0 4px;">${_escHtml(item.customer_name || 'Unknown')}</h3>`
+        +     `<span class="pl-badge" style="background:${t.color}22;color:${t.color};">${t.icon} ${t.short}</span></div>`
+        +   (item.amount ? `<div class="pl-amt">$${Number(item.amount).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>` : '')
+        + '</div>'
+        + (chips.length ? `<div class="pl-contact" style="margin-top:10px;">${chips.join('')}</div>` : '')
+        + '<div class="lbl">Details</div>'
+        + '<div class="pl-detail-grid">'
+        +   kv(dateLabel, dateStr) + kv('Address', item.address) + kv('Phone', item.phone) + kv('Email', item.email)
+        +   (item.type === 'cancellation' ? kv('Reason', item.reason) + kv('Customer comments', item.detail) : '')
+        +   (item.type === 'unconverted_estimate' ? kv('Outcome', item.reason) + kv('Job summary', summary) + kv('Items', items) : '')
+        +   (item.type === 'ucb' ? kv('Route', routeRel && routeRel.name) + kv('Job summary', summary) : '')
+        +   (item.type === 'case' ? kv('Type', item.reason) + kv('Case notes', item.detail) : '')
+        +   (item.type === 'lead' ? kv('Notes', summary) : '')
+        + '</div>'
+        + '<div class="lbl">Follow-up</div>'
+        + '<div class="pl-detail-grid">'
+        +   kv('Stage', item.stage) + kv('Sequence', seqName || 'None') + kv('Assigned to', item.assigned_to)
+        + '</div>'
+        + `<div style="margin-top:4px;">${touchList}</div>`
+        + (item.notes ? `<div class="lbl">Your notes</div><div class="pl-sub" style="color:var(--text-primary);font-size:13px;">${_escHtml(item.notes)}</div>` : '')
+        + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap;">'
+        +   `<button class="pl-btn" onclick="plNote('${item.id}')">📝 Note</button>`
+        +   (vlink ? `<a class="pl-btn acc" href="${vlink}" target="_blank" rel="noopener">↗ Open in Vonigo</a>` : '')
+        +   '<button class="pl-btn" onclick="plCloseModal()">Close</button>'
+        + '</div>';
     }
 
     // ── modal primitive ───────────────────────────────────────────────

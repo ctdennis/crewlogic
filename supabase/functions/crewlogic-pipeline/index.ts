@@ -159,7 +159,7 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || '').trim();
     const franchiseID = String(body.franchiseID || '').trim();
-    const ACTIONS = ['sync', 'list', 'reminders', 'update', 'dismiss', 'touchDone', 'snooze', 'seqList', 'seqSave', 'seqDelete', 'assignSequence', 'unassignSequence'];
+    const ACTIONS = ['sync', 'list', 'reminders', 'detail', 'update', 'dismiss', 'touchDone', 'snooze', 'seqList', 'seqSave', 'seqDelete', 'assignSequence', 'unassignSequence'];
     if (!ACTIONS.includes(action)) return json({ success: false, error: 'unknown action', reqId }, 400);
     if (!franchiseID) return json({ success: false, error: 'franchiseID required', reqId }, 400);
 
@@ -194,6 +194,21 @@ Deno.serve(async (req: Request) => {
       const counts: Record<string, number> = {}; let open = 0;
       for (const r of (allT || []) as Record<string, string>[]) { counts[r.type] = (counts[r.type] || 0) + 1; if (!CLOSED.has(r.stage)) open++; }
       return json({ success: true, items: out, counts, open, total: out.length, reqId });
+    }
+
+    // Full detail for one item (incl. the stored `raw` Vonigo object) — powers the row detail modal. On demand
+    // (not in `list`) so the list payload stays small. Also returns the item's scheduled touches.
+    if (action === 'detail') {
+      const id = String(body.id || ''); if (!id) return json({ success: false, error: 'id required', reqId }, 400);
+      const { data: item } = await supabase.from('pipeline_items').select('*').eq('id', id).eq('franchise_id', franchiseInternalID).maybeSingle();
+      if (!item) return json({ success: false, error: 'not found', reqId }, 404);
+      const { data: touches } = await supabase.from('pipeline_touches').select('id, due_at, channel, status, note, sequence_step_id').eq('pipeline_item_id', id).order('due_at', { ascending: true });
+      let seqName: string | null = null;
+      if ((item as Record<string, unknown>).sequence_id) {
+        const { data: s } = await supabase.from('pipeline_sequences').select('name').eq('id', (item as Record<string, unknown>).sequence_id).maybeSingle();
+        seqName = s ? (s as { name: string }).name : null;
+      }
+      return json({ success: true, item, touches: touches || [], sequenceName: seqName, reqId });
     }
 
     // Compact due-reminder feed for the Dispatch follow-ups rail + day dots. Open items with a scheduled next
