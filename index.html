@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.11 | 2026-08-11">
+  <meta name="crewlogic-version" content="v5.124.12 | 2026-08-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -13134,6 +13134,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       dashRenderBoard(_dashSrcDay, srcR, srcC, axis);
       dashRenderBoard(_dashDestDay, destR, destC, axis);
       _mjLoadEta(_dashSrcDay, srcR); _mjLoadEta(_dashDestDay, destR); // FW-59: feasibility pills for BOTH boards (async repaint)
+      loadDashReminders(); // P4: fetch pipeline reminders NOW that _dashCache + boards exist, then repaint dots (deterministic — no race)
     }
     // Shared time axis (originH/endH) across both days so both boards have identical columns + dimensions.
     function _dashSharedAxis(routeSets) {
@@ -14933,9 +14934,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         .pl-seqcard .nm{font-weight:800;color:var(--text-primary);font-size:14px;}
         .pl-seqcard .ds{font-size:11.5px;color:var(--text-muted);margin-top:2px;}
         .pl-defbadge{font-size:10px;font-weight:800;text-transform:uppercase;padding:2px 6px;border-radius:999px;background:rgba(34,197,94,.15);color:#4ade80;border:1px solid rgba(34,197,94,.3);}
-        #pipelineScreen .pl-group-hdr{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin:14px 2px 6px;display:flex;align-items:center;gap:8px;}
-        #pipelineScreen .pl-group-hdr:first-child{margin-top:2px;}
+        #pipelineScreen .pl-group{margin-top:14px;}
+        #pipelineScreen .pl-group:first-child{margin-top:2px;}
+        #pipelineScreen .pl-group-hdr{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin:0 2px 6px;display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;user-select:none;}
+        #pipelineScreen .pl-group-hdr::-webkit-details-marker{display:none;}
         #pipelineScreen .pl-group-hdr .cnt{font-size:11px;font-weight:700;color:var(--text-muted);background:var(--bg-input,#253545);border:1px solid var(--border,#2c3e50);border-radius:999px;padding:1px 8px;}
+        #pipelineScreen .pl-group-hdr .pl-group-caret{margin-left:auto;font-size:11px;color:var(--text-muted);transition:transform .12s;}
+        #pipelineScreen .pl-group:not([open]) .pl-group-caret{transform:rotate(-90deg);}
         .pl-detail-grid{display:flex;flex-direction:column;margin-top:8px;}
         .pl-kv{display:flex;justify-content:space-between;gap:14px;padding:7px 0;border-bottom:1px solid var(--border,#2c3e50);font-size:13px;align-items:baseline;}
         /* The detail modal (.pl-mcard) lives on <body>, so the #pipelineScreen-scoped versions of these don't
@@ -15019,7 +15024,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           .sort((a, b) => String(a.occurred_at || '9999').localeCompare(String(b.occurred_at || '9999'))); // oldest first, nulls last
         if (!g.length) continue;
         const t = PL_TYPES.find(x => x.key === key) || { icon: '•', label: key };
-        html += `<div class="pl-group-hdr">${t.icon} ${t.label} <span class="cnt">${g.length}</span></div>` + g.map(plRowHtml).join('');
+        html += `<details open class="pl-group"><summary class="pl-group-hdr">${t.icon} ${t.label} <span class="cnt">${g.length}</span><span class="pl-group-caret">▾</span></summary>${g.map(plRowHtml).join('')}</details>`;
       }
       return html;
     }
@@ -15523,8 +15528,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const _dashOpenToday = mjNowParts().dayID;
         _dashSrcDay = _dashOpenToday;
         _dashDestDay = mjAddDays(_dashOpenToday, 1);
-        renderDashboard();
-        loadDashReminders(); // P4: fetch pipeline reminders → dots on the timeline (gated; no-op off #90)
+        renderDashboard(); // dashLoadBoards() (inside) fetches reminders after the boards render — no separate call needed
         _startBoardAutoRefresh();
         return;
       }
