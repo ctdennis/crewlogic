@@ -524,8 +524,14 @@ Deno.serve(async (req: Request) => {
       const { data: defs } = await supabase.from('pipeline_sequences').select('id, name, default_for_type').eq('franchise_id', franchiseInternalID).eq('active', true).not('default_for_type', 'is', null);
       const defByType: Record<string, { id: string; name: string }> = {};
       for (const d of (defs || []) as Record<string, string>[]) defByType[d.default_for_type] = { id: d.id, name: d.name };
-      const { data: freshItems } = await supabase.from('pipeline_items').select('id, type, source_external_id').eq('franchise_id', franchiseInternalID);
-      const toSeed = ((freshItems || []) as Record<string, unknown>[]).filter((i) => newKeys.has(String(i.type) + '|' + String(i.source_external_id)) && defByType[String(i.type)]);
+      const { data: freshItems } = await supabase.from('pipeline_items').select('id, type, source_external_id, occurred_at').eq('franchise_id', franchiseInternalID);
+      // Option A (owner 2026-08-11): auto-enroll only GENUINELY-NEW items, never the historical backlog. Guard by
+      // recency — an item whose event date is within AUTO_SEED_MAX_AGE_DAYS (or in the future) auto-seeds; older
+      // backlog stays in the list unscheduled until the owner assigns a sequence. Prevents the whole backlog
+      // stacking its first follow-up on one calendar day (the "186 due today" pile-up).
+      const AUTO_SEED_MAX_AGE_DAYS = 3, AUTO_SEED_MAX_AGE_MS = AUTO_SEED_MAX_AGE_DAYS * 86400000, _nowMs = Date.now();
+      const _recentEnough = (occ: unknown) => { if (!occ) return false; const ts = new Date(String(occ)).getTime(); return Number.isFinite(ts) && ts >= _nowMs - AUTO_SEED_MAX_AGE_MS; };
+      const toSeed = ((freshItems || []) as Record<string, unknown>[]).filter((i) => newKeys.has(String(i.type) + '|' + String(i.source_external_id)) && defByType[String(i.type)] && _recentEnough(i.occurred_at));
       await mapPool(toSeed, 8, (i) => seedTouches(supabase, String(i.id), defByType[String(i.type)], franchiseInternalID));
       autoSeeded = toSeed.length;
     }

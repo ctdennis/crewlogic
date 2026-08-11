@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.3 | 2026-08-11">
+  <meta name="crewlogic-version" content="v5.124.4 | 2026-08-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12686,16 +12686,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const t = PL_TYPES.find(x => x.key === r.type) || { icon: '•', short: r.type, color: '#6e8194' };
       const nt = r.nextTouch, w = plWhen(nt.dueAt);
       const chips = [];
-      if (r.phone) { chips.push('<a href="tel:' + plTel(r.phone) + '" style="text-decoration:none;">📞</a>'); chips.push('<a href="sms:' + plTel(r.phone) + '" style="text-decoration:none;">💬</a>'); }
-      if (r.email) chips.push('<a href="mailto:' + _escHtml(r.email) + '" style="text-decoration:none;">✉️</a>');
-      return '<div style="display:flex;align-items:center;gap:8px;padding:6px 6px;border-top:1px solid var(--border,#2c3e50);font-size:12.5px;">'
+      if (r.phone) { chips.push('<a onclick="event.stopPropagation()" href="tel:' + plTel(r.phone) + '" title="Call" style="text-decoration:none;">📞</a>'); chips.push('<a onclick="event.stopPropagation()" href="sms:' + plTel(r.phone) + '" title="Text" style="text-decoration:none;">💬</a>'); }
+      if (r.email) chips.push('<a onclick="event.stopPropagation()" href="mailto:' + _escHtml(r.email) + '" title="Email" style="text-decoration:none;">✉️</a>');
+      // Whole row opens the detail modal for context; the contact + Done/Snooze controls stop propagation.
+      return '<div onclick="plOpenDetail(\'' + r.id + '\')" title="Open details" style="display:flex;align-items:center;gap:8px;padding:7px 6px;border-top:1px solid var(--border,#2c3e50);font-size:12.5px;cursor:pointer;">'
         + '<span style="font-size:10px;font-weight:800;text-transform:uppercase;padding:2px 6px;border-radius:999px;background:' + t.color + '22;color:' + t.color + ';white-space:nowrap;">' + t.icon + ' ' + t.short + '</span>'
         + '<span style="font-weight:700;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px;">' + _escHtml(r.customer_name || 'Unknown') + '</span>'
         + '<span style="font-weight:700;color:' + (w.over ? '#fca5a5' : 'var(--text-muted)') + ';white-space:nowrap;">' + (PL_CHAN[nt.channel] || '•') + ' ' + w.txt + '</span>'
         + '<span style="display:inline-flex;gap:7px;font-size:14px;">' + chips.join('') + '</span>'
         + '<span style="margin-left:auto;display:inline-flex;gap:6px;">'
-        + '<button onclick="_dashFuDone(\'' + r.id + '\',\'' + (nt.touchId || '') + '\')" title="Mark done" style="padding:4px 9px;border-radius:6px;border:1px solid var(--accent-green,#22c55e);background:var(--accent-green,#22c55e);color:var(--accent-text,#0b0f14);font-weight:800;font-size:11px;cursor:pointer;">✓</button>'
-        + '<button onclick="_dashFuSnooze(\'' + (nt.touchId || '') + '\')" title="Snooze" style="padding:4px 9px;border-radius:6px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:11px;cursor:pointer;">⏰</button>'
+        + '<button onclick="event.stopPropagation();_dashFuDone(\'' + r.id + '\',\'' + (nt.touchId || '') + '\')" title="Mark done" style="padding:4px 9px;border-radius:6px;border:1px solid var(--accent-green,#22c55e);background:var(--accent-green,#22c55e);color:var(--accent-text,#0b0f14);font-weight:800;font-size:11px;cursor:pointer;">✓</button>'
+        + '<button onclick="event.stopPropagation();_dashFuSnooze(\'' + (nt.touchId || '') + '\')" title="Snooze" style="padding:4px 9px;border-radius:6px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:11px;cursor:pointer;">⏰</button>'
+        + '<span style="color:var(--text-muted);font-size:15px;">›</span>'
         + '</span></div>';
     }
     // Click a timeline dot → this day's follow-up list in a centered modal (reuses _dashFuRowHtml).
@@ -12709,7 +12711,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!back) { back = document.createElement('div'); back.id = 'plDayModal'; document.body.appendChild(back); }
       back.dataset.day = String(dayID);
       back.onclick = (e) => { if (e.target === back) plCloseDayModal(); };
-      back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9000;display:flex;align-items:center;justify-content:center;padding:16px;';
+      back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:350;display:flex;align-items:center;justify-content:center;padding:16px;'; // below .pl-mback (400) so the detail modal stacks above the day list
       back.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);max-width:560px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.5);">'
         + '<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);">'
         +   '<span style="font-size:15px;font-weight:800;color:var(--text-primary);">🔔 Follow-ups · ' + _escHtml(label) + '</span>'
@@ -14903,6 +14905,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         #pipelineScreen .pl-group-hdr .cnt{font-size:11px;font-weight:700;color:var(--text-muted);background:var(--bg-input,#253545);border:1px solid var(--border,#2c3e50);border-radius:999px;padding:1px 8px;}
         .pl-detail-grid{display:flex;flex-direction:column;margin-top:8px;}
         .pl-kv{display:flex;justify-content:space-between;gap:14px;padding:7px 0;border-bottom:1px solid var(--border,#2c3e50);font-size:13px;align-items:baseline;}
+        /* The detail modal (.pl-mcard) lives on <body>, so the #pipelineScreen-scoped versions of these don't
+           reach it when opened from Dispatch → raw blue links + unstyled buttons. Re-declare them theme-scoped
+           to the modal card so they match everywhere. */
+        .pl-mcard .pl-btn{padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;gap:5px;}
+        .pl-mcard .pl-btn.acc{background:var(--accent-green);border-color:var(--accent-green);color:var(--accent-text,#0b0f14);}
+        .pl-mcard .pl-chip{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:999px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-size:12px;font-weight:700;text-decoration:none;cursor:pointer;}
+        .pl-mcard .pl-badge{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;padding:2px 7px;border-radius:999px;margin-left:2px;}
+        .pl-mcard .pl-amt{font-size:15px;font-weight:800;color:var(--text-primary);font-variant-numeric:tabular-nums;white-space:nowrap;}
+        .pl-mcard .pl-contact{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;}
+        .pl-mcard .pl-sub{font-size:12px;color:var(--text-muted);margin-top:2px;}
         .pl-kv .k{color:var(--text-muted);white-space:nowrap;flex:0 0 auto;font-weight:600;}
         .pl-kv .v{color:var(--text-primary);text-align:right;word-break:break-word;}
         .pl-syncov{position:fixed;inset:0;background:rgba(8,12,18,.72);z-index:500;display:flex;align-items:center;justify-content:center;padding:24px;}
