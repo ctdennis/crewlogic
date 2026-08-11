@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.6 | 2026-08-11">
+  <meta name="crewlogic-version" content="v5.124.7 | 2026-08-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12696,7 +12696,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + '<span style="display:inline-flex;gap:9px;font-size:15px;">' + chips.join('') + '</span>'
         + '<span style="display:inline-flex;gap:6px;">'
         + '<button onclick="event.stopPropagation();_dashFuDone(\'' + r.id + '\',\'' + (nt.touchId || '') + '\')" title="Mark done" style="padding:4px 9px;border-radius:6px;border:1px solid var(--accent-green,#22c55e);background:var(--accent-green,#22c55e);color:var(--accent-text,#0b0f14);font-weight:800;font-size:11px;cursor:pointer;">✓</button>'
-        + '<button onclick="event.stopPropagation();_dashFuSnooze(\'' + (nt.touchId || '') + '\')" title="Snooze" style="padding:4px 9px;border-radius:6px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:11px;cursor:pointer;">⏰</button>'
+        + '<button onclick="event.stopPropagation();_dashFuSnooze(\'' + (nt.touchId || '') + '\')" title="Reschedule" style="padding:4px 9px;border-radius:6px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:11px;cursor:pointer;">⏰</button>'
         + '<span style="color:var(--text-muted);font-size:15px;">›</span>'
         + '</span></div>';
     }
@@ -12730,18 +12730,33 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function _dashFuSnooze(touchId) {
       if (!touchId) return;
-      plModal('<h3>Snooze follow-up</h3><div style="color:var(--text-muted);font-size:12px;margin:2px 0 10px;">Push the next touch out to…</div>'
-        + '<div style="display:flex;gap:8px;flex-wrap:wrap;">'
+      const pad = n => String(n).padStart(2, '0');
+      const today = new Date(); const isoToday = today.getFullYear() + '-' + pad(today.getMonth() + 1) + '-' + pad(today.getDate());
+      const tmr = new Date(); tmr.setDate(tmr.getDate() + 1); const isoTmr = tmr.getFullYear() + '-' + pad(tmr.getMonth() + 1) + '-' + pad(tmr.getDate());
+      plModal('<h3>Reschedule follow-up</h3><div style="color:var(--text-muted);font-size:12.5px;margin:2px 0 12px;">When should this come up next?</div>'
+        + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">'
         + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + touchId + '\',1)">Tomorrow</button>'
-        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + touchId + '\',3)">+3 days</button>'
-        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + touchId + '\',7)">+1 week</button></div>'
+        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + touchId + '\',3)">In 3 days</button>'
+        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + touchId + '\',7)">In a week</button></div>'
+        + '<div class="lbl">Or pick a date</div>'
+        + '<div style="display:flex;gap:8px;align-items:center;">'
+        + '<input type="date" id="plSnoozeDate" value="' + isoTmr + '" min="' + isoToday + '" style="flex:1;color-scheme:dark;">'
+        + '<button class="pl-btn acc" onclick="_dashDoSnoozeDate(\'' + touchId + '\')">Set date</button></div>'
         + '<div style="display:flex;justify-content:flex-end;margin-top:16px;"><button class="pl-btn" onclick="plCloseModal()">Cancel</button></div>');
     }
     async function _dashDoSnooze(touchId, days) {
       plCloseModal();
       const d = new Date(); d.setHours(9, 0, 0, 0); d.setDate(d.getDate() + days);
       const r = await plApi('snooze', { touchId, dueAt: d.toISOString() });
-      if (!r || !r.success) { alert('Could not snooze.'); return; }
+      if (!r || !r.success) { alert('Could not reschedule.'); return; }
+      await loadDashReminders(); _plRefreshDayModal();
+    }
+    async function _dashDoSnoozeDate(touchId) {
+      const el = document.getElementById('plSnoozeDate'); const v = el && el.value; if (!v) { alert('Pick a date first.'); return; }
+      plCloseModal();
+      const d = new Date(v + 'T09:00:00'); // 9am local on the chosen day (franchise-local; exact for the ET/#90 audience)
+      const r = await plApi('snooze', { touchId, dueAt: d.toISOString() });
+      if (!r || !r.success) { alert('Could not reschedule.'); return; }
       await loadDashReminders(); _plRefreshDayModal();
     }
 
