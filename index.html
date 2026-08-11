@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.10 | 2026-08-11">
+  <meta name="crewlogic-version" content="v5.124.11 | 2026-08-11">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12572,7 +12572,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           _fuByHour[hh].n++; if (new Date(rr.nextTouch.dueAt) < _fuNow) _fuByHour[hh].over = true; _hasFu = true;
         });
       }
-      const _fuRowH = _hasFu ? 13 : 0; // the follow-up row's height (0 when the day has none) — offsets the now-line
+      // Always show the follow-up row on BOTH dashboard boards (consistency); elsewhere only when it has dots.
+      const _isDashBoard = !!(container && (container.id === 'dashSrcBoard' || container.id === 'dashDestBoard'));
+      const _showFuRow = _isDashBoard || _hasFu;
+      const _fuRowH = _showFuRow ? 13 : 0; // the follow-up row's height (0 when hidden) — offsets the now-line
       // time header (hour labels)
       h += '<div style="display:flex;height:20px;border-bottom:1px solid var(--border);">';
       h += '<div style="position:sticky;left:0;z-index:3;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);"></div>';
@@ -12582,9 +12585,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       h += '</div></div>';
       // P4: DEDICATED follow-up dot row — a small dot centered in each hour-cell that has a follow-up due this
       // day; click → that day's list. Its own row, so it never overlays the hour labels.
-      if (_hasFu) {
+      if (_showFuRow) {
         h += '<div style="display:flex;height:' + _fuRowH + 'px;border-bottom:1px solid var(--border);background:var(--bg-card);">';
-        h += '<div style="position:sticky;left:0;z-index:3;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);"></div>';
+        h += '<div title="Follow-ups due" style="position:sticky;left:0;z-index:3;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:9px;opacity:.5;">🔔</div>';
         if (showTruck) h += '<div style="position:sticky;left:' + LW + 'px;z-index:3;width:' + TW + 'px;flex:0 0 ' + TW + 'px;background:var(--bg-card);border-right:1px solid var(--border);"></div>';
         h += '<div style="position:relative;width:' + trackW + 'px;">';
         Object.keys(_fuByHour).forEach(hh => {
