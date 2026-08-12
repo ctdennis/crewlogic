@@ -1,24 +1,39 @@
 # Plan — Sales-Activity Calendar (FW-64)
 
 **Status:** DRAFT — awaiting Owner approval of direction before any code.
-**Date:** 2026-08-11
-**Owner ask (verbatim):** "we have sales activities, calls, visits, presentations, etc. these all get tagged to a calendar event with a date and time, contact information, phone, email, etc. If there is a dot at 5:30pm and it is 9am, it isn't even shown on the board ... many of our franchisees are one person operations ... next step might be to integrate with a calendar feature which is something we discussed originally."
+**Date:** 2026-08-11 (problem restated 2026-08-12).
+**Owner ask (verbatim, 2026-08-12 restatement):** "We will be creating a pipeline dashboard. However, when our owners are on the dispatch dashboard, they need a reminder to see upcoming appointments and some basic functionality to action them: text, email, etc. They probably also need a link to get back to the main pipeline dashboard. Currently, our owners are juggling lots of different balls: Crew Scheduling, Accounts Receivable, Marketing, Routes, Trucks, Customers. It is helpful to have small views into the other operations from any given dashboard. If they are heads down managing routes and jobs and have no visibility that they may have an upcoming meeting or need to place a phone call or send an email, then they might lose sight of it. The small dots on the schedule timeline are a perfect place to incorporate those types of things because there will be a reminder for a heavily distracted owner that they have something to do."
 
 ---
 
-## 1. Problem
+## 1. The problem (restated)
 
-The Follow-up Pipeline (FW / `crewlogic-pipeline`) surfaces WHO needs a touch (leads, open estimates, cancellations, urgent callbacks, cases). We tried to show timed follow-ups as dots on the **dispatch board**, and it broke on first contact with reality:
+We are building the **Pipeline dashboard** as the place owners work their follow-ups. But an owner rarely sits in one screen. A CrewLogic owner — often a **one-person shop** — juggles many operations at once:
 
-- Follow-ups have **no real clock time** — a touch's "time" was just when the sync ran (e.g. 5:27 PM).
-- The dispatch board is a **fixed working-hours window for trucks** (~6 AM–3 PM). Anything outside it — or untimed — has no honest place on it (a 5:30 PM dot isn't even on the board at 9 AM).
-- A truck-routing board is the wrong home for **office sales work** (calls/visits/presentations the operator does between jobs).
+- Crew Scheduling
+- Accounts Receivable
+- Marketing
+- Routes
+- Trucks
+- Customers
 
-The right model for timed sales work is a **calendar event**: type + date + time + duration + contact (name/phone/email) + notes + outcome. That is a distinct object from both a Vonigo job (truck work) and a pipeline record (the CRM row).
+When they're heads-down on the **dispatch dashboard** managing routes and jobs, it's easy to lose sight of an upcoming meeting, a call to place, or an email to send. A heavily distracted owner needs the system to *remind* them — right where their attention already is.
 
-### The operator context (the deciding factor)
+The fix is **not** to move that work onto the dispatch board. It's to give the owner a **peripheral reminder** while they're there: a glanceable nudge that says "you have something coming up," with enough basic functionality to act in the moment (**text, email, call**) and a **link back to the full Pipeline dashboard**. The **small dots on the schedule timeline are the perfect surface** for this — they sit in the owner's field of view during heads-down work and catch a distracted operator's eye.
 
-Many franchisees are **one-person operations** — they run ops, accounting, marketing, AND sales. They do not want the pipeline in one place, jobs in another, and their calendar on their phone. They want **one view of their day**: the Vonigo jobs they're running *and* the calls/visits they've scheduled, on whatever device they're holding (usually their phone, in the field).
+> The dots are a **reminder presence**, not a timed placement. Follow-ups carry no real clock time, and the board is a fixed working-hours window — a 5:30 PM item isn't even on a 6 AM–3 PM board. So the widget shows a **glanceable count → the day's list with quick actions**; genuinely *timed* work (a meeting at 2 PM) belongs on the calendar in Layer 3, not fudged onto the truck board.
+
+### Design principle — small views into other operations, from any dashboard
+
+This generalizes beyond follow-ups. An owner deep in routes benefits from a **glance at overdue AR**, a **pending marketing task**, or a **crew gap**, the same way — peripheral awareness across the balls they're juggling, without leaving the screen they're on. The dispatch follow-up reminder is the **first instance of a repeatable pattern**: a lightweight, glanceable, actionable widget that surfaces one operation *inside* another.
+
+### Three layers (don't conflate them)
+
+1. **Pipeline dashboard** — the workspace where follow-ups are actually worked (grouped list, needs-attention, sequences). *Exists.*
+2. **Dispatch reminder widget** — peripheral awareness on the dispatch: upcoming appointments / calls / emails as timeline dots → quick actions (text / email / call) + a **link back to the Pipeline dashboard**. *Near-term; mostly built (v5.124.13, dev). Remaining: the back-to-Pipeline link, and framing it as a reminder.*
+3. **Sales-activity calendar** — timed activities, a unified **"My Day,"** and Google Calendar sync. *The future — the back half of this plan.*
+
+The rest of this plan details Layer 3 (the calendar), because Layers 1–2 largely exist; the calendar is the piece that still needs a decision and a contract.
 
 ## 2. What a Sales Activity is
 
