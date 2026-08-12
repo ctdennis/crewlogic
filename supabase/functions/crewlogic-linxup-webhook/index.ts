@@ -138,6 +138,26 @@ function parseLinxup(p: any): ParsedLinxup {
   };
 }
 
+// Record telematics-webhook health per franchise+provider (powers crewlogic-alert-health).
+// ok=true  → an authenticated post landed  (last_ok_at=now, fail_streak=0)
+// ok=false → a post was REJECTED (bad token) (last_fail_at=now, fail_streak+=1)
+// Best-effort: never let a health-write failure affect the webhook response.
+async function recordWebhookHealth(sb: SupabaseClient, fid: string, ok: boolean): Promise<void> {
+  try {
+    const now = new Date().toISOString();
+    await sb.from("telematics_webhook_health").upsert({ franchise_id: fid, provider: "linxup" }, { onConflict: "franchise_id,provider", ignoreDuplicates: true });
+    if (ok) {
+      await sb.from("telematics_webhook_health").update({ last_ok_at: now, fail_streak: 0, updated_at: now }).eq("franchise_id", fid).eq("provider", "linxup");
+    } else {
+      const { data } = await sb.from("telematics_webhook_health").select("fail_streak").eq("franchise_id", fid).eq("provider", "linxup").maybeSingle();
+      const streak = ((data?.fail_streak as number) ?? 0) + 1;
+      await sb.from("telematics_webhook_health").update({ last_fail_at: now, fail_streak: streak, updated_at: now }).eq("franchise_id", fid).eq("provider", "linxup");
+    }
+  } catch (e) {
+    console.error("[linxup-webhook] health record failed:", (e as Error).message);
+  }
+}
+
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -165,8 +185,10 @@ Deno.serve(async (req: Request) => {
   const expected = secret ? String(secret) : "";
   if (!expected || !presented || !timingSafeEqualStr(presented, expected)) {
     console.error("[linxup-webhook] auth failed (f=" + franchise.external_id + ")");
+    await recordWebhookHealth(sb, franchise.uuid, false);   // the provider IS posting but the token doesn't match → monitor picks this up
     return new Response(JSON.stringify({ success: false, error: "unauthorized" }), { status: 401, headers: { ...CORS, "Content-Type": "application/json" } });
   }
+  await recordWebhookHealth(sb, franchise.uuid, true);       // authenticated post landed — webhook path is healthy
 
   // Parse defensively.
   let parsed: any = null;

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.123.3 | 2026-08-11">
+  <meta name="crewlogic-version" content="v5.124.14 | 2026-08-12">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12558,13 +12558,47 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:14px;">' + _mjDoneHtml + (showTruck ? _mjDialControlHTML() : '') + '</span></div>';
       h += '<div class="mj-scroll" style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);-webkit-overflow-scrolling:touch;">';
       h += '<div style="position:relative;min-width:' + (LW + TWc + trackW) + 'px;">';
-      // time header
+      // P4: bucket this board-day's follow-ups by hour-cell for the DEDICATED dot row (below). Follow-ups are
+      // "due this day", not at a clock time, so we collapse to one dot per hour-cell (centered), in its own row
+      // that doesn't overlay the hour labels. (Owner 2026-08-11.)
+      // Follow-ups carry NO real clock time (their "time" is just when the sync ran, e.g. 5:27 PM), so placing a
+      // dot by that time pushes it off the working-hours board. Instead: ONE count pill per day, anchored at the
+      // start of the day (always visible) in the dedicated row. Click → the day's list. (Owner 2026-08-11.)
+      let _fuCount = 0, _fuOver = false; const _fuNow = new Date();
+      if (data.dayID && _dashReminders && _dashReminders.length) {
+        _dashReminders.forEach(rr => {
+          if (_dueDayID(rr.nextTouch.dueAt) !== String(data.dayID)) return;
+          _fuCount++; if (new Date(rr.nextTouch.dueAt) < _fuNow) _fuOver = true;
+        });
+      }
+      const _hasFu = _fuCount > 0;
+      // Always show the follow-up row on BOTH dashboard boards — but ONLY for the pipeline audience (dev / #90 /
+      // super-admin), so other franchises never see an empty follow-up row on their dispatch. (_hasFu is already
+      // audience-gated: _dashReminders stays empty for everyone else.)
+      const _isDashBoard = !!(container && (container.id === 'dashSrcBoard' || container.id === 'dashDestBoard'));
+      const _fuAudience = (IS_DEV_ENV || (currentUser && (currentUser.franchiseID === '90' || currentUser.email === 'charles.dennis@junkluggers.com')));
+      const _showFuRow = (_isDashBoard && _fuAudience) || _hasFu;
+      const _fuRowH = _showFuRow ? 13 : 0; // the follow-up row's height (0 when hidden) — offsets the now-line
+      // time header (hour labels)
       h += '<div style="display:flex;height:20px;border-bottom:1px solid var(--border);">';
       h += '<div style="position:sticky;left:0;z-index:3;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);"></div>';
       if (showTruck) h += '<div style="position:sticky;left:' + LW + 'px;z-index:3;width:' + TW + 'px;flex:0 0 ' + TW + 'px;background:var(--bg-card);border-right:1px solid var(--border);display:flex;align-items:center;padding:0 5px;font-size:9px;font-weight:700;color:var(--text-muted);letter-spacing:.3px;">TRUCK</div>';
       h += '<div style="position:relative;width:' + trackW + 'px;background:' + grid + ';">';
       for (let hh = originH; hh < endH; hh++) h += '<div style="position:absolute;left:' + ((hh - originH) * PXH) + 'px;top:4px;font-size:9.5px;color:var(--text-muted);background:var(--bg-card);padding:0 3px;">' + mjEsc(mjHourLabel(hh)) + '</div>';
       h += '</div></div>';
+      // P4: DEDICATED follow-up dot row — a small dot centered in each hour-cell that has a follow-up due this
+      // day; click → that day's list. Its own row, so it never overlays the hour labels.
+      if (_showFuRow) {
+        h += '<div style="display:flex;height:' + _fuRowH + 'px;border-bottom:1px solid var(--border);background:var(--bg-card);">';
+        h += '<div title="Follow-ups due" style="position:sticky;left:0;z-index:3;width:' + LW + 'px;flex:0 0 ' + LW + 'px;background:var(--bg-card);display:flex;align-items:center;justify-content:center;font-size:9px;opacity:.5;">🔔</div>';
+        if (showTruck) h += '<div style="position:sticky;left:' + LW + 'px;z-index:3;width:' + TW + 'px;flex:0 0 ' + TW + 'px;background:var(--bg-card);border-right:1px solid var(--border);"></div>';
+        h += '<div style="position:relative;width:' + trackW + 'px;">';
+        if (_hasFu) {
+          const _cx = 0.5 * PXH, _col = _fuOver ? '#e05a4f' : '#e0a44f'; // start-of-day cell, always visible
+          h += '<div onclick="plDayActivities(\'' + mjEsc(String(data.dayID)) + '\',event)" title="' + _fuCount + ' follow-up' + (_fuCount !== 1 ? 's' : '') + ' due — click for the day’s list" style="position:absolute;left:' + (_cx - 8) + 'px;top:1px;display:inline-flex;align-items:center;justify-content:center;min-width:15px;height:11px;padding:0 3px;border-radius:999px;background:' + _col + ';color:#0b0f14;font-size:9px;font-weight:800;cursor:pointer;">' + _fuCount + '</div>';
+        }
+        h += '</div></div>';
+      }
       // route lanes — ALL routes (empty/closed included). Base = blocked-gray; green bands = open slots.
       routesData.forEach((rt) => {
         const rc = rt.code || '?';
@@ -12633,7 +12667,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           const nx = LW + TWc + ((nowMin - startMin) / 60) * PXH, laneH = ROW * routesData.length;
           nowX = nx;
           h += '<div title="Now" style="position:absolute;left:' + (nx - 3) + 'px;top:12px;width:8px;height:8px;border-radius:50%;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
-          h += '<div title="Now" style="position:absolute;left:' + nx + 'px;top:20px;width:2px;height:' + laneH + 'px;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
+          h += '<div title="Now" style="position:absolute;left:' + nx + 'px;top:' + (20 + _fuRowH) + 'px;width:2px;height:' + laneH + 'px;background:#ff5a5a;z-index:6;pointer-events:none;"></div>';
         }
       }
       h += '</div></div>';
@@ -12655,87 +12689,96 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (dayID === mjAddDays(today, 1)) return 'Tomorrow';
       return mjDayLabelFromID(dayID);
     }
-    // ── P4: Follow-ups rail on the Dispatch screen — pipeline reminders (calls/emails due) in one place ──────────
+    // ── P4: Dispatch timeline follow-up dots — pipeline reminders (calls/emails due) surfaced as clickable dots
+    // on each board's time axis (a dot at the touch's time; click → that day's follow-up list). ────────────────
     let _dashReminders = [];
     function _dueDayID(iso) { const d = new Date(iso); return '' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0'); }
-    function _dashFuBucket(iso) {
-      const d = new Date(iso); d.setHours(0, 0, 0, 0);
-      const t0 = new Date(); t0.setHours(0, 0, 0, 0);
-      const diff = Math.round((d - t0) / 86400000);
-      if (diff < 0) return 'overdue'; if (diff === 0) return 'today'; if (diff <= 7) return 'week'; return 'later';
-    }
-    async function renderDashFollowups() {
-      const host = document.getElementById('dashFollowups'); if (!host) return;
-      // Pipeline is a gated feature (dev / super-admin / tester) — stay silent otherwise (and on prod where the fn isn't deployed).
-      if (!(IS_DEV_ENV || (currentUser && (currentUser.franchiseID === '90' || currentUser.email === 'charles.dennis@junkluggers.com')))) { host.innerHTML = ''; return; }
-      plEnsureStyles(); // the snooze modal reuses the pipeline .pl-btn/.pl-mback styles
+    function _dueMin(iso) { const d = new Date(iso); return d.getHours() * 60 + d.getMinutes(); } // minutes from local midnight (board is franchise-local; exact for the ET/#90 audience)
+    async function loadDashReminders() {
+      // Pipeline is a gated feature (dev / super-admin / #90) — stay silent otherwise (and on prod where the fn isn't deployed).
+      if (!(IS_DEV_ENV || (currentUser && (currentUser.franchiseID === '90' || currentUser.email === 'charles.dennis@junkluggers.com')))) { _dashReminders = []; return; }
+      plEnsureStyles(); // the day-list popover + snooze modal reuse the pipeline .pl-btn/.pl-mback styles
       let rem = [];
       try { const r = await plApi('reminders', {}); if (r && r.success) rem = r.reminders || []; } catch (e) { console.error('[dashFu] load', e); }
-      _dashReminders = rem;
-      const g = { overdue: [], today: [], week: [] };
-      for (const r of rem) { if (!r.nextTouch) continue; const b = _dashFuBucket(r.nextTouch.dueAt); if (g[b]) g[b].push(r); }
-      const total = g.overdue.length + g.today.length + g.week.length;
-      if (!total) { host.innerHTML = ''; _dashUpdateDueChips(); return; }
-      const sec = (title, arr, color) => !arr.length ? '' :
-        '<div style="margin-top:6px;"><div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:' + color + ';margin:0 0 4px 2px;">' + title + ' (' + arr.length + ')</div>'
-        + arr.slice(0, 60).map(_dashFuRowHtml).join('') + '</div>';
-      host.innerHTML =
-        '<details open style="border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-card);">'
-        + '<summary style="cursor:pointer;list-style:none;padding:9px 12px;font-size:13px;font-weight:800;color:var(--text-primary);display:flex;align-items:center;gap:8px;">'
-        + '🔔 Follow-ups due'
-        + (g.overdue.length ? '<span style="font-size:11px;font-weight:800;padding:1px 8px;border-radius:999px;background:rgba(224,90,79,.16);color:#fca5a5;border:1px solid rgba(224,90,79,.38);">' + g.overdue.length + ' overdue</span>' : '')
-        + '<span style="font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;background:rgba(224,164,79,.14);color:#f2c17d;border:1px solid rgba(224,164,79,.34);">' + g.today.length + ' today</span>'
-        + '<span style="margin-left:auto;font-size:11px;color:var(--text-muted);">▾</span></summary>'
-        + '<div style="padding:4px 10px 10px;max-height:34vh;overflow-y:auto;">' + sec('Overdue', g.overdue, '#e05a4f') + sec('Today', g.today, '#e0a44f') + sec('This week', g.week, '#7dd3fc') + '</div>'
-        + '</details>';
-      _dashUpdateDueChips();
+      _dashReminders = (rem || []).filter(r => r.nextTouch && r.nextTouch.dueAt);
+      _dashRerenderBoards(); // repaint the dashboard boards so the dots appear (no-op until the boards have loaded)
     }
     function _dashFuRowHtml(r) {
       const t = PL_TYPES.find(x => x.key === r.type) || { icon: '•', short: r.type, color: '#6e8194' };
-      const nt = r.nextTouch, w = plWhen(nt.dueAt);
+      const nt = r.nextTouch;
       const chips = [];
-      if (r.phone) { chips.push('<a href="tel:' + plTel(r.phone) + '" style="text-decoration:none;">📞</a>'); chips.push('<a href="sms:' + plTel(r.phone) + '" style="text-decoration:none;">💬</a>'); }
-      if (r.email) chips.push('<a href="mailto:' + _escHtml(r.email) + '" style="text-decoration:none;">✉️</a>');
-      return '<div style="display:flex;align-items:center;gap:8px;padding:6px 6px;border-top:1px solid var(--border,#2c3e50);font-size:12.5px;">'
+      if (r.phone) { chips.push('<a onclick="event.stopPropagation()" href="tel:' + plTel(r.phone) + '" title="Call" style="text-decoration:none;">📞</a>'); chips.push('<a onclick="event.stopPropagation()" href="sms:' + plTel(r.phone) + '" title="Text" style="text-decoration:none;">💬</a>'); }
+      if (r.email) chips.push('<a onclick="event.stopPropagation()" href="mailto:' + _escHtml(r.email) + '" title="Email" style="text-decoration:none;">✉️</a>');
+      // Whole row opens the detail modal for context; the contact + Done/Snooze controls stop propagation.
+      // No date/channel text — the modal header already names the day; the chips ARE the channels to act on.
+      return '<div onclick="plOpenDetail(\'' + r.id + '\')" title="Open details" style="display:flex;align-items:center;gap:10px;padding:8px 6px;border-top:1px solid var(--border,#2c3e50);font-size:12.5px;cursor:pointer;">'
         + '<span style="font-size:10px;font-weight:800;text-transform:uppercase;padding:2px 6px;border-radius:999px;background:' + t.color + '22;color:' + t.color + ';white-space:nowrap;">' + t.icon + ' ' + t.short + '</span>'
-        + '<span style="font-weight:700;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px;">' + _escHtml(r.customer_name || 'Unknown') + '</span>'
-        + '<span style="font-weight:700;color:' + (w.over ? '#fca5a5' : 'var(--text-muted)') + ';white-space:nowrap;">' + (PL_CHAN[nt.channel] || '•') + ' ' + w.txt + '</span>'
-        + '<span style="display:inline-flex;gap:7px;font-size:14px;">' + chips.join('') + '</span>'
-        + '<span style="margin-left:auto;display:inline-flex;gap:6px;">'
-        + '<button onclick="_dashFuDone(\'' + r.id + '\',\'' + (nt.touchId || '') + '\')" title="Mark done" style="padding:4px 9px;border-radius:6px;border:1px solid var(--accent-green,#22c55e);background:var(--accent-green,#22c55e);color:var(--accent-text,#0b0f14);font-weight:800;font-size:11px;cursor:pointer;">✓</button>'
-        + '<button onclick="_dashFuSnooze(\'' + (nt.touchId || '') + '\')" title="Snooze" style="padding:4px 9px;border-radius:6px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:11px;cursor:pointer;">⏰</button>'
+        + '<span style="font-weight:700;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;">' + _escHtml(r.customer_name || 'Unknown') + '</span>'
+        + '<span style="display:inline-flex;gap:9px;font-size:15px;">' + chips.join('') + '</span>'
+        + '<span style="display:inline-flex;gap:6px;">'
+        + '<button onclick="event.stopPropagation();_dashFuDone(\'' + r.id + '\',\'' + (nt.touchId || '') + '\')" title="Mark done" style="padding:4px 9px;border-radius:6px;border:1px solid var(--accent-green,#22c55e);background:var(--accent-green,#22c55e);color:var(--accent-text,#0b0f14);font-weight:800;font-size:11px;cursor:pointer;">✓</button>'
+        + '<button onclick="event.stopPropagation();_dashFuSnooze(\'' + r.id + '\')" title="Reschedule" style="padding:4px 9px;border-radius:6px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:11px;cursor:pointer;">⏰</button>'
+        + '<span style="color:var(--text-muted);font-size:15px;">›</span>'
         + '</span></div>';
     }
-    function _dashUpdateDueChips() {
-      for (const side of ['src', 'dest']) {
-        const day = side === 'src' ? _dashSrcDay : _dashDestDay;
-        const chip = document.getElementById('dashDue-' + side); if (!chip) continue;
-        const n = (_dashReminders || []).filter(r => r.nextTouch && _dueDayID(r.nextTouch.dueAt) === day).length;
-        if (n > 0) { chip.style.display = ''; chip.textContent = '🔔 ' + n; } else { chip.style.display = 'none'; }
-      }
+    // Click a timeline dot → this day's follow-up list in a centered modal (reuses _dashFuRowHtml).
+    function plDayActivities(dayID, ev) {
+      if (ev) ev.stopPropagation();
+      const rows = (_dashReminders || []).filter(r => _dueDayID(r.nextTouch.dueAt) === String(dayID))
+        .sort((a, b) => new Date(a.nextTouch.dueAt) - new Date(b.nextTouch.dueAt));
+      const label = (typeof _dashDayLabel === 'function') ? _dashDayLabel(String(dayID)) : String(dayID);
+      const body = rows.length ? rows.map(_dashFuRowHtml).join('') : '<div style="padding:14px;color:var(--text-muted);font-size:13px;">No follow-ups for this day.</div>';
+      let back = document.getElementById('plDayModal');
+      if (!back) { back = document.createElement('div'); back.id = 'plDayModal'; document.body.appendChild(back); }
+      back.dataset.day = String(dayID);
+      back.onclick = (e) => { if (e.target === back) plCloseDayModal(); };
+      back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px;'; // app modal tier — above the Leaflet map (~1100); .pl-mback (100001) stacks the detail modal above this
+      back.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);max-width:560px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.5);">'
+        + '<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);">'
+        +   '<span style="font-size:15px;font-weight:800;color:var(--text-primary);">🔔 Follow-ups · ' + _escHtml(label) + '</span>'
+        +   '<span style="font-size:12px;color:var(--text-muted);">' + rows.length + ' due</span>'
+        +   '<button onclick="plCloseDayModal()" style="margin-left:auto;padding:5px 10px;border-radius:6px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:12px;cursor:pointer;">Close</button>'
+        + '</div>'
+        + '<div style="padding:4px 12px 12px;overflow-y:auto;">' + body + '</div></div>';
     }
-    function _dashFuScrollToDay() { const h = document.getElementById('dashFollowups'); if (h) h.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    function plCloseDayModal() { const b = document.getElementById('plDayModal'); if (b) b.remove(); }
+    function _plRefreshDayModal() { const b = document.getElementById('plDayModal'); if (b && b.dataset.day) plDayActivities(b.dataset.day); } // re-render the open day-list after a Done/Snooze
     async function _dashFuDone(itemId, touchId) {
       if (!touchId) return;
       const r = await plApi('touchDone', { touchId });
       if (!r || !r.success) { alert('Could not mark done.'); return; }
-      renderDashFollowups();
+      await loadDashReminders(); _plRefreshDayModal();
     }
-    function _dashFuSnooze(touchId) {
-      if (!touchId) return;
-      plModal('<h3>Snooze follow-up</h3><div style="color:var(--text-muted);font-size:12px;margin:2px 0 10px;">Push the next touch out to…</div>'
-        + '<div style="display:flex;gap:8px;flex-wrap:wrap;">'
-        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + touchId + '\',1)">Tomorrow</button>'
-        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + touchId + '\',3)">+3 days</button>'
-        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + touchId + '\',7)">+1 week</button></div>'
+    function _dashFuSnooze(itemId) {
+      if (!itemId) return;
+      const pad = n => String(n).padStart(2, '0');
+      const today = new Date(); const isoToday = today.getFullYear() + '-' + pad(today.getMonth() + 1) + '-' + pad(today.getDate());
+      const tmr = new Date(); tmr.setDate(tmr.getDate() + 1); const isoTmr = tmr.getFullYear() + '-' + pad(tmr.getMonth() + 1) + '-' + pad(tmr.getDate());
+      plModal('<h3>Reschedule follow-up</h3><div style="color:var(--text-muted);font-size:12.5px;margin:2px 0 12px;">When should this come up next? (moves the whole follow-up plan for this customer.)</div>'
+        + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">'
+        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + itemId + '\',1)">Tomorrow</button>'
+        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + itemId + '\',3)">In 3 days</button>'
+        + '<button class="pl-btn" onclick="_dashDoSnooze(\'' + itemId + '\',7)">In a week</button></div>'
+        + '<div class="lbl">Or pick a date</div>'
+        + '<div style="display:flex;gap:8px;align-items:center;">'
+        + '<input type="date" id="plSnoozeDate" value="' + isoTmr + '" min="' + isoToday + '" style="flex:1;color-scheme:dark;">'
+        + '<button class="pl-btn acc" onclick="_dashDoSnoozeDate(\'' + itemId + '\')">Set date</button></div>'
         + '<div style="display:flex;justify-content:flex-end;margin-top:16px;"><button class="pl-btn" onclick="plCloseModal()">Cancel</button></div>');
     }
-    async function _dashDoSnooze(touchId, days) {
+    async function _dashDoSnooze(itemId, days) {
       plCloseModal();
       const d = new Date(); d.setHours(9, 0, 0, 0); d.setDate(d.getDate() + days);
-      const r = await plApi('snooze', { touchId, dueAt: d.toISOString() });
-      if (!r || !r.success) { alert('Could not snooze.'); return; }
-      renderDashFollowups();
+      const r = await plApi('snooze', { itemId, dueAt: d.toISOString() });
+      if (!r || !r.success) { alert('Could not reschedule.'); return; }
+      await loadDashReminders(); _plRefreshDayModal();
+    }
+    async function _dashDoSnoozeDate(itemId) {
+      const el = document.getElementById('plSnoozeDate'); const v = el && el.value; if (!v) { alert('Pick a date first.'); return; }
+      plCloseModal();
+      const d = new Date(v + 'T09:00:00'); // 9am local on the chosen day (franchise-local; exact for the ET/#90 audience)
+      const r = await plApi('snooze', { itemId, dueAt: d.toISOString() });
+      if (!r || !r.success) { alert('Could not reschedule.'); return; }
+      await loadDashReminders(); _plRefreshDayModal();
     }
 
     function dashDayPickerHTML(side, dayID) {
@@ -12745,7 +12788,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         + '<button onclick="dashShiftDay(\'' + side + '\',-1)" style="' + _dashNavBtnCss() + '">◀</button>'
         + '<span id="dashDayLbl-' + side + '" style="font-size:13px;font-weight:700;color:var(--text-primary);min-width:104px;text-align:center;">' + mjEsc(_dashDayLabel(dayID)) + '</span>'
         + '<button onclick="dashShiftDay(\'' + side + '\',1)" style="' + _dashNavBtnCss() + '">▶</button>'
-        + '<span id="dashDue-' + side + '" onclick="_dashFuScrollToDay(\'' + side + '\')" title="Follow-ups due on this day" style="display:none;cursor:pointer;font-size:11px;font-weight:800;padding:2px 8px;border-radius:999px;background:rgba(224,90,79,.16);color:#fca5a5;border:1px solid rgba(224,90,79,.38);"></span>'
         + '<input type="date" id="dashDayDate-' + side + '" value="' + (String(dayID).slice(0,4)+'-'+String(dayID).slice(4,6)+'-'+String(dayID).slice(6,8)) + '" onchange="dashSetDay(\'' + side + '\',this.value)" title="Jump to a date" style="font-size:12px;padding:5px 7px;background:var(--bg-input,#1e2f40);color:var(--text-primary);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);color-scheme:dark;">'
         + '<button onclick="dashReloadOne(\'' + side + '\',true)" title="Refresh this board" style="' + _dashNavBtnCss() + ';margin-left:auto;">🔄</button>'
         + '</div>';
@@ -12772,8 +12814,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         +     '</div>'
         +   '</details>'
         + '</div>'
-        // P4: pipeline follow-ups rail — due calls/emails/texts in one place (self-contained; filled by renderDashFollowups)
-        + '<div id="dashFollowups" style="margin-bottom:12px;"></div>'
         // schedules on TOP (two boards, route-aligned)
         + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start;margin-bottom:12px;">'
         +   '<div style="border:1px solid var(--border);border-radius:var(--radius);padding:8px;background:var(--bg-card);min-width:0;">' + dashDayPickerHTML('src', _dashSrcDay) + '<div id="dashSrcBoard"></div></div>'
@@ -13038,7 +13078,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const inp = document.getElementById('dashDayDate-' + side);
       if (inp) inp.value = String(dayID).slice(0, 4) + '-' + String(dayID).slice(4, 6) + '-' + String(dayID).slice(6, 8);
       dashReloadOne(side, true); // reload ONLY this board — no full dashboard rebuild, no map remount, no blank flash
-      _dashUpdateDueChips(); // refresh this side's follow-up day-dot from the cached reminders
     }
     function dashShiftDay(side, delta) {
       dashApplyDay(side, mjAddDays(side === 'src' ? _dashSrcDay : _dashDestDay, delta));
@@ -13098,6 +13137,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       dashRenderBoard(_dashSrcDay, srcR, srcC, axis);
       dashRenderBoard(_dashDestDay, destR, destC, axis);
       _mjLoadEta(_dashSrcDay, srcR); _mjLoadEta(_dashDestDay, destR); // FW-59: feasibility pills for BOTH boards (async repaint)
+      loadDashReminders(); // P4: fetch pipeline reminders NOW that _dashCache + boards exist, then repaint dots (deterministic — no race)
     }
     // Shared time axis (originH/endH) across both days so both boards have identical columns + dimensions.
     function _dashSharedAxis(routeSets) {
@@ -14825,7 +14865,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // ═══════════════════════════════════════════════════════════════════════════════════════
     const PL_TYPES = [
       { key: 'lead',                 label: 'Leads',              short: 'Lead',        icon: '🌱', color: '#22c55e' },
-      { key: 'unconverted_estimate', label: 'Unconverted est.',   short: 'Unconverted', icon: '📝', color: '#e0a44f' },
+      { key: 'unconverted_estimate', label: 'Open estimates',      short: 'Open estimate', icon: '📝', color: '#e0a44f' },
       { key: 'cancellation',         label: 'Cancellations',      short: 'Cancelled',   icon: '✖️', color: '#e05a4f' },
       { key: 'ucb',                  label: 'Urgent callbacks',   short: 'Urgent CB',   icon: '📞', color: '#f43f5e' },
       { key: 'case',                 label: 'Cases',              short: 'Case',        icon: '🛟', color: '#8b5cf6' }
@@ -14885,7 +14925,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         #pipelineScreen .pl-mini.go{background:var(--accent-green);border-color:var(--accent-green);color:var(--accent-text,#0b0f14);}
         #pipelineScreen .pl-spacer{flex:1;}
         #pipelineScreen .pl-empty{text-align:center;color:var(--text-muted);padding:48px 16px;font-size:14px;}
-        .pl-mback{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:400;display:flex;align-items:flex-start;justify-content:center;padding:24px 12px;overflow-y:auto;}
+        .pl-mback{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100001;display:flex;align-items:flex-start;justify-content:center;padding:24px 12px;overflow-y:auto;}
         .pl-mcard{background:var(--bg-secondary,#182634);border:1px solid var(--border,#2c3e50);border-radius:var(--radius,12px);width:100%;max-width:560px;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.5);}
         .pl-mcard h3{font-size:17px;font-weight:800;color:var(--text-primary);margin:0 0 3px;}
         .pl-mcard .lbl{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin:12px 0 5px;}
@@ -14897,6 +14937,27 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         .pl-seqcard .nm{font-weight:800;color:var(--text-primary);font-size:14px;}
         .pl-seqcard .ds{font-size:11.5px;color:var(--text-muted);margin-top:2px;}
         .pl-defbadge{font-size:10px;font-weight:800;text-transform:uppercase;padding:2px 6px;border-radius:999px;background:rgba(34,197,94,.15);color:#4ade80;border:1px solid rgba(34,197,94,.3);}
+        #pipelineScreen .pl-group{margin-top:14px;}
+        #pipelineScreen .pl-group:first-child{margin-top:2px;}
+        #pipelineScreen .pl-group-hdr{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin:0 2px 6px;display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;user-select:none;}
+        #pipelineScreen .pl-group-hdr::-webkit-details-marker{display:none;}
+        #pipelineScreen .pl-group-hdr .cnt{font-size:11px;font-weight:700;color:var(--text-muted);background:var(--bg-input,#253545);border:1px solid var(--border,#2c3e50);border-radius:999px;padding:1px 8px;}
+        #pipelineScreen .pl-group-hdr .pl-group-caret{margin-left:auto;font-size:11px;color:var(--text-muted);transition:transform .12s;}
+        #pipelineScreen .pl-group:not([open]) .pl-group-caret{transform:rotate(-90deg);}
+        .pl-detail-grid{display:flex;flex-direction:column;margin-top:8px;}
+        .pl-kv{display:flex;justify-content:space-between;gap:14px;padding:7px 0;border-bottom:1px solid var(--border,#2c3e50);font-size:13px;align-items:baseline;}
+        /* The detail modal (.pl-mcard) lives on <body>, so the #pipelineScreen-scoped versions of these don't
+           reach it when opened from Dispatch → raw blue links + unstyled buttons. Re-declare them theme-scoped
+           to the modal card so they match everywhere. */
+        .pl-mcard .pl-btn{padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;gap:5px;}
+        .pl-mcard .pl-btn.acc{background:var(--accent-green);border-color:var(--accent-green);color:var(--accent-text,#0b0f14);}
+        .pl-mcard .pl-chip{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:999px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-size:12px;font-weight:700;text-decoration:none;cursor:pointer;}
+        .pl-mcard .pl-badge{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;padding:2px 7px;border-radius:999px;margin-left:2px;}
+        .pl-mcard .pl-amt{font-size:15px;font-weight:800;color:var(--text-primary);font-variant-numeric:tabular-nums;white-space:nowrap;}
+        .pl-mcard .pl-contact{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;}
+        .pl-mcard .pl-sub{font-size:12px;color:var(--text-muted);margin-top:2px;}
+        .pl-kv .k{color:var(--text-muted);white-space:nowrap;flex:0 0 auto;font-weight:600;}
+        .pl-kv .v{color:var(--text-primary);text-align:right;word-break:break-word;}
         .pl-syncov{position:fixed;inset:0;background:rgba(8,12,18,.72);z-index:500;display:flex;align-items:center;justify-content:center;padding:24px;}
         .pl-syncbox{background:var(--bg-secondary,#182634);border:1px solid var(--border,#2c3e50);border-radius:var(--radius,12px);padding:26px 30px;max-width:340px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5);}
         .pl-spin{width:34px;height:34px;margin:0 auto 14px;border:3px solid var(--border,#2c3e50);border-top-color:var(--accent-green,#22c55e);border-radius:50%;animation:pl-spin 0.8s linear infinite;}
@@ -14956,6 +15017,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return _plItems.filter(it => _plTypeFilter.has(it.type) && (!q || String(it.customer_name || '').toLowerCase().includes(q)));
     }
 
+    // Grouped, oldest-first rendering (Owner 2026-08-11): sort BY GROUP (cases first), and within each group by
+    // date oldest→newest, so the most-aged items to work surface at the top. Group order is easy to re-order.
+    const PL_GROUP_ORDER = ['case', 'ucb', 'cancellation', 'unconverted_estimate', 'lead'];
+    function plGroupedHtml(items) {
+      let html = '';
+      for (const key of PL_GROUP_ORDER) {
+        const g = items.filter(i => i.type === key)
+          .sort((a, b) => String(a.occurred_at || '9999').localeCompare(String(b.occurred_at || '9999'))); // oldest first, nulls last
+        if (!g.length) continue;
+        const t = PL_TYPES.find(x => x.key === key) || { icon: '•', label: key };
+        html += `<details open class="pl-group"><summary class="pl-group-hdr">${t.icon} ${t.label} <span class="cnt">${g.length}</span><span class="pl-group-caret">▾</span></summary>${g.map(plRowHtml).join('')}</details>`;
+      }
+      return html;
+    }
+
     function plPaint() {
       const scr = document.getElementById('pipelineScreen');
       const totalOpen = _plOpen;
@@ -14963,7 +15039,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         `<label><input type="checkbox" ${_plTypeFilter.has(t.key) ? 'checked' : ''} onchange="plToggleType('${t.key}', this.checked)"> ${t.icon} ${t.label} <span class="cnt">${_plCounts[t.key] || 0}</span></label>`
       ).join('');
 
-      const rows = plVisible().map(plRowHtml).join('');
+      const rows = plGroupedHtml(plVisible());
       const body = rows || `<div class="pl-empty">Nothing here.${_plView === 'attention' ? ' Everything open has been worked, or try “All”.' : ''}<br>Tap <b>Sync now</b> to pull the latest from Vonigo.</div>`;
 
       scr.innerHTML = `
@@ -15006,7 +15082,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Repaint only the list (used after a filter/search toggle — keeps the filter dropdown open & search focus/scroll)
     function plPaintList() {
       const el = document.getElementById('plList'); if (!el) return plPaint();
-      const rows = plVisible().map(plRowHtml).join('');
+      const rows = plGroupedHtml(plVisible());
       el.innerHTML = rows || `<div class="pl-empty">Nothing matches.</div>`;
     }
 
@@ -15039,9 +15115,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         : '';
       return `
         <div class="pl-row" style="border-left-color:${t.color};">
-          <div class="r1">
+          <div class="r1" onclick="plOpenDetail('${it.id}')" style="cursor:pointer;" title="View full details">
             <div>
-              <span class="pl-name">${_escHtml(it.customer_name || 'Unknown')}</span>
+              <span class="pl-name">${_escHtml(it.customer_name || 'Unknown')} <span style="font-size:12px;color:var(--text-muted);font-weight:400;">ⓘ</span></span>
               <span class="pl-badge" style="background:${t.color}22;color:${t.color};">${t.short}</span>
             </div>
             ${it.amount ? `<div class="pl-amt">$${Number(it.amount).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>` : ''}
@@ -15054,6 +15130,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <span class="pl-spacer"></span>
             ${seqSel}
             ${stageSel}
+            <button class="pl-mini" title="Full details" onclick="plOpenDetail('${it.id}')">ⓘ</button>
             <button class="pl-mini" title="Add a note" onclick="plNote('${it.id}')">📝</button>
             <button class="pl-mini" title="Dismiss" onclick="plDismiss('${it.id}')">✕</button>
           </div>
@@ -15181,6 +15258,75 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const txt = (s ? s.value + '\n\n' : '') + b.value;
       if (navigator.clipboard) navigator.clipboard.writeText(txt);
       const btn = event && event.target; if (btn) { btn.textContent = 'Copied ✓'; setTimeout(() => { btn.textContent = 'Copy'; }, 1400); }
+    }
+
+    // ── item detail modal (rich Vonigo context + deep-link) ───────────
+    function plRawVal(raw, fid) { const f = ((raw && raw.Fields) || []).find(x => x.fieldID === fid); return f ? (f.fieldValue || '') : ''; }
+    function plRawRel(raw, type) { return ((raw && raw.Relations) || []).find(r => r.relationType === type) || null; }
+    // Vonigo deep-link (Owner-supplied patterns 2026-08-11):
+    //  • WorkOrder types (cancellation/unconverted/ucb) → the parent JOB page (Job_Main.aspx?jobID).
+    //  • Case → the case task page (Case_TaskMain.aspx?taskID = the case objectID; verify when a live case exists —
+    //    #90 currently has none).
+    //  • Lead → Vonigo opens Clients inside a frameset, so there's no clean per-lead deep-link — no button (the
+    //    modal still shows full lead context: name, phone, email, address, notes).
+    function plVonigoLink(item) {
+      if (item.type === 'lead') return 'https://junkluggers.vonigo.com/Client/?tabNo=1'; // no per-lead deep-link (framed) — opens the Leads list
+      if (item.type === 'case') {
+        const tid = String(item.source_external_id || '');
+        return tid ? 'https://junkluggers.vonigo.com/Client/Case/Case_TaskMain.aspx?taskID=' + encodeURIComponent(tid) : null;
+      }
+      const jobRel = plRawRel(item.raw, 'job');
+      const jobId = jobRel && jobRel.objectID;
+      return jobId ? 'https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(jobId)) : null;
+    }
+    async function plOpenDetail(id) {
+      plModal('<div style="padding:28px;text-align:center;color:var(--text-muted);">Loading details…</div>');
+      let d; try { d = await plApi('detail', { id }); } catch (e) { d = null; }
+      if (!d || !d.success) { plModal('<h3>Couldn’t load</h3><div class="pl-sub" style="color:var(--text-muted);font-size:12px;">' + _escHtml((d && d.error) || 'Please try again.') + '</div><div style="display:flex;justify-content:flex-end;margin-top:14px;"><button class="pl-btn" onclick="plCloseModal()">Close</button></div>'); return; }
+      plModal(plDetailHtml(d.item, d.touches || [], d.sequenceName));
+    }
+    function plDetailHtml(item, touches, seqName) {
+      const t = PL_TYPES.find(x => x.key === item.type) || { icon: '•', short: item.type, color: '#6e8194' };
+      const raw = item.raw || {};
+      const kv = (label, val) => (val || val === 0) ? `<div class="pl-kv"><span class="k">${label}</span><span class="v">${_escHtml(String(val))}</span></div>` : '';
+      const dateStr = item.occurred_at ? new Date(item.occurred_at).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : '';
+      const dateLabel = { lead: 'Lead created', cancellation: 'Service date', unconverted_estimate: 'Estimate date', ucb: 'Callback date', case: 'Case opened' }[item.type] || 'Date';
+      const summary = plRawVal(raw, 200), items = plRawVal(raw, 10336), routeRel = plRawRel(raw, 'route');
+      const chips = [];
+      if (item.phone) { chips.push(`<a class="pl-chip" href="tel:${plTel(item.phone)}">📞 Call</a>`); chips.push(`<a class="pl-chip" href="sms:${plTel(item.phone)}">💬 Text</a>`); }
+      if (item.email) chips.push(`<a class="pl-chip" href="mailto:${_escHtml(item.email)}">✉️ Email</a>`);
+      const vlink = plVonigoLink(item);
+      const upcoming = (touches || []).filter(x => x.status === 'scheduled');
+      const touchList = upcoming.length
+        ? upcoming.map(x => `<div class="pl-kv"><span class="k">${PL_CHAN[x.channel] || '•'} ${x.channel}</span><span class="v">${plDate(x.due_at)}</span></div>`).join('')
+        : '<div class="pl-sub" style="color:var(--text-muted);font-size:12px;padding:4px 0;">No scheduled follow-ups.</div>';
+      return ''
+        + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">'
+        +   `<div><h3 style="margin:0 0 4px;">${_escHtml(item.customer_name || 'Unknown')}</h3>`
+        +     `<span class="pl-badge" style="background:${t.color}22;color:${t.color};">${t.icon} ${t.short}</span></div>`
+        +   (item.amount ? `<div class="pl-amt">$${Number(item.amount).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>` : '')
+        + '</div>'
+        + (chips.length ? `<div class="pl-contact" style="margin-top:10px;">${chips.join('')}</div>` : '')
+        + '<div class="lbl">Details</div>'
+        + '<div class="pl-detail-grid">'
+        +   kv(dateLabel, dateStr) + kv('Address', item.address) + kv('Phone', item.phone) + kv('Email', item.email)
+        +   (item.type === 'cancellation' ? kv('Reason', item.reason) + kv('Customer comments', item.detail) : '')
+        +   (item.type === 'unconverted_estimate' ? kv('Outcome', item.reason) + kv('Job summary', summary) + kv('Items', items) : '')
+        +   (item.type === 'ucb' ? kv('Route', routeRel && routeRel.name) + kv('Job summary', summary) : '')
+        +   (item.type === 'case' ? kv('Type', item.reason) + kv('Case notes', item.detail) : '')
+        +   (item.type === 'lead' ? kv('Notes', summary) : '')
+        + '</div>'
+        + '<div class="lbl">Follow-up</div>'
+        + '<div class="pl-detail-grid">'
+        +   kv('Stage', item.stage) + kv('Sequence', seqName || 'None') + kv('Assigned to', item.assigned_to)
+        + '</div>'
+        + `<div style="margin-top:4px;">${touchList}</div>`
+        + (item.notes ? `<div class="lbl">Your notes</div><div class="pl-sub" style="color:var(--text-primary);font-size:13px;">${_escHtml(item.notes)}</div>` : '')
+        + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap;">'
+        +   `<button class="pl-btn" onclick="plNote('${item.id}')">📝 Note</button>`
+        +   (vlink ? `<a class="pl-btn acc" href="${vlink}" target="_blank" rel="noopener">↗ ${item.type === 'lead' ? 'Open leads in Vonigo' : 'Open in Vonigo'}</a>` : '')
+        +   '<button class="pl-btn" onclick="plCloseModal()">Close</button>'
+        + '</div>';
     }
 
     // ── modal primitive ───────────────────────────────────────────────
@@ -15385,8 +15531,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const _dashOpenToday = mjNowParts().dayID;
         _dashSrcDay = _dashOpenToday;
         _dashDestDay = mjAddDays(_dashOpenToday, 1);
-        renderDashboard();
-        renderDashFollowups(); // P4: pipeline follow-ups rail + day-dots
+        renderDashboard(); // dashLoadBoards() (inside) fetches reminders after the boards render — no separate call needed
         _startBoardAutoRefresh();
         return;
       }

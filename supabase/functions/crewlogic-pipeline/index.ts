@@ -159,7 +159,7 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || '').trim();
     const franchiseID = String(body.franchiseID || '').trim();
-    const ACTIONS = ['sync', 'list', 'reminders', 'update', 'dismiss', 'touchDone', 'snooze', 'seqList', 'seqSave', 'seqDelete', 'assignSequence', 'unassignSequence'];
+    const ACTIONS = ['sync', 'list', 'reminders', 'detail', 'update', 'dismiss', 'touchDone', 'snooze', 'seqList', 'seqSave', 'seqDelete', 'assignSequence', 'unassignSequence'];
     if (!ACTIONS.includes(action)) return json({ success: false, error: 'unknown action', reqId }, 400);
     if (!franchiseID) return json({ success: false, error: 'franchiseID required', reqId }, 400);
 
@@ -196,6 +196,21 @@ Deno.serve(async (req: Request) => {
       return json({ success: true, items: out, counts, open, total: out.length, reqId });
     }
 
+    // Full detail for one item (incl. the stored `raw` Vonigo object) — powers the row detail modal. On demand
+    // (not in `list`) so the list payload stays small. Also returns the item's scheduled touches.
+    if (action === 'detail') {
+      const id = String(body.id || ''); if (!id) return json({ success: false, error: 'id required', reqId }, 400);
+      const { data: item } = await supabase.from('pipeline_items').select('*').eq('id', id).eq('franchise_id', franchiseInternalID).maybeSingle();
+      if (!item) return json({ success: false, error: 'not found', reqId }, 404);
+      const { data: touches } = await supabase.from('pipeline_touches').select('id, due_at, channel, status, note, sequence_step_id').eq('pipeline_item_id', id).order('due_at', { ascending: true });
+      let seqName: string | null = null;
+      if ((item as Record<string, unknown>).sequence_id) {
+        const { data: s } = await supabase.from('pipeline_sequences').select('name').eq('id', (item as Record<string, unknown>).sequence_id).maybeSingle();
+        seqName = s ? (s as { name: string }).name : null;
+      }
+      return json({ success: true, item, touches: touches || [], sequenceName: seqName, reqId });
+    }
+
     // Compact due-reminder feed for the Dispatch follow-ups rail + day dots. Open items with a scheduled next
     // touch, ordered by due; carries the touchId so the rail's Done/Snooze can act without a second lookup.
     if (action === 'reminders') {
@@ -230,13 +245,33 @@ Deno.serve(async (req: Request) => {
       return json({ success: true, reqId });
     }
 
-    if (action === 'touchDone' || action === 'snooze') {
+    if (action === 'touchDone') {
       const touchId = String(body.touchId || ''); if (!touchId) return json({ success: false, error: 'touchId required', reqId }, 400);
       const { data: t } = await supabase.from('pipeline_touches').select('pipeline_item_id').eq('id', touchId).maybeSingle();
       if (!t || !(await ownItem(String((t as { pipeline_item_id: string }).pipeline_item_id)))) return json({ success: false, error: 'not found', reqId }, 404);
-      if (action === 'touchDone') await supabase.from('pipeline_touches').update({ status: 'done', done_at: new Date().toISOString() }).eq('id', touchId); // trigger recomputes next_action_at
-      else { const dueAt = String(body.dueAt || ''); if (!dueAt) return json({ success: false, error: 'dueAt required', reqId }, 400); await supabase.from('pipeline_touches').update({ due_at: dueAt }).eq('id', touchId).eq('status', 'scheduled'); }
+      await supabase.from('pipeline_touches').update({ status: 'done', done_at: new Date().toISOString() }).eq('id', touchId); // trigger recomputes next_action_at
       return json({ success: true, reqId });
+    }
+    if (action === 'snooze') {
+      // Reschedule the WHOLE remaining follow-up plan for an item: shift EVERY scheduled touch so the earliest
+      // lands on `dueAt`, preserving the spacing of later steps. (Owner 2026-08-11: "push this out to next week"
+      // must defer the customer — a single-touch snooze left the next sequence step surfacing the very next day.)
+      const dueAt = String(body.dueAt || ''); if (!dueAt) return json({ success: false, error: 'dueAt required', reqId }, 400);
+      const target = new Date(dueAt).getTime(); if (!Number.isFinite(target)) return json({ success: false, error: 'bad dueAt', reqId }, 400);
+      let itemId = String(body.itemId || '');
+      if (!itemId) { // back-compat: derive the item from a touchId
+        const tid = String(body.touchId || ''); if (!tid) return json({ success: false, error: 'itemId or touchId required', reqId }, 400);
+        const { data: t } = await supabase.from('pipeline_touches').select('pipeline_item_id').eq('id', tid).maybeSingle();
+        if (!t) return json({ success: false, error: 'not found', reqId }, 404);
+        itemId = String((t as { pipeline_item_id: string }).pipeline_item_id);
+      }
+      if (!(await ownItem(itemId))) return json({ success: false, error: 'not found', reqId }, 404);
+      const { data: ts } = await supabase.from('pipeline_touches').select('id, due_at').eq('pipeline_item_id', itemId).eq('status', 'scheduled').order('due_at', { ascending: true });
+      const list = (ts || []) as { id: string; due_at: string }[];
+      if (!list.length) return json({ success: true, shifted: 0, reqId });
+      const delta = target - new Date(list[0].due_at).getTime();
+      for (const t of list) { const nd = new Date(new Date(t.due_at).getTime() + delta).toISOString(); await supabase.from('pipeline_touches').update({ due_at: nd }).eq('id', t.id); }
+      return json({ success: true, shifted: list.length, reqId });
     }
 
     // ===== SEQUENCES =====
@@ -509,8 +544,14 @@ Deno.serve(async (req: Request) => {
       const { data: defs } = await supabase.from('pipeline_sequences').select('id, name, default_for_type').eq('franchise_id', franchiseInternalID).eq('active', true).not('default_for_type', 'is', null);
       const defByType: Record<string, { id: string; name: string }> = {};
       for (const d of (defs || []) as Record<string, string>[]) defByType[d.default_for_type] = { id: d.id, name: d.name };
-      const { data: freshItems } = await supabase.from('pipeline_items').select('id, type, source_external_id').eq('franchise_id', franchiseInternalID);
-      const toSeed = ((freshItems || []) as Record<string, unknown>[]).filter((i) => newKeys.has(String(i.type) + '|' + String(i.source_external_id)) && defByType[String(i.type)]);
+      const { data: freshItems } = await supabase.from('pipeline_items').select('id, type, source_external_id, occurred_at').eq('franchise_id', franchiseInternalID);
+      // Option A (owner 2026-08-11): auto-enroll only GENUINELY-NEW items, never the historical backlog. Guard by
+      // recency — an item whose event date is within AUTO_SEED_MAX_AGE_DAYS (or in the future) auto-seeds; older
+      // backlog stays in the list unscheduled until the owner assigns a sequence. Prevents the whole backlog
+      // stacking its first follow-up on one calendar day (the "186 due today" pile-up).
+      const AUTO_SEED_MAX_AGE_DAYS = 3, AUTO_SEED_MAX_AGE_MS = AUTO_SEED_MAX_AGE_DAYS * 86400000, _nowMs = Date.now();
+      const _recentEnough = (occ: unknown) => { if (!occ) return false; const ts = new Date(String(occ)).getTime(); return Number.isFinite(ts) && ts >= _nowMs - AUTO_SEED_MAX_AGE_MS; };
+      const toSeed = ((freshItems || []) as Record<string, unknown>[]).filter((i) => newKeys.has(String(i.type) + '|' + String(i.source_external_id)) && defByType[String(i.type)] && _recentEnough(i.occurred_at));
       await mapPool(toSeed, 8, (i) => seedTouches(supabase, String(i.id), defByType[String(i.type)], franchiseInternalID));
       autoSeeded = toSeed.length;
     }

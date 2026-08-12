@@ -37,6 +37,7 @@ PUBLIC=(
   crewlogic-vonigo-health
   crewlogic-vonigo-sync
   crewlogic-fn-health
+  crewlogic-alert-health
   crewlogic-notify
   crewlogic-vonigo-import
   crewlogic-vonigo-deep-backfill

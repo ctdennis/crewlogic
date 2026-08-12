@@ -1,0 +1,127 @@
+# Plan — Sales-Activity Calendar (FW-64)
+
+**Status:** DRAFT — awaiting Owner approval of direction before any code.
+**Date:** 2026-08-11 (problem restated 2026-08-12).
+**Owner ask (verbatim, 2026-08-12 restatement):** "We will be creating a pipeline dashboard. However, when our owners are on the dispatch dashboard, they need a reminder to see upcoming appointments and some basic functionality to action them: text, email, etc. They probably also need a link to get back to the main pipeline dashboard. Currently, our owners are juggling lots of different balls: Crew Scheduling, Accounts Receivable, Marketing, Routes, Trucks, Customers. It is helpful to have small views into the other operations from any given dashboard. If they are heads down managing routes and jobs and have no visibility that they may have an upcoming meeting or need to place a phone call or send an email, then they might lose sight of it. The small dots on the schedule timeline are a perfect place to incorporate those types of things because there will be a reminder for a heavily distracted owner that they have something to do."
+
+---
+
+## 1. The problem (restated)
+
+We are building the **Pipeline dashboard** as the place owners work their follow-ups. But an owner rarely sits in one screen. A CrewLogic owner — often a **one-person shop** — juggles many operations at once:
+
+- Crew Scheduling
+- Accounts Receivable
+- Marketing
+- Routes
+- Trucks
+- Customers
+
+When they're heads-down on the **dispatch dashboard** managing routes and jobs, it's easy to lose sight of an upcoming meeting, a call to place, or an email to send. A heavily distracted owner needs the system to *remind* them — right where their attention already is.
+
+The fix is **not** to move that work onto the dispatch board. It's to give the owner a **peripheral reminder** while they're there: a glanceable nudge that says "you have something coming up," with enough basic functionality to act in the moment (**text, email, call**) and a **link back to the full Pipeline dashboard**. The **small dots on the schedule timeline are the perfect surface** for this — they sit in the owner's field of view during heads-down work and catch a distracted operator's eye.
+
+> The dots are a **reminder presence**, not a timed placement. Follow-ups carry no real clock time, and the board is a fixed working-hours window — a 5:30 PM item isn't even on a 6 AM–3 PM board. So the widget shows a **glanceable count → the day's list with quick actions**; genuinely *timed* work (a meeting at 2 PM) belongs on the calendar in Layer 3, not fudged onto the truck board.
+
+### Design principle — small views into other operations, from any dashboard
+
+This generalizes beyond follow-ups. An owner deep in routes benefits from a **glance at overdue AR**, a **pending marketing task**, or a **crew gap**, the same way — peripheral awareness across the balls they're juggling, without leaving the screen they're on. The dispatch follow-up reminder is the **first instance of a repeatable pattern**: a lightweight, glanceable, actionable widget that surfaces one operation *inside* another.
+
+### Three layers (don't conflate them)
+
+1. **Pipeline dashboard** — the workspace where follow-ups are actually worked (grouped list, needs-attention, sequences). *Exists.*
+2. **Dispatch reminder widget** — peripheral awareness on the dispatch: upcoming appointments / calls / emails as timeline dots → quick actions (text / email / call) + a **link back to the Pipeline dashboard**. *Near-term; mostly built (v5.124.13, dev). Remaining: the back-to-Pipeline link, and framing it as a reminder.*
+3. **Sales-activity calendar** — timed activities, a unified **"My Day,"** and Google Calendar sync. *The future — the back half of this plan.*
+
+The rest of this plan details Layer 3 (the calendar), because Layers 1–2 largely exist; the calendar is the piece that still needs a decision and a contract.
+
+## 2. What a Sales Activity is
+
+A first-class object, separate from a job and from a pipeline record:
+
+| Field | Notes |
+|---|---|
+| `type` | call · visit · presentation · email · task (extensible) |
+| `subject` | short title ("Call back Hines re: cellar cleanout") |
+| `start_at` / `end_at` | date + time + duration (TZ-resolved per franchise — see the multi-tenant TZ rules in CLAUDE.md) |
+| `contact_name / phone / email` | copied from the linked pipeline item, or entered for a standalone activity |
+| `location` | address (for visits/presentations); enables map + drive-time later |
+| `pipeline_item_id` | nullable link back to the lead/estimate/cancellation/UCB/case |
+| `user_id` | which operator owns it (multi-person orgs) |
+| `status` | scheduled · done · canceled · no-show |
+| `outcome` | after completion: reached / left VM / booked / not interested / reschedule |
+| `reminder_minutes` | lead time for the reminder |
+| `notes` | free text |
+| `google_event_id` | nullable — mapping for two-way Google Calendar sync (Phase 2) |
+
+## 3. How it folds in the Follow-up Pipeline
+
+The Pipeline and the Calendar are complementary, not competing:
+
+- **Pipeline = the worklist.** "Who needs attention" (the CRM records + their due-date queue). Stays exactly as it is: grouped list, "needs attention," the per-day count pill on the dispatch as a heads-up.
+- **Scheduling a follow-up with a time = creating a Sales Activity** linked to that pipeline item.
+- **Untimed follow-ups stay a due-date queue** (today's count pill + the day list). **Timed activities land on the calendar** at their time. Nothing gets a fake time.
+- The existing `pipeline_touches` cadence keeps generating **untimed due-dates**; the operator promotes any touch to a timed activity when it deserves one ("customer said call at 2").
+
+This resolves the date-vs-time question cleanly: **date-only by default, time when it's real.**
+
+## 4. The key decision — native calendar vs. Google Calendar sync
+
+**Recommendation: native activity data model as the source of truth, a native in-app "My Day" view, AND two-way Google Calendar sync as the headline integration.** Reasoning:
+
+- **Google Calendar sync is the high-value piece for solo operators.** We just put crewlogicai.com on **Google Workspace**, and most franchisees live in Gmail/Google Calendar. Pushing activities to *their* Google Calendar means: it shows on their phone, fires Google's native reminders, and needs no new habit or second app to check. (It also sidesteps the "cron cadence must match the UX promise" trap — Google owns the reminder delivery.)
+- **A native in-app view still matters** for the "one view of my day" moment inside CrewLogic — jobs (from the Vonigo mirror) + activities on one timeline — and it works even for an operator who never connects Google.
+- **Native data model, Google as a mirror/target.** `sales_activities` is the source of truth; Google events are created/updated/deleted from it and mapped by `google_event_id`. Optionally pull the operator's existing Google events for conflict awareness. This keeps us portable (a future Outlook/iCal sync is the same pattern) and never dependent on a third party for our own data.
+
+## 5. Data model sketch (plan-level — NOT final schema)
+
+Per the contract-before-code discipline, this is illustrative; the real schema is a later gate.
+
+- **`sales_activities`** — the fields in §2, scoped by `tenant_id` + `franchise_id`, RLS on (service-role via an edge fn, matching the pipeline pattern).
+- **`calendar_connections`** — per-user Google OAuth tokens (refresh token in Vault, like `vonigo_credentials`), the connected calendar id, sync state.
+- **Evolve `pipeline_touches`?** Option A: leave touches as the untimed cadence, and "schedule with a time" creates a linked `sales_activity`. Option B: give touches an optional `scheduled_at` time and render timed ones as activities. **Lean A** — keeps the cadence engine simple and the calendar object clean. (Open decision D-3.)
+
+## 6. Google Calendar integration approach (Phase 2)
+
+- **OAuth scope:** extend the existing Google sign-in with `https://www.googleapis.com/auth/calendar.events` (or `calendar`). We already run Google OAuth for auth (`crewlogic-oauth-callback`) — this is an incremental-consent add, per-user opt-in.
+- **New edge fn `crewlogic-calendar`:** create/update/delete a Google event from a `sales_activity`; store `google_event_id`; token refresh; (v2) pull events for conflict view. Deploy via the `deploy-fn.sh` guardrail (it is server-to-server / user-authed — confirm the public-list decision at build time).
+- **Reminders** ride on Google (native push to the phone). No CrewLogic cron needed for reminders.
+- **Account nuance:** the operator connects **their own** Google Calendar (their working calendar), not a crewlogicai.com service account — cf. the "Google accounts split: Drive vs mail" note (auth as the account that owns the calendar).
+
+## 7. One-person-operation UX — "My Day"
+
+- A **My Day** view (mobile-first): today's **Vonigo jobs** (from the `job_appointments` mirror) + today's **sales activities** on one vertical timeline.
+- Tap a call/visit → contact card + one-tap **Call / Text / Email** + **log outcome** (reached / VM / booked / reschedule) → writes back to the activity and the linked pipeline item.
+- Reschedule = pick a new date/time (reuses the reschedule modal we just built, extended with a time).
+- This is the surface a solo operator opens each morning to run ops + sales from one screen.
+
+## 8. Phasing
+
+- **Phase 1 — Native activities + My Day (no external dependency).** `sales_activities` table + a "Schedule activity" action on a pipeline item (type + date + time + contact) + the native My Day / calendar view (jobs + activities). Untimed follow-ups stay the count pill + day list. Ships value with zero Google dependency.
+- **Phase 2 — Google Calendar two-way sync.** OAuth scope, `crewlogic-calendar`, `google_event_id` mapping, native reminders. The headline integration.
+- **Phase 3 — Conflict awareness + team.** Pull Google events to show conflicts; recurring activities; per-user calendars for multi-person franchises; drive-time from a visit's location (reuse the dispatch distance engine).
+
+## 9. Open decisions for Owner
+
+- **D-1. Scope of v1:** native My Day only (Phase 1), or go straight to Google sync (Phase 1+2)?
+- **D-2. Native view + Google both, or Google-only?** (Recommendation: both, native data model as truth.)
+- **D-3. Touch model:** keep `pipeline_touches` untimed + separate `sales_activities` (lean A), or add a time to touches (B)?
+- **D-4. Do activities also appear on the dispatch board** (as an overlay/lane), or **only** in the My Day / calendar view? (Recommendation: only the calendar view + the existing dispatch count pill — keep the truck board clean.)
+- **D-5. Per-user calendars** at launch (multi-person orgs) or single-operator first?
+
+## 10. Interim state (holds until this ships)
+
+The current **date-based pipeline + dispatch per-day count pill** (v5.124.13, dev) is stable and does not block any of this. **Prod promotion is HELD** at Owner's direction pending this plan's approval and a decision on how far the calendar changes the pipeline surfaces. Nothing pipeline-related is on prod beyond the earlier v5.123.3 (#90-gated).
+
+## 11. Related
+
+- `docs/plan-pipeline.md` — the Follow-up Pipeline this extends.
+- `.HUB/Hub.md` FW-64 — tracking row for this plan.
+- CLAUDE.md "Time zones & dates (multi-tenant)" — all activity times must be TZ-resolved per franchise.
+- Memory: `crewlogic-email-infra` (Google Workspace on crewlogicai.com), `google-accounts-split-drive-vs-mail` (connect the account that owns the calendar).
+
+---
+
+### Next action
+
+Owner: approve the **direction** (and answer D-1 / D-2 as the two that gate scope). On approval, the first gate is the API/schema contract for `sales_activities` (contract-before-code), not implementation.

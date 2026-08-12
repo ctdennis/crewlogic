@@ -1,6 +1,6 @@
 # Plan — Vonigo → CrewLogic Follow-up Pipeline (all 5 ops types)
 
-**Status:** APPROVED — building on `dev`. P1 (schema+sync), P2 (list/CRM server), P2.5 (sequences), and **P3 (Pipeline screen + Sequence builder, v5.121.0)** are done on dev; nothing on prod yet.
+**Status:** LIVE on PROD (2026-08-11), gated to franchise #90 only. Migrations 0085/0086/0088 applied to prod, crewlogic-pipeline deployed, dev→main merged (v5.123.3). P1–P4 shipped. Remaining: P5 scheduled-sync cron (currently manual Sync now on prod); widen to #31 after NY validation.
 **Tracks:** Hub FW "Vonigo date-range pull → CRM pipeline" + task #28 ("manage 5 ops types").
 **Recognition reference (DONE/validated):** memory `vonigo-five-type-recognition` (probes vs #90, 2026-08-06/07).
 **Owner scope decision (2026-08-10):** build **all 5 types**, plan doc first.
