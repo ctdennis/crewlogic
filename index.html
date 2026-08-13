@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.19 | 2026-08-13">
+  <meta name="crewlogic-version" content="v5.124.20 | 2026-08-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14263,11 +14263,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       div.id = 'estimateCostingScreen';
       div.style.display = 'none';
       div.innerHTML =
-        '<div class="ec-layout" style="max-width:1500px;margin:0 auto;">' +
-          '<div class="ec-photos-col">' +
-            '<div id="ecPhotos" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;"></div>' +
-          '</div>' +
-          '<div class="ec-results-col"><div id="ecResults"></div></div>' +
+        '<div class="ec-layout" style="max-width:1400px;margin:0 auto;">' +
+          '<div id="ecPhotos" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;"></div>' +
+          '<div id="ecResults"></div>' +
         '</div>' +
         '<div id="ecRoomModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)ecCloseModal()">' +
           '<div style="width:100%;max-width:520px;background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border);margin:auto;padding:16px;">' +
@@ -14287,14 +14285,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.getElementById('homeScreen').parentNode.appendChild(div);
       if (!document.getElementById('ecKeyframes')) { const st = document.createElement('style'); st.id = 'ecKeyframes'; st.textContent =
         '@keyframes ecslide{0%{margin-left:-40%}100%{margin-left:100%}}'
-        // Adaptive: full width via a class (+!important — beats the 480px cap AND survives inline-style resets).
-        // Two columns only WHEN photos are present (.ec-has-photos) — photos flex-wide left, cost/margin panel
-        // right; otherwise a single, comfortably-wide, CENTERED results view (a loaded costing with no photos
-        // isn't squished into a right rail).
+        // Adaptive full width via a class (+!important — beats the 480px cap AND survives inline-style resets).
+        // Inside the results, desktop (≥1000px) splits into rooms/volume on the LEFT (narrow) and the money —
+        // Adjustments + Price & margin — on the RIGHT (wide); phones stay single-column.
         + '.app-content.ec-wide,.app-shell.ec-wide{max-width:none !important;}'
-        + '.ec-layout{display:grid;grid-template-columns:1fr;gap:16px;align-items:start;}'
-        + '.ec-results-col{width:100%;max-width:900px;margin:0 auto;}'
-        + '@media (min-width:1000px){.ec-layout.ec-has-photos{grid-template-columns:minmax(0,1fr) minmax(400px,470px);}.ec-layout.ec-has-photos .ec-results-col{max-width:none;margin:0;}}';
+        + '.ec-cols{display:grid;grid-template-columns:1fr;gap:16px;align-items:start;}'
+        + '@media (min-width:1000px){.ec-cols{grid-template-columns:minmax(260px,340px) minmax(0,1fr);}}';
         document.head.appendChild(st); }
       try { const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'rooms' }); if (r && r.success) _ec.roomOptions = r.rooms || []; } catch(_e){}
     }
@@ -14794,11 +14790,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '<div><div id="ecBilled" style="font-size:24px;font-weight:800;color:var(--accent-green);"></div><div style="font-size:12px;color:var(--text-muted);">billed (min 1, 1/8-truck steps)</div></div>' +
           '<div><div id="ecTrucks" style="font-size:24px;font-weight:800;color:var(--accent-green);"></div><div style="font-size:12px;color:var(--text-muted);">16-cy truckloads</div></div>' +
         '</div>' +
-        '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Tap a room to see its photos + items and set its truck volume. Totals update live.</div>' +
-        rows +
-        '<div id="ecAdjPanel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:14px 0;">'+ecAdjustmentsHtml()+'</div>' +
-        '<div id="ecMarginPanel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:14px 0;">'+ecMarginPanelHtml()+'</div>';
-      _ecSyncCols(); // reflect photo presence: two columns for a fresh estimate (photos), single/centered for a loaded costing
+        '<div class="ec-cols">' +
+          '<div>' +
+            '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Tap a room to see its photos + items and set its truck volume. Totals update live.</div>' +
+            rows +
+          '</div>' +
+          '<div>' +
+            '<div id="ecAdjPanel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:0 0 14px;">'+ecAdjustmentsHtml()+'</div>' +
+            '<div id="ecMarginPanel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:0;">'+ecMarginPanelHtml()+'</div>' +
+          '</div>' +
+        '</div>';
       ecRecalcTotals();
       // Auto-calculate drive distances on first margin render so Drive labor + Fuel populate without a manual tap;
       // the user hits Recalc distances after changing a disposal/recycling/donation site. Fire-and-forget.
