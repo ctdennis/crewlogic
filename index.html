@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.15 | 2026-08-13">
+  <meta name="crewlogic-version" content="v5.124.16 | 2026-08-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14353,7 +14353,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     function ecRoomSelect(idx, selected) {
-      const opts = _ec.roomOptions.length ? _ec.roomOptions : ['Other'];
+      // Rooms sorted alphabetically (case-insensitive) for quick scanning; "Other" always kept last.
+      const opts = (_ec.roomOptions.length ? _ec.roomOptions : ['Other']).slice().sort((a, b) => {
+        const ao = /^other$/i.test(String(a)), bo = /^other$/i.test(String(b));
+        if (ao !== bo) return ao ? 1 : -1;
+        return String(a).localeCompare(String(b), undefined, { sensitivity: 'base' });
+      });
       return '<select class="form-select" style="font-size:12px;padding:4px 6px;margin-top:4px;width:100%;max-width:100%;box-sizing:border-box;" onchange="ecSetRoom('+idx+', this.value)">' +
         '<option value="">— room —</option>' +
         opts.map(o => '<option value="'+_ecEsc(o)+'"'+(o===selected?' selected':'')+'>'+_ecEsc(o)+'</option>').join('') +
