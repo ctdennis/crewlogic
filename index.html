@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.16 | 2026-08-13">
+  <meta name="crewlogic-version" content="v5.124.17 | 2026-08-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14263,9 +14263,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       div.id = 'estimateCostingScreen';
       div.style.display = 'none';
       div.innerHTML =
-        '<div style="max-width:1100px;margin:0 auto;">' +
-          '<div id="ecPhotos" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;"></div>' +
-          '<div id="ecResults"></div>' +
+        '<div class="ec-layout" style="max-width:1500px;margin:0 auto;">' +
+          '<div class="ec-photos-col">' +
+            '<div id="ecPhotos" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;"></div>' +
+          '</div>' +
+          '<div class="ec-results-col"><div id="ecResults"></div></div>' +
         '</div>' +
         '<div id="ecRoomModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)ecCloseModal()">' +
           '<div style="width:100%;max-width:520px;background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border);margin:auto;padding:16px;">' +
@@ -14283,7 +14285,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '</div>' +
         '</div>';
       document.getElementById('homeScreen').parentNode.appendChild(div);
-      if (!document.getElementById('ecKeyframes')) { const st = document.createElement('style'); st.id = 'ecKeyframes'; st.textContent = '@keyframes ecslide{0%{margin-left:-40%}100%{margin-left:100%}}'; document.head.appendChild(st); }
+      if (!document.getElementById('ecKeyframes')) { const st = document.createElement('style'); st.id = 'ecKeyframes'; st.textContent =
+        '@keyframes ecslide{0%{margin-left:-40%}100%{margin-left:100%}}'
+        // Adaptive layout: one column on phones; two on desktop (≥1000px) — photos flex-wide on the left, the
+        // estimate/cost/margin panel on the right, so you cost the job while the photos + rooms stay in view.
+        + '.ec-layout{display:grid;grid-template-columns:1fr;gap:16px;align-items:start;}'
+        + '@media(min-width:1000px){.ec-layout{grid-template-columns:minmax(0,1fr) minmax(400px,470px);}}';
+        document.head.appendChild(st); }
       try { const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'rooms' }); if (r && r.success) _ec.roomOptions = r.rooms || []; } catch(_e){}
     }
 
@@ -15471,6 +15479,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('headerTitle').textContent = 'Estimate Costing';
         currentScreen = 'estimateCosting';
         showSecondaryToolbar('estimateCosting'); // picker + Calculate live in the sticky header
+        ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) el.style.maxWidth = 'none'; }); // adaptive: lift the 480px mobile cap so desktop can use the full width; .ec-layout caps + splits to 2 cols on wide screens, stays 1 col on phones
         ecOpen();
         return;
       }
