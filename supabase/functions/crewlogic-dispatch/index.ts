@@ -23,15 +23,19 @@ const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers
 const TENANT_ID = '946a4535-aa61-45b6-a6fb-9190ff546d41';
 const VONIGO_BASE = 'https://junkluggers.vonigo.com/api/v1';
 // WorkOrder fieldIDs
-const F = { status: 181, client: 183, address: 184, date: 185, duration: 186, time: 9082, price: 813, summary: 200, items: 10336, label: 201, origin: 9949 };
-// "Booked online" = the WorkOrder ORIGIN dropdown (field 9949, Vonigo's "Originated On" — Call Center /
-// Corporate / Franchise / Online). optionID 22423 = Online. Verified on live #90 (2026-08-13) against
-// owner-labelled jobs: online job 876594 → 22423; four known phone/estimate jobs → NOT 22423
-// (Call Center 22599 ×2, Franchise/Corporate 16028 / 18873). This is the durable signal.
-// HISTORY (both wrong, both replaced): (1) summary text "Online booking." (field 200) — the office overwrites
-// it AND an API/online booking's summary reads "Created via API", not "Online booking." (876594). (2) field
-// 9920 as a "durable boolean" — reads 'true' on plain phone jobs too (Adawy), which striped every board job.
-const ORIGIN_ONLINE = 22423; // field-9949 optionID for "Originated On: Online" (Junkluggers, verified #90)
+const F = { status: 181, client: 183, address: 184, date: 185, duration: 186, time: 9082, price: 813, summary: 200, items: 10336, label: 201 };
+// "Booked online" = the WorkOrder's CREATOR relation is Vonigo's online-booking API user "API, DevHub"
+// (objectID 5065). Verified live #90 2026-08-13 against owner-labelled jobs: BOTH online jobs (Primini 875866,
+// Thompson 876594 — Vonigo Request "Originated On: Online") were Created By "API, DevHub"; every phone/office
+// job was created by a human (Motta→Dennis Skip, Littlefield/Call-Center→Okotie Paul, Lynch→Anderson Kayla).
+// FREE signal — the creator relation is already in the WorkOrders payload (no per-job Request call). The truly
+// authoritative field is the Request's "Originated On" (Call Center/Corporate/Franchise/Online) but reading it
+// needs a separate /data/Requests call per job; the creator relation aligns 1:1 with it on every sample.
+// CrewLogic's own submitQuote logs in with per-franchise creds (a human user) → its jobs are NOT "API, DevHub",
+// so no false positive. DISPROVEN, do NOT reuse: field 9920 ('true' on phone jobs too → striped everything);
+// summary "Online booking." text (office overwrites it; an online booking's summary reads "Created via API");
+// field 9949 (NOT origin — online job 875866 and Call-Center job 877559 share optionID 22599).
+const ONLINE_CREATOR_ID = '5065'; // Vonigo user "API, DevHub" — the online-booking integration (Junkluggers tenant)
 // Field-201 LABEL optionIDs that mean a job is "done" → render gray. Mapped from Vonigo 2026-06-22:
 // 245=Estimate Completed (Job), 9996=Estimate Completed (Est. Only), 9993=Lost. (Converted labels 9975/9970
 // stay ACTIVE until status Archived; National Account also grays only on Archived — handled by status.)
@@ -245,11 +249,12 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
     const labelDone = GRAY_LABELS.has(gf(f, F.label).optionID || 0);
     const zoneRel = rel.find((x: any) => x.relationType === 'zone');
     const clientRel = rel.find((x: any) => x.relationType === 'client'); // CLIENT account name (e.g. "Clean City Pros"); field 183 is the on-site CONTACT — wrong for commercial clients
+    const creatorRel = rel.find((x: any) => x.relationType === 'creator'); // online bookings are Created By Vonigo's API user "API, DevHub" (objectID 5065)
     // Crew comes through as one Relation per member (crew id=7435 Nicholson, Joe). Names only — the
     // job card just shows who is on it. driver/lugger role is NOT in this relation; it lives in the
     // crew-member record, so the card can't distinguish them yet.
     const crew = rel.filter((x: any) => x.relationType === 'crew').map((c: any) => String(c.name || '').trim()).filter(Boolean);
-    return { jobID: jobRel ? String(jobRel.objectID) : null, crew, woID: String(w.objectID), route: rname, routeCode: shortRoute(rname), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: (clientRel && clientRel.name) || gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), labelDone, labelOpt: gf(f, F.label).optionID || 0, apptCount: parseInt(String(w.countWorkOrders ?? '0'), 10) || 0, bookedOnline: (gf(f, F.origin).optionID || 0) === ORIGIN_ONLINE, dateCreated: String(w.dateCreated || ''), dateService: String(w.dateService || ''), zoneID: zoneRel ? String(zoneRel.objectID) : '', zoneName: zoneRel ? zoneRel.name : '', lat: null as number | null, lon: null as number | null };
+    return { jobID: jobRel ? String(jobRel.objectID) : null, crew, woID: String(w.objectID), route: rname, routeCode: shortRoute(rname), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: (clientRel && clientRel.name) || gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), labelDone, labelOpt: gf(f, F.label).optionID || 0, apptCount: parseInt(String(w.countWorkOrders ?? '0'), 10) || 0, bookedOnline: !!creatorRel && (String(creatorRel.objectID) === ONLINE_CREATOR_ID || /^api,\s*devhub$/i.test(String(creatorRel.name || ''))), dateCreated: String(w.dateCreated || ''), dateService: String(w.dateService || ''), zoneID: zoneRel ? String(zoneRel.objectID) : '', zoneName: zoneRel ? zoneRel.name : '', lat: null as number | null, lon: null as number | null };
   });
   // Day-wide CANCELLED count — these jobs are hidden from the board (below), but the dispatch header
   // surfaces "how many cancelled today". Same predicate as the hide filter: optionID 162 OR text "cancel".
