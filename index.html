@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.20 | 2026-08-13">
+  <meta name="crewlogic-version" content="v5.124.21 | 2026-08-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14264,7 +14264,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       div.style.display = 'none';
       div.innerHTML =
         '<div class="ec-layout" style="max-width:1400px;margin:0 auto;">' +
-          '<div id="ecPhotos" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;"></div>' +
+          '<div id="ecPhotos" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;"></div>' +
           '<div id="ecResults"></div>' +
         '</div>' +
         '<div id="ecRoomModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)ecCloseModal()">' +
@@ -14379,10 +14379,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function ecFixPhotoCols(){
       const grid = document.getElementById('ecPhotos'); if (!grid) return;
       const w = grid.getBoundingClientRect().width || (grid.parentElement && grid.parentElement.getBoundingClientRect().width) || 320;
-      const cols = Math.max(2, Math.min(5, Math.floor(w / 115)));
+      const cols = Math.max(2, Math.min(8, Math.floor(w / 210))); // ~210px thumbs → ~6 cols on a wide desktop, up to 8
       grid.style.gridTemplateColumns = 'repeat(' + cols + ', minmax(0, 1fr))';
     }
     function ecRenderPhotos() {
+      _ecWide(); // unlock full desktop width BEFORE ecFixPhotoCols measures the grid (else it sees 480px → 2 cols)
       const grid = document.getElementById('ecPhotos');
       grid.style.display = 'grid';
       grid.style.gap = '8px';
@@ -14394,10 +14395,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         '</div>';
       }).join('');
       ecFixPhotoCols();
-      _ecSyncCols();
     }
-    // Two-column only when photos are actually present; a loaded costing (no photos) stays single + centered.
-    function _ecSyncCols(){ const p=document.getElementById('ecPhotos'); const l=document.querySelector('#estimateCostingScreen .ec-layout'); if(l) l.classList.toggle('ec-has-photos', !!(p&&p.childElementCount)); }
+    // Unlock the 480px mobile cap for the Estimate Costing screen (class + !important; survives inline resets).
+    // Called from every content render so ANY entry path — openModule, job-pick, session-restore — gets full width.
+    function _ecWide(){ document.querySelectorAll('.app-content, .app-shell').forEach(el => el.classList.add('ec-wide')); }
     window.addEventListener('resize', function(){ if (document.getElementById('ecPhotos') && (document.getElementById('ecPhotos').childElementCount)) ecFixPhotoCols(); });
     function ecSetRoom(idx, val){ if (_ec.photos[idx]) { _ec.photos[idx].room = val; const c = document.getElementById('ecRoomCell'+idx); if (c) c.innerHTML = ecRoomSelect(idx, val); const card = document.getElementById('ecPhotoCard'+idx); if (card) card.style.border = (val && String(val).trim()) ? '1px solid var(--border)' : '2px solid #e05a4f'; } }
     // Lightbox: click a thumbnail → full-size photo + the room dropdown, so you can read the room and assign it.
@@ -14784,6 +14785,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _ec.rooms.forEach(rm => { rm.rawCy = parseFloat(rm.volume_cuyd)||0; rm.eighths = ecCyToEighths(rm.rawCy); rm.volume_cuyd = ecEighthsToCy(rm.eighths); });
       const grid = document.getElementById('ecPhotos'); if (grid) grid.style.display = 'none'; // photos now live inside their rooms
       const rows = _ec.rooms.map((rm,i) => ecRoomRow(rm,i)).join('');
+      _ecWide();
       document.getElementById('ecResults').innerHTML =
         '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:12px 0;display:flex;gap:20px;flex-wrap:wrap;">' +
           '<div><div id="ecTotalCuyd" style="font-size:24px;font-weight:800;color:var(--accent-green);"></div><div style="font-size:12px;color:var(--text-muted);">total cu yd</div></div>' +
@@ -14868,7 +14870,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '<input id="ecAdjQty" type="number" min="1" value="1" style="width:54px;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:6px;padding:5px 6px;font-size:13px;">' +
           '<button class="btn-surface" style="padding:6px 12px;font-weight:700;" onclick="ecAdjAdd()">Add</button>' +
         '</div>' +
-        '<div style="margin-top:10px;font-size:13px;color:var(--text-muted);">Net adjustments: <span style="font-weight:700;color:var(--accent-green);">'+(net<0?'-$':'$')+Math.abs(net).toFixed(2)+'</span> <span style="font-size:11px;">(applied to margin next)</span></div>';
+        '<div style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px;color:var(--text-muted);">' +
+          '<span style="flex:1;">Net adjustments <span style="font-size:11px;">(applied to margin next)</span></span>' +
+          '<span style="font-weight:700;color:var(--accent-green);min-width:66px;text-align:right;">'+(net<0?'-$':'$')+Math.abs(net).toFixed(2)+'</span>' +
+          '<span style="padding:0 4px;visibility:hidden;font-weight:800;">×</span>' +
+        '</div>';
     }
     function ecRoomDetails(i) {
       const rm = _ec.rooms[i]; if (!rm) return;
