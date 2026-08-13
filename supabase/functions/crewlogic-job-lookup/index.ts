@@ -109,105 +109,120 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ success: false, error: 'Vonigo credentials not found for franchise ' + franchiseID, reqId }, 404);
     }
 
-    // 2) Authenticate with Vonigo (MD5 login)
-    const authUrl = new URL(VONIGO_BASE + '/security/login/');
-    authUrl.searchParams.set('company', 'Vonigo');
-    authUrl.searchParams.set('userName', creds.vonigo_username);
-    authUrl.searchParams.set('password', creds.vonigo_md5);
-    const authData = await vonigoJson(await fetch(authUrl.toString()));
-    if (authData.errNo !== 0 || !authData.securityToken) {
-      console.error(`[job-lookup][${reqId}] Vonigo auth failed: ${authData.errMsg || 'no token'}`);
-      return jsonResponse({ success: false, error: 'Vonigo auth failed', reqId }, 502);
-    }
-    const securityToken = authData.securityToken;
+    // Mirror fallback (outage insurance): the last stored snapshot for this jobID. Used when Vonigo can't be
+    // reached (down / slow / auth-fail) so the dispatch / manage-jobs / trucks phone still resolves — from
+    // Supabase. Slightly stale (a number changed in Vonigo minutes ago won't show) but usable; the rest of
+    // those screens (map, telematics) are Google / Motive / Linxup-sourced, so they stay functional.
+    // (Owner 2026-08-13.) Live is always tried FIRST for freshness; the mirror only fills the gap.
+    const franchiseInternalID = franchiseRow.id as string;
+    const mirrorLookup = async (): Promise<{ clientName: string; clientPhone: string; clientEmail: string; address: string } | null> => {
+      try {
+        const { data: jobRow } = await supabase.from('jobs').select('id, service_address').eq('franchise_id', franchiseInternalID).eq('source_external_id', jobID).maybeSingle();
+        if (!jobRow) return null;
+        const { data: appt } = await supabase.from('job_appointments').select('id').eq('franchise_id', franchiseInternalID).eq('job_id', (jobRow as { id: string }).id).limit(1).maybeSingle();
+        if (!appt) return null;
+        const { data: snap } = await supabase.from('job_source_snapshot').select('customer_display').eq('appointment_id', (appt as { id: string }).id).maybeSingle();
+        const cd = (((snap as { customer_display?: Record<string, string> } | null)?.customer_display) || {}) as { name?: string; phone?: string; email?: string };
+        if (!cd.phone && !cd.email && !cd.name) return null;
+        return { clientName: cd.name || '', clientPhone: cd.phone || '', clientEmail: cd.email || '', address: (jobRow as { service_address?: string }).service_address || '' };
+      } catch { return null; }
+    };
+    const mirrorResponse = (m: { clientName: string; clientPhone: string; clientEmail: string; address: string }) =>
+      jsonResponse({ success: true, jobID, clientID: null, contactID: null, locationID: null, clientName: m.clientName, address: m.address, zip: '', clientEmail: m.clientEmail, clientPhone: m.clientPhone, source: 'mirror', reqId });
 
-    // 3) Query the WorkOrder by jobID
-    const woData = await vonigoJson(await fetch(VONIGO_BASE + '/data/WorkOrders/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        securityToken,
-        jobID,
-        pageNo: '1',
-        pageSize: '10',
-        sortMode: '1',
-        sortDirection: '1',
-        isCompleteObject: 'true',
-      }),
-    }));
-
-    // Match the n8n behavior: any non-result — Vonigo validation error (e.g. an
-    // invalid/nonexistent job number → errNo -600), an error code, or an empty
-    // list — is surfaced to the user as a friendly "Job not found". Genuine
-    // Vonigo errNo values are logged server-side for diagnosis.
-    const workOrder: VonigoWorkOrder | undefined = (woData.WorkOrders || [])[0];
-    if (!workOrder) {
-      if (woData.errNo !== 0) {
-        console.warn(`[job-lookup][${reqId}] Vonigo errNo ${woData.errNo}: ${woData.errMsg || ''} (jobID ${jobID}) — treating as not found`);
-      }
-      return jsonResponse({ success: false, error: 'Job not found', reqId }, 200);
-    }
-
-    const relations = workOrder.Relations || [];
-    const fields = workOrder.Fields || [];
-    const rel = (type: string) => relations.find((r) => r.relationType === type);
-
-    const clientRel = rel('client');
-    const clientID = clientRel ? String(clientRel.objectID) : null;
-    const contactRel = rel('contact');
-    const locationRel = rel('location1');
-    const clientName = clientRel?.name || '';
-
-    if (!clientID) {
-      return jsonResponse({ success: false, error: 'Could not find client on this job', reqId }, 200);
-    }
-
-    const rawAddress = (fields.find((f) => f.fieldID === F_ADDRESS)?.fieldValue) || '';
-    let address = '';
-    let zip = '';
-    if (rawAddress) {
-      address = rawAddress.replace(/\n/g, ', ').trim();
-      const zipMatch = rawAddress.match(/\b[A-Z]{2}\s+(\d{5})\b/);
-      if (zipMatch) zip = zipMatch[1];
-    }
-
-    // 4) Look up the client's contact for email/phone (best-effort)
-    let clientEmail = '';
-    let clientPhone = '';
     try {
-      const contactData = await (await fetch(VONIGO_BASE + '/data/Contacts/', {
+      // 2) Authenticate with Vonigo (MD5 login)
+      const authUrl = new URL(VONIGO_BASE + '/security/login/');
+      authUrl.searchParams.set('company', 'Vonigo');
+      authUrl.searchParams.set('userName', creds.vonigo_username);
+      authUrl.searchParams.set('password', creds.vonigo_md5);
+      const authData = await vonigoJson(await fetch(authUrl.toString()));
+      if (authData.errNo !== 0 || !authData.securityToken) {
+        console.error(`[job-lookup][${reqId}] Vonigo auth failed: ${authData.errMsg || 'no token'} — trying mirror`);
+        const m = await mirrorLookup();
+        if (m) return mirrorResponse(m);
+        return jsonResponse({ success: false, error: 'Vonigo auth failed', reqId }, 502);
+      }
+      const securityToken = authData.securityToken;
+
+      // 3) Query the WorkOrder by jobID
+      const woData = await vonigoJson(await fetch(VONIGO_BASE + '/data/WorkOrders/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          securityToken,
-          clientID,
-          sortMode: '1',
-          sortDirection: '0',
-          pageNo: '1',
-          pageSize: '50',
-          isCompleteObject: 'true',
-        }),
-      })).json();
-      const contact: VonigoContact | undefined = (contactData.Contacts || [])[0];
-      const cFields = contact?.Fields || [];
-      clientEmail = cFields.find((f) => f.fieldID === F_CONTACT_EMAIL)?.fieldValue || '';
-      clientPhone = cFields.find((f) => f.fieldID === F_CONTACT_PHONE)?.fieldValue || '';
-    } catch (e) {
-      console.warn(`[job-lookup][${reqId}] contact lookup failed (non-fatal): ${(e as Error).message}`);
-    }
+        body: JSON.stringify({ securityToken, jobID, pageNo: '1', pageSize: '10', sortMode: '1', sortDirection: '1', isCompleteObject: 'true' }),
+      }));
 
-    return jsonResponse({
-      success: true,
-      jobID,
-      clientID,
-      contactID: contactRel ? String(contactRel.objectID) : null,
-      locationID: locationRel ? String(locationRel.objectID) : null,
-      clientName,
-      address,
-      zip,
-      clientEmail,
-      clientPhone,
-    });
+      const workOrder: VonigoWorkOrder | undefined = (woData.WorkOrders || [])[0];
+      if (!workOrder) {
+        // A Vonigo ERROR (not a genuinely-missing job) → try the mirror before giving up.
+        if (woData.errNo !== 0) {
+          console.warn(`[job-lookup][${reqId}] Vonigo errNo ${woData.errNo}: ${woData.errMsg || ''} (jobID ${jobID}) — trying mirror`);
+          const m = await mirrorLookup();
+          if (m) return mirrorResponse(m);
+        }
+        return jsonResponse({ success: false, error: 'Job not found', reqId }, 200);
+      }
+
+      const relations = workOrder.Relations || [];
+      const fields = workOrder.Fields || [];
+      const rel = (type: string) => relations.find((r) => r.relationType === type);
+
+      const clientRel = rel('client');
+      const clientID = clientRel ? String(clientRel.objectID) : null;
+      const contactRel = rel('contact');
+      const locationRel = rel('location1');
+      const clientName = clientRel?.name || '';
+
+      if (!clientID) {
+        return jsonResponse({ success: false, error: 'Could not find client on this job', reqId }, 200);
+      }
+
+      const rawAddress = (fields.find((f) => f.fieldID === F_ADDRESS)?.fieldValue) || '';
+      let address = '';
+      let zip = '';
+      if (rawAddress) {
+        address = rawAddress.replace(/\n/g, ', ').trim();
+        const zipMatch = rawAddress.match(/\b[A-Z]{2}\s+(\d{5})\b/);
+        if (zipMatch) zip = zipMatch[1];
+      }
+
+      // 4) Look up the client's contact for email/phone (best-effort)
+      let clientEmail = '';
+      let clientPhone = '';
+      try {
+        const contactData = await (await fetch(VONIGO_BASE + '/data/Contacts/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ securityToken, clientID, sortMode: '1', sortDirection: '0', pageNo: '1', pageSize: '50', isCompleteObject: 'true' }),
+        })).json();
+        const contact: VonigoContact | undefined = (contactData.Contacts || [])[0];
+        const cFields = contact?.Fields || [];
+        clientEmail = cFields.find((f) => f.fieldID === F_CONTACT_EMAIL)?.fieldValue || '';
+        clientPhone = cFields.find((f) => f.fieldID === F_CONTACT_PHONE)?.fieldValue || '';
+      } catch (e) {
+        console.warn(`[job-lookup][${reqId}] contact lookup failed (non-fatal): ${(e as Error).message}`);
+      }
+
+      // Live-first; if Vonigo returned no phone/email (contact fetch failed/empty), backfill from the mirror.
+      if (!clientPhone || !clientEmail) {
+        const m = await mirrorLookup();
+        if (m) { clientPhone = clientPhone || m.clientPhone; clientEmail = clientEmail || m.clientEmail; }
+      }
+
+      return jsonResponse({
+        success: true, jobID, clientID,
+        contactID: contactRel ? String(contactRel.objectID) : null,
+        locationID: locationRel ? String(locationRel.objectID) : null,
+        clientName, address, zip, clientEmail, clientPhone, source: 'live',
+      });
+    } catch (ve) {
+      // Vonigo unreachable (Cloudflare 522 / HTML / network) → fall back to the stored mirror copy.
+      console.error(`[job-lookup][${reqId}] Vonigo unavailable — trying mirror:`, (ve as Error)?.message);
+      const m = await mirrorLookup();
+      if (m) return mirrorResponse(m);
+      if (ve instanceof VonigoUnavailable) return jsonResponse({ ...VONIGO_DOWN_BODY, reqId }, 503);
+      throw ve;  // no mirror + not a clean Vonigo-down → outer catch returns 500
+    }
 
   } catch (e) {
     // Vonigo down (Cloudflare 522 / HTML) → clean message instead of the raw "Unexpected token '<'".
