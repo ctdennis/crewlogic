@@ -23,13 +23,15 @@ const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers
 const TENANT_ID = '946a4535-aa61-45b6-a6fb-9190ff546d41';
 const VONIGO_BASE = 'https://junkluggers.vonigo.com/api/v1';
 // WorkOrder fieldIDs
-const F = { status: 181, client: 183, address: 184, date: 185, duration: 186, time: 9082, price: 813, summary: 200, items: 10336, label: 201 };
-// "Booked online" = the summary (field 200) text is "Online booking." — the signal Vonigo writes on an online
-// booking. DISPROVEN (2026-08-13): field 9920 is NOT a durable "booked online" boolean — it reads 'true' on
-// plain phone/estimate jobs too (e.g. Adawy WO 1010018, a phone/SIP job, on 2026-08-15), which striped every
-// job on the board as online. Reverted to summary-text only. Trade-off: if the office overwrites the note the
-// stripe is lost — acceptable vs. false-positive striping. A truly-durable online field needs a KNOWN online
-// WO to identify (compare its Fields against a phone job); none was available to disprove 9920's replacement.
+const F = { status: 181, client: 183, address: 184, date: 185, duration: 186, time: 9082, price: 813, summary: 200, items: 10336, label: 201, origin: 9949 };
+// "Booked online" = the WorkOrder ORIGIN dropdown (field 9949, Vonigo's "Originated On" — Call Center /
+// Corporate / Franchise / Online). optionID 22423 = Online. Verified on live #90 (2026-08-13) against
+// owner-labelled jobs: online job 876594 → 22423; four known phone/estimate jobs → NOT 22423
+// (Call Center 22599 ×2, Franchise/Corporate 16028 / 18873). This is the durable signal.
+// HISTORY (both wrong, both replaced): (1) summary text "Online booking." (field 200) — the office overwrites
+// it AND an API/online booking's summary reads "Created via API", not "Online booking." (876594). (2) field
+// 9920 as a "durable boolean" — reads 'true' on plain phone jobs too (Adawy), which striped every board job.
+const ORIGIN_ONLINE = 22423; // field-9949 optionID for "Originated On: Online" (Junkluggers, verified #90)
 // Field-201 LABEL optionIDs that mean a job is "done" → render gray. Mapped from Vonigo 2026-06-22:
 // 245=Estimate Completed (Job), 9996=Estimate Completed (Est. Only), 9993=Lost. (Converted labels 9975/9970
 // stay ACTIVE until status Archived; National Account also grays only on Archived — handled by status.)
@@ -247,7 +249,7 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
     // job card just shows who is on it. driver/lugger role is NOT in this relation; it lives in the
     // crew-member record, so the card can't distinguish them yet.
     const crew = rel.filter((x: any) => x.relationType === 'crew').map((c: any) => String(c.name || '').trim()).filter(Boolean);
-    return { jobID: jobRel ? String(jobRel.objectID) : null, crew, woID: String(w.objectID), route: rname, routeCode: shortRoute(rname), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: (clientRel && clientRel.name) || gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), labelDone, labelOpt: gf(f, F.label).optionID || 0, apptCount: parseInt(String(w.countWorkOrders ?? '0'), 10) || 0, bookedOnline: /online booking/i.test(gf(f, F.summary).fieldValue || ''), dateCreated: String(w.dateCreated || ''), dateService: String(w.dateService || ''), zoneID: zoneRel ? String(zoneRel.objectID) : '', zoneName: zoneRel ? zoneRel.name : '', lat: null as number | null, lon: null as number | null };
+    return { jobID: jobRel ? String(jobRel.objectID) : null, crew, woID: String(w.objectID), route: rname, routeCode: shortRoute(rname), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: (clientRel && clientRel.name) || gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), labelDone, labelOpt: gf(f, F.label).optionID || 0, apptCount: parseInt(String(w.countWorkOrders ?? '0'), 10) || 0, bookedOnline: (gf(f, F.origin).optionID || 0) === ORIGIN_ONLINE, dateCreated: String(w.dateCreated || ''), dateService: String(w.dateService || ''), zoneID: zoneRel ? String(zoneRel.objectID) : '', zoneName: zoneRel ? zoneRel.name : '', lat: null as number | null, lon: null as number | null };
   });
   // Day-wide CANCELLED count — these jobs are hidden from the board (below), but the dispatch header
   // surfaces "how many cancelled today". Same predicate as the hide filter: optionID 162 OR text "cancel".
