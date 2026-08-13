@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.18 | 2026-08-13">
+  <meta name="crewlogic-version" content="v5.124.19 | 2026-08-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9013,7 +9013,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (_eeNode && _estEditorHome && _eeNode.parentElement !== _estEditorHome) { _eeNode.classList.remove('active'); _estEditorHome.appendChild(_eeNode); }
       _stopTrucksAutoRefresh();
       // Restore the app shell + content to their default (480px) width; the desktop dashboard widens them.
-      ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) el.style.maxWidth = ''; });
+      ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) { el.style.maxWidth = ''; el.classList.remove('ec-wide'); } });
       allScreens.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -14287,10 +14287,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.getElementById('homeScreen').parentNode.appendChild(div);
       if (!document.getElementById('ecKeyframes')) { const st = document.createElement('style'); st.id = 'ecKeyframes'; st.textContent =
         '@keyframes ecslide{0%{margin-left:-40%}100%{margin-left:100%}}'
-        // Adaptive layout: one column on phones; two on desktop (≥1000px) — photos flex-wide on the left, the
-        // estimate/cost/margin panel on the right, so you cost the job while the photos + rooms stay in view.
+        // Adaptive: full width via a class (+!important — beats the 480px cap AND survives inline-style resets).
+        // Two columns only WHEN photos are present (.ec-has-photos) — photos flex-wide left, cost/margin panel
+        // right; otherwise a single, comfortably-wide, CENTERED results view (a loaded costing with no photos
+        // isn't squished into a right rail).
+        + '.app-content.ec-wide,.app-shell.ec-wide{max-width:none !important;}'
         + '.ec-layout{display:grid;grid-template-columns:1fr;gap:16px;align-items:start;}'
-        + '@media (min-width:1000px){.ec-layout{grid-template-columns:minmax(0,1fr) minmax(400px,470px);}}';
+        + '.ec-results-col{width:100%;max-width:900px;margin:0 auto;}'
+        + '@media (min-width:1000px){.ec-layout.ec-has-photos{grid-template-columns:minmax(0,1fr) minmax(400px,470px);}.ec-layout.ec-has-photos .ec-results-col{max-width:none;margin:0;}}';
         document.head.appendChild(st); }
       try { const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'rooms' }); if (r && r.success) _ec.roomOptions = r.rooms || []; } catch(_e){}
     }
@@ -14298,6 +14302,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function ecOpen() {
       await ecEnsureScreen();
       document.getElementById('estimateCostingScreen').style.display = 'block';
+      // Adaptive full width — applied HERE (the screen's own open fn) so it fires on every path, incl. the
+      // session-restore that shows this screen on reload without going through openModule's width override.
+      document.querySelectorAll('.app-content, .app-shell').forEach(el => el.classList.add('ec-wide'));
       _ec.jobID = null; _ec.photos = []; _ec.rooms = []; _ec.spend = 0; _ec.estimates = []; _ec.counts = {}; _ec.est = null; _ec.priceBook = []; _ec.adjustments = []; _ec.adjType = 'surcharge'; _ec.cost = { crew: 2, hours: '', disposalSiteIdx: 0, recycleSiteIdx: 0, donateSiteIdx: 0, recyclePct: 0, donatePct: 0, targetMargin: 60, dist: null, driveMin: '', driveMiles: '', include: { disposal: true, labor: true, driveLabor: true, fuel: true, royalty: true } };
       document.getElementById('ecPhotos').innerHTML = '';
       document.getElementById('ecResults').innerHTML = '';
@@ -14391,7 +14398,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         '</div>';
       }).join('');
       ecFixPhotoCols();
+      _ecSyncCols();
     }
+    // Two-column only when photos are actually present; a loaded costing (no photos) stays single + centered.
+    function _ecSyncCols(){ const p=document.getElementById('ecPhotos'); const l=document.querySelector('#estimateCostingScreen .ec-layout'); if(l) l.classList.toggle('ec-has-photos', !!(p&&p.childElementCount)); }
     window.addEventListener('resize', function(){ if (document.getElementById('ecPhotos') && (document.getElementById('ecPhotos').childElementCount)) ecFixPhotoCols(); });
     function ecSetRoom(idx, val){ if (_ec.photos[idx]) { _ec.photos[idx].room = val; const c = document.getElementById('ecRoomCell'+idx); if (c) c.innerHTML = ecRoomSelect(idx, val); const card = document.getElementById('ecPhotoCard'+idx); if (card) card.style.border = (val && String(val).trim()) ? '1px solid var(--border)' : '2px solid #e05a4f'; } }
     // Lightbox: click a thumbnail → full-size photo + the room dropdown, so you can read the room and assign it.
@@ -14788,6 +14798,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         rows +
         '<div id="ecAdjPanel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:14px 0;">'+ecAdjustmentsHtml()+'</div>' +
         '<div id="ecMarginPanel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:14px 0;">'+ecMarginPanelHtml()+'</div>';
+      _ecSyncCols(); // reflect photo presence: two columns for a fresh estimate (photos), single/centered for a loaded costing
       ecRecalcTotals();
       // Auto-calculate drive distances on first margin render so Drive labor + Fuel populate without a manual tap;
       // the user hits Recalc distances after changing a disposal/recycling/donation site. Fire-and-forget.
@@ -15479,8 +15490,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('headerTitle').textContent = 'Estimate Costing';
         currentScreen = 'estimateCosting';
         showSecondaryToolbar('estimateCosting'); // picker + Calculate live in the sticky header
-        ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) el.style.maxWidth = 'none'; }); // adaptive: lift the 480px mobile cap so desktop can use the full width; .ec-layout caps + splits to 2 cols on wide screens, stays 1 col on phones
-        ecOpen();
+        ecOpen(); // ecOpen applies the .ec-wide full-width class (covers this path + the session-restore path)
         return;
       }
       if (module === 'pipeline') {
