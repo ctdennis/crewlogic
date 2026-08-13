@@ -153,6 +153,42 @@ Deno.serve(async (req: Request) => {
       return out;
     };
 
+    // ── BACKFILL-CONTACTS MODE ──────────────────────────────────────────────────────────────────
+    // Gradually fill missing phone/email across the customer base WITHOUT re-pulling WorkOrders: find
+    // snapshots that have no phone, pull each client's contact (time-budgeted, parallel), and UPDATE just
+    // customer_display. Run repeatedly (cron or manual) with a limit; each pass fills a chunk. NON-destructive
+    // (only touches rows whose phone is null). Newest-synced first, so active jobs get numbers back soonest.
+    if (String(body.action) === 'backfillContacts') {
+      const limit = Math.min(Number(body.limit) || 300, 1000);
+      const { data: missing } = await db.from('job_source_snapshot')
+        .select('appointment_id, customer_display, raw')
+        .eq('franchise_id', franchiseInternalID)
+        .filter('customer_display->>phone', 'is', null)
+        .order('synced_at', { ascending: false })
+        .limit(limit);
+      const rows = (missing || []) as Record<string, unknown>[];
+      let filled = 0, examined = 0;
+      const bfDeadline = Date.now() + 95_000;
+      const BF = 12;
+      for (let i = 0; i < rows.length && Date.now() < bfDeadline; i += BF) {
+        await Promise.all(rows.slice(i, i + BF).map(async (row) => {
+          examined++;
+          const raw = (row.raw || {}) as { Relations?: { relationType: string; objectID?: unknown }[] };
+          const cr = (raw.Relations || []).find((r) => r.relationType === 'client');
+          const cid = cr?.objectID ? String(cr.objectID) : '';
+          if (!cid) return;
+          const ci = await fetchContact(cid);
+          if (!ci.phone && !ci.email) return;
+          const cd = (row.customer_display || {}) as { name?: string | null };
+          await db.from('job_source_snapshot').update({
+            customer_display: { name: cd.name ?? null, phone: ci.phone || null, email: ci.email || null },
+          }).eq('appointment_id', String(row.appointment_id));
+          filled++;
+        }));
+      }
+      return json({ success: true, action: 'backfillContacts', counts: { candidates: rows.length, examined, filled } });
+    }
+
     // 4) Pull ALL WorkOrders across the window (paginated) into memory.
     const PAGE = 200;
     const allWOs: VWorkOrder[] = [];
@@ -177,15 +213,24 @@ Deno.serve(async (req: Request) => {
     // Pre-fetch every unique customer's contact IN PARALLEL (batched) so the per-customer /data/Contacts/
     // calls don't serialize into the 150s function limit on busy franchises. Populates contactCache; the
     // loop below reads from it. Skipped for deep-history (skipContacts) — those rows are name-only.
+    //
+    // TIME BUDGET (2026-08-13): when Vonigo is SLOW, this contact phase used to eat the whole 150s limit →
+    // the function timed out BEFORE the end-write → nothing persisted → the mirror silently went stale/blank
+    // (the outage root cause). Now we stop fetching contacts once CONTACT_BUDGET_MS is spent and fall through
+    // to the write regardless, so the schedule ALWAYS persists and contacts we couldn't reach fill on the next
+    // sync (or the backfillContacts pass). Phones already stored are preserved below, never nulled.
+    const CONTACT_BUDGET_MS = 95_000;
     if (!skipContacts) {
       const clientIDs = [...new Set(allWOs.map((w) => {
         const cr = (w.Relations || []).find((r) => r.relationType === 'client');
         return cr?.objectID ? String(cr.objectID) : '';
       }).filter(Boolean))];
+      const contactDeadline = Date.now() + CONTACT_BUDGET_MS;
       const CBATCH = 12;
-      for (let i = 0; i < clientIDs.length; i += CBATCH) {
+      for (let i = 0; i < clientIDs.length && Date.now() < contactDeadline; i += CBATCH) {
         await Promise.all(clientIDs.slice(i, i + CBATCH).map((cid) => fetchContact(cid)));
       }
+      (counts as Record<string, number>).contactsFetched = contactCache.size;
     }
 
     // ── BATCHED WRITE PATH ──────────────────────────────────────────────────────────────────
@@ -271,14 +316,26 @@ Deno.serve(async (req: Request) => {
       counts.appointments += c.length;
     }
 
-    // SNAPSHOTS — provider DR extras, keyed on appointment_id.
+    // Preserve phone/email already stored for any client we did NOT re-fetch this run (time-budget hit, or
+    // Vonigo returned nothing): a partial/slow run must never null out a good number. Read current snapshots.
+    const existingCD = new Map<string, { phone: string | null; email: string | null }>();
+    for (const c of chunk([...apptUuid.values()], CHUNK)) {
+      const { data } = await db.from('job_source_snapshot').select('appointment_id, customer_display').in('appointment_id', c);
+      for (const row of (data || []) as Record<string, unknown>[]) {
+        const cd = (row.customer_display || {}) as { phone?: string | null; email?: string | null };
+        existingCD.set(String(row.appointment_id), { phone: cd.phone ?? null, email: cd.email ?? null });
+      }
+    }
+
+    // SNAPSHOTS — provider DR extras, keyed on appointment_id. Fresh contact wins; else keep what's stored.
     const snapRows = recs.map((r) => {
       const apptId = apptUuid.get(r.woID);
       if (!apptId) return null;
+      const prev = existingCD.get(apptId) || { phone: null, email: null };
       return {
         appointment_id: apptId, franchise_id: franchiseInternalID, provider: 'vonigo',
         import_total: r.price, crew_display: r.crew.length ? r.crew : null,
-        customer_display: { name: r.custName || null, phone: r.phone || null, email: r.email || null },
+        customer_display: { name: r.custName || null, phone: (r.phone || prev.phone) || null, email: (r.email || prev.email) || null },
         route_name: r.routeName || null, label_optionid: r.labelOptID, raw: r.raw, synced_at: now,
       };
     }).filter(Boolean) as Record<string, unknown>[];

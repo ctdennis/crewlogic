@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.14 | 2026-08-12">
+  <meta name="crewlogic-version" content="v5.124.15 | 2026-08-13">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12694,14 +12694,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _dashReminders = [];
     function _dueDayID(iso) { const d = new Date(iso); return '' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0'); }
     function _dueMin(iso) { const d = new Date(iso); return d.getHours() * 60 + d.getMinutes(); } // minutes from local midnight (board is franchise-local; exact for the ET/#90 audience)
-    async function loadDashReminders() {
+    async function loadDashReminders(skipRepaint) {
       // Pipeline is a gated feature (dev / super-admin / #90) — stay silent otherwise (and on prod where the fn isn't deployed).
       if (!(IS_DEV_ENV || (currentUser && (currentUser.franchiseID === '90' || currentUser.email === 'charles.dennis@junkluggers.com')))) { _dashReminders = []; return; }
       plEnsureStyles(); // the day-list popover + snooze modal reuse the pipeline .pl-btn/.pl-mback styles
       let rem = [];
       try { const r = await plApi('reminders', {}); if (r && r.success) rem = r.reminders || []; } catch (e) { console.error('[dashFu] load', e); }
       _dashReminders = (rem || []).filter(r => r.nextTouch && r.nextTouch.dueAt);
-      _dashRerenderBoards(); // repaint the dashboard boards so the dots appear (no-op until the boards have loaded)
+      if (!skipRepaint) _dashRerenderBoards(); // repaint to show the dots. On the INITIAL dashboard load we pass skipRepaint (fetched in parallel BEFORE the first board paint) so we never re-render into the map's settle/coverage-fit window (that late re-render was stopping the map from auto-expanding).
     }
     function _dashFuRowHtml(r) {
       const t = PL_TYPES.find(x => x.key === r.type) || { icon: '•', short: r.type, color: '#6e8194' };
@@ -13133,11 +13133,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         ? { originH: Math.floor(Math.min(...sMin) / 60), endH: Math.ceil(Math.max(...eMax) / 60) }
         : _dashSharedAxis([srcR, destR]);
       _dashCache = { srcR, destR, axis, srcDay: _dashSrcDay, destDay: _dashDestDay }; // for the route filter (re-render without re-fetch)
-      await Promise.all([_mjLoadAssignData(_dashSrcDay), _mjLoadAssignData(_dashDestDay)]); // FW-59: assignments for BOTH days before render
+      await Promise.all([_mjLoadAssignData(_dashSrcDay), _mjLoadAssignData(_dashDestDay), loadDashReminders(true)]); // FW-59: assignments for BOTH days before render; P4: reminders fetched here (skipRepaint) so the dots are in the FIRST board paint — no late re-render disturbing the map fit
       dashRenderBoard(_dashSrcDay, srcR, srcC, axis);
       dashRenderBoard(_dashDestDay, destR, destC, axis);
       _mjLoadEta(_dashSrcDay, srcR); _mjLoadEta(_dashDestDay, destR); // FW-59: feasibility pills for BOTH boards (async repaint)
-      loadDashReminders(); // P4: fetch pipeline reminders NOW that _dashCache + boards exist, then repaint dots (deterministic — no race)
     }
     // Shared time axis (originH/endH) across both days so both boards have identical columns + dimensions.
     function _dashSharedAxis(routeSets) {
