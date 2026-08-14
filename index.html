@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.23 | 2026-08-14">
+  <meta name="crewlogic-version" content="v5.124.24 | 2026-08-14">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15399,13 +15399,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // P(close) base by type (client-side heuristic, new in P0). Combined with an age-decay below.
     const BW_PBASE = { unconverted_estimate: 0.55, ucb: 0.5, lead: 0.3, cancellation: 0.25, case: 0.1 };
 
-    let _bwItems = [], _bwCounts = {}, _bwOpen = 0, _bwTotal = 0, _bwSel = null, _bwToastT = null;
+    let _bwItems = [], _bwCounts = {}, _bwOpen = 0, _bwTotal = 0, _bwSel = null, _bwToastT = null, _bwPOverride = {}; // _bwPOverride: manager P(close) override by item id (session-only in P0)
 
     function bwUsd(n) { return '$' + (Math.round(Number(n) || 0)).toLocaleString('en-US'); }
     function bwEvk(n) { n = Number(n) || 0; return n >= 1000 ? '$' + (n / 1000).toFixed(1) + 'k' : '$' + Math.round(n); }
     function bwDaysOld(occurred) { if (!occurred) return 0; const ms = Date.now() - new Date(occurred).getTime(); return ms > 0 ? ms / 86400000 : 0; }
     function bwHasAmount(it) { const a = Number(it && it.amount); return isFinite(a) && a > 0; }
+    function bwActive(it) { const s = String((it && it.stage) || 'new').toLowerCase(); return s !== 'won' && s !== 'lost'; } // won/lost are closed → hidden from the active worklist + forecast (funnel still counts them)
     function bwPclose(it) {
+      if (_bwPOverride[it.id] != null) return _bwPOverride[it.id]; // manager override wins over the heuristic
       const base = (BW_PBASE[it.type] != null) ? BW_PBASE[it.type] : 0.3;
       const decay = Math.max(0.4, 1 - bwDaysOld(it.occurred_at) * 0.03);
       return Math.max(0, Math.min(1, base * decay));
@@ -15440,7 +15442,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         #bizdevScreen .bw-kpi.fc{background:rgba(53,194,110,.16);border-color:var(--accent-green,#35c26e);}
         #bizdevScreen .bw-kpi.fc b{color:var(--accent-green,#35c26e);}
         #bizdevScreen .bw-kpi.win b{color:var(--accent-green,#35c26e);}
-        #bizdevScreen .bw-grid{display:grid;grid-template-columns:290px minmax(0,1fr);gap:16px;align-items:start;}
+        #bizdevScreen .bw-grid{display:grid;grid-template-columns:380px minmax(0,1fr);gap:16px;align-items:start;}
         @media (max-width:860px){#bizdevScreen .bw-grid{grid-template-columns:1fr;}}
         #bizdevScreen .bw-rail{background:var(--bg-card,#1e2f40);border:1px solid var(--border,#2c3e50);border-radius:12px;overflow:hidden;}
         #bizdevScreen .bw-rail-h{padding:11px 14px;border-bottom:1px solid var(--border,#2c3e50);display:flex;align-items:center;gap:8px;}
@@ -15459,17 +15461,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         #bizdevScreen .bw-pill{background:var(--bg-input,#253545);border:1px solid var(--border,#2c3e50);border-radius:20px;padding:1px 8px;font-size:11px;}
         #bizdevScreen .bw-grp-body{border-top:1px solid var(--border,#2c3e50);}
         #bizdevScreen .bw-row-none{color:var(--text-muted,#8ea3b5);padding:9px 14px 9px 30px;font-size:12px;}
-        #bizdevScreen .bw-row{width:100%;display:flex;align-items:center;gap:10px;padding:9px 14px 9px 30px;background:transparent;border:0;border-top:1px solid var(--border,#2c3e50);color:var(--text-primary);text-align:left;cursor:pointer;font-family:inherit;}
+        #bizdevScreen .bw-row{width:100%;display:flex;align-items:center;gap:12px;padding:11px 16px 11px 30px;background:transparent;border:0;border-top:1px solid var(--border,#2c3e50);color:var(--text-primary);text-align:left;cursor:pointer;font-family:inherit;}
         #bizdevScreen .bw-grp-body .bw-row:first-child{border-top:0;}
         #bizdevScreen .bw-row:hover{background:var(--bg-input,#253545);}
         #bizdevScreen .bw-row.sel{background:rgba(53,194,110,.16);box-shadow:inset 3px 0 0 var(--accent-green,#35c26e);}
-        #bizdevScreen .bw-row-main{min-width:0;flex:1;}
+        #bizdevScreen .bw-row-main{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px;}
         #bizdevScreen .bw-row-name{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
         #bizdevScreen .bw-row-sub{color:var(--text-muted,#8ea3b5);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
         #bizdevScreen .bw-row-fc{display:flex;flex-direction:column;align-items:flex-end;flex:none;line-height:1.25;}
         #bizdevScreen .bw-fc-amt{font-weight:800;font-size:13px;color:var(--accent-green,#35c26e);}
         #bizdevScreen .bw-fc-amt.bw-none{color:var(--text-muted,#8ea3b5);}
-        #bizdevScreen .bw-fc-opp{font-size:10px;color:var(--text-muted,#8ea3b5);}
+        #bizdevScreen .bw-fc-opp{font-size:10px;color:var(--text-muted,#8ea3b5);white-space:nowrap;}
+        #bizdevScreen .bw-pedit{display:flex;align-items:center;gap:9px;padding:14px 18px 0;flex-wrap:wrap;}
+        #bizdevScreen .bw-pedit-l{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted,#8ea3b5);}
+        #bizdevScreen .bw-pin{width:62px;background:var(--bg-input,#253545);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;padding:5px 8px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;}
+        #bizdevScreen .bw-pin:focus{outline:2px solid var(--accent-green,#35c26e);outline-offset:1px;}
         #bizdevScreen .bw-surface{background:var(--bg-card,#1e2f40);border:1px solid var(--border,#2c3e50);border-radius:12px;min-height:520px;}
         #bizdevScreen .bw-empty,#bizdevScreen .bw-empty-lg{height:520px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--text-muted,#8ea3b5);text-align:center;padding:24px;}
         #bizdevScreen .bw-big{font-size:34px;}
@@ -15528,7 +15534,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     function bwPaint() {
       const scr = document.getElementById('bizdevScreen'); if (!scr) return;
-      const fcTotal = _bwItems.reduce((s, i) => s + (bwForecast(i) || 0), 0); // forecast KPI = Σ over items with an amount
+      const fcTotal = _bwItems.filter(bwActive).reduce((s, i) => s + (bwForecast(i) || 0), 0); // forecast KPI = Σ over ACTIVE items with an amount (won/lost excluded)
       const st = k => _bwItems.filter(i => (i.stage || 'new') === k).length;
       const nNew = st('new'), nContacted = st('contacted'), nWorking = st('working'), nWon = st('won'), nLost = st('lost');
       const winPct = (nWon + nLost) ? Math.round(nWon / (nWon + nLost) * 100) + '%' : '—';
@@ -15537,7 +15543,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           <div class="bw-topbar">
             <div class="bw-brand"><b>Sales Workspace</b><span>Biz-dev worklist · franchise <span class="bw-mono">#${_escHtml(String(currentUser.franchiseID || ''))}</span> · read-only beta</span></div>
             <div class="bw-funnel">
-              <div class="bw-kpi fc"><b class="bw-tnum">${bwEvk(fcTotal)}</b><span>Forecast</span></div>
+              <div class="bw-kpi fc"><b class="bw-tnum" id="bwFcKpi">${bwEvk(fcTotal)}</b><span>Forecast</span></div>
               <div class="bw-kpi"><b class="bw-tnum">${nNew}</b><span>New</span></div>
               <div class="bw-kpi"><b class="bw-tnum">${nContacted}</b><span>Contacted</span></div>
               <div class="bw-kpi"><b class="bw-tnum">${nWorking}</b><span>Working</span></div>
@@ -15563,28 +15569,47 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     function bwRailHtml() {
       return BW_GROUPS.map((g, gi) => {
-        const items = _bwItems.filter(i => i.type === g.type).sort((a, b) => bwSortKey(b) - bwSortKey(a));
+        const items = _bwItems.filter(i => i.type === g.type && bwActive(i)).sort((a, b) => bwSortKey(b) - bwSortKey(a));
         const ftot = items.reduce((s, i) => s + (bwForecast(i) || 0), 0);
         const open = gi < 1; // first group open by default
         const rows = items.map(i => bwRowHtml(i)).join('') || '<div class="bw-row-none">— none —</div>';
         return `<details class="bw-group"${open ? ' open' : ''}>
-          <summary class="bw-grp-h"><span class="bw-caret"></span><span class="bw-dot" style="background:${g.color}"></span><span class="bw-grp-name">${g.name}</span><span class="bw-grp-meta"><span class="bw-pill bw-tnum">${items.length}</span><span class="bw-tnum" title="group forecast (opportunity × P close)">${bwEvk(ftot)}</span></span></summary>
+          <summary class="bw-grp-h"><span class="bw-caret"></span><span class="bw-dot" style="background:${g.color}"></span><span class="bw-grp-name">${g.name}</span><span class="bw-grp-meta"><span class="bw-pill bw-tnum">${items.length}</span><span class="bw-tnum bw-grp-fc" data-type="${g.type}" title="group forecast (opportunity × P close)">${bwEvk(ftot)}</span></span></summary>
           <div class="bw-grp-body">${rows}</div>
         </details>`;
       }).join('');
     }
 
+    function bwRowRightHtml(i) {
+      return bwHasAmount(i)
+        ? `<span class="bw-fc-amt bw-tnum">${bwUsd(bwForecast(i))}</span><span class="bw-fc-opp bw-tnum">of ${bwUsd(i.amount)}</span>`
+        : `<span class="bw-fc-amt bw-none">—</span><span class="bw-fc-opp">AI estimate pending</span>`;
+    }
     function bwRowHtml(i) {
-      const has = bwHasAmount(i), fc = bwForecast(i);
       const sub = _escHtml([i.address, (i.reason || i.detail || '')].filter(Boolean).join(' · ')) || '—';
       const sel = (_bwSel === i.id) ? ' sel' : '';
-      const right = has
-        ? `<span class="bw-fc-amt bw-tnum">${bwUsd(fc)}</span><span class="bw-fc-opp bw-tnum">of ${bwUsd(i.amount)}</span>`
-        : `<span class="bw-fc-amt bw-none">—</span><span class="bw-fc-opp">AI estimate pending</span>`;
       return `<button class="bw-row${sel}" data-id="${_escHtml(String(i.id))}" onclick="bwPick('${_escHtml(String(i.id))}')">
         <span class="bw-row-main"><span class="bw-row-name">${_escHtml(i.customer_name || 'Unknown')}</span><span class="bw-row-sub">${sub}</span></span>
-        <span class="bw-row-fc">${right}</span>
+        <span class="bw-row-fc">${bwRowRightHtml(i)}</span>
       </button>`;
+    }
+    // Manager overrides P(close) → recompute forecast in place: detail pane + that row's number + the KPI/group
+    // totals. Deliberately does NOT re-sort the rail on edit (would make the row jump); sort re-applies on reload.
+    function bwSetP(id, val) {
+      const it = _bwItems.find(i => String(i.id) === String(id)); if (!it) return;
+      _bwPOverride[it.id] = Math.max(0, Math.min(100, Math.round(Number(val) || 0))) / 100;
+      const surf = document.getElementById('bwSurface'); if (surf) surf.innerHTML = bwDetailHtml(it);
+      const cell = document.querySelector('#bwRail .bw-row[data-id="' + (window.CSS && CSS.escape ? CSS.escape(String(it.id)) : String(it.id)) + '"] .bw-row-fc');
+      if (cell) cell.innerHTML = bwRowRightHtml(it);
+      bwRecalcTotals();
+    }
+    function bwRecalcTotals() {
+      const kpi = document.getElementById('bwFcKpi');
+      if (kpi) kpi.textContent = bwEvk(_bwItems.filter(bwActive).reduce((s, i) => s + (bwForecast(i) || 0), 0));
+      document.querySelectorAll('#bwRail .bw-grp-fc').forEach(el => {
+        const t = el.getAttribute('data-type');
+        el.textContent = bwEvk(_bwItems.filter(i => i.type === t && bwActive(i)).reduce((s, i) => s + (bwForecast(i) || 0), 0));
+      });
     }
 
     function bwPick(id) {
@@ -15638,6 +15663,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         <div class="bw-sf-contact">${chips.join('') || '<span class="bw-ctx" style="font-size:12px">No contact on file</span>'}</div>
       </div>
       <div class="bw-sf-body">
+        <div class="bw-pedit"><span class="bw-pedit-l">P(close)</span><input type="number" class="bw-pin" min="0" max="100" step="5" value="${p}" onchange="bwSetP('${_escHtml(String(i.id))}', this.value)"><span class="bw-pedit-l" style="text-transform:none;letter-spacing:0;font-weight:400">% — tunes the forecast (Opportunity × P)</span></div>
         ${body}
         <div class="bw-actions">
           ${openBtn}
