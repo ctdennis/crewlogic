@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.21 | 2026-08-13">
+  <meta name="crewlogic-version" content="v5.124.22 | 2026-08-14">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1529,6 +1529,12 @@
             <div class="module-desc">Leads, unconverted estimates &amp; cancellations to work</div>
           </div>
 
+          <div class="module-card fade-in fade-in-delay-2" id="bizdevCard" data-card="bizdev" onclick="openModule('bizdev')" style="display:none;">
+            <div class="module-icon">📈</div>
+            <div class="module-name">Sales Workspace</div>
+            <div class="module-desc">Forecast-ranked biz-dev worklist (desktop beta)</div>
+          </div>
+
           <div class="module-card fade-in fade-in-delay-3" id="routerCard" data-card="router" onclick="openModule('router')" style="display:none;">
             <div class="module-icon">🚛</div>
             <div class="module-name">Route Optimizer</div>
@@ -1725,6 +1731,8 @@
       <div id="estimatesDashboardScreen" style="display:none;box-sizing:border-box;padding:12px 24px 32px;"></div>
       <!-- FOLLOW-UP PIPELINE — unified list of leads / unconverted estimates / cancellations / UCBs / cases + sequence builder (renderPipeline) -->
       <div id="pipelineScreen" style="display:none;box-sizing:border-box;padding:12px 16px 32px;"></div>
+      <!-- BIZ-DEV SALES WORKSPACE (FW-66 P0) — read-only forecast-ranked worklist over the same pipeline data (renderBizDev) -->
+      <div id="bizdevScreen" style="display:none;box-sizing:border-box;padding:12px 24px 32px;"></div>
 
       <!-- JOB PLAN -->
       <div class="job-plan-section" id="jobPlanScreen">
@@ -8894,6 +8902,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Pipeline is #90-only on prod for now (Owner 2026-08-11) — dev env (all), super-admin, and franchise #90.
       const _pipelineAudience = (IS_DEV_ENV || currentUser.franchiseID === '90' || currentUser.email === 'charles.dennis@junkluggers.com');
       if (plCard) plCard.style.display = _pipelineAudience ? '' : 'none';
+      // Sales Workspace (FW-66 P0, biz-dev) — desktop beta: dev env (all) OR super-admin only for now.
+      const bwCard = document.getElementById('bizdevCard');
+      const _bizdevAudience = (IS_DEV_ENV || currentUser.email === 'charles.dennis@junkluggers.com');
+      if (bwCard) bwCard.style.display = _bizdevAudience ? '' : 'none';
       // Route Classification settings tab — same audience (owner-only tab; drives estimate-route scoping + board grouping).
       const _routesTab = document.getElementById('stab-routes');
       if (_routesTab) _routesTab.style.display = (_ecAudience && currentUser.role === 'owner') ? '' : 'none';
@@ -9003,7 +9015,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       'disposalRouterScreen',
       'storageScreen', 'storageResultsScreen',
       'mattressScreen', 'mattressResultsScreen',
-      'priceLookupScreen', 'promosScreen', 'backupScheduleScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'truckAlertsScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen', 'estimateCostingScreen', 'pipelineScreen'
+      'priceLookupScreen', 'promosScreen', 'backupScheduleScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'truckAlertsScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen', 'estimateCostingScreen', 'pipelineScreen', 'bizdevScreen'
     ];
 
     function hideAll() {
@@ -15367,6 +15379,283 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function plCloseModal() { const m = document.getElementById('plModalHost'); if (m) m.innerHTML = ''; }
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+    // BIZ-DEV SALES WORKSPACE (FW-66 P0) — read-only desktop worklist over the SAME
+    // crewlogic-pipeline data, forecast-ranked. Fully ADDITIVE: own bw* state / functions /
+    // CSS; touches nothing in the Follow-up Pipeline (_pl*). It reuses the read-only edge
+    // 'list' action + the shared _escHtml / plTel helpers only. No DB or Vonigo writes in P0 —
+    // every action button is a stubbed toast. Gated to dev / super-admin (see applyOwnerCards).
+    // Plan: docs/plan-bizdev-workspace.md
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+    const BW_GROUPS = [
+      { type: 'unconverted_estimate', name: 'Open Estimates', color: '#35c26e' },
+      { type: 'lead',                 name: 'Leads',          color: '#4a9fe0' },
+      { type: 'cancellation',         name: 'Cancellations',  color: '#e0645a' },
+      { type: 'ucb',                  name: 'UCB',            color: '#e0904a' },
+      { type: 'case',                 name: 'Cases',          color: '#6e8194' }
+    ];
+    const BW_BADGE = { unconverted_estimate: 'Estimate', lead: 'Lead', cancellation: 'Cancellation', ucb: 'UCB', case: 'Case' };
+    const BW_ACT   = { unconverted_estimate: 'Schedule / book', lead: 'Schedule / book', cancellation: 'Schedule / book', ucb: 'Schedule / book', case: 'Schedule / book' };
+    // P(close) base by type (client-side heuristic, new in P0). Combined with an age-decay below.
+    const BW_PBASE = { unconverted_estimate: 0.55, ucb: 0.5, lead: 0.3, cancellation: 0.25, case: 0.1 };
+
+    let _bwItems = [], _bwCounts = {}, _bwOpen = 0, _bwTotal = 0, _bwSel = null, _bwToastT = null;
+
+    function bwUsd(n) { return '$' + (Math.round(Number(n) || 0)).toLocaleString('en-US'); }
+    function bwEvk(n) { n = Number(n) || 0; return n >= 1000 ? '$' + (n / 1000).toFixed(1) + 'k' : '$' + Math.round(n); }
+    function bwDaysOld(occurred) { if (!occurred) return 0; const ms = Date.now() - new Date(occurred).getTime(); return ms > 0 ? ms / 86400000 : 0; }
+    function bwHasAmount(it) { const a = Number(it && it.amount); return isFinite(a) && a > 0; }
+    function bwPclose(it) {
+      const base = (BW_PBASE[it.type] != null) ? BW_PBASE[it.type] : 0.3;
+      const decay = Math.max(0.4, 1 - bwDaysOld(it.occurred_at) * 0.03);
+      return Math.max(0, Math.min(1, base * decay));
+    }
+    function bwForecast(it) { return bwHasAmount(it) ? Math.round(bwPclose(it) * Number(it.amount)) : null; }
+    function bwSortKey(it) { const f = bwForecast(it); return (f == null) ? -1 : f; } // no-amount items sort last
+
+    function bwToast(msg) {
+      let t = document.getElementById('bwToast');
+      if (!t) { t = document.createElement('div'); t.id = 'bwToast'; document.body.appendChild(t); }
+      t.style.cssText = 'position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:100002;background:var(--accent-green,#35c26e);color:#06210f;font-weight:700;padding:11px 18px;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.4);font-size:13px;max-width:90vw;';
+      t.textContent = msg; t.style.display = 'block';
+      clearTimeout(_bwToastT); _bwToastT = setTimeout(() => { if (t) t.style.display = 'none'; }, 2800);
+    }
+
+    function bwEnsureStyles() {
+      if (document.getElementById('bwStyles')) return;
+      const st = document.createElement('style'); st.id = 'bwStyles';
+      st.textContent = `
+        #bizdevScreen .bw-app{max-width:1680px;margin:0 auto;}
+        #bizdevScreen .bw-tnum{font-variant-numeric:tabular-nums;}
+        #bizdevScreen .bw-mono{font-family:var(--mono,ui-monospace,Menlo,Consolas,monospace);color:var(--accent-green,#35c26e);}
+        #bizdevScreen .bw-none{color:var(--text-muted,#8ea3b5);}
+        #bizdevScreen .bw-topbar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:12px 16px;background:var(--bg-card,#1e2f40);border:1px solid var(--border,#2c3e50);border-radius:12px;margin-bottom:14px;}
+        #bizdevScreen .bw-brand{display:flex;flex-direction:column;gap:2px;margin-right:auto;}
+        #bizdevScreen .bw-brand b{font-size:15px;letter-spacing:.2px;color:var(--text-primary);}
+        #bizdevScreen .bw-brand span{color:var(--text-muted,#8ea3b5);font-size:11.5px;}
+        #bizdevScreen .bw-funnel{display:flex;gap:8px;flex-wrap:wrap;}
+        #bizdevScreen .bw-kpi{background:var(--bg-input,#253545);border:1px solid var(--border,#2c3e50);border-radius:8px;padding:6px 11px;text-align:center;min-width:60px;}
+        #bizdevScreen .bw-kpi b{display:block;font-size:16px;line-height:1.1;color:var(--text-primary);}
+        #bizdevScreen .bw-kpi span{font-size:10px;color:var(--text-muted,#8ea3b5);text-transform:uppercase;letter-spacing:.4px;}
+        #bizdevScreen .bw-kpi.fc{background:rgba(53,194,110,.16);border-color:var(--accent-green,#35c26e);}
+        #bizdevScreen .bw-kpi.fc b{color:var(--accent-green,#35c26e);}
+        #bizdevScreen .bw-kpi.win b{color:var(--accent-green,#35c26e);}
+        #bizdevScreen .bw-grid{display:grid;grid-template-columns:290px minmax(0,1fr);gap:16px;align-items:start;}
+        @media (max-width:860px){#bizdevScreen .bw-grid{grid-template-columns:1fr;}}
+        #bizdevScreen .bw-rail{background:var(--bg-card,#1e2f40);border:1px solid var(--border,#2c3e50);border-radius:12px;overflow:hidden;}
+        #bizdevScreen .bw-rail-h{padding:11px 14px;border-bottom:1px solid var(--border,#2c3e50);display:flex;align-items:center;gap:8px;}
+        #bizdevScreen .bw-rail-h b{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted,#8ea3b5);}
+        #bizdevScreen .bw-railsub{margin-left:auto;color:var(--text-muted,#8ea3b5);font-size:11.5px;}
+        #bizdevScreen .bw-group{border-top:1px solid var(--border,#2c3e50);}
+        #bizdevScreen .bw-group:first-child{border-top:0;}
+        #bizdevScreen .bw-grp-h{display:flex;align-items:center;gap:9px;padding:10px 14px;color:var(--text-primary);cursor:pointer;list-style:none;user-select:none;}
+        #bizdevScreen .bw-grp-h::-webkit-details-marker{display:none;}
+        #bizdevScreen .bw-grp-h:hover{background:var(--bg-input,#253545);}
+        #bizdevScreen .bw-caret{width:9px;height:9px;border-right:2px solid var(--text-muted,#8ea3b5);border-bottom:2px solid var(--text-muted,#8ea3b5);transform:rotate(-45deg);transition:transform .16s;flex:none;}
+        #bizdevScreen .bw-group[open] .bw-caret{transform:rotate(45deg);}
+        #bizdevScreen .bw-dot{width:8px;height:8px;border-radius:50%;flex:none;}
+        #bizdevScreen .bw-grp-name{font-weight:700;font-size:13px;}
+        #bizdevScreen .bw-grp-meta{margin-left:auto;display:flex;gap:8px;align-items:center;color:var(--text-muted,#8ea3b5);font-size:11.5px;}
+        #bizdevScreen .bw-pill{background:var(--bg-input,#253545);border:1px solid var(--border,#2c3e50);border-radius:20px;padding:1px 8px;font-size:11px;}
+        #bizdevScreen .bw-grp-body{border-top:1px solid var(--border,#2c3e50);}
+        #bizdevScreen .bw-row-none{color:var(--text-muted,#8ea3b5);padding:9px 14px 9px 30px;font-size:12px;}
+        #bizdevScreen .bw-row{width:100%;display:flex;align-items:center;gap:10px;padding:9px 14px 9px 30px;background:transparent;border:0;border-top:1px solid var(--border,#2c3e50);color:var(--text-primary);text-align:left;cursor:pointer;font-family:inherit;}
+        #bizdevScreen .bw-grp-body .bw-row:first-child{border-top:0;}
+        #bizdevScreen .bw-row:hover{background:var(--bg-input,#253545);}
+        #bizdevScreen .bw-row.sel{background:rgba(53,194,110,.16);box-shadow:inset 3px 0 0 var(--accent-green,#35c26e);}
+        #bizdevScreen .bw-row-main{min-width:0;flex:1;}
+        #bizdevScreen .bw-row-name{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        #bizdevScreen .bw-row-sub{color:var(--text-muted,#8ea3b5);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        #bizdevScreen .bw-row-fc{display:flex;flex-direction:column;align-items:flex-end;flex:none;line-height:1.25;}
+        #bizdevScreen .bw-fc-amt{font-weight:800;font-size:13px;color:var(--accent-green,#35c26e);}
+        #bizdevScreen .bw-fc-amt.bw-none{color:var(--text-muted,#8ea3b5);}
+        #bizdevScreen .bw-fc-opp{font-size:10px;color:var(--text-muted,#8ea3b5);}
+        #bizdevScreen .bw-surface{background:var(--bg-card,#1e2f40);border:1px solid var(--border,#2c3e50);border-radius:12px;min-height:520px;}
+        #bizdevScreen .bw-empty,#bizdevScreen .bw-empty-lg{height:520px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--text-muted,#8ea3b5);text-align:center;padding:24px;}
+        #bizdevScreen .bw-big{font-size:34px;}
+        #bizdevScreen .bw-sf-head{padding:16px 18px;border-bottom:1px solid var(--border,#2c3e50);}
+        #bizdevScreen .bw-sf-top{display:flex;align-items:flex-start;gap:12px;}
+        #bizdevScreen .bw-sf-top h2{font-size:19px;margin:0;color:var(--text-primary);font-weight:800;}
+        #bizdevScreen .bw-sf-loc{color:var(--text-muted,#8ea3b5);font-size:12.5px;margin-top:3px;}
+        #bizdevScreen .bw-sf-stage{margin-top:9px;font-size:11px;color:var(--text-muted,#8ea3b5);display:flex;align-items:center;gap:8px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;}
+        #bizdevScreen .bw-stage-pill{background:var(--bg-input,#253545);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:20px;padding:3px 12px;font-size:12px;font-weight:700;letter-spacing:0;text-transform:capitalize;}
+        #bizdevScreen .bw-badge{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:3px 9px;border-radius:20px;border:1px solid;flex:none;}
+        #bizdevScreen .bw-sf-ev{margin-left:auto;text-align:right;flex:none;}
+        #bizdevScreen .bw-sf-ev b{font-size:20px;color:var(--accent-green,#35c26e);display:block;}
+        #bizdevScreen .bw-sf-ev b.bw-none{color:var(--text-muted,#8ea3b5);}
+        #bizdevScreen .bw-sf-ev span{font-size:10px;color:var(--text-muted,#8ea3b5);text-transform:uppercase;letter-spacing:.4px;}
+        #bizdevScreen .bw-sf-contact{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px;}
+        #bizdevScreen .bw-chip{display:inline-flex;align-items:center;gap:7px;background:var(--bg-input,#253545);border:1px solid var(--border,#2c3e50);border-radius:20px;padding:5px 12px;font-size:12.5px;color:var(--text-primary);text-decoration:none;font-variant-numeric:tabular-nums;}
+        #bizdevScreen .bw-chip:hover{border-color:var(--accent-green,#35c26e);color:var(--accent-green,#35c26e);}
+        #bizdevScreen .bw-chip .bw-k{color:var(--text-muted,#8ea3b5);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
+        #bizdevScreen .bw-sf-body{padding:16px 18px;}
+        #bizdevScreen .bw-card{background:var(--bg-input,#253545);border:1px solid var(--border,#2c3e50);border-radius:12px;padding:14px 16px;margin-bottom:14px;}
+        #bizdevScreen .bw-card h3{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted,#8ea3b5);margin:0 0 10px;}
+        #bizdevScreen .bw-card-sub{text-transform:none;letter-spacing:0;font-weight:400;color:var(--text-muted,#8ea3b5);}
+        #bizdevScreen .bw-strip{display:flex;gap:24px;flex-wrap:wrap;}
+        #bizdevScreen .bw-m b{font-size:22px;color:var(--text-primary);display:block;line-height:1.1;}
+        #bizdevScreen .bw-m span{font-size:11px;color:var(--text-muted,#8ea3b5);}
+        #bizdevScreen .bw-ctx{color:var(--text-muted,#8ea3b5);font-size:13px;line-height:1.5;}
+        #bizdevScreen .bw-ctx b{color:var(--text-primary);}
+        #bizdevScreen .bw-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:4px;}
+        #bizdevScreen .bw-btn{border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);border-radius:8px;padding:9px 15px;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit;}
+        #bizdevScreen .bw-btn:hover{filter:brightness(1.08);}
+        #bizdevScreen .bw-btn.primary{background:var(--accent-green,#35c26e);border-color:var(--accent-green,#35c26e);color:#06210f;}
+        #bizdevScreen .bw-btn.open{background:transparent;}
+        #bizdevScreen .bw-btn.danger{background:transparent;border-color:rgba(224,100,90,.5);color:#e0645a;}
+        #bizdevScreen .bw-btn.danger:hover{background:rgba(224,100,90,.13);filter:none;}
+        #bizdevScreen .bw-foot{margin-top:14px;color:var(--text-muted,#8ea3b5);font-size:11.5px;text-align:center;opacity:.8;}
+      `;
+      document.head.appendChild(st);
+    }
+
+    async function renderBizDev() {
+      bwEnsureStyles();
+      const scr = document.getElementById('bizdevScreen');
+      scr.innerHTML = '<div class="bw-app"><div class="bw-empty">Loading sales workspace…</div></div>';
+      await bwLoad();
+    }
+
+    async function bwLoad() {
+      try {
+        // Same read-only edge call the Follow-up Pipeline uses; own state so the two never collide.
+        const res = await edgeFunctionCall('crewlogic-pipeline', { action: 'list', franchiseID: currentUser.franchiseID });
+        if (res && res.success) { _bwItems = res.items || []; _bwCounts = res.counts || {}; _bwOpen = res.open || 0; _bwTotal = res.total || _bwItems.length; }
+        else { console.error('[bizdev] list failed', res && res.error); _bwItems = []; }
+      } catch (e) { console.error('[bizdev] load error', e); _bwItems = []; }
+      bwPaint();
+    }
+
+    function bwPaint() {
+      const scr = document.getElementById('bizdevScreen'); if (!scr) return;
+      const fcTotal = _bwItems.reduce((s, i) => s + (bwForecast(i) || 0), 0); // forecast KPI = Σ over items with an amount
+      const st = k => _bwItems.filter(i => (i.stage || 'new') === k).length;
+      const nNew = st('new'), nContacted = st('contacted'), nWorking = st('working'), nWon = st('won'), nLost = st('lost');
+      const winPct = (nWon + nLost) ? Math.round(nWon / (nWon + nLost) * 100) + '%' : '—';
+      scr.innerHTML = `
+        <div class="bw-app">
+          <div class="bw-topbar">
+            <div class="bw-brand"><b>Sales Workspace</b><span>Biz-dev worklist · franchise <span class="bw-mono">#${_escHtml(String(currentUser.franchiseID || ''))}</span> · read-only beta</span></div>
+            <div class="bw-funnel">
+              <div class="bw-kpi fc"><b class="bw-tnum">${bwEvk(fcTotal)}</b><span>Forecast</span></div>
+              <div class="bw-kpi"><b class="bw-tnum">${nNew}</b><span>New</span></div>
+              <div class="bw-kpi"><b class="bw-tnum">${nContacted}</b><span>Contacted</span></div>
+              <div class="bw-kpi"><b class="bw-tnum">${nWorking}</b><span>Working</span></div>
+              <div class="bw-kpi"><b class="bw-tnum">${nWon}</b><span>Won</span></div>
+              <div class="bw-kpi win"><b class="bw-tnum">${winPct}</b><span>Win</span></div>
+            </div>
+          </div>
+          <div class="bw-grid">
+            <div class="bw-rail">
+              <div class="bw-rail-h"><b>Worklist</b><span class="bw-railsub">ranked by forecast</span></div>
+              <div id="bwRail">${bwRailHtml()}</div>
+            </div>
+            <div class="bw-surface" id="bwSurface">${bwEmptyHtml()}</div>
+          </div>
+          <div class="bw-foot">Read-only P0 · scheduling &amp; write-back land next phase · FW-66 · docs/plan-bizdev-workspace.md</div>
+        </div>`;
+      if (_bwSel && _bwItems.some(i => i.id === _bwSel)) bwPick(_bwSel); // re-open a prior selection if it still exists
+    }
+
+    function bwEmptyHtml() {
+      return '<div class="bw-empty-lg"><div class="bw-big">☰</div><div>Pick a pipeline item on the left.<br>Estimates open in their source; every item is read-only in P0.</div></div>';
+    }
+
+    function bwRailHtml() {
+      return BW_GROUPS.map((g, gi) => {
+        const items = _bwItems.filter(i => i.type === g.type).sort((a, b) => bwSortKey(b) - bwSortKey(a));
+        const ftot = items.reduce((s, i) => s + (bwForecast(i) || 0), 0);
+        const open = gi < 1; // first group open by default
+        const rows = items.map(i => bwRowHtml(i)).join('') || '<div class="bw-row-none">— none —</div>';
+        return `<details class="bw-group"${open ? ' open' : ''}>
+          <summary class="bw-grp-h"><span class="bw-caret"></span><span class="bw-dot" style="background:${g.color}"></span><span class="bw-grp-name">${g.name}</span><span class="bw-grp-meta"><span class="bw-pill bw-tnum">${items.length}</span><span class="bw-tnum" title="group forecast (opportunity × P close)">${bwEvk(ftot)}</span></span></summary>
+          <div class="bw-grp-body">${rows}</div>
+        </details>`;
+      }).join('');
+    }
+
+    function bwRowHtml(i) {
+      const has = bwHasAmount(i), fc = bwForecast(i);
+      const sub = _escHtml([i.address, (i.reason || i.detail || '')].filter(Boolean).join(' · ')) || '—';
+      const sel = (_bwSel === i.id) ? ' sel' : '';
+      const right = has
+        ? `<span class="bw-fc-amt bw-tnum">${bwUsd(fc)}</span><span class="bw-fc-opp bw-tnum">of ${bwUsd(i.amount)}</span>`
+        : `<span class="bw-fc-amt bw-none">—</span><span class="bw-fc-opp">AI estimate pending</span>`;
+      return `<button class="bw-row${sel}" data-id="${_escHtml(String(i.id))}" onclick="bwPick('${_escHtml(String(i.id))}')">
+        <span class="bw-row-main"><span class="bw-row-name">${_escHtml(i.customer_name || 'Unknown')}</span><span class="bw-row-sub">${sub}</span></span>
+        <span class="bw-row-fc">${right}</span>
+      </button>`;
+    }
+
+    function bwPick(id) {
+      const it = _bwItems.find(i => String(i.id) === String(id)); if (!it) return;
+      _bwSel = it.id;
+      document.querySelectorAll('#bwRail .bw-row').forEach(r => r.classList.toggle('sel', String(r.dataset.id) === String(id)));
+      const s = document.getElementById('bwSurface'); if (s) s.innerHTML = bwDetailHtml(it); // paints ONLY the right pane; rail (open groups/scroll) untouched
+    }
+
+    function bwDetailHtml(i) {
+      const g = BW_GROUPS.find(x => x.type === i.type) || { color: '#6e8194', name: i.type };
+      const has = bwHasAmount(i), fc = bwForecast(i), p = Math.round(bwPclose(i) * 100);
+      const isEst = (i.type === 'unconverted_estimate');
+      const prov = (i.source_provider || '').toLowerCase();
+      const where = (prov === 'crewlogic') ? 'CrewLogic' : 'Vonigo';
+      const chips = [];
+      if (i.phone) chips.push(`<a class="bw-chip" href="tel:${plTel(i.phone)}"><span class="bw-k">Call</span>${_escHtml(i.phone)}</a>`);
+      if (i.email) chips.push(`<a class="bw-chip" href="mailto:${_escHtml(i.email)}"><span class="bw-k">Email</span>${_escHtml(i.email)}</a>`);
+      const evHtml = has
+        ? `<b class="bw-tnum">${bwUsd(fc)}</b><span>forecast · ${bwUsd(i.amount)} × ${p}%</span>`
+        : `<b class="bw-tnum bw-none">—</b><span>AI estimate pending</span>`;
+      let body;
+      if (isEst) {
+        body = `<div class="bw-card">
+          <h3>Quote <span class="bw-card-sub">· source: ${where}</span></h3>
+          <div class="bw-strip">
+            <div class="bw-m"><b class="bw-tnum">${has ? bwUsd(i.amount) : '—'}</b><span>quote</span></div>
+            <div class="bw-m"><b class="bw-tnum">${p}%</b><span>P(close)</span></div>
+            <div class="bw-m"><b class="bw-tnum" style="color:var(--accent-green,#35c26e)">${has ? bwUsd(fc) : '—'}</b><span>forecast</span></div>
+          </div>
+          ${i.reason ? `<div class="bw-ctx" style="margin-top:9px">${_escHtml(i.reason)}</div>` : ''}
+          <div class="bw-ctx" style="margin-top:9px;font-size:12px">Read-only here. Adjust the estimate in <b>${where}</b> — the only place changes are made.</div>
+        </div>`;
+      } else {
+        const ctx = _escHtml(i.detail || i.reason || 'No additional context on this item.');
+        body = `<div class="bw-card"><h3>Context</h3><div class="bw-ctx">${ctx}</div></div>`
+          + (!has ? `<div class="bw-card"><h3>Opportunity <span class="bw-card-sub">· no price attached</span></h3><div class="bw-ctx">No dollar value on this ${_escHtml(BW_BADGE[i.type] || 'item')} yet — <b>— AI estimate pending</b>. The AI-derived opportunity is a later phase.</div></div>` : '');
+      }
+      const openBtn = isEst ? `<button class="bw-btn open" onclick="bwOpenSource('${_escHtml(String(i.id))}')">Open in ${where} ↗</button>` : '';
+      const act = BW_ACT[i.type] || 'Schedule / book';
+      return `<div class="bw-sf-head">
+        <div class="bw-sf-top">
+          <span class="bw-badge" style="color:${g.color};border-color:${g.color}">${_escHtml(BW_BADGE[i.type] || i.type)}</span>
+          <div style="min-width:0">
+            <h2>${_escHtml(i.customer_name || 'Unknown')}</h2>
+            <div class="bw-sf-loc">${_escHtml(i.address || 'No address on file')}</div>
+            <div class="bw-sf-stage">Stage <span class="bw-stage-pill">${_escHtml(i.stage || 'new')}</span></div>
+          </div>
+          <div class="bw-sf-ev">${evHtml}</div>
+        </div>
+        <div class="bw-sf-contact">${chips.join('') || '<span class="bw-ctx" style="font-size:12px">No contact on file</span>'}</div>
+      </div>
+      <div class="bw-sf-body">
+        ${body}
+        <div class="bw-actions">
+          ${openBtn}
+          <button class="bw-btn primary" onclick="bwStub('${_escHtml(act)}')">${_escHtml(act)}</button>
+          <button class="bw-btn" onclick="bwStub('Reschedule')">Reschedule</button>
+          <button class="bw-btn" onclick="bwStub('Set follow-up')">Set follow-up</button>
+          <button class="bw-btn danger" onclick="bwStub('Mark lost')">Mark lost</button>
+        </div>
+      </div>`;
+    }
+
+    function bwOpenSource(id) {
+      const i = _bwItems.find(x => String(x.id) === String(id)); if (!i) return;
+      const where = ((i.source_provider || '').toLowerCase() === 'crewlogic') ? 'CrewLogic' : 'Vonigo';
+      bwToast('Opens the ' + where + ' estimate (wiring next phase)');
+    }
+    function bwStub(action) { bwToast(action + ' — next phase'); }
+
     // ── sequences (builder) ───────────────────────────────────────────
     function plOpenSequences() {
       const cards = _plSeqs.map(s => {
@@ -15505,6 +15794,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('headerTitle').textContent = 'Follow-up Pipeline';
         currentScreen = 'pipeline';
         renderPipeline();
+        return;
+      }
+      if (module === 'bizdev') {
+        document.getElementById('bizdevScreen').style.display = 'block';
+        document.getElementById('headerTitle').textContent = 'Sales Workspace';
+        currentScreen = 'bizdev';
+        _bwSel = null; // fresh entry starts with no selection
+        _ecWide(); // full desktop width (same class the Estimate Costing / pipeline-desk paths use)
+        renderBizDev();
         return;
       }
       if (module === 'trucks') {
