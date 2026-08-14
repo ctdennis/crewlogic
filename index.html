@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.24 | 2026-08-14">
+  <meta name="crewlogic-version" content="v5.124.25 | 2026-08-14">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15399,13 +15399,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // P(close) base by type (client-side heuristic, new in P0). Combined with an age-decay below.
     const BW_PBASE = { unconverted_estimate: 0.55, ucb: 0.5, lead: 0.3, cancellation: 0.25, case: 0.1 };
 
-    let _bwItems = [], _bwCounts = {}, _bwOpen = 0, _bwTotal = 0, _bwSel = null, _bwToastT = null, _bwPOverride = {}; // _bwPOverride: manager P(close) override by item id (session-only in P0)
+    let _bwItems = [], _bwCounts = {}, _bwOpen = 0, _bwTotal = 0, _bwSel = null, _bwToastT = null, _bwPOverride = {}, _bwOpenGroups = null; // _bwPOverride: session P(close) overrides; _bwOpenGroups: which rail groups are open (preserved across repaint)
 
     function bwUsd(n) { return '$' + (Math.round(Number(n) || 0)).toLocaleString('en-US'); }
     function bwEvk(n) { n = Number(n) || 0; return n >= 1000 ? '$' + (n / 1000).toFixed(1) + 'k' : '$' + Math.round(n); }
     function bwDaysOld(occurred) { if (!occurred) return 0; const ms = Date.now() - new Date(occurred).getTime(); return ms > 0 ? ms / 86400000 : 0; }
     function bwHasAmount(it) { const a = Number(it && it.amount); return isFinite(a) && a > 0; }
-    function bwActive(it) { const s = String((it && it.stage) || 'new').toLowerCase(); return s !== 'won' && s !== 'lost'; } // won/lost are closed → hidden from the active worklist + forecast (funnel still counts them)
+    const BW_CLOSED = new Set(['won', 'lost', 'dismissed', 'resolved']);
+    function bwActive(it) { return !BW_CLOSED.has(String((it && it.stage) || 'new').toLowerCase()); } // closed stages hidden from the active worklist + forecast (funnel still counts won/lost)
+    // Persist a stage change (CrewLogic-side write to pipeline_items.stage, franchise-scoped via the edge fn's
+    // 'update' action). Closed stages (won/lost/dismissed) drop the item off the active worklist; Schedule → won.
+    async function bwSetStage(id, stage) {
+      const it = _bwItems.find(i => String(i.id) === String(id)); if (!it) return;
+      const prev = it.stage; stage = String(stage || '').toLowerCase(); it.stage = stage; // optimistic
+      if (!bwActive(it) && _bwSel === it.id) _bwSel = null; // closing the open item clears the detail
+      bwPaint();
+      try {
+        const d = await edgeFunctionCall('crewlogic-pipeline', { action: 'update', franchiseID: currentUser.franchiseID, id: it.id, patch: { stage } });
+        if (!d || d.success === false) throw new Error((d && d.error) || 'update failed');
+        bwToast(!bwActive(it) ? (stage === 'won' ? 'Marked Won — off the active list' : 'Marked ' + stage + ' — off the active list') : ('Stage → ' + stage));
+      } catch (e) {
+        it.stage = prev; bwPaint(); bwToast('Could not save stage — ' + ((e && e.message) || 'try again'));
+      }
+    }
     function bwPclose(it) {
       if (_bwPOverride[it.id] != null) return _bwPOverride[it.id]; // manager override wins over the heuristic
       const base = (BW_PBASE[it.type] != null) ? BW_PBASE[it.type] : 0.3;
@@ -15485,6 +15501,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         #bizdevScreen .bw-sf-loc{color:var(--text-muted,#8ea3b5);font-size:12.5px;margin-top:3px;}
         #bizdevScreen .bw-sf-stage{margin-top:9px;font-size:11px;color:var(--text-muted,#8ea3b5);display:flex;align-items:center;gap:8px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;}
         #bizdevScreen .bw-stage-pill{background:var(--bg-input,#253545);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:20px;padding:3px 12px;font-size:12px;font-weight:700;letter-spacing:0;text-transform:capitalize;}
+        #bizdevScreen .bw-stage-sel{background:var(--bg-input,#253545);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:20px;padding:3px 12px;font-size:12px;font-weight:700;letter-spacing:0;text-transform:capitalize;cursor:pointer;}
+        #bizdevScreen .bw-stage-sel:focus-visible{outline:2px solid var(--accent-green,#35c26e);outline-offset:2px;}
         #bizdevScreen .bw-badge{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:3px 9px;border-radius:20px;border:1px solid;flex:none;}
         #bizdevScreen .bw-sf-ev{margin-left:auto;text-align:right;flex:none;}
         #bizdevScreen .bw-sf-ev b{font-size:20px;color:var(--accent-green,#35c26e);display:block;}
@@ -15534,6 +15552,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     function bwPaint() {
       const scr = document.getElementById('bizdevScreen'); if (!scr) return;
+      if (scr.querySelector('.bw-group')) _bwOpenGroups = new Set(Array.from(scr.querySelectorAll('.bw-group[open]')).map(d => d.getAttribute('data-type'))); // preserve which rail groups are open across repaint
       const fcTotal = _bwItems.filter(bwActive).reduce((s, i) => s + (bwForecast(i) || 0), 0); // forecast KPI = Σ over ACTIVE items with an amount (won/lost excluded)
       const st = k => _bwItems.filter(i => (i.stage || 'new') === k).length;
       const nNew = st('new'), nContacted = st('contacted'), nWorking = st('working'), nWon = st('won'), nLost = st('lost');
@@ -15571,9 +15590,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return BW_GROUPS.map((g, gi) => {
         const items = _bwItems.filter(i => i.type === g.type && bwActive(i)).sort((a, b) => bwSortKey(b) - bwSortKey(a));
         const ftot = items.reduce((s, i) => s + (bwForecast(i) || 0), 0);
-        const open = gi < 1; // first group open by default
+        const open = _bwOpenGroups ? _bwOpenGroups.has(g.type) : (gi < 1); // preserve open groups across repaint; default first group
         const rows = items.map(i => bwRowHtml(i)).join('') || '<div class="bw-row-none">— none —</div>';
-        return `<details class="bw-group"${open ? ' open' : ''}>
+        return `<details class="bw-group" data-type="${g.type}"${open ? ' open' : ''}>
           <summary class="bw-grp-h"><span class="bw-caret"></span><span class="bw-dot" style="background:${g.color}"></span><span class="bw-grp-name">${g.name}</span><span class="bw-grp-meta"><span class="bw-pill bw-tnum">${items.length}</span><span class="bw-tnum bw-grp-fc" data-type="${g.type}" title="group forecast (opportunity × P close)">${bwEvk(ftot)}</span></span></summary>
           <div class="bw-grp-body">${rows}</div>
         </details>`;
@@ -15656,7 +15675,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           <div style="min-width:0">
             <h2>${_escHtml(i.customer_name || 'Unknown')}</h2>
             <div class="bw-sf-loc">${_escHtml(i.address || 'No address on file')}</div>
-            <div class="bw-sf-stage">Stage <span class="bw-stage-pill">${_escHtml(i.stage || 'new')}</span></div>
+            <div class="bw-sf-stage">Stage <select class="bw-stage-sel" onchange="bwSetStage('${_escHtml(String(i.id))}', this.value)">${['new','contacted','working','won','lost','dismissed'].map(s => `<option value="${s}"${(String(i.stage||'new').toLowerCase()===s)?' selected':''}>${s}</option>`).join('')}</select></div>
           </div>
           <div class="bw-sf-ev">${evHtml}</div>
         </div>
@@ -15667,10 +15686,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         ${body}
         <div class="bw-actions">
           ${openBtn}
-          <button class="bw-btn primary" onclick="bwStub('${_escHtml(act)}')">${_escHtml(act)}</button>
+          <button class="bw-btn primary" onclick="bwSetStage('${_escHtml(String(i.id))}','won')">${_escHtml(act)}</button>
           <button class="bw-btn" onclick="bwStub('Reschedule')">Reschedule</button>
           <button class="bw-btn" onclick="bwStub('Set follow-up')">Set follow-up</button>
-          <button class="bw-btn danger" onclick="bwStub('Mark lost')">Mark lost</button>
+          <button class="bw-btn danger" onclick="bwSetStage('${_escHtml(String(i.id))}','lost')">Mark lost</button>
         </div>
       </div>`;
     }
