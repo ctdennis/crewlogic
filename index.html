@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.28 | 2026-08-15">
+  <meta name="crewlogic-version" content="v5.124.29 | 2026-08-15">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15435,6 +15435,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Pin the grid to the viewport so the worklist + detail each scroll INTERNALLY (the page itself doesn't
     // scroll). Without this, a click on a bottom-of-list item leaves the detail off-screen up top.
     function bwFitHeight() {
+      // Re-assert full desktop width every layout pass — some app paths reset .app-content/.app-shell max-width,
+      // which made the workspace flicker narrow↔wide between clicks.
+      ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) el.style.maxWidth = 'none'; });
       const g = document.querySelector('#bizdevScreen .bw-grid'); if (!g) return;
       g.style.height = Math.max(360, window.innerHeight - g.getBoundingClientRect().top - 20) + 'px';
     }
@@ -15459,7 +15462,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (document.getElementById('bwStyles')) return;
       const st = document.createElement('style'); st.id = 'bwStyles';
       st.textContent = `
-        #bizdevScreen .bw-app{max-width:1680px;margin:0 auto;}
+        #bizdevScreen{width:100%;}
+        #bizdevScreen .bw-app{max-width:1680px;margin:0 auto;width:100%;}
         #bizdevScreen .bw-tnum{font-variant-numeric:tabular-nums;}
         #bizdevScreen .bw-mono{font-family:var(--mono,ui-monospace,Menlo,Consolas,monospace);color:var(--accent-green,#35c26e);}
         #bizdevScreen .bw-none{color:var(--text-muted,#8ea3b5);}
@@ -15656,6 +15660,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _bwSel = it.id;
       document.querySelectorAll('#bwRail .bw-row').forEach(r => r.classList.toggle('sel', String(r.dataset.id) === String(id)));
       const s = document.getElementById('bwSurface'); if (s) s.innerHTML = bwDetailHtml(it); // paints ONLY the right pane; rail (open groups/scroll) untouched
+      bwFitHeight(); // re-assert full width + fit height (guards the content-width flicker on click)
     }
 
     function bwDetailHtml(i) {
@@ -15714,7 +15719,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         <div class="bw-sf-contact">${chips.join('') || '<span class="bw-ctx" style="font-size:12px">No contact on file</span>'}</div>
       </div>
       <div class="bw-sf-body">
-        <div class="bw-pedit"><span class="bw-pedit-l">Probability of Close <span class="bw-help" title="A confidence factor: the probability this lead gets booked to a job. It multiplies the Opportunity to give the forecast (Opportunity × Probability = forecast).">?</span></span><input type="number" class="bw-pin" min="0" max="100" step="5" value="${p}" onchange="bwSetP('${_escHtml(String(i.id))}', this.value)"><span class="bw-pedit-l" style="text-transform:none;letter-spacing:0;font-weight:400">% — tunes the forecast (Opportunity × P)</span></div>
+        <div class="bw-pedit"><span class="bw-pedit-l">Probability of Close <span class="bw-help" title="A confidence factor: the probability this lead gets booked to a job. It multiplies the Opportunity to give the forecast (Opportunity × Probability = forecast)." onclick="bwToast('Probability of Close: a confidence factor — the chance this lead gets booked to a job. It multiplies the Opportunity to give the forecast.')">?</span></span><input type="number" class="bw-pin" min="0" max="100" step="5" value="${p}" onchange="bwSetP('${_escHtml(String(i.id))}', this.value)"><span class="bw-pedit-l" style="text-transform:none;letter-spacing:0;font-weight:400">% — tunes the forecast (Opportunity × P)</span></div>
         ${body}
         <div class="bw-actions">
           ${openBtn}
