@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.30 | 2026-08-15">
+  <meta name="crewlogic-version" content="v5.125.0 | 2026-08-15">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15482,8 +15482,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         #bizdevScreen .bw-kpi.fc{background:rgba(53,194,110,.16);border-color:var(--accent-green,#35c26e);}
         #bizdevScreen .bw-kpi.fc b{color:var(--accent-green,#35c26e);}
         #bizdevScreen .bw-kpi.win b{color:var(--accent-green,#35c26e);}
-        #bizdevScreen .bw-grid{display:grid;grid-template-columns:380px minmax(0,1fr);gap:16px;align-items:stretch;}
+        #bizdevScreen .bw-grid{display:grid;grid-template-columns:380px 10px minmax(0,1fr);gap:0;align-items:stretch;}
         @media (max-width:860px){#bizdevScreen .bw-grid{grid-template-columns:1fr;}}
+        /* Draggable rail/detail divider (mirrors the dispatch dashboard's rail dividers; persists in localStorage). */
+        #bizdevScreen .bw-divider{cursor:col-resize;align-self:stretch;display:flex;align-items:center;justify-content:center;touch-action:none;}
+        #bizdevScreen .bw-divider::before{content:"";width:2px;height:100%;background:var(--border,#2c3e50);border-radius:2px;transition:background .15s,width .15s;}
+        #bizdevScreen .bw-divider:hover::before,#bizdevScreen .bw-divider.dragging::before{background:var(--accent-green,#35c26e);width:4px;}
+        @media (max-width:860px){#bizdevScreen .bw-divider{display:none;}}
+        #bizdevScreen .bw-src-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
         #bizdevScreen .bw-rail{background:var(--bg-card,#1e2f40);border:1px solid var(--border,#2c3e50);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;max-height:100%;}
         #bizdevScreen #bwRail{overflow-y:auto;flex:1;min-height:0;}
         #bizdevScreen .bw-rail-h{padding:11px 14px;border-bottom:1px solid var(--border,#2c3e50);display:flex;align-items:center;gap:8px;}
@@ -15601,13 +15607,49 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               <div class="bw-rail-h"><b>Worklist</b><span class="bw-railsub">ranked by forecast</span></div>
               <div id="bwRail">${bwRailHtml()}</div>
             </div>
+            <div class="bw-divider" title="Drag to resize"></div>
             <div class="bw-surface" id="bwSurface">${bwEmptyHtml()}</div>
           </div>
           <div class="bw-foot">Read-only P0 · scheduling &amp; write-back land next phase · FW-66 · docs/plan-bizdev-workspace.md</div>
         </div>`;
       if (_bwSel && _bwItems.some(i => i.id === _bwSel)) bwPick(_bwSel); // re-open a prior selection if it still exists
       bwFitHeight();
+      _bwApplyGrid(); _bwInitDivider(); // restore the persisted rail width + bind the drag handle (ADDITIVE — does not touch bwFitHeight's .bw-app width)
       if (!window._bwFitBound) { window.addEventListener('resize', bwFitHeight); window._bwFitBound = true; }
+      if (!window._bwGridBound) { window.addEventListener('resize', _bwApplyGrid); window._bwGridBound = true; }
+    }
+
+    // ── Draggable, persisted rail/detail divider (Part 2). Mirrors the dispatch dashboard's rail-divider pattern
+    //    (see _dashInitDividers / dashRailW_* localStorage). Here the column SPLIT changes only — bwFitHeight still
+    //    owns the definite .bw-app width, so the two never fight. Key: bizdev.railWidth. Clamp 260–760px, default 380.
+    function _bwRailWidth() {
+      const v = parseInt(localStorage.getItem('bizdev.railWidth') || '', 10);
+      return Math.max(260, Math.min(760, Number.isFinite(v) ? v : 380));
+    }
+    function _bwApplyGrid() {
+      const g = document.querySelector('#bizdevScreen .bw-grid'); if (!g) return;
+      if (window.innerWidth <= 860) { g.style.gridTemplateColumns = '1fr'; return; } // stack on mobile (divider hidden via CSS)
+      g.style.gridTemplateColumns = _bwRailWidth() + 'px 10px minmax(0,1fr)';
+    }
+    function _bwInitDivider() {
+      const d = document.querySelector('#bizdevScreen .bw-divider'); if (!d || d._bwBound) return; d._bwBound = true;
+      d.onmousedown = function (e) {
+        e.preventDefault();
+        const g = document.querySelector('#bizdevScreen .bw-grid'); const rail = document.querySelector('#bizdevScreen .bw-rail'); if (!g || !rail) return;
+        const startX = e.clientX, startW = rail.getBoundingClientRect().width;
+        d.classList.add('dragging'); document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
+        const onMove = function (ev) {
+          const w = Math.max(260, Math.min(760, Math.round(startW + (ev.clientX - startX))));
+          g.style.gridTemplateColumns = w + 'px 10px minmax(0,1fr)';
+        };
+        const onUp = function () {
+          document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+          d.classList.remove('dragging'); document.body.style.cursor = ''; document.body.style.userSelect = '';
+          const w = Math.max(260, Math.min(760, Math.round(rail.getBoundingClientRect().width)));
+          try { localStorage.setItem('bizdev.railWidth', String(w)); } catch (_e) {}
+        };
+        document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+      };
     }
 
     function bwEmptyHtml() {
@@ -15671,44 +15713,74 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const g = BW_GROUPS.find(x => x.type === i.type) || { color: '#6e8194', name: i.type };
       const has = bwHasAmount(i), fc = bwForecast(i), p = Math.round(bwPclose(i) * 100);
       const isEst = (i.type === 'unconverted_estimate');
-      const prov = (i.source_provider || '').toLowerCase();
-      const where = (prov === 'crewlogic') ? 'CrewLogic' : 'Vonigo';
+      const isFb = bwIsFallback(i), avg = bwAvgJob();
+      const clPresent = !!(isEst && i.cl_present && i.cl_estimate_id);
       const chips = [];
       if (i.phone) chips.push(`<a class="bw-chip" href="tel:${plTel(i.phone)}"><span class="bw-k">Call</span>${_escHtml(i.phone)}</a>`);
       if (i.email) chips.push(`<a class="bw-chip" href="mailto:${_escHtml(i.email)}"><span class="bw-k">Email</span>${_escHtml(i.email)}</a>`);
-      const isFb = bwIsFallback(i), avg = bwAvgJob();
-      const evHtml = has
-        ? `<b class="bw-tnum">${bwUsd(fc)}</b><span>forecast · ${bwUsd(i.amount)} × ${p}%</span>`
-        : (isFb
-          ? `<b class="bw-tnum">${bwUsd(fc)}</b><span>forecast · ~${bwUsd(avg)} × ${p}% · avg job</span>`
-          : `<b class="bw-tnum bw-none">—</b><span>AI estimate pending</span>`);
-      let body;
-      if (isEst) {
-        body = `<div class="bw-card">
-          <h3>Quote <span class="bw-card-sub">· source: ${where}</span></h3>
+      // Header EV summary (kept) — forecast, or the AI-pending note when there's no amount and no avg-job floor.
+      const evHtml = (has || isFb)
+        ? `<b class="bw-tnum">${bwUsd(fc)}</b><span>forecast · ${has ? bwUsd(i.amount) : '~' + bwUsd(avg)} × ${p}%${(!has && isFb) ? ' · avg job' : ''}</span>`
+        : `<b class="bw-tnum bw-none">—</b><span>AI estimate pending</span>`;
+
+      // ── UNIFIED top strip (Part 4) — SAME [Quote|Opportunity · Prob. of close · Forecast] for EVERY type.
+      //    Uses the item's real amount when present, else the avg-job floor (Low), else "— / AI estimate pending".
+      const oppLabel = isEst ? 'Quote' : 'Opportunity';
+      const oppVal = has ? bwUsd(i.amount) : (isFb ? '~' + bwUsd(avg) : '—');
+      const oppSub = has
+        ? (isEst ? (clPresent ? 'CrewLogic estimate' : 'priced') : 'priced')
+        : (isFb ? 'avg job (30-day) · Low' : 'AI estimate pending');
+      const fcVal = (has || isFb) ? bwUsd(fc) : '—';
+      const strip = `<div class="bw-card">
           <div class="bw-strip">
-            <div class="bw-m"><b class="bw-tnum">${has ? bwUsd(i.amount) : '—'}</b><span>quote</span></div>
+            <div class="bw-m"><b class="bw-tnum">${oppVal}</b><span>${oppLabel} · <span class="bw-card-sub">${oppSub}</span></span></div>
             <div class="bw-m"><b class="bw-tnum">${p}%</b><span>Prob. of close</span></div>
-            <div class="bw-m"><b class="bw-tnum" style="color:var(--accent-green,#35c26e)">${has ? bwUsd(fc) : '—'}</b><span>forecast</span></div>
+            <div class="bw-m"><b class="bw-tnum" style="color:var(--accent-green,#35c26e)">${fcVal}</b><span>forecast</span></div>
           </div>
-          ${i.reason ? `<div class="bw-ctx" style="margin-top:9px">${_escHtml(i.reason)}</div>` : ''}
-          <div class="bw-ctx" style="margin-top:9px;font-size:12px">Read-only here. Adjust the estimate in <b>${where}</b> — the only place changes are made.</div>
+          ${(!has && isFb) ? `<div class="bw-ctx" style="margin-top:9px;font-size:12px">No priced value yet — using the <b>franchise average job (30-day)</b> as the floor Opportunity. ${isEst ? 'Add a quote in CrewLogic or Vonigo for a precise number.' : 'A precise AI-derived opportunity is a later phase.'}</div>` : ''}
+          ${(!has && !isFb) ? `<div class="bw-ctx" style="margin-top:9px;font-size:12px">No dollar value yet — <b>AI estimate pending</b>. Set an <b>Avg job size $</b> in Settings → Cost Analysis to use the franchise average as a floor.</div>` : ''}
+        </div>`;
+
+      // ── Estimate-only Source card (Part 3b/3c): badge (CrewLogic/Vonigo/Both), Vonigo estimate #, CrewLogic $/status.
+      let estMeta = '';
+      if (isEst) {
+        const badge = clPresent ? 'Both' : 'Vonigo';
+        const badgeColor = clPresent ? '#35c26e' : '#6db3ff';
+        const woNum = _escHtml(String(i.source_external_id || ''));
+        const clStatus = i.cl_status ? ' · ' + _escHtml(String(i.cl_status)) : '';
+        estMeta = `<div class="bw-card">
+          <h3>Source</h3>
+          <div class="bw-src-row">
+            <span class="bw-badge" style="color:${badgeColor};border-color:${badgeColor}">${badge}</span>
+            ${woNum ? `<span class="bw-chip"><span class="bw-k">Vonigo est.</span>#${woNum}</span>` : ''}
+            ${clPresent ? `<span class="bw-chip"><span class="bw-k">CrewLogic</span>${has ? bwUsd(i.amount) : 'estimate'}${clStatus}</span>` : ''}
+          </div>
+          <div class="bw-ctx" style="margin-top:9px;font-size:12px">${clPresent
+            ? 'This estimate exists in <b>both</b> CrewLogic (costing record) and Vonigo (submitted quote) — open either below.'
+            : 'This estimate came from <b>Vonigo</b>. No matching CrewLogic costing record was found for this job.'}</div>
+        </div>`;
+      }
+
+      // ── Type-specific CONTEXT card (kept BELOW the strip; the only per-type difference besides badge + open controls).
+      let ctxCard;
+      if (isEst) {
+        const adjustWhere = clPresent ? 'CrewLogic or Vonigo' : 'Vonigo';
+        ctxCard = `<div class="bw-card"><h3>Context</h3>
+          <div class="bw-ctx">${i.reason ? _escHtml(i.reason) : 'Open estimate awaiting conversion.'}</div>
+          <div class="bw-ctx" style="margin-top:9px;font-size:12px">Read-only here. Adjust the estimate in <b>${adjustWhere}</b> — the only place changes are made.</div>
         </div>`;
       } else {
-        const ctx = _escHtml(i.detail || i.reason || 'No additional context on this item.');
-        body = `<div class="bw-card"><h3>Context</h3><div class="bw-ctx">${ctx}</div></div>`
-          + (has ? '' : (isFb
-            ? `<div class="bw-card"><h3>Opportunity <span class="bw-card-sub">· franchise average · Low confidence</span></h3>
-                <div class="bw-strip">
-                  <div class="bw-m"><b class="bw-tnum">~${bwUsd(avg)}</b><span>avg job (30-day)</span></div>
-                  <div class="bw-m"><b class="bw-tnum">${p}%</b><span>Prob. of close</span></div>
-                  <div class="bw-m"><b class="bw-tnum" style="color:var(--accent-green,#35c26e)">${bwUsd(fc)}</b><span>forecast</span></div>
-                </div>
-                <div class="bw-ctx" style="margin-top:9px;font-size:12px">No priced estimate yet — using the <b>franchise average job (30-day)</b> as the floor Opportunity. A precise AI-derived opportunity is a later phase.</div>
-              </div>`
-            : `<div class="bw-card"><h3>Opportunity <span class="bw-card-sub">· no price attached</span></h3><div class="bw-ctx">No dollar value on this ${_escHtml(BW_BADGE[i.type] || 'item')} yet — <b>— AI estimate pending</b>. Set an <b>Avg job size $</b> in Settings → Cost Analysis to use the franchise average as a floor. The AI-derived opportunity is a later phase.</div></div>`));
+        ctxCard = `<div class="bw-card"><h3>Context</h3><div class="bw-ctx">${_escHtml(i.detail || i.reason || 'No additional context on this item.')}</div></div>`;
       }
-      const openBtn = isEst ? `<button class="bw-btn open" onclick="bwOpenSource('${_escHtml(String(i.id))}')">Open in ${where} ↗</button>` : '';
+      const body = strip + estMeta + ctxCard;
+
+      // ── Open controls (estimate-only): Open in CrewLogic (real editor) and/or Open in Vonigo (real deep-link).
+      const openBtns = [];
+      if (isEst) {
+        if (clPresent) openBtns.push(`<button class="bw-btn open" onclick="bwOpenCrewlogic('${_escHtml(String(i.id))}')">Open in CrewLogic ↗</button>`);
+        openBtns.push(`<button class="bw-btn open" onclick="bwOpenVonigo('${_escHtml(String(i.id))}')">Open in Vonigo ↗</button>`);
+      }
+      const openBtn = openBtns.join('');
       const act = BW_ACT[i.type] || 'Schedule / book';
       return `<div class="bw-sf-head">
         <div class="bw-sf-top">
@@ -15735,10 +15807,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       </div>`;
     }
 
-    function bwOpenSource(id) {
+    // Open in Vonigo — REAL deep-link to the job page (same URL pattern the dispatch map uses:
+    // /Schedule/Job/Job_Main.aspx?jobID=). vonigo_job_id comes from the WO's 'job' relation (edge `list` enrichment).
+    function bwOpenVonigo(id) {
       const i = _bwItems.find(x => String(x.id) === String(id)); if (!i) return;
-      const where = ((i.source_provider || '').toLowerCase() === 'crewlogic') ? 'CrewLogic' : 'Vonigo';
-      bwToast('Opens the ' + where + ' estimate (wiring next phase)');
+      if (i.vonigo_job_id) {
+        window.open('https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(i.vonigo_job_id)), '_blank', 'noopener');
+      } else {
+        bwToast('Vonigo estimate #' + (i.source_external_id || '?') + ' — no direct job link on this item');
+      }
+    }
+    // Open in CrewLogic — loads the matched CrewLogic estimate/costing record into the estimate editor (real nav).
+    function bwOpenCrewlogic(id) {
+      const i = _bwItems.find(x => String(x.id) === String(id)); if (!i) return;
+      if (i.cl_estimate_id) { openEstimate(String(i.cl_estimate_id)); }
+      else bwToast('No CrewLogic estimate found for this item');
     }
     function bwStub(action) { bwToast(action + ' — next phase'); }
 

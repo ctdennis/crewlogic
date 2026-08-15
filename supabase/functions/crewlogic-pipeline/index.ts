@@ -213,6 +213,43 @@ Deno.serve(async (req: Request) => {
         for (const t of (ts || []) as Record<string, unknown>[]) { const k = String(t.pipeline_item_id); if (!touchByItem[k]) touchByItem[k] = { dueAt: t.due_at as string, channel: t.channel as string }; }
       }
       const out = (items || []).map((i: Record<string, unknown>) => ({ ...i, nextTouch: touchByItem[i.id as string] || null }));
+      // ── Bizdev enrichment: match unconverted_estimate items to their CrewLogic estimate row (the real quote
+      //    total_price) and expose the Vonigo jobID for a deep-link. The WO price field (813) is 0 for estimates,
+      //    so the CrewLogic estimate is the only real $ source; when present it overwrites amount. Two indexed reads.
+      const estOut = out.filter((i: Record<string, unknown>) => i.type === 'unconverted_estimate');
+      if (estOut.length) {
+        const { data: rawRows } = await supabase.from('pipeline_items').select('id, raw')
+          .eq('franchise_id', franchiseInternalID).eq('type', 'unconverted_estimate');
+        const jobByItem: Record<string, string> = {}; const jobIds: string[] = [];
+        for (const r of (rawRows || []) as Record<string, unknown>[]) {
+          const rels = (((r.raw as Record<string, unknown>) || {}).Relations as VRel[]) || [];
+          const j = (rels || []).find((x) => x && x.relationType === 'job');
+          if (j && j.objectID != null) { const jid = String(j.objectID); jobByItem[String(r.id)] = jid; jobIds.push(jid); }
+        }
+        const estByJob: Record<string, Record<string, unknown>> = {};
+        if (jobIds.length) {
+          const { data: ests } = await supabase.from('estimates')
+            .select('estimate_id, job_id, total_price, status, deleted_at')
+            .eq('franchise_id', franchiseInternalID).in('job_id', jobIds);
+          for (const e of (ests || []) as Record<string, unknown>[]) {
+            if (e.deleted_at) continue;
+            const k = String(e.job_id); const prev = estByJob[k];
+            if (!prev || Number(e.total_price || 0) > Number(prev.total_price || 0)) estByJob[k] = e; // keep the most-priced match
+          }
+        }
+        for (const it of estOut) {
+          const jid = jobByItem[String(it.id)] || null;
+          it.vonigo_job_id = jid;
+          const e = jid ? estByJob[jid] : null;
+          if (e) {
+            it.cl_present = true;
+            it.cl_estimate_id = e.estimate_id;
+            it.cl_status = e.status;
+            it.cl_total_price = Number(e.total_price || 0);
+            if ((it.amount == null || Number(it.amount) === 0) && Number(e.total_price || 0) > 0) it.amount = Number(e.total_price);
+          } else { it.cl_present = false; }
+        }
+      }
       const { data: allT } = await supabase.from('pipeline_items').select('type, stage').eq('franchise_id', franchiseInternalID);
       const counts: Record<string, number> = {}; let open = 0;
       for (const r of (allT || []) as Record<string, string>[]) { counts[r.type] = (counts[r.type] || 0) + 1; if (!CLOSED.has(r.stage)) open++; }
