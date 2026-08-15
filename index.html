@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.3 | 2026-08-15">
+  <meta name="crewlogic-version" content="v5.125.4 | 2026-08-15">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15585,6 +15585,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         else { console.error('[bizdev] list failed', res && res.error); _bwItems = []; }
         _bwAvgCalc = (avgRes && avgRes.success && Number(avgRes.avg) > 0) ? Math.round(Number(avgRes.avg)) : 0;
       } catch (e) { console.error('[bizdev] load error', e); _bwItems = []; }
+      // LEADS window: P(close) is age-decayed, so a lead >2 weeks old is effectively dead. Show only leads
+      // from the last 14 days (other types keep their own relevance window). Keeps the queue + forecast honest.
+      _bwItems = (_bwItems || []).filter(it => it.type !== 'lead' || bwDaysOld(it.occurred_at) <= 14);
       bwPaint();
     }
 
