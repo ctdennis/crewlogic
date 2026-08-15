@@ -159,7 +159,7 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || '').trim();
     const franchiseID = String(body.franchiseID || '').trim();
-    const ACTIONS = ['sync', 'list', 'reminders', 'detail', 'update', 'dismiss', 'touchDone', 'snooze', 'seqList', 'seqSave', 'seqDelete', 'assignSequence', 'unassignSequence'];
+    const ACTIONS = ['sync', 'list', 'reminders', 'detail', 'update', 'dismiss', 'touchDone', 'snooze', 'seqList', 'seqSave', 'seqDelete', 'assignSequence', 'unassignSequence', 'avgJobSize'];
     if (!ACTIONS.includes(action)) return json({ success: false, error: 'unknown action', reqId }, 400);
     if (!franchiseID) return json({ success: false, error: 'franchiseID required', reqId }, 400);
 
@@ -169,6 +169,29 @@ Deno.serve(async (req: Request) => {
     const franchiseInternalID = (fr as { id: string }).id;
     const CLOSED = new Set(['won', 'lost', 'dismissed', 'resolved']);
     const ownItem = async (id: string) => (await supabase.from('pipeline_items').select('id').eq('id', id).eq('franchise_id', franchiseInternalID).maybeSingle()).data; // franchise-scope guard
+
+    // ===== AVG JOB SIZE (read-only) — average closed-job revenue over the last 30 days from the job mirror =====
+    // Closed job = job_appointments.status='done' (Vonigo WorkOrder status 164 Completed / 165 Archived, per the
+    // importer's apptStatus). Revenue = job_source_snapshot.import_total (woPrice field 813 at import time).
+    // Franchise-scoped. Returns { avg, count, sumRevenue, days:30 } — a suggestion the owner may Apply; no writes.
+    if (action === 'avgJobSize') {
+      const days = 30;
+      const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10); // YYYY-MM-DD
+      const { data: rows, error: err } = await supabase
+        .from('job_source_snapshot')
+        .select('import_total, job_appointments!inner(status, scheduled_date)')
+        .eq('franchise_id', franchiseInternalID)
+        .eq('job_appointments.status', 'done')
+        .gte('job_appointments.scheduled_date', cutoff);
+      if (err) return json({ success: false, error: err.message, reqId }, 500);
+      let sum = 0, count = 0;
+      for (const r of ((rows || []) as Record<string, unknown>[])) {
+        const v = Number(r.import_total);
+        if (Number.isFinite(v) && v > 0) { sum += v; count++; }
+      }
+      const avg = count > 0 ? Math.round(sum / count) : 0;
+      return json({ success: true, avg, count, sumRevenue: Math.round(sum), days, reqId });
+    }
 
     // ===== CRM actions (DB only; no Vonigo) =====
     if (action === 'list') {

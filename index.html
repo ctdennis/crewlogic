@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.27 | 2026-08-15">
+  <meta name="crewlogic-version" content="v5.124.28 | 2026-08-15">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -2005,6 +2005,11 @@
                   <div class="settings-input-group">
                     <label class="settings-input-label">Default Recycling $/truck</label>
                     <input type="number" class="form-input cost-compact-input" id="settingsRecyclingRevenue" placeholder="130" inputmode="decimal" min="0">
+                  </div>
+                  <div class="settings-input-group">
+                    <label class="settings-input-label">Avg job size $ <span style="font-weight:400;color:var(--text-muted);">(fallback opportunity)</span></label>
+                    <input type="number" class="form-input cost-compact-input" id="settingsAvgJobSize" placeholder="0" inputmode="decimal" min="0" step="1" title="Average closed-job revenue. Used in the Sales Workspace as the fallback Opportunity for unpriced leads/cases.">
+                    <div id="avgJobSuggest" style="display:none;font-size:11px;color:var(--text-muted);margin-top:3px;line-height:1.4;"></div>
                   </div>
                 </div>
               </div>
@@ -15405,6 +15410,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function bwEvk(n) { n = Number(n) || 0; return n >= 1000 ? '$' + (n / 1000).toFixed(1) + 'k' : '$' + Math.round(n); }
     function bwDaysOld(occurred) { if (!occurred) return 0; const ms = Date.now() - new Date(occurred).getTime(); return ms > 0 ? ms / 86400000 : 0; }
     function bwHasAmount(it) { const a = Number(it && it.amount); return isFinite(a) && a > 0; }
+    // Avg-job-size fallback (client-side, from the loaded cost settings). When an item has NO real amount
+    // but the franchise has an Avg job size $ set, the average becomes the floor Opportunity at Low confidence.
+    function bwAvgJob() { const a = Number((currentUser && currentUser.costSettings && currentUser.costSettings.avgJobSize)); return (isFinite(a) && a > 0) ? a : 0; }
+    function bwIsFallback(it) { return !bwHasAmount(it) && bwAvgJob() > 0; } // opportunity comes from the franchise average
+    function bwOppAmount(it) { if (bwHasAmount(it)) return Number(it.amount); const avg = bwAvgJob(); return avg > 0 ? avg : null; } // effective opportunity ($), or null when neither
     const BW_CLOSED = new Set(['won', 'lost', 'dismissed', 'resolved']);
     function bwActive(it) { return !BW_CLOSED.has(String((it && it.stage) || 'new').toLowerCase()); } // closed stages hidden from the active worklist + forecast (funnel still counts won/lost)
     // Persist a stage change (CrewLogic-side write to pipeline_items.stage, franchise-scoped via the edge fn's
@@ -15434,8 +15444,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const decay = Math.max(0.4, 1 - bwDaysOld(it.occurred_at) * 0.03);
       return Math.max(0, Math.min(1, base * decay));
     }
-    function bwForecast(it) { return bwHasAmount(it) ? Math.round(bwPclose(it) * Number(it.amount)) : null; }
-    function bwSortKey(it) { const f = bwForecast(it); return (f == null) ? -1 : f; } // no-amount items sort last
+    function bwForecast(it) { const opp = bwOppAmount(it); return (opp != null && opp > 0) ? Math.round(bwPclose(it) * opp) : null; } // uses real amount, else avg-job fallback
+    function bwSortKey(it) { const f = bwForecast(it); return (f == null) ? -1 : f; } // items with neither amount nor avg sort last
 
     function bwToast(msg) {
       let t = document.getElementById('bwToast');
@@ -15610,9 +15620,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     function bwRowRightHtml(i) {
-      return bwHasAmount(i)
-        ? `<span class="bw-fc-amt bw-tnum">${bwUsd(bwForecast(i))}</span><span class="bw-fc-opp bw-tnum">of ${bwUsd(i.amount)}</span>`
-        : `<span class="bw-fc-amt bw-none">—</span><span class="bw-fc-opp">AI estimate pending</span>`;
+      if (bwHasAmount(i)) return `<span class="bw-fc-amt bw-tnum">${bwUsd(bwForecast(i))}</span><span class="bw-fc-opp bw-tnum">of ${bwUsd(i.amount)}</span>`;
+      if (bwIsFallback(i)) return `<span class="bw-fc-amt bw-tnum">${bwUsd(bwForecast(i))}</span><span class="bw-fc-opp bw-tnum" style="opacity:.65" title="franchise average job (30-day)">of ~${bwUsd(bwAvgJob())}</span>`;
+      return `<span class="bw-fc-amt bw-none">—</span><span class="bw-fc-opp">AI estimate pending</span>`;
     }
     function bwRowHtml(i) {
       const sub = _escHtml([i.address, (i.reason || i.detail || '')].filter(Boolean).join(' · ')) || '—';
@@ -15657,9 +15667,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const chips = [];
       if (i.phone) chips.push(`<a class="bw-chip" href="tel:${plTel(i.phone)}"><span class="bw-k">Call</span>${_escHtml(i.phone)}</a>`);
       if (i.email) chips.push(`<a class="bw-chip" href="mailto:${_escHtml(i.email)}"><span class="bw-k">Email</span>${_escHtml(i.email)}</a>`);
+      const isFb = bwIsFallback(i), avg = bwAvgJob();
       const evHtml = has
         ? `<b class="bw-tnum">${bwUsd(fc)}</b><span>forecast · ${bwUsd(i.amount)} × ${p}%</span>`
-        : `<b class="bw-tnum bw-none">—</b><span>AI estimate pending</span>`;
+        : (isFb
+          ? `<b class="bw-tnum">${bwUsd(fc)}</b><span>forecast · ~${bwUsd(avg)} × ${p}% · avg job</span>`
+          : `<b class="bw-tnum bw-none">—</b><span>AI estimate pending</span>`);
       let body;
       if (isEst) {
         body = `<div class="bw-card">
@@ -15675,7 +15688,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       } else {
         const ctx = _escHtml(i.detail || i.reason || 'No additional context on this item.');
         body = `<div class="bw-card"><h3>Context</h3><div class="bw-ctx">${ctx}</div></div>`
-          + (!has ? `<div class="bw-card"><h3>Opportunity <span class="bw-card-sub">· no price attached</span></h3><div class="bw-ctx">No dollar value on this ${_escHtml(BW_BADGE[i.type] || 'item')} yet — <b>— AI estimate pending</b>. The AI-derived opportunity is a later phase.</div></div>` : '');
+          + (has ? '' : (isFb
+            ? `<div class="bw-card"><h3>Opportunity <span class="bw-card-sub">· franchise average · Low confidence</span></h3>
+                <div class="bw-strip">
+                  <div class="bw-m"><b class="bw-tnum">~${bwUsd(avg)}</b><span>avg job (30-day)</span></div>
+                  <div class="bw-m"><b class="bw-tnum">${p}%</b><span>Prob. of close</span></div>
+                  <div class="bw-m"><b class="bw-tnum" style="color:var(--accent-green,#35c26e)">${bwUsd(fc)}</b><span>forecast</span></div>
+                </div>
+                <div class="bw-ctx" style="margin-top:9px;font-size:12px">No priced estimate yet — using the <b>franchise average job (30-day)</b> as the floor Opportunity. A precise AI-derived opportunity is a later phase.</div>
+              </div>`
+            : `<div class="bw-card"><h3>Opportunity <span class="bw-card-sub">· no price attached</span></h3><div class="bw-ctx">No dollar value on this ${_escHtml(BW_BADGE[i.type] || 'item')} yet — <b>— AI estimate pending</b>. Set an <b>Avg job size $</b> in Settings → Cost Analysis to use the franchise average as a floor. The AI-derived opportunity is a later phase.</div></div>`));
       }
       const openBtn = isEst ? `<button class="bw-btn open" onclick="bwOpenSource('${_escHtml(String(i.id))}')">Open in ${where} ↗</button>` : '';
       const act = BW_ACT[i.type] || 'Schedule / book';
@@ -29318,7 +29340,7 @@ Please review the estimate below. If you have any questions or would like to adj
       'truckCY',
       'truckHome','MPG','fuelCost','crewRate','disposalCost',
       'disposalWait','recyclingWait','donationWait',
-      'recyclingRevenue','royaltyPct',
+      'recyclingRevenue','royaltyPct','avgJobSize',
       'costMattress','costTV','costFreon','costTire','costPaint',
       'costPallet','costCardboard',
       'containerRateDefault','containerIncludedTonsDefault','containerOverageDefault'
@@ -29406,6 +29428,34 @@ Please review the estimate below. If you have any questions or would like to adj
         if (el && cs[f] !== undefined) el.value = cs[f];
       });
       renderAllFacilityLists();
+      loadAvgJobSuggestion();   // 30-day auto-compute suggestion next to the Avg job size field (additive)
+    }
+
+    // ===== AVG JOB SIZE — 30-day auto-compute (read-only) =====
+    // Fetches the franchise's average closed-job revenue over the last 30 days from the job mirror
+    // (crewlogic-pipeline action:'avgJobSize') and offers it as a one-tap suggestion. Never overwrites
+    // a value the owner already typed — the owner taps Apply to fill the field.
+    async function loadAvgJobSuggestion() {
+      const box = document.getElementById('avgJobSuggest');
+      if (!box) return;
+      box.style.display = 'none';
+      box.innerHTML = '';
+      try {
+        const res = await edgeFunctionCall('crewlogic-pipeline', { action: 'avgJobSize', franchiseID: currentUser.franchiseID });
+        if (!res || res.success === false) return;
+        const avg = Math.round(Number(res.avg) || 0);
+        const count = Number(res.count) || 0;
+        if (!(avg > 0) || !(count > 0)) return;
+        window._avgJobSuggestValue = avg;
+        box.innerHTML = 'Suggested: <b>$' + avg.toLocaleString('en-US') + '</b> (last 30 days, ' + count + ' job' + (count === 1 ? '' : 's') +
+          ') <button type="button" class="btn-surface" style="padding:2px 8px;font-size:11px;border-radius:6px;margin-left:4px;cursor:pointer;" onclick="applyAvgJobSuggestion()">Apply</button>';
+        box.style.display = 'block';
+      } catch (e) { /* non-fatal: manual field still works */ }
+    }
+    function applyAvgJobSuggestion() {
+      const el = document.getElementById('settingsAvgJobSize');
+      const v = window._avgJobSuggestValue;
+      if (el && v > 0) { el.value = v; _settingsDirty = true; }
     }
 
     // ===== COST ANALYSIS PANEL =====
