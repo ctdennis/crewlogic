@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.29 | 2026-08-15">
+  <meta name="crewlogic-version" content="v5.124.30 | 2026-08-15">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15435,11 +15435,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Pin the grid to the viewport so the worklist + detail each scroll INTERNALLY (the page itself doesn't
     // scroll). Without this, a click on a bottom-of-list item leaves the detail off-screen up top.
     function bwFitHeight() {
-      // Re-assert full desktop width every layout pass — some app paths reset .app-content/.app-shell max-width,
-      // which made the workspace flicker narrow↔wide between clicks.
+      const scr = document.getElementById('bizdevScreen'); if (!scr) return;
       ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) el.style.maxWidth = 'none'; });
-      const g = document.querySelector('#bizdevScreen .bw-grid'); if (!g) return;
-      g.style.height = Math.max(360, window.innerHeight - g.getBoundingClientRect().top - 20) + 'px';
+      // A DEFINITE pixel width on .bw-app breaks the flex:1 shrink-wrap chain — .app-content is a flex item that
+      // content-sized the workspace, so it flickered narrow↔wide by detail content. Viewport-based; CSS
+      // max-width:1680 still caps it, margin:0 auto still centers it.
+      const app = scr.querySelector('.bw-app');
+      if (app) app.style.width = Math.max(360, document.documentElement.clientWidth - 88) + 'px';
+      const g = scr.querySelector('.bw-grid');
+      if (g) g.style.height = Math.max(360, window.innerHeight - g.getBoundingClientRect().top - 20) + 'px';
     }
     function bwPclose(it) {
       if (_bwPOverride[it.id] != null) return _bwPOverride[it.id]; // manager override wins over the heuristic
