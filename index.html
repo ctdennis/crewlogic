@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.4 | 2026-08-15">
+  <meta name="crewlogic-version" content="v5.125.5 | 2026-08-15">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15418,17 +15418,54 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function bwActive(it) { return !BW_CLOSED.has(String((it && it.stage) || 'new').toLowerCase()); } // closed stages hidden from the active worklist + forecast (funnel still counts won/lost)
     // Persist a stage change (CrewLogic-side write to pipeline_items.stage, franchise-scoped via the edge fn's
     // 'update' action). Closed stages (won/lost/dismissed) drop the item off the active worklist; Schedule → won.
-    async function bwSetStage(id, stage) {
+    // Reason codes shared by lost + dismissed closes (structured close_reason on pipeline_items).
+    const BW_CLOSE_REASONS = ['Pricing', 'Duplicate', 'Customer unreachable', 'Items already removed', 'Service already performed', 'Other'];
+    // Stage <select> entry point: closing stages (lost/dismissed) prompt for a reason BEFORE persisting;
+    // all other stages persist immediately (unchanged behavior).
+    function bwStageSel(id, stage) {
+      stage = String(stage || '').toLowerCase();
+      if (stage === 'lost' || stage === 'dismissed') { bwReasonPicker(id, stage); return; }
+      bwSetStage(id, stage);
+    }
+    // Inline reason menu injected under the detail header. Pick → persist stage + reason together; Cancel → revert.
+    function bwReasonPicker(id, stage) {
       const it = _bwItems.find(i => String(i.id) === String(id)); if (!it) return;
-      const prev = it.stage; stage = String(stage || '').toLowerCase(); it.stage = stage; // optimistic
+      const surf = document.getElementById('bwSurface'); if (!surf) return;
+      const head = surf.querySelector('.bw-sf-head'); if (!head) return;
+      const ex = document.getElementById('bwReasonMenu'); if (ex) ex.remove();
+      const chips = BW_CLOSE_REASONS.map(r => `<button class="bw-btn bw-reason-chip" data-r="${_escHtml(r)}" onclick="bwPickReason('${_escHtml(String(id))}','${stage}', this.dataset.r)">${_escHtml(r)}</button>`).join('');
+      const menu = document.createElement('div');
+      menu.id = 'bwReasonMenu';
+      menu.style.cssText = 'margin:8px 0;padding:10px;border:1px solid var(--btn-surface-border,#46596d);border-radius:8px;background:var(--bg-card,#1e2f40)';
+      menu.innerHTML = `<div style="font-size:12px;color:var(--text-muted,#9fb0c0);margin-bottom:8px">Reason for marking <b>${stage}</b> — pick one</div>`
+        + `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">${chips}</div>`
+        + `<button class="bw-btn" onclick="bwCancelReason('${_escHtml(String(id))}')">Cancel</button>`;
+      head.insertAdjacentElement('afterend', menu);
+    }
+    async function bwPickReason(id, stage, reason) {
+      const menu = document.getElementById('bwReasonMenu'); if (menu) menu.remove();
+      await bwSetStage(id, stage, reason);
+    }
+    function bwCancelReason(id) {
+      const menu = document.getElementById('bwReasonMenu'); if (menu) menu.remove();
+      const it = _bwItems.find(i => String(i.id) === String(id));
+      const sel = document.querySelector('#bwSurface .bw-stage-sel');
+      if (sel && it) sel.value = String(it.stage || 'new').toLowerCase(); // revert dropdown to persisted stage
+    }
+    async function bwSetStage(id, stage, reason) {
+      const it = _bwItems.find(i => String(i.id) === String(id)); if (!it) return;
+      const prev = it.stage, prevReason = it.close_reason; stage = String(stage || '').toLowerCase(); it.stage = stage; // optimistic
+      if (reason != null) it.close_reason = reason;
       if (!bwActive(it) && _bwSel === it.id) _bwSel = null; // closing the open item clears the detail
       bwPaint();
       try {
-        const d = await edgeFunctionCall('crewlogic-pipeline', { action: 'update', franchiseID: currentUser.franchiseID, id: it.id, patch: { stage } });
+        const patch = { stage };
+        if (reason != null) patch.close_reason = reason;
+        const d = await edgeFunctionCall('crewlogic-pipeline', { action: 'update', franchiseID: currentUser.franchiseID, id: it.id, patch });
         if (!d || d.success === false) throw new Error((d && d.error) || 'update failed');
-        bwToast(!bwActive(it) ? (stage === 'won' ? 'Marked Won — off the active list' : 'Marked ' + stage + ' — off the active list') : ('Stage → ' + stage));
+        bwToast(!bwActive(it) ? (stage === 'won' ? 'Marked Won — off the active list' : 'Marked ' + stage + (reason ? ' · ' + reason : '') + ' — off the active list') : ('Stage → ' + stage));
       } catch (e) {
-        it.stage = prev; bwPaint(); bwToast('Could not save stage — ' + ((e && e.message) || 'try again'));
+        it.stage = prev; it.close_reason = prevReason; bwPaint(); bwToast('Could not save stage — ' + ((e && e.message) || 'try again'));
       }
     }
     // Pin the grid to the viewport so the worklist + detail each scroll INTERNALLY (the page itself doesn't
@@ -15797,7 +15834,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           <div style="min-width:0">
             <h2>${_escHtml(i.customer_name || 'Unknown')}</h2>
             <div class="bw-sf-loc">${_escHtml(i.address || 'No address on file')}</div>
-            <div class="bw-sf-stage">Stage <select class="bw-stage-sel" onchange="bwSetStage('${_escHtml(String(i.id))}', this.value)">${['new','contacted','working','won','lost','dismissed'].map(s => `<option value="${s}"${(String(i.stage||'new').toLowerCase()===s)?' selected':''}>${s}</option>`).join('')}</select></div>
+            <div class="bw-sf-stage">Stage <select class="bw-stage-sel" onchange="bwStageSel('${_escHtml(String(i.id))}', this.value)">${['new','contacted','working','won','lost','dismissed'].map(s => `<option value="${s}"${(String(i.stage||'new').toLowerCase()===s)?' selected':''}>${s}</option>`).join('')}</select></div>
+            ${(['lost','dismissed'].includes(String(i.stage||'').toLowerCase()) && i.close_reason) ? `<div class="bw-sf-closed" style="font-size:12px;color:var(--text-muted,#9fb0c0);margin-top:4px">Closed: ${_escHtml(String(i.stage).charAt(0).toUpperCase() + String(i.stage).slice(1))} · ${_escHtml(String(i.close_reason))}</div>` : ''}
           </div>
           <div class="bw-sf-ev">${evHtml}</div>
         </div>
@@ -15811,7 +15849,6 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           <button class="bw-btn primary" onclick="bwSetStage('${_escHtml(String(i.id))}','won')">${_escHtml(act)}</button>
           <button class="bw-btn" onclick="bwStub('Reschedule')">Reschedule</button>
           <button class="bw-btn" onclick="bwStub('Set follow-up')">Set follow-up</button>
-          <button class="bw-btn danger" onclick="bwSetStage('${_escHtml(String(i.id))}','lost')">Mark lost</button>
         </div>
       </div>`;
     }

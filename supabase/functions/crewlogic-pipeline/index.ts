@@ -296,7 +296,7 @@ Deno.serve(async (req: Request) => {
       const p = (body.patch || {}) as Record<string, unknown>;
       const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
       if (action === 'dismiss') patch.stage = 'dismissed';
-      for (const k of ['stage', 'assigned_to', 'notes', 'cadence']) if (k in p) patch[k] = p[k] == null ? null : String(p[k]);
+      for (const k of ['stage', 'assigned_to', 'notes', 'cadence', 'close_reason']) if (k in p) patch[k] = p[k] == null ? null : String(p[k]);
       if ('next_action_at' in p) patch.next_action_at = p.next_action_at || null;
       const { error } = await supabase.from('pipeline_items').update(patch).eq('id', id).eq('franchise_id', franchiseInternalID);
       if (error) throw error;
