@@ -783,9 +783,18 @@ Deno.serve(async (req: Request) => {
         let resCommSet: boolean | null = null;
         if (resCommOptionID) { try { const ce = await vpost(token, '/data/Clients/', { method: '2', objectID: clientID, Fields: [{ fieldID: '121', optionID: resCommOptionID }] }); resCommSet = ce?.errNo === 0; } catch { resCommSet = false; } }
 
-        console.log('[bookLead] booked', { franchiseID, clientID, jobID, woID, dayID, routeID, startTime, durMin, resCommSet });
-        try { await audit({ franchiseID, action: 'bookLead', actorEmail: body.actorEmail, resolved: { clientID, contactID, locationID, dayID, routeID, startTime, durMin }, fieldsWritten: { woID, jobID, resCommSet }, vonigoErrno: 0, success: true, result: { dateService } }); } catch { /* audit best-effort */ }
-        return json({ success: true, jobID, woID, dateService, durMin, resCommSet });
+        // 6) Deactivate the LEAD so it drops out of the pipeline (owner 2026-08-16: the id we hold IS the lead
+        //    object id — no job existed until now; deactivating the lead record does NOT touch the new job).
+        //    Best-effort: a booked job that leaves the lead active is a minor re-surface, not a failed booking.
+        let leadDeactivated: boolean | null = null;
+        if (body.deactivateLead !== false) {
+          try { const dl = await vpost(token, '/data/Leads/', { method: '5', objectID: clientID }); leadDeactivated = dl?.errNo === 0; if (!leadDeactivated) console.error('[bookLead] lead deactivate failed', { clientID, errNo: dl?.errNo, errMsg: dl?.errMsg }); }
+          catch (e) { leadDeactivated = false; console.error('[bookLead] lead deactivate threw', e); }
+        }
+
+        console.log('[bookLead] booked', { franchiseID, clientID, jobID, woID, dayID, routeID, startTime, durMin, resCommSet, leadDeactivated });
+        try { await audit({ franchiseID, action: 'bookLead', actorEmail: body.actorEmail, resolved: { clientID, contactID, locationID, dayID, routeID, startTime, durMin }, fieldsWritten: { woID, jobID, resCommSet, leadDeactivated }, vonigoErrno: 0, success: true, result: { dateService } }); } catch { /* audit best-effort */ }
+        return json({ success: true, jobID, woID, dateService, durMin, resCommSet, leadDeactivated });
       } catch (e) {
         await releaseLock();
         console.error('[bookLead] exception', e);
