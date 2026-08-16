@@ -790,6 +790,13 @@ Deno.serve(async (req: Request) => {
       if (mc.phone != null && String(mc.phone).trim()) contactFields.push({ fieldID: '1088', fieldValue: String(mc.phone).trim() });
       if (mc.name != null && String(mc.name).trim()) { const nm = String(mc.name).trim(); const sp = nm.lastIndexOf(' '); const first = sp > 0 ? nm.slice(0, sp) : nm; const last = sp > 0 ? nm.slice(sp + 1) : ''; contactFields.push({ fieldID: '127', fieldValue: first }); if (last) contactFields.push({ fieldID: '128', fieldValue: last }); }
 
+      // Client-record fields — the Client (obj 7) carries its OWN name (126 + 130), stored "Last, First" (e.g.
+      //    "Higginbotham, Michael"). Updating the Contact's name does NOT set this — a bare lead stays "No name"
+      //    on the client until 126/130 are set. Res/comm (Client Type 121) is folded into the same edit.
+      const clientFields: any[] = [];
+      if (mc.name != null && String(mc.name).trim()) { const raw = String(mc.name).trim(); const sp = raw.lastIndexOf(' '); const lastFirst = raw.includes(',') ? raw : (sp > 0 ? (raw.slice(sp + 1) + ', ' + raw.slice(0, sp)) : raw); clientFields.push({ fieldID: '126', fieldValue: lastFirst }); clientFields.push({ fieldID: '130', fieldValue: lastFirst }); }
+      if (resCommOptionID) clientFields.push({ fieldID: '121', optionID: resCommOptionID });
+
       // Address fields (shared by the location CREATE for a bare lead and the location UPDATE for an existing one).
       const aStreet = String(ma.street || '').trim(), aCity = String(ma.city || '').trim(), aZip = String(ma.zip || (needLocation ? zip : '') || '').trim();
       const addrFields: any[] = [];
@@ -802,11 +809,14 @@ Deno.serve(async (req: Request) => {
       //    patch whatever subset the manager supplied.
       const canCreateLoc = !!(aStreet && aZip);
 
-      if (dryRun) return json({ success: true, dryRun: true, needLocation, resolved: { clientID, contactID, locationID: locationID || null, durMin, zip, zProvince, zCountry }, wouldPost: { contactEdit: contactFields.length ? { method: '2', objectID: contactID, Fields: contactFields } : null, locationCreate: needLocation ? { method: '3', clientID, contactID, canCreate: canCreateLoc, Fields: addrFields } : null, locationEdit: (!needLocation && addrFields.length) ? { method: '2', objectID: locationID, Fields: addrFields } : null, lock: { dayID, routeID, startTime, duration: durMin, serviceTypeID: svc }, wo: { method: '3', clientID, contactID, locationID: locationID || '(new)', serviceTypeID: svc, Fields: [{ fieldID: '10336', fieldValue: items }, { fieldID: '200', fieldValue: desc }, { fieldID: '186', fieldValue: String(durMin) }] }, clientEdit: resCommOptionID ? { Fields: [{ fieldID: '121', optionID: resCommOptionID }] } : null } });
+      if (dryRun) return json({ success: true, dryRun: true, needLocation, resolved: { clientID, contactID, locationID: locationID || null, durMin, zip, zProvince, zCountry }, wouldPost: { contactEdit: contactFields.length ? { method: '2', objectID: contactID, Fields: contactFields } : null, locationCreate: needLocation ? { method: '3', clientID, contactID, canCreate: canCreateLoc, Fields: addrFields } : null, locationEdit: (!needLocation && addrFields.length) ? { method: '2', objectID: locationID, Fields: addrFields } : null, lock: { dayID, routeID, startTime, duration: durMin, serviceTypeID: svc }, wo: { method: '3', clientID, contactID, locationID: locationID || '(new)', serviceTypeID: svc, Fields: [{ fieldID: '10336', fieldValue: items }, { fieldID: '200', fieldValue: desc }, { fieldID: '186', fieldValue: String(durMin) }] }, clientEdit: clientFields.length ? { method: '2', objectID: clientID, Fields: clientFields } : null } });
 
       // Execute the Contact update (best-effort) + the Location create/update (flags returned so the manager sees what stuck).
-      let contactUpdated: boolean | null = null, locationUpdated: boolean | null = null, locationCreated = false;
+      let contactUpdated: boolean | null = null, locationUpdated: boolean | null = null, locationCreated = false, clientUpdated: boolean | null = null;
       if (contactFields.length) { try { const ce = await vpost(token, '/data/Contacts/', { method: '2', objectID: String(contactID), Fields: contactFields }); contactUpdated = ce?.errNo === 0; if (!contactUpdated) console.error('[bookLead] contact update failed', { contactID, errNo: ce?.errNo, errMsg: ce?.errMsg }); } catch (e) { contactUpdated = false; console.error('[bookLead] contact update threw', e); } }
+      // Set the Client's own name (126/130) + res/comm (121) in one edit — otherwise the client stays "No name".
+      if (clientFields.length) { try { const cue = await vpost(token, '/data/Clients/', { method: '2', objectID: clientID, Fields: clientFields }); clientUpdated = cue?.errNo === 0; if (!clientUpdated) console.error('[bookLead] client update failed', { clientID, errNo: cue?.errNo, errMsg: cue?.errMsg }); } catch (e) { clientUpdated = false; console.error('[bookLead] client update threw', e); } }
+      const resCommSet: boolean | null = resCommOptionID ? clientUpdated : null;
       if (needLocation) {
         // CREATE the service address (standard Vonigo child-create: clientID + contactID; franchise/locationType auto-derive).
         if (!canCreateLoc) return json({ success: false, step: 'location', error: 'This lead has no service address on file — enter at least a street and zip to book.' }, 409);
@@ -837,9 +847,7 @@ Deno.serve(async (req: Request) => {
         const jobID = jobRel ? String(jobRel.objectID) : (woObj?.name ? (String(woObj.name).match(/(\d+)-/) || [])[1] || null : null);
         const dateService = woObj?.dateService || null;
 
-        // 5) Set residential/commercial (Client field 121 — a text/relation edit that DOES take, unlike the Job selects)
-        let resCommSet: boolean | null = null;
-        if (resCommOptionID) { try { const ce = await vpost(token, '/data/Clients/', { method: '2', objectID: clientID, Fields: [{ fieldID: '121', optionID: resCommOptionID }] }); resCommSet = ce?.errNo === 0; } catch { resCommSet = false; } }
+        // 5) (Client name + res/comm already set pre-lock in one /data/Clients edit — see clientFields above.)
 
         // 6) Deactivate the LEAD so it drops out of the pipeline (owner 2026-08-16: the id we hold IS the lead
         //    object id — no job existed until now; deactivating the lead record does NOT touch the new job).
@@ -850,9 +858,9 @@ Deno.serve(async (req: Request) => {
           catch (e) { leadDeactivated = false; console.error('[bookLead] lead deactivate threw', e); }
         }
 
-        console.log('[bookLead] booked', { franchiseID, clientID, jobID, woID, dayID, routeID, startTime, durMin, contactUpdated, locationCreated, locationUpdated, resCommSet, leadDeactivated });
-        try { await audit({ franchiseID, action: 'bookLead', actorEmail: body.actorEmail, resolved: { clientID, contactID, locationID, dayID, routeID, startTime, durMin }, fieldsWritten: { woID, jobID, contactUpdated, locationCreated, locationUpdated, resCommSet, leadDeactivated }, vonigoErrno: 0, success: true, result: { dateService } }); } catch { /* audit best-effort */ }
-        return json({ success: true, jobID, woID, dateService, durMin, contactUpdated, locationCreated, locationUpdated, resCommSet, leadDeactivated });
+        console.log('[bookLead] booked', { franchiseID, clientID, jobID, woID, dayID, routeID, startTime, durMin, contactUpdated, clientUpdated, locationCreated, locationUpdated, resCommSet, leadDeactivated });
+        try { await audit({ franchiseID, action: 'bookLead', actorEmail: body.actorEmail, resolved: { clientID, contactID, locationID, dayID, routeID, startTime, durMin }, fieldsWritten: { woID, jobID, contactUpdated, clientUpdated, locationCreated, locationUpdated, resCommSet, leadDeactivated }, vonigoErrno: 0, success: true, result: { dateService } }); } catch { /* audit best-effort */ }
+        return json({ success: true, jobID, woID, dateService, durMin, contactUpdated, clientUpdated, locationCreated, locationUpdated, resCommSet, leadDeactivated });
       } catch (e) {
         await releaseLock();
         console.error('[bookLead] exception', e);
