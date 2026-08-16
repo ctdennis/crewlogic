@@ -213,5 +213,24 @@ UPDATE target, don't round-trip-verify by re-retrieving that id.
 **⚠ Booking auto-sends a Vonigo appointment confirmation to the customer** — test ONLY on a throwaway/old lead
 with the address+email changed to your own (owner 2026-08-16). See the memory `vonigo-booking-sends-confirmation`.
 
+## RESOLVED — bare-lead location create + client name (verified live 2026-08-16)
+Built + tested on dev #90 (v5.125.20–.21). A real book of a **location-less lead** succeeded — job
+**878468**, service address "11 Wagon Trail, Lakeville MA 02347" created and wired, on-site contact set.
+
+- **Bare leads (Contact but NO Location):** most phone/web leads. `bookLead` now requires only a Contact;
+  a missing Location is **CREATED**: `POST /data/Locations/ {method:'3', clientID, contactID, Fields:[773
+  street, 775 zip, 776 city, 778 state optionID, 779 country optionID]}` — franchise/locationType auto-derive.
+  Guarded on street+zip present; a failed create aborts before the WO (no orphan job). Existing locations are
+  UPDATED (method 2) instead.
+- **Client "No name" fix:** the Client (obj 7) carries its OWN name in **126 AND 130** ("Last, First"). Updating
+  the Contact name (127/128) does NOT set it. `bookLead` now edits Client 126/130 (+ res/comm 121) pre-lock in
+  one `/data/Clients` edit. Verified: a named client has 126=130="Last, First"; a bare one had "n/a".
+- **Location read-by-id unreliable** (re-confirmed: asked 1087585, got 1595 / another franchise). Trust the
+  client's `location` relation id for writes; never round-trip-read a location.
+- Full field maps captured in memory `vonigo-client-contact-location-field-maps`. Read-only diagnostics
+  `inspectClient` (+`deep`) and `objMeta` live in `crewlogic-dispatch` for future triage.
+
+**Remaining:** owner end-to-end confirm on a bare lead (name now shows on the Client); then cancellation + UCB.
+
 ---
-*No code until this contract is signed off. Cancellation contract is next.*
+*Leads booking BUILT + dev-verified. Cancellation contract is next.*
