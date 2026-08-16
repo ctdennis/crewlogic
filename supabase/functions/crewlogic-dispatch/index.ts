@@ -767,12 +767,38 @@ Deno.serve(async (req: Request) => {
       const locationID = (crel.location && crel.location[0]) || (crel.location1 && crel.location1[0]);
       if (!contactID || !locationID) return json({ success: false, step: 'client', error: 'Lead is missing a contact or location — cannot book.', contactID: contactID || null, locationID: locationID || null }, 409);
 
-      // 2) Duration from the zip's zone (contract: /resources/zips/ method 1 → ServiceTypes[0].duration)
+      // 2) Zip lookup — ONE call yields duration + province/country optionIDs + default city (contract:
+      //    /resources/zips/ method 1 → ServiceTypes[0].duration, Zip.provinceOptionID/countryOptionID).
       let durMin = Number(body.durationMin || 0);
-      if (!durMin && zip) { try { const zr = await vpost(token, '/resources/zips/', { method: '1', zip }); const st = (zr.ServiceTypes || [])[0]; if (st && st.duration) durMin = Number(st.duration); } catch { /* fall through */ } }
+      let zipInfo: any = null;
+      if (zip) { try { const zr = await vpost(token, '/resources/zips/', { method: '1', zip }); zipInfo = zr.Zip || zr.zip || (Array.isArray(zr.Zips) ? zr.Zips[0] : null) || null; const st = (zr.ServiceTypes || [])[0]; if (!durMin && st && st.duration) durMin = Number(st.duration); } catch { /* fall through */ } }
       if (!durMin) durMin = 120;
+      const zProvince = zipInfo ? String(zipInfo.provinceOptionID || zipInfo.ProvinceOptionID || '') : '';
+      const zCountry = zipInfo ? String(zipInfo.countryOptionID || zipInfo.CountryOptionID || '9906') : '9906';
 
-      if (dryRun) return json({ success: true, dryRun: true, resolved: { clientID, contactID, locationID, durMin, zip }, wouldPost: { lock: { dayID, routeID, startTime, duration: durMin, serviceTypeID: svc }, wo: { method: '3', clientID, contactID, locationID, serviceTypeID: svc, Fields: [{ fieldID: '10336', fieldValue: items }, { fieldID: '200', fieldValue: desc }, { fieldID: '186', fieldValue: String(durMin) }] }, clientEdit: resCommOptionID ? { Fields: [{ fieldID: '121', optionID: resCommOptionID }] } : null } });
+      // 2.5) Contact-record update — refresh the client's Contact + Location from the modal fields BEFORE the
+      //    WO create (the WO references locationID, so the address must be right first). Only fields the manager
+      //    actually supplied are sent — never blank existing data. State (778) is a select → needs the zip's
+      //    provinceOptionID; skipped if the zip lookup didn't yield one (leaves the existing state). Contract:
+      //    docs/contract-bizdev-leads-booking.md "Contact-record backend". Real Vonigo writes — GATED.
+      const mc: any = body.contact || {}, ma: any = body.address || {};
+      const contactFields: any[] = [];
+      if (mc.email != null && String(mc.email).trim()) contactFields.push({ fieldID: '97', fieldValue: String(mc.email).trim() });
+      if (mc.phone != null && String(mc.phone).trim()) contactFields.push({ fieldID: '1088', fieldValue: String(mc.phone).trim() });
+      if (mc.name != null && String(mc.name).trim()) { const nm = String(mc.name).trim(); const sp = nm.lastIndexOf(' '); const first = sp > 0 ? nm.slice(0, sp) : nm; const last = sp > 0 ? nm.slice(sp + 1) : ''; contactFields.push({ fieldID: '127', fieldValue: first }); if (last) contactFields.push({ fieldID: '128', fieldValue: last }); }
+      const locFields: any[] = [];
+      if (ma.street != null && String(ma.street).trim()) locFields.push({ fieldID: '773', fieldValue: String(ma.street).trim() });
+      if (ma.city != null && String(ma.city).trim()) locFields.push({ fieldID: '776', fieldValue: String(ma.city).trim() });
+      if (ma.zip != null && String(ma.zip).trim()) locFields.push({ fieldID: '775', fieldValue: String(ma.zip).trim() });
+      if (zProvince) locFields.push({ fieldID: '778', optionID: zProvince });
+      if (zCountry && locFields.length) locFields.push({ fieldID: '779', optionID: zCountry });
+
+      if (dryRun) return json({ success: true, dryRun: true, resolved: { clientID, contactID, locationID, durMin, zip, zProvince, zCountry }, wouldPost: { contactEdit: contactFields.length ? { method: '2', objectID: contactID, Fields: contactFields } : null, locationEdit: locFields.length ? { method: '2', objectID: locationID, Fields: locFields } : null, lock: { dayID, routeID, startTime, duration: durMin, serviceTypeID: svc }, wo: { method: '3', clientID, contactID, locationID, serviceTypeID: svc, Fields: [{ fieldID: '10336', fieldValue: items }, { fieldID: '200', fieldValue: desc }, { fieldID: '186', fieldValue: String(durMin) }] }, clientEdit: resCommOptionID ? { Fields: [{ fieldID: '121', optionID: resCommOptionID }] } : null } });
+
+      // Execute the Contact + Location updates (best-effort; flags returned so the manager can see what stuck).
+      let contactUpdated: boolean | null = null, locationUpdated: boolean | null = null;
+      if (contactFields.length) { try { const ce = await vpost(token, '/data/Contacts/', { method: '2', objectID: String(contactID), Fields: contactFields }); contactUpdated = ce?.errNo === 0; if (!contactUpdated) console.error('[bookLead] contact update failed', { contactID, errNo: ce?.errNo, errMsg: ce?.errMsg }); } catch (e) { contactUpdated = false; console.error('[bookLead] contact update threw', e); } }
+      if (locFields.length) { try { const le = await vpost(token, '/data/Locations/', { method: '2', objectID: String(locationID), Fields: locFields }); locationUpdated = le?.errNo === 0; if (!locationUpdated) console.error('[bookLead] location update failed', { locationID, errNo: le?.errNo, errMsg: le?.errMsg }); } catch (e) { locationUpdated = false; console.error('[bookLead] location update threw', e); } }
 
       // 3) Lock the slot (availability method 2 → lockID)
       const lock = await vpost(token, '/resources/availability/', { method: '2', dayID, routeID, zip, serviceTypeID: svc, duration: String(durMin), startTime });
@@ -803,9 +829,9 @@ Deno.serve(async (req: Request) => {
           catch (e) { leadDeactivated = false; console.error('[bookLead] lead deactivate threw', e); }
         }
 
-        console.log('[bookLead] booked', { franchiseID, clientID, jobID, woID, dayID, routeID, startTime, durMin, resCommSet, leadDeactivated });
-        try { await audit({ franchiseID, action: 'bookLead', actorEmail: body.actorEmail, resolved: { clientID, contactID, locationID, dayID, routeID, startTime, durMin }, fieldsWritten: { woID, jobID, resCommSet, leadDeactivated }, vonigoErrno: 0, success: true, result: { dateService } }); } catch { /* audit best-effort */ }
-        return json({ success: true, jobID, woID, dateService, durMin, resCommSet, leadDeactivated });
+        console.log('[bookLead] booked', { franchiseID, clientID, jobID, woID, dayID, routeID, startTime, durMin, contactUpdated, locationUpdated, resCommSet, leadDeactivated });
+        try { await audit({ franchiseID, action: 'bookLead', actorEmail: body.actorEmail, resolved: { clientID, contactID, locationID, dayID, routeID, startTime, durMin }, fieldsWritten: { woID, jobID, contactUpdated, locationUpdated, resCommSet, leadDeactivated }, vonigoErrno: 0, success: true, result: { dateService } }); } catch { /* audit best-effort */ }
+        return json({ success: true, jobID, woID, dateService, durMin, contactUpdated, locationUpdated, resCommSet, leadDeactivated });
       } catch (e) {
         await releaseLock();
         console.error('[bookLead] exception', e);
