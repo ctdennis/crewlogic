@@ -429,6 +429,21 @@ Deno.serve(async (req: Request) => {
       source_object, source_external_id, last_synced_at: new Date().toISOString(), updated_at: new Date().toISOString(), ...extra,
     });
 
+    // Territory filter for leads (owner 2026-08-16): Vonigo national/mis-routed leads land in this franchise's feed
+    // multi-tagged to OTHER franchises. Franchise tags are unreliable (a [90]-only lead can be in IL; 90 can be listed
+    // first on an MD lead) — the ONLY reliable signal is the address zip's OWNING franchise (/resources/zips → the
+    // zone's serviceType.franchiseID). Cache per zip. Returns the owner id, null (zip not serviced by anyone), or
+    // undefined (transient lookup error → do NOT drop). `franchiseID` here is the Vonigo franchise id (e.g. "90").
+    const ootLeadExtIds: string[] = [];
+    const _zipOwnerCache = new Map<string, string | null | undefined>();
+    const zipOwnerOf = async (zStr: string): Promise<string | null | undefined> => {
+      if (_zipOwnerCache.has(zStr)) return _zipOwnerCache.get(zStr);
+      let owner: string | null | undefined;
+      try { const zr = await vpost('/resources/zips/', { securityToken: token, method: '1', zip: zStr }); const st = (zr.ServiceTypes || [])[0]; owner = st ? String(st.franchiseID) : null; }
+      catch { owner = undefined; }
+      _zipOwnerCache.set(zStr, owner); return owner;
+    };
+
     // WorkOrder-derived types (cancellation / unconverted_estimate / ucb) are READ FROM THE LOCAL JOB MIRROR
     // (job_appointments + job_source_snapshot), which crewlogic-vonigo-import already keeps fresh (prod: every
     // 15 min + a nightly ~90-day backfill). This replaces the old per-sync Vonigo WorkOrders scan (the 120-day UCB
@@ -544,6 +559,13 @@ Deno.serve(async (req: Request) => {
       const leads = clientPages.flat().filter((c) => (getField(c.Fields as VField[], F.clientStage)?.fieldValue || '') === 'Lead');
       await mapPool(leads, 6, async (c) => {
         const fields = c.Fields as VField[]; const rels = c.Relations as VRel[];
+        const address = (fields || []).map((f) => f.fieldValue).find((v) => /\d/.test(String(v)) && /,/.test(String(v))) || null;
+        // Territory filter: drop leads whose address zip is owned by a DIFFERENT franchise (or not serviced at all).
+        const zipStr = (String(address || '').match(/\b(\d{5})(?:-\d{4})?\b/) || [])[1] || '';
+        if (zipStr) {
+          const owner = await zipOwnerOf(zipStr);
+          if (owner !== undefined && owner !== String(franchiseID)) { ootLeadExtIds.push(String(c.objectID)); return; }
+        }
         let phone: string | null = null, email: string | null = null;
         const cachedC = knownLeadContact.get(String(c.objectID));
         if (cachedC && cachedC.phone) { phone = cachedC.phone; email = cachedC.email; } // already fetched — skip the Contact call
@@ -558,8 +580,7 @@ Deno.serve(async (req: Request) => {
           }
         }
         rows.push(mk('lead', 'client', String(c.objectID), {
-          customer_name: String(c.name || ''), phone, email,
-          address: (fields || []).map((f) => f.fieldValue).find((v) => /\d/.test(String(v)) && /,/.test(String(v))) || null,
+          customer_name: String(c.name || ''), phone, email, address,
           occurred_at: iso(c.dateCreated), raw: c,
         }));
       });
@@ -613,6 +634,21 @@ Deno.serve(async (req: Request) => {
       upserted = rows.length;
     }
 
+    // Purge any out-of-territory leads that were mirrored before the territory filter existed (or newly detected
+    // this run). They should never have entered the mirror — delete their touches then the rows. Bounded to the
+    // ext ids we POSITIVELY determined are OOT this sync (owner != this franchise / zip not serviced).
+    let ootPurged = 0;
+    if (ootLeadExtIds.length) {
+      const { data: ootRows } = await supabase.from('pipeline_items').select('id').eq('franchise_id', franchiseInternalID).eq('type', 'lead').in('source_external_id', ootLeadExtIds);
+      const ids = ((ootRows || []) as Record<string, string>[]).map((r) => r.id);
+      if (ids.length) {
+        await supabase.from('pipeline_touches').delete().in('pipeline_item_id', ids);
+        await supabase.from('pipeline_items').delete().in('id', ids);
+        ootPurged = ids.length;
+      }
+      console.log(`[pipeline:${reqId}] territory filter: ${ootLeadExtIds.length} OOT leads skipped, ${ootPurged} purged from mirror`);
+    }
+
     // Hybrid auto-default: brand-new items auto-enter their type's default sequence (schedule starts now).
     const newKeys = new Set(rows.filter((r) => !existKeys.has(String(r.type) + '|' + String(r.source_external_id))).map((r) => String(r.type) + '|' + String(r.source_external_id)));
     let autoSeeded = 0;
@@ -657,7 +693,7 @@ Deno.serve(async (req: Request) => {
 
     const counts: Record<string, number> = {};
     for (const t of ALL_TYPES) counts[t] = rows.filter((r) => r.type === t).length;
-    return json({ success: true, franchiseID, window: { dateStart, dateEnd, days }, upserted, autoSeeded, reconciled, counts, reqId });
+    return json({ success: true, franchiseID, window: { dateStart, dateEnd, days }, upserted, autoSeeded, reconciled, ootPurged, ootSkipped: ootLeadExtIds.length, counts, reqId });
   } catch (e) {
     if (e instanceof VonigoUnavailable) return json(VONIGO_DOWN_BODY, 503);
     console.error(`[pipeline:${reqId}] error:`, (e as Error)?.stack || String(e));

@@ -901,6 +901,32 @@ Deno.serve(async (req: Request) => {
       return json({ success: true, objectID, name: m.name || m.objectName || null, fields: (m.Fields || []).map((f: any) => ({ id: f.fieldID, name: f.name, required: f.isFieldRequired, type: f.type })), optionCount: (m.Options || []).length });
     }
 
+    // action=leadsProbe — READ-ONLY diagnostic: dump /data/Leads/ for the franchise so we can see the real Lead
+    // objects (distinct from the Client). Optionally filter to a name substring. Safe.
+    if (action === 'leadsProbe') {
+      const method = String(body.method || '-1');
+      const nameLike = String(body.nameLike || '').toLowerCase();
+      const b: any = { method, pageNo: String(body.pageNo || '1'), pageSize: String(body.pageSize || '50'), sortMode: String(body.sortMode || '1'), sortDirection: String(body.sortDirection || '0'), isCompleteObject: 'true' };
+      if (body.franchiseID2) b.franchiseID = String(body.franchiseID2);
+      if (body.dateMode) { b.dateMode = String(body.dateMode); b.dateStart = String(body.dateStart || ''); b.dateEnd = String(body.dateEnd || ''); }
+      const r = await vpost(token, '/data/Leads/', b);
+      const arr = (r.Leads || r.Lead || r.Clients || []) as any[];
+      const trim = (o: any) => ({ objectID: o.objectID, name: o.name, dateCreated: o.dateCreated, relations: (o.Relations || []).map((x: any) => ({ type: x.relationType, id: x.objectID })), fields: (o.Fields || []).filter((f: any) => f.fieldValue || f.optionID).map((f: any) => ({ id: f.fieldID, value: f.fieldValue, optionID: f.optionID })) });
+      const rows = arr.filter((o: any) => !nameLike || String(o.name || '').toLowerCase().includes(nameLike)).map(trim);
+      const rawKeys: Record<string, string> = {}; for (const k of Object.keys(r)) { const v: any = (r as any)[k]; rawKeys[k] = Array.isArray(v) ? `array[${v.length}]` : typeof v; }
+      return json({ success: true, errNo: r.errNo, arrayKey: r.Leads ? 'Leads' : (r.Lead ? 'Lead' : null), count: arr.length, matched: rows.length, rows: rows.slice(0, Number(body.limit || 10)), rawKeys, rawSample: arr.length === 0 ? r : undefined });
+    }
+
+    // action=zipOwner — READ-ONLY: which franchise owns a zip (territory check). Returns ServiceTypes[0].franchiseID.
+    if (action === 'zipOwner') {
+      const z = String(body.zip || '');
+      if (!z) return json({ success: false, error: 'zipOwner needs zip' }, 400);
+      const zr = await vpost(token, '/resources/zips/', { method: '1', zip: z });
+      const st = (zr.ServiceTypes || [])[0] || null;
+      const zi = zr.Zip || zr.zip || null;
+      return json({ success: true, zip: z, ownerFranchiseID: st ? String(st.franchiseID) : null, defaultCity: zi ? (zi.defaultCity || null) : null, errNo: zr.errNo, found: !!st });
+    }
+
     // action=deactivateLead — mark a DEAD lead: deactivate it in Vonigo (/data/Leads/ method 5) so it drops
     // out of the lead pool for good. Real Vonigo WRITE, but LEAD-GATED (method 5 only affects a lead — it
     // won't touch a customer who has a job). Owner-triggered from the workspace "Dead lead" button.
