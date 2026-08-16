@@ -777,6 +777,7 @@ Deno.serve(async (req: Request) => {
       if (!durMin) durMin = 120;
       const zProvince = zipInfo ? String(zipInfo.provinceOptionID || zipInfo.ProvinceOptionID || '') : '';
       const zCountry = zipInfo ? String(zipInfo.countryOptionID || zipInfo.CountryOptionID || '9906') : '9906';
+      const zCity = zipInfo ? String(zipInfo.defaultCity || zipInfo.DefaultCity || '') : ''; // fallback city if the modal has none
 
       // 2.5) Contact-record update — refresh the client's Contact + Location from the modal fields BEFORE the
       //    WO create (the WO references locationID, so the address must be right first). Only fields the manager
@@ -798,7 +799,8 @@ Deno.serve(async (req: Request) => {
       if (resCommOptionID) clientFields.push({ fieldID: '121', optionID: resCommOptionID });
 
       // Address fields (shared by the location CREATE for a bare lead and the location UPDATE for an existing one).
-      const aStreet = String(ma.street || '').trim(), aCity = String(ma.city || '').trim(), aZip = String(ma.zip || (needLocation ? zip : '') || '').trim();
+      const aStreet = String(ma.street || '').trim(), aZip = String(ma.zip || (needLocation ? zip : '') || '').trim();
+      const aCity = String(ma.city || '').trim() || zCity; // fall back to the zip's default city if the modal left it blank
       const addrFields: any[] = [];
       if (aStreet) addrFields.push({ fieldID: '773', fieldValue: aStreet });
       if (aCity) addrFields.push({ fieldID: '776', fieldValue: aCity });

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.21 | 2026-08-16">
+  <meta name="crewlogic-version" content="v5.125.22 | 2026-08-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15928,14 +15928,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Modal buttons use INLINE styles (the modal renders on <body>, outside #bizdevScreen, so .bw-btn doesn't reach it).
     const _BW_BTN = 'padding:9px 14px;border-radius:8px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:13px;cursor:pointer;';
     const _BW_BTNP = 'padding:9px 16px;border-radius:8px;border:none;background:var(--accent-green,#00E785);color:#06121d;font-weight:800;font-size:13px;cursor:pointer;';
-    function _bwParseAddr(s) { // best-effort split of a lead's single address string into parts
-      s = String(s || '').replace(/\s+/g, ' ').trim();
-      const zip = (s.match(/\b(\d{5})(?:-\d{4})?\b/) || [])[1] || '';
-      const state = ((s.match(/,?\s*([A-Za-z]{2})\s+\d{5}/) || [])[1] || '').toUpperCase();
+    function _bwParseAddr(s) { // split a lead's address into parts. Vonigo commonly stores "STREET\nCITY, ST ZIP"
+      const raw = String(s || '').replace(/\r/g, '').trim();
+      const zip = (raw.match(/\b(\d{5})(?:-\d{4})?\b/) || [])[1] || '';
+      const state = ((raw.match(/\b([A-Za-z]{2})\s+\d{5}\b/) || [])[1] || '').toUpperCase();
       let street = '', city = '';
-      const m = s.match(/^(.*?),\s*([^,]+?),?\s*[A-Za-z]{2}\s+\d{5}/); // "street, city, ST zip"
-      if (m) { street = m[1].trim(); city = m[2].trim(); }
-      else { street = zip ? s.split(',')[0].trim() : s; }
+      const lines = raw.split('\n').map(x => x.trim()).filter(Boolean);
+      if (lines.length >= 2) {
+        // street on the first line(s), "CITY, ST ZIP" (or "CITY ST ZIP") on the last line — the newline is the
+        // street/city boundary. Do NOT collapse it first (that's what merged the city into the street).
+        street = lines.slice(0, lines.length - 1).join(', ');
+        city = lines[lines.length - 1].replace(/,?\s*[A-Za-z]{2}\s+\d{5}(?:-\d{4})?\s*$/, '').replace(/,\s*$/, '').trim();
+      } else {
+        const one = raw.replace(/\s+/g, ' ');
+        const m = one.match(/^(.*?),\s*([^,]+?),?\s*[A-Za-z]{2}\s+\d{5}/); // single line "street, city, ST zip"
+        if (m) { street = m[1].trim(); city = m[2].trim(); }
+        else { street = zip ? one.replace(/,?\s*[A-Za-z]{2}\s+\d{5}.*$/, '').replace(/,\s*$/, '').trim() : one; }
+      }
       return { street, city, state, zip };
     }
     function bwOpenBook(id) {
