@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.15 | 2026-08-16">
+  <meta name="crewlogic-version" content="v5.125.16 | 2026-08-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15987,8 +15987,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const go = document.getElementById('bwBookGo'); if (go) { go.disabled = true; go.style.opacity = '.5'; }
       const cont = document.getElementById('bwBookSlots'); if (cont) cont.innerHTML = '<span style="color:var(--text-muted);font-size:12px">Finding open times…</span>';
       try {
-        const r = await edgeFunctionCall('crewlogic-dispatch', { action: 'suggestSlots', franchiseID: currentUser.franchiseID, dayID, zip: _bwBook.zip, durationMin: _bwBook.durMin || 120, serviceTypeID: '11' });
-        const slots = (r && r.slots) || []; if (!cont) return;
+        const r = await edgeFunctionCall('crewlogic-dispatch', { action: 'suggestSlots', franchiseID: currentUser.franchiseID, dayID, zip: _bwBook.zip, durationMin: _bwBook.durMin || 120, serviceTypeID: '11', checkTerritory: true });
+        if (!cont) return;
+        if (r && r.outOfTerritory) { cont.innerHTML = '<span style="color:var(--accent-red,#e0645a);font-size:12.5px">Zip <b>' + _escHtml(r.zip || _bwBook.zip) + '</b> is outside your service territory' + (r.servicedBy ? ' — serviced by <b>' + _escHtml(r.servicedBy) + '</b>' : '') + '. You can’t book a job to that zip.</span>'; return; }
+        const slots = (r && r.slots) || [];
         if (!slots.length) { cont.innerHTML = '<span style="color:var(--text-muted);font-size:12px">No open times that day for this zone — try another day.</span>'; return; }
         // Availability ALREADY respects the zone's availability-template hours (verified: RI opens ~9:30 AM,
         // local ~8 AM, and the latest start leaves room to finish by close). Just dedup by start time — no

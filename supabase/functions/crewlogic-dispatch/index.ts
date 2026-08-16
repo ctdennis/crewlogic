@@ -681,6 +681,17 @@ Deno.serve(async (req: Request) => {
     if (action === 'suggestSlots') {
       const dayID = String(body.dayID); const ds = dayEpoch(dayID), de = ds + 79200;
       const duration = String(body.durationMin || 120), serviceTypeID = String(body.serviceTypeID || '11');
+      // Territory guard (opt-in via checkTerritory). Vonigo does NOT error on an out-of-territory zip — the
+      // availability query silently falls back to the UNZONED all-routes set (6am–6:30pm). The reliable signal
+      // is /resources/zips/ method:1 → the zone's franchiseID. If that isn't THIS franchise, refuse: another
+      // franchise owns that zip (e.g. 02108 → franchise 53 "MA - Greater Boston").
+      if (body.checkTerritory && body.zip) {
+        const zr = await vpost(token, '/resources/zips/', { method: '1', zip: String(body.zip) });
+        const zst = (zr.ServiceTypes || [])[0] as any;
+        if (!zst || (zst.franchiseID != null && String(zst.franchiseID) !== String(franchiseID))) {
+          return json({ success: true, dayID, zoned: true, count: 0, slots: [], outOfTerritory: true, zip: String(body.zip), servicedBy: zst ? String(zst.franchise || '') : null });
+        }
+      }
       const p: any = { method: '0', dateStart: String(ds), dateEnd: String(de), duration, locationID: '1', serviceTypeID, pageNo: '1', pageSize: '400' };
       if (body.zip) p.zip = String(body.zip);
       if (body.routeID) p.routeID = String(body.routeID);
