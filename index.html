@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.12 | 2026-08-16">
+  <meta name="crewlogic-version" content="v5.125.13 | 2026-08-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15917,23 +15917,42 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Modal buttons use INLINE styles (the modal renders on <body>, outside #bizdevScreen, so .bw-btn doesn't reach it).
     const _BW_BTN = 'padding:9px 14px;border-radius:8px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:13px;cursor:pointer;';
     const _BW_BTNP = 'padding:9px 16px;border-radius:8px;border:none;background:var(--accent-green,#00E785);color:#06121d;font-weight:800;font-size:13px;cursor:pointer;';
+    function _bwParseAddr(s) { // best-effort split of a lead's single address string into parts
+      s = String(s || '').replace(/\s+/g, ' ').trim();
+      const zip = (s.match(/\b(\d{5})(?:-\d{4})?\b/) || [])[1] || '';
+      const state = ((s.match(/,?\s*([A-Za-z]{2})\s+\d{5}/) || [])[1] || '').toUpperCase();
+      let street = '', city = '';
+      const m = s.match(/^(.*?),\s*([^,]+?),?\s*[A-Za-z]{2}\s+\d{5}/); // "street, city, ST zip"
+      if (m) { street = m[1].trim(); city = m[2].trim(); }
+      else { street = zip ? s.split(',')[0].trim() : s; }
+      return { street, city, state, zip };
+    }
     function bwOpenBook(id) {
       const it = _bwItems.find(x => String(x.id) === String(id)); if (!it) return;
       if (it.type !== 'lead') { bwSetStage(id, 'won'); return; } // only leads use this flow for now
       plEnsureStyles(); // the booking modal reuses .pl-mback/.pl-mcard (idempotent) — otherwise the modal renders unstyled/invisible on the bizdev screen
       const clientID = String(it.source_external_id || '');
-      const zip = String(it.zip || (String(it.address || '').match(/\b(\d{5})\b/) || [])[1] || '');
+      const a = _bwParseAddr(it.address || '');
+      const zip = String(it.zip || a.zip || '');
       _bwBook = { id, clientID, zip, durMin: 0, slotDay: '', slot: null };
-      plModal(`<div style="max-width:460px">
+      const _grey = _BW_BI + 'opacity:.5;cursor:not-allowed;';
+      const _sect = 'font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--accent-green,#35c26e);margin:10px 0 6px;';
+      plModal(`<div style="max-width:520px">
         <h3 style="margin:0 0 2px">Book lead — ${_escHtml(it.customer_name || 'Unknown')}</h3>
-        <div style="color:var(--text-muted);font-size:12.5px;margin-bottom:12px">${_escHtml(it.address || 'No address on file')}${zip ? ' · ' + _escHtml(zip) : ''}</div>
-        <div id="bwBookStatus" style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px">Checking availability…</div>
-        <label style="${_BW_BL}">Property type</label>
-        <select id="bwBookResComm" style="${_BW_BI}"><option value="">— leave unchanged —</option><option value="59">Residential</option><option value="60">Commercial</option></select>
-        <label style="${_BW_BL}">Customer situation</label>
-        <textarea id="bwBookDesc" rows="2" placeholder="What's going on / notes for the crew" style="${_BW_BI}resize:vertical"></textarea>
-        <label style="${_BW_BL}">Items to remove</label>
-        <input id="bwBookItems" placeholder="e.g. 3 mattresses, boxes, a couch" style="${_BW_BI}">
+        <div id="bwBookStatus" style="font-size:12.5px;color:var(--text-muted);margin:6px 0 4px">Checking availability…</div>
+        <div style="${_sect}margin-top:6px">Contact</div>
+        <label style="${_BW_BL}">Name</label><input id="bwBookName" style="${_BW_BI}" value="${_escHtml(it.customer_name || '')}">
+        <div style="display:flex;gap:8px"><div style="flex:1"><label style="${_BW_BL}">Phone</label><input id="bwBookPhone" style="${_BW_BI}" value="${_escHtml(it.phone || '')}"></div><div style="flex:1.4"><label style="${_BW_BL}">Email</label><input id="bwBookEmail" style="${_BW_BI}" value="${_escHtml(it.email || '')}"></div></div>
+        <div style="${_sect}">Service address</div>
+        <label style="${_BW_BL}">Street address</label><input id="bwBookStreet" style="${_BW_BI}" placeholder="e.g. 12 Main St" value="${_escHtml(a.street || '')}">
+        <div style="display:flex;gap:8px"><div style="flex:2"><label style="${_BW_BL}">City</label><input id="bwBookCity" style="${_BW_BI}" value="${_escHtml(a.city || '')}"></div><div style="flex:.6"><label style="${_BW_BL}">State</label><input id="bwBookState" style="${_BW_BI}" maxlength="2" value="${_escHtml(a.state || '')}"></div><div style="flex:1"><label style="${_BW_BL}">Zip</label><input id="bwBookZip" style="${_BW_BI}" value="${_escHtml(zip)}"></div></div>
+        <label style="${_BW_BL}">Country</label><input style="${_grey}" value="United States" disabled>
+        <div style="${_sect}">Job</div>
+        <label style="${_BW_BL}">Property type</label><select id="bwBookResComm" style="${_BW_BI}"><option value="">— select —</option><option value="59">Residential</option><option value="60">Commercial</option></select>
+        <label style="${_BW_BL}">Campaign source</label><input style="${_grey}" value="Carries over from the lead" disabled>
+        <label style="${_BW_BL}">Customer situation</label><textarea id="bwBookDesc" rows="2" placeholder="What's going on / notes for the crew" style="${_BW_BI}resize:vertical"></textarea>
+        <label style="${_BW_BL}">Items to remove</label><input id="bwBookItems" placeholder="e.g. 3 mattresses, boxes, a couch" style="${_BW_BI}">
+        <div style="${_sect}">Appointment</div>
         <label style="${_BW_BL}">Pick a day</label>
         <div style="display:flex;gap:8px;align-items:center;margin:4px 0 6px"><input type="date" id="bwBookDate" style="${_BW_BI}margin:0;flex:0 0 auto;width:auto"><button style="${_BW_BTN}" onclick="bwBookFindSlots()">Find times</button></div>
         <div id="bwBookSlots" style="margin:6px 0 4px;display:flex;flex-wrap:wrap;gap:6px"></div>
@@ -15956,7 +15975,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const go = document.getElementById('bwBookGo'); if (go) { go.disabled = true; go.style.opacity = '.5'; }
       const cont = document.getElementById('bwBookSlots'); if (cont) cont.innerHTML = '<span style="color:var(--text-muted);font-size:12px">Finding open times…</span>';
       try {
-        const r = await edgeFunctionCall('crewlogic-dispatch', { action: 'suggestSlots', franchiseID: currentUser.franchiseID, dayID, zip: _bwBook.zip, durationMin: _bwBook.durMin || 120, serviceTypeID: '11' });
+        const zipNow = (document.getElementById('bwBookZip') || {}).value || _bwBook.zip || ''; _bwBook.zip = zipNow;
+        const r = await edgeFunctionCall('crewlogic-dispatch', { action: 'suggestSlots', franchiseID: currentUser.franchiseID, dayID, zip: zipNow, durationMin: _bwBook.durMin || 120, serviceTypeID: '11' });
         const slots = (r && r.slots) || []; if (!cont) return;
         if (!slots.length) { cont.innerHTML = '<span style="color:var(--text-muted);font-size:12px">No open times that day — try another.</span>'; return; }
         const seen = new Set(), uniq = [];
@@ -15977,12 +15997,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const go = document.getElementById('bwBookGo'); if (go) { go.disabled = true; go.textContent = 'Booking…'; }
       const bk = _bwBook;
       try {
+        const gv = (elId) => (document.getElementById(elId) || {}).value || '';
         const r = await edgeFunctionCall('crewlogic-dispatch', {
-          action: 'bookLead', franchiseID: currentUser.franchiseID, clientID: bk.clientID, zip: bk.zip,
+          action: 'bookLead', franchiseID: currentUser.franchiseID, clientID: bk.clientID,
+          zip: gv('bwBookZip') || bk.zip,
           dayID: bk.slot.dayID, routeID: bk.slot.routeID, startTime: String(bk.slot.startTime),
-          items: (document.getElementById('bwBookItems') || {}).value || '',
-          desc: (document.getElementById('bwBookDesc') || {}).value || '',
-          resCommOptionID: (document.getElementById('bwBookResComm') || {}).value || '',
+          items: gv('bwBookItems'), desc: gv('bwBookDesc'), resCommOptionID: gv('bwBookResComm'),
+          // NEW contact/address fields — the backend (create/update client Contact + Location) is the next step;
+          // sent now so the modal is complete. bookLead currently ignores these (books against the existing client).
+          contact: { name: gv('bwBookName'), phone: gv('bwBookPhone'), email: gv('bwBookEmail') },
+          address: { street: gv('bwBookStreet'), city: gv('bwBookCity'), state: gv('bwBookState'), zip: gv('bwBookZip'), country: 'United States' },
           actorEmail: (currentUser && currentUser.email) || '',
         });
         if (r && r.success) { bwToast('Booked · ' + bk.slot.label + ' — job #' + (r.jobID || '?')); plCloseModal(); bwSetStage(bk.id, 'won'); _bwBook = null; }
