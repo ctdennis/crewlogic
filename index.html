@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.16 | 2026-08-16">
+  <meta name="crewlogic-version" content="v5.125.17 | 2026-08-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15419,6 +15419,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function bwUsd(n) { return '$' + (Math.round(Number(n) || 0)).toLocaleString('en-US'); }
     function bwEvk(n) { n = Number(n) || 0; return n >= 1000 ? '$' + (n / 1000).toFixed(1) + 'k' : '$' + Math.round(n); }
     function bwDaysOld(occurred) { if (!occurred) return 0; const ms = Date.now() - new Date(occurred).getTime(); return ms > 0 ? ms / 86400000 : 0; }
+    function bwDate(iso, withYear) { if (!iso) return ''; const d = new Date(iso); return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', withYear ? { month: 'short', day: 'numeric', year: 'numeric' } : { month: 'short', day: 'numeric' }); }
     function bwHasAmount(it) { const a = Number(it && it.amount); return isFinite(a) && a > 0; }
     // Avg-job-size fallback (client-side, from the loaded cost settings). When an item has NO real amount
     // but the franchise has an Avg job size $ set, the average becomes the floor Opportunity at Low confidence.
@@ -15734,10 +15735,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return `<span class="bw-fc-amt bw-none">—</span><span class="bw-fc-opp">AI estimate pending</span>`;
     }
     function bwRowHtml(i) {
-      const sub = _escHtml([i.address, (i.reason || i.detail || '')].filter(Boolean).join(' · ')) || '—';
+      const dt = bwDate(i.occurred_at);
+      const sub = _escHtml([i.address, (i.reason || i.detail || ''), (dt ? 'in ' + dt : '')].filter(Boolean).join(' · ')) || '—';
       const sel = (_bwSel === i.id) ? ' sel' : '';
+      const stg = String(i.stage || 'new').toLowerCase();
+      const pill = `<span style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.09);color:var(--text-muted,#8ea3b5);margin-left:6px;vertical-align:middle">${_escHtml(stg)}</span>`;
       return `<button class="bw-row${sel}" data-id="${_escHtml(String(i.id))}" onclick="bwPick('${_escHtml(String(i.id))}')">
-        <span class="bw-row-main"><span class="bw-row-name">${_escHtml(i.customer_name || 'Unknown')}</span><span class="bw-row-sub">${sub}</span></span>
+        <span class="bw-row-main"><span class="bw-row-name">${_escHtml(i.customer_name || 'Unknown')}${pill}</span><span class="bw-row-sub">${sub}</span></span>
         <span class="bw-row-fc">${bwRowRightHtml(i)}</span>
       </button>`;
     }
@@ -15871,6 +15875,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <h2>${_escHtml(i.customer_name || 'Unknown')}</h2>
             <div class="bw-sf-loc">${_escHtml(i.address || 'No address on file')}</div>
             <div class="bw-sf-stage">Stage <select class="bw-stage-sel" onchange="bwStageSel('${_escHtml(String(i.id))}', this.value)">${['new','contacted','working','won','lost','dismissed'].map(s => `<option value="${s}"${(String(i.stage||'new').toLowerCase()===s)?' selected':''}>${s}</option>`).join('')}</select></div>
+            ${i.occurred_at ? `<div style="margin-top:7px;font-size:11.5px;color:var(--text-muted,#8ea3b5)">Came in <b style="color:var(--text-primary,#e6edf3);font-weight:700">${_escHtml(bwDate(i.occurred_at, true))}</b></div>` : ''}
             ${(['lost','dismissed'].includes(String(i.stage||'').toLowerCase()) && i.close_reason) ? `<div class="bw-sf-closed" style="font-size:12px;color:var(--text-muted,#9fb0c0);margin-top:4px">Closed: ${_escHtml(String(i.stage).charAt(0).toUpperCase() + String(i.stage).slice(1))} · ${_escHtml(String(i.close_reason))}</div>` : ''}
           </div>
           <div class="bw-sf-ev">${evHtml}</div>
