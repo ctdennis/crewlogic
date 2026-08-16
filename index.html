@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.23 | 2026-08-16">
+  <meta name="crewlogic-version" content="v5.125.24 | 2026-08-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -4425,16 +4425,30 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // Helper for Edge Function calls — POST JSON, returns parsed JSON.
-    async function edgeFunctionCall(name, body) {
-      const res = await fetch(EDGE_BASE + '/' + name, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + EDGE_ANON_KEY,
-          'apikey': EDGE_ANON_KEY
-        },
-        body: JSON.stringify(body)
-      });
+    async function edgeFunctionCall(name, body, timeoutMs) {
+      // Optional client-side timeout: an edge fn that hangs (e.g. a Vonigo call that never returns) must not
+      // leave the UI stuck forever waiting on the gateway. Callers that need a bound pass timeoutMs; the abort
+      // surfaces as a clean {success:false} error object, same as any other failure.
+      const ctrl = (timeoutMs && typeof AbortController !== 'undefined') ? new AbortController() : null;
+      const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+      let res;
+      try {
+        res = await fetch(EDGE_BASE + '/' + name, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + EDGE_ANON_KEY,
+            'apikey': EDGE_ANON_KEY
+          },
+          body: JSON.stringify(body),
+          signal: ctrl ? ctrl.signal : undefined
+        });
+      } catch (e) {
+        if (timer) clearTimeout(timer);
+        if (e && e.name === 'AbortError') return { success: false, error: 'The request timed out. Please try again.' };
+        return { success: false, error: 'Network error — please try again.' };
+      }
+      if (timer) clearTimeout(timer);
       // Defensive parse: a gateway/timeout/error can return an HTML page, not JSON.
       // Don't let a raw "Unexpected token '<'" JSON.parse error reach the UI — callers
       // check `data.success`, so return a clean error object instead.
@@ -16059,11 +16073,33 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const it = _bwItems.find(x => String(x.id) === String(id)); if (!it || it.type !== 'lead') return;
       const clientID = String(it.source_external_id || '');
       if (!clientID) { bwToast('No lead id on this item'); return; }
-      if (!window.confirm('Mark this lead DEAD?\n\nIt will be deactivated in Vonigo and removed from the pool.')) return;
-      bwToast('Deactivating…');
-      edgeFunctionCall('crewlogic-dispatch', { action: 'deactivateLead', franchiseID: currentUser.franchiseID, clientID, actorEmail: (currentUser && currentUser.email) || '' })
-        .then(r => { if (r && r.success) { bwToast('Lead deactivated — removed from the pool'); bwSetStage(id, 'dismissed', 'Dead lead'); } else { bwToast('Could not deactivate: ' + ((r && r.error) || 'try again')); } })
-        .catch(() => bwToast('Deactivate failed — try again.'));
+      // Non-blocking custom modal (NOT window.confirm — the native dialog froze the app when the deactivate
+      // call hung). The action is bounded by a client-side timeout so a hung Vonigo call can never wedge the UI.
+      plEnsureStyles();
+      plModal(`<div style="max-width:420px">
+        <h3 style="margin:0 0 8px">Mark this lead DEAD?</h3>
+        <div style="font-size:13px;color:var(--text-muted);line-height:1.5;margin-bottom:6px">It will be deactivated in Vonigo and removed from the pool.</div>
+        <div id="bwDeadErr" style="font-size:12.5px;color:var(--accent-red,#e0645a);margin:4px 0;display:none"></div>
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <button id="bwDeadGo" style="${_BW_BTNP}background:var(--accent-red,#e0645a);border-color:var(--accent-red,#e0645a)" onclick="bwDeadLeadGo('${_escHtml(String(id))}','${_escHtml(clientID)}')">Mark dead</button>
+          <button style="${_BW_BTN}" onclick="plCloseModal()">Cancel</button>
+        </div>
+      </div>`);
+    }
+    async function bwDeadLeadGo(id, clientID) {
+      const go = document.getElementById('bwDeadGo'); const err = document.getElementById('bwDeadErr');
+      if (go) { go.disabled = true; go.textContent = 'Deactivating…'; go.style.opacity = '.6'; }
+      if (err) err.style.display = 'none';
+      try {
+        const r = await edgeFunctionCall('crewlogic-dispatch', { action: 'deactivateLead', franchiseID: currentUser.franchiseID, clientID, actorEmail: (currentUser && currentUser.email) || '' }, 25000);
+        if (r && r.success) { plCloseModal(); bwToast('Lead deactivated — removed from the pool'); bwSetStage(id, 'dismissed', 'Dead lead'); return; }
+        const msg = (r && (r.errMsg || r.error)) || 'try again'; const en = (r && r.errNo != null) ? ' (Vonigo ' + r.errNo + ')' : '';
+        if (err) { err.textContent = 'Could not deactivate: ' + msg + en; err.style.display = 'block'; } else { bwToast('Could not deactivate: ' + msg); }
+      } catch (e) {
+        if (err) { err.textContent = 'Deactivate failed — try again.'; err.style.display = 'block'; } else { bwToast('Deactivate failed — try again.'); }
+      } finally {
+        if (go) { go.disabled = false; go.textContent = 'Mark dead'; go.style.opacity = '1'; }
+      }
     }
 
     // ── sequences (builder) ───────────────────────────────────────────
