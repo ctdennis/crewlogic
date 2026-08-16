@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.10 | 2026-08-16">
+  <meta name="crewlogic-version" content="v5.125.11 | 2026-08-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15883,8 +15883,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         <div class="bw-actions">
           ${openBtn}
           <button class="bw-btn primary" onclick="${i.type === 'lead' ? `bwOpenBook('${_escHtml(String(i.id))}')` : `bwSetStage('${_escHtml(String(i.id))}','won')`}">${_escHtml(act)}</button>
-          <button class="bw-btn" onclick="bwStub('Reschedule')">Reschedule</button>
-          <button class="bw-btn" onclick="bwStub('Set follow-up')">Set follow-up</button>
+          ${i.type === 'lead'
+    ? `<button class="bw-btn" onclick="bwDeadLead('${_escHtml(String(i.id))}')">Dead lead</button>`
+    : `<button class="bw-btn" onclick="bwStub('Reschedule')">Reschedule</button><button class="bw-btn" onclick="bwStub('Set follow-up')">Set follow-up</button>`}
         </div>
       </div>`;
     }
@@ -15984,6 +15985,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (r && r.success) { bwToast('Booked · ' + bk.slot.label + ' — job #' + (r.jobID || '?')); plCloseModal(); bwSetStage(bk.id, 'won'); _bwBook = null; }
         else { if (go) { go.disabled = false; go.textContent = 'Book appointment'; } bwToast('Booking failed: ' + ((r && r.error) || 'try another time')); }
       } catch (e) { if (go) { go.disabled = false; go.textContent = 'Book appointment'; } bwToast('Booking failed — try again.'); }
+    }
+    // Dead lead — most leads won't book (owner 2026-08-16). Deactivate it in Vonigo (drops it from the pool)
+    // + close the workspace item as dismissed · "Dead lead". Real Vonigo write, triggered by the manager here.
+    function bwDeadLead(id) {
+      const it = _bwItems.find(x => String(x.id) === String(id)); if (!it || it.type !== 'lead') return;
+      const clientID = String(it.source_external_id || '');
+      if (!clientID) { bwToast('No lead id on this item'); return; }
+      if (!window.confirm('Mark this lead DEAD?\n\nIt will be deactivated in Vonigo and removed from the pool.')) return;
+      bwToast('Deactivating…');
+      edgeFunctionCall('crewlogic-dispatch', { action: 'deactivateLead', franchiseID: currentUser.franchiseID, clientID, actorEmail: (currentUser && currentUser.email) || '' })
+        .then(r => { if (r && r.success) { bwToast('Lead deactivated — removed from the pool'); bwSetStage(id, 'dismissed', 'Dead lead'); } else { bwToast('Could not deactivate: ' + ((r && r.error) || 'try again')); } })
+        .catch(() => bwToast('Deactivate failed — try again.'));
     }
 
     // ── sequences (builder) ───────────────────────────────────────────

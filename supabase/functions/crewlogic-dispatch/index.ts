@@ -802,6 +802,20 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // action=deactivateLead — mark a DEAD lead: deactivate it in Vonigo (/data/Leads/ method 5) so it drops
+    // out of the lead pool for good. Real Vonigo WRITE, but LEAD-GATED (method 5 only affects a lead — it
+    // won't touch a customer who has a job). Owner-triggered from the workspace "Dead lead" button.
+    if (action === 'deactivateLead') {
+      const clientID = String(body.clientID || '');
+      if (!clientID) return json({ success: false, error: 'deactivateLead needs clientID' }, 400);
+      const dl = await vpost(token, '/data/Leads/', { method: '5', objectID: clientID });
+      const ok = dl?.errNo === 0;
+      console.log('[deactivateLead]', { franchiseID, clientID, errNo: dl?.errNo });
+      try { await audit({ franchiseID, action: 'deactivateLead', actorEmail: body.actorEmail, resolved: { clientID }, fieldsWritten: { method: 5 }, vonigoErrno: dl?.errNo, success: ok, result: { errMsg: dl?.errMsg || null } }); } catch { /* audit best-effort */ }
+      if (!ok) return json({ success: false, error: 'Could not deactivate the lead in Vonigo.', errNo: dl?.errNo, errMsg: dl?.errMsg }, 502);
+      return json({ success: true, clientID });
+    }
+
     if (action === 'cancelJob') {
       const { jobID, categoryOptionID, reasonOptionID } = body;
       const comments = String(body.comments || '');
