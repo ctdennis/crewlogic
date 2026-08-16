@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.19 | 2026-08-16">
+  <meta name="crewlogic-version" content="v5.125.20 | 2026-08-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15974,8 +15974,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       </div>`);
       edgeFunctionCall('crewlogic-dispatch', { action: 'bookLead', franchiseID: currentUser.franchiseID, clientID, zip, dryRun: true })
         .then(r => { const st = document.getElementById('bwBookStatus'); if (!st) return;
-          if (r && r.success) { _bwBook.durMin = Number(r.resolved.durMin) || 0; st.textContent = 'Bookable · ' + _bwBook.durMin + '-min appointment (zone default). Campaign will carry over from the lead.'; }
-          else { st.innerHTML = '<span style="color:var(--accent-red,#e0645a)">Can’t book: ' + _escHtml((r && r.error) || 'this lead has no contact/location on file') + '</span>'; } })
+          if (r && r.success) { _bwBook.durMin = Number(r.resolved && r.resolved.durMin) || 0;
+            if (r.needLocation) { st.innerHTML = '<span style="color:var(--accent-yellow,#e0b23a)">No service address on file for this lead — fill in the address below; it will be created in Vonigo when you book.</span>'; }
+            else { st.textContent = 'Bookable · ' + _bwBook.durMin + '-min appointment (zone default). Campaign will carry over from the lead.'; } }
+          else { st.innerHTML = '<span style="color:var(--accent-red,#e0645a)">Can’t book: ' + _escHtml((r && r.error) || 'this lead has no contact record on file') + '</span>'; } })
         .catch(() => { const st = document.getElementById('bwBookStatus'); if (st) st.textContent = 'Could not check availability — try again.'; });
     }
     function bwBookZipChg() { // enable "Find times" only with a valid 5-digit zip; clear stale slots on change

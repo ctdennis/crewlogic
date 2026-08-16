@@ -764,8 +764,10 @@ Deno.serve(async (req: Request) => {
       if (!client) return json({ success: false, step: 'client', error: 'Lead client not found', clientID }, 404);
       const crel: Record<string, string[]> = ((client.Relations || []) as any[]).reduce((m: any, x: any) => { (m[x.relationType] = m[x.relationType] || []).push(String(x.objectID)); return m; }, {});
       const contactID = crel.contact && crel.contact[0];
-      const locationID = (crel.location && crel.location[0]) || (crel.location1 && crel.location1[0]);
-      if (!contactID || !locationID) return json({ success: false, step: 'client', error: 'Lead is missing a contact or location — cannot book.', contactID: contactID || null, locationID: locationID || null }, 409);
+      let locationID = (crel.location && crel.location[0]) || (crel.location1 && crel.location1[0]);
+      // Every lead has a contact (phone lives there); many phone/web leads have NO location. Contact is required;
+      // a missing location is CREATED below from the modal address (step 2.4). Only a missing contact is fatal.
+      if (!contactID) return json({ success: false, step: 'client', error: 'Lead has no contact record — cannot book.', contactID: null }, 409);
 
       // 2) Zip lookup — ONE call yields duration + province/country optionIDs + default city (contract:
       //    /resources/zips/ method 1 → ServiceTypes[0].duration, Zip.provinceOptionID/countryOptionID).
@@ -782,23 +784,42 @@ Deno.serve(async (req: Request) => {
       //    provinceOptionID; skipped if the zip lookup didn't yield one (leaves the existing state). Contract:
       //    docs/contract-bizdev-leads-booking.md "Contact-record backend". Real Vonigo writes — GATED.
       const mc: any = body.contact || {}, ma: any = body.address || {};
+      const needLocation = !locationID; // bare lead (contact but no location) — CREATE one from the modal address
       const contactFields: any[] = [];
       if (mc.email != null && String(mc.email).trim()) contactFields.push({ fieldID: '97', fieldValue: String(mc.email).trim() });
       if (mc.phone != null && String(mc.phone).trim()) contactFields.push({ fieldID: '1088', fieldValue: String(mc.phone).trim() });
       if (mc.name != null && String(mc.name).trim()) { const nm = String(mc.name).trim(); const sp = nm.lastIndexOf(' '); const first = sp > 0 ? nm.slice(0, sp) : nm; const last = sp > 0 ? nm.slice(sp + 1) : ''; contactFields.push({ fieldID: '127', fieldValue: first }); if (last) contactFields.push({ fieldID: '128', fieldValue: last }); }
-      const locFields: any[] = [];
-      if (ma.street != null && String(ma.street).trim()) locFields.push({ fieldID: '773', fieldValue: String(ma.street).trim() });
-      if (ma.city != null && String(ma.city).trim()) locFields.push({ fieldID: '776', fieldValue: String(ma.city).trim() });
-      if (ma.zip != null && String(ma.zip).trim()) locFields.push({ fieldID: '775', fieldValue: String(ma.zip).trim() });
-      if (zProvince) locFields.push({ fieldID: '778', optionID: zProvince });
-      if (zCountry && locFields.length) locFields.push({ fieldID: '779', optionID: zCountry });
 
-      if (dryRun) return json({ success: true, dryRun: true, resolved: { clientID, contactID, locationID, durMin, zip, zProvince, zCountry }, wouldPost: { contactEdit: contactFields.length ? { method: '2', objectID: contactID, Fields: contactFields } : null, locationEdit: locFields.length ? { method: '2', objectID: locationID, Fields: locFields } : null, lock: { dayID, routeID, startTime, duration: durMin, serviceTypeID: svc }, wo: { method: '3', clientID, contactID, locationID, serviceTypeID: svc, Fields: [{ fieldID: '10336', fieldValue: items }, { fieldID: '200', fieldValue: desc }, { fieldID: '186', fieldValue: String(durMin) }] }, clientEdit: resCommOptionID ? { Fields: [{ fieldID: '121', optionID: resCommOptionID }] } : null } });
+      // Address fields (shared by the location CREATE for a bare lead and the location UPDATE for an existing one).
+      const aStreet = String(ma.street || '').trim(), aCity = String(ma.city || '').trim(), aZip = String(ma.zip || (needLocation ? zip : '') || '').trim();
+      const addrFields: any[] = [];
+      if (aStreet) addrFields.push({ fieldID: '773', fieldValue: aStreet });
+      if (aCity) addrFields.push({ fieldID: '776', fieldValue: aCity });
+      if (aZip) addrFields.push({ fieldID: '775', fieldValue: aZip });
+      if (zProvince) addrFields.push({ fieldID: '778', optionID: zProvince });
+      if (zCountry && addrFields.length) addrFields.push({ fieldID: '779', optionID: zCountry });
+      // A CREATE needs street + zip (a select-only Fields set would make an addressless location). An UPDATE can
+      //    patch whatever subset the manager supplied.
+      const canCreateLoc = !!(aStreet && aZip);
 
-      // Execute the Contact + Location updates (best-effort; flags returned so the manager can see what stuck).
-      let contactUpdated: boolean | null = null, locationUpdated: boolean | null = null;
+      if (dryRun) return json({ success: true, dryRun: true, needLocation, resolved: { clientID, contactID, locationID: locationID || null, durMin, zip, zProvince, zCountry }, wouldPost: { contactEdit: contactFields.length ? { method: '2', objectID: contactID, Fields: contactFields } : null, locationCreate: needLocation ? { method: '3', clientID, contactID, canCreate: canCreateLoc, Fields: addrFields } : null, locationEdit: (!needLocation && addrFields.length) ? { method: '2', objectID: locationID, Fields: addrFields } : null, lock: { dayID, routeID, startTime, duration: durMin, serviceTypeID: svc }, wo: { method: '3', clientID, contactID, locationID: locationID || '(new)', serviceTypeID: svc, Fields: [{ fieldID: '10336', fieldValue: items }, { fieldID: '200', fieldValue: desc }, { fieldID: '186', fieldValue: String(durMin) }] }, clientEdit: resCommOptionID ? { Fields: [{ fieldID: '121', optionID: resCommOptionID }] } : null } });
+
+      // Execute the Contact update (best-effort) + the Location create/update (flags returned so the manager sees what stuck).
+      let contactUpdated: boolean | null = null, locationUpdated: boolean | null = null, locationCreated = false;
       if (contactFields.length) { try { const ce = await vpost(token, '/data/Contacts/', { method: '2', objectID: String(contactID), Fields: contactFields }); contactUpdated = ce?.errNo === 0; if (!contactUpdated) console.error('[bookLead] contact update failed', { contactID, errNo: ce?.errNo, errMsg: ce?.errMsg }); } catch (e) { contactUpdated = false; console.error('[bookLead] contact update threw', e); } }
-      if (locFields.length) { try { const le = await vpost(token, '/data/Locations/', { method: '2', objectID: String(locationID), Fields: locFields }); locationUpdated = le?.errNo === 0; if (!locationUpdated) console.error('[bookLead] location update failed', { locationID, errNo: le?.errNo, errMsg: le?.errMsg }); } catch (e) { locationUpdated = false; console.error('[bookLead] location update threw', e); } }
+      if (needLocation) {
+        // CREATE the service address (standard Vonigo child-create: clientID + contactID; franchise/locationType auto-derive).
+        if (!canCreateLoc) return json({ success: false, step: 'location', error: 'This lead has no service address on file — enter at least a street and zip to book.' }, 409);
+        const lc = await vpost(token, '/data/Locations/', { method: '3', clientID, contactID: String(contactID), Fields: addrFields });
+        const newLoc = lc.Location || (lc.Locations && lc.Locations[0]) || null;
+        const newLocID = newLoc ? String(newLoc.objectID) : null;
+        if (!newLocID || lc?.errNo !== 0) { console.error('[bookLead] location create failed', { clientID, contactID, errNo: lc?.errNo, errMsg: lc?.errMsg }); return json({ success: false, step: 'locationCreate', error: 'Could not create the service address in Vonigo.', errNo: lc?.errNo, errMsg: lc?.errMsg || null }, 502); }
+        locationID = newLocID; locationCreated = true; locationUpdated = true;
+        console.log('[bookLead] location created', { clientID, contactID, locationID });
+      } else if (addrFields.length) {
+        // UPDATE the existing location. (Reads-by-id are unreliable for locations, but writes-by-id are trusted — contract.)
+        try { const le = await vpost(token, '/data/Locations/', { method: '2', objectID: String(locationID), Fields: addrFields }); locationUpdated = le?.errNo === 0; if (!locationUpdated) console.error('[bookLead] location update failed', { locationID, errNo: le?.errNo, errMsg: le?.errMsg }); } catch (e) { locationUpdated = false; console.error('[bookLead] location update threw', e); }
+      }
 
       // 3) Lock the slot (availability method 2 → lockID)
       const lock = await vpost(token, '/resources/availability/', { method: '2', dayID, routeID, zip, serviceTypeID: svc, duration: String(durMin), startTime });
@@ -829,14 +850,45 @@ Deno.serve(async (req: Request) => {
           catch (e) { leadDeactivated = false; console.error('[bookLead] lead deactivate threw', e); }
         }
 
-        console.log('[bookLead] booked', { franchiseID, clientID, jobID, woID, dayID, routeID, startTime, durMin, contactUpdated, locationUpdated, resCommSet, leadDeactivated });
-        try { await audit({ franchiseID, action: 'bookLead', actorEmail: body.actorEmail, resolved: { clientID, contactID, locationID, dayID, routeID, startTime, durMin }, fieldsWritten: { woID, jobID, contactUpdated, locationUpdated, resCommSet, leadDeactivated }, vonigoErrno: 0, success: true, result: { dateService } }); } catch { /* audit best-effort */ }
-        return json({ success: true, jobID, woID, dateService, durMin, contactUpdated, locationUpdated, resCommSet, leadDeactivated });
+        console.log('[bookLead] booked', { franchiseID, clientID, jobID, woID, dayID, routeID, startTime, durMin, contactUpdated, locationCreated, locationUpdated, resCommSet, leadDeactivated });
+        try { await audit({ franchiseID, action: 'bookLead', actorEmail: body.actorEmail, resolved: { clientID, contactID, locationID, dayID, routeID, startTime, durMin }, fieldsWritten: { woID, jobID, contactUpdated, locationCreated, locationUpdated, resCommSet, leadDeactivated }, vonigoErrno: 0, success: true, result: { dateService } }); } catch { /* audit best-effort */ }
+        return json({ success: true, jobID, woID, dateService, durMin, contactUpdated, locationCreated, locationUpdated, resCommSet, leadDeactivated });
       } catch (e) {
         await releaseLock();
         console.error('[bookLead] exception', e);
         return json({ success: false, step: 'exception', error: 'Booking failed — the slot was released.' }, 500);
       }
+    }
+
+    // action=inspectClient — READ-ONLY diagnostic: dump a client's raw Relations + Fields so we can see what
+    // objects (contact/location) a lead actually carries. Safe (method -1 read). Used to design the bare-lead
+    // create path and for support triage.
+    if (action === 'inspectClient') {
+      const clientID = String(body.clientID || '');
+      if (!clientID) return json({ success: false, error: 'inspectClient needs clientID' }, 400);
+      const cr = await vpost(token, '/data/Clients/', { method: '-1', objectID: clientID, isCompleteObject: 'true' });
+      const client = (cr.Clients && cr.Clients[0]) || null;
+      if (!client) return json({ success: false, error: 'client not found', clientID, raw: cr });
+      const relTypes: Record<string, string[]> = ((client.Relations || []) as any[]).reduce((m: any, x: any) => { (m[x.relationType] = m[x.relationType] || []).push(String(x.objectID)); return m; }, {});
+      const out: any = { success: true, clientID, name: client.name || null, relationTypes: relTypes, fields: (client.Fields || []).map((f: any) => ({ id: f.fieldID, name: f.name, value: f.fieldValue, optionID: f.optionID })) };
+      // Optionally dump the linked contact + location objects (read-only) to see their fields/relations.
+      if (body.deep) {
+        const dump = async (path: string, id: string) => { try { const r = await vpost(token, path, { method: '-1', objectID: id, isCompleteObject: 'true' }); const key = Object.keys(r).find(k => Array.isArray((r as any)[k]) && (r as any)[k][0] && (r as any)[k][0].objectID); const o = key ? (r as any)[key][0] : null; return o ? { objectID: o.objectID, name: o.name, relations: (o.Relations || []).map((x: any) => ({ type: x.relationType, id: x.objectID })), fields: (o.Fields || []).map((f: any) => ({ id: f.fieldID, name: f.name, value: f.fieldValue, optionID: f.optionID })) } : { raw: r }; } catch (e) { return { error: String(e) }; } };
+        if (relTypes.contact) out.contact = await dump('/data/Contacts/', relTypes.contact[0]);
+        if (relTypes.location) out.location = await dump('/data/Locations/', relTypes.location[0]);
+      }
+      return json(out);
+    }
+
+    // action=objMeta — READ-ONLY: dump a Vonigo object's field + option metadata (/system/objects method 1).
+    // Used to design creates (required fields, option sets). Safe.
+    if (action === 'objMeta') {
+      const objectID = String(body.objectID || '');
+      if (!objectID) return json({ success: false, error: 'objMeta needs objectID' }, 400);
+      const b: any = { method: '1', objectID };
+      if (body.serviceTypeID) b.serviceTypeID = String(body.serviceTypeID);
+      const m = await vpost(token, '/system/objects/', b);
+      return json({ success: true, objectID, name: m.name || m.objectName || null, fields: (m.Fields || []).map((f: any) => ({ id: f.fieldID, name: f.name, required: f.isFieldRequired, type: f.type })), optionCount: (m.Options || []).length });
     }
 
     // action=deactivateLead — mark a DEAD lead: deactivate it in Vonigo (/data/Leads/ method 5) so it drops
