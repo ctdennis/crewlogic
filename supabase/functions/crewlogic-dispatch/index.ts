@@ -728,6 +728,70 @@ Deno.serve(async (req: Request) => {
       return json({ success: true, lockID, requestID: lockID, dayID: String(dayID), routeID: String(routeID), startTime: Number(startTime), durationMin: Number(duration) });
     }
 
+    // action=bookLead — FW-66 leads booking (contract: docs/contract-bizdev-leads-booking.md, approved).
+    // Books a lead (an existing Vonigo Client) into a chosen slot: resolve client → zip-zone duration → lock
+    // slot → create WorkOrder (method 3, which auto-creates the parent Job + appointment) → set res/comm on
+    // the client → release the lock on any failure. Real Vonigo WRITE. dryRun:true validates + returns the
+    // intended payloads only.
+    // CAMPAIGN: the created Job auto-inherits the lead's own campaign source (its real origin — the correct
+    // default for a lead). Explicit override is NOT a /data/Jobs method-2 field edit (969/983 are relation-
+    // managed selects → Vonigo returns "No Data to update"); an override path (via the campaign relation /
+    // campaignID) is a tracked follow-up, not v1.
+    if (action === 'bookLead') {
+      const clientID = String(body.clientID || '');
+      const dayID = String(body.dayID || ''), routeID = String(body.routeID || ''), startTime = String(body.startTime ?? '');
+      const zip = String(body.zip || ''), svc = String(body.serviceTypeID || '11');
+      const items = String(body.items || '').trim(), desc = String(body.desc || '').trim();
+      const resCommOptionID = body.resCommOptionID != null ? String(body.resCommOptionID) : ''; // 59 Residential / 60 Commercial (Client field 121)
+      const dryRun = body.dryRun === true;
+      if (!clientID || !dayID || !routeID || startTime === '') return json({ success: false, error: 'bookLead needs clientID, dayID, routeID, startTime' }, 400);
+
+      // 1) Resolve the client → contactID + locationID (required for the WO create)
+      const cr = await vpost(token, '/data/Clients/', { method: '-1', objectID: clientID, isCompleteObject: 'true' });
+      const client = (cr.Clients && cr.Clients[0]) || null;
+      if (!client) return json({ success: false, step: 'client', error: 'Lead client not found', clientID }, 404);
+      const crel: Record<string, string[]> = ((client.Relations || []) as any[]).reduce((m: any, x: any) => { (m[x.relationType] = m[x.relationType] || []).push(String(x.objectID)); return m; }, {});
+      const contactID = crel.contact && crel.contact[0];
+      const locationID = (crel.location && crel.location[0]) || (crel.location1 && crel.location1[0]);
+      if (!contactID || !locationID) return json({ success: false, step: 'client', error: 'Lead is missing a contact or location — cannot book.', contactID: contactID || null, locationID: locationID || null }, 409);
+
+      // 2) Duration from the zip's zone (contract: /resources/zips/ method 1 → ServiceTypes[0].duration)
+      let durMin = Number(body.durationMin || 0);
+      if (!durMin && zip) { try { const zr = await vpost(token, '/resources/zips/', { method: '1', zip }); const st = (zr.ServiceTypes || [])[0]; if (st && st.duration) durMin = Number(st.duration); } catch { /* fall through */ } }
+      if (!durMin) durMin = 120;
+
+      if (dryRun) return json({ success: true, dryRun: true, resolved: { clientID, contactID, locationID, durMin, zip }, wouldPost: { lock: { dayID, routeID, startTime, duration: durMin, serviceTypeID: svc }, wo: { method: '3', clientID, contactID, locationID, serviceTypeID: svc, Fields: [{ fieldID: '10336', fieldValue: items }, { fieldID: '200', fieldValue: desc }, { fieldID: '186', fieldValue: String(durMin) }] }, clientEdit: resCommOptionID ? { Fields: [{ fieldID: '121', optionID: resCommOptionID }] } : null } });
+
+      // 3) Lock the slot (availability method 2 → lockID)
+      const lock = await vpost(token, '/resources/availability/', { method: '2', dayID, routeID, zip, serviceTypeID: svc, duration: String(durMin), startTime });
+      const lockID = (lock.Ids && (lock.Ids.lockID || lock.Ids.LockID)) || null;
+      if (!lockID) return json({ success: false, step: 'lock', error: 'That slot isn’t open — pick another time.', errNo: lock?.errNo }, 409);
+      const releaseLock = async () => { try { await vpost(token, '/resources/availability/', { method: '4', lockID: String(lockID) }); } catch { /* best effort */ } };
+
+      try {
+        // 4) Create the WorkOrder (method 3) — auto-creates the parent Job + appointment in the locked slot
+        const wo = await vpost(token, '/data/WorkOrders/', { method: '3', lockID: String(lockID), clientID, contactID: String(contactID), locationID: String(locationID), serviceTypeID: svc, Fields: [{ fieldID: '10336', fieldValue: items || 'n/a' }, { fieldID: '200', fieldValue: desc || '' }, { fieldID: '186', fieldValue: String(durMin) }] });
+        if (wo?.errNo !== 0) { await releaseLock(); console.error('[bookLead] WO create failed', { franchiseID, clientID, errNo: wo?.errNo, errMsg: wo?.errMsg }); return json({ success: false, step: 'woCreate', error: 'Booking failed at the scheduling step — the slot was released.', errNo: wo?.errNo }, 502); }
+        const woObj = wo.WorkOrder || null;
+        const woID = woObj ? String(woObj.objectID) : null;
+        const jobRel = ((woObj?.Relations || []) as any[]).find((x: any) => x.relationType === 'job');
+        const jobID = jobRel ? String(jobRel.objectID) : (woObj?.name ? (String(woObj.name).match(/(\d+)-/) || [])[1] || null : null);
+        const dateService = woObj?.dateService || null;
+
+        // 5) Set residential/commercial (Client field 121 — a text/relation edit that DOES take, unlike the Job selects)
+        let resCommSet: boolean | null = null;
+        if (resCommOptionID) { try { const ce = await vpost(token, '/data/Clients/', { method: '2', objectID: clientID, Fields: [{ fieldID: '121', optionID: resCommOptionID }] }); resCommSet = ce?.errNo === 0; } catch { resCommSet = false; } }
+
+        console.log('[bookLead] booked', { franchiseID, clientID, jobID, woID, dayID, routeID, startTime, durMin, resCommSet });
+        try { await audit({ franchiseID, action: 'bookLead', actorEmail: body.actorEmail, resolved: { clientID, contactID, locationID, dayID, routeID, startTime, durMin }, fieldsWritten: { woID, jobID, resCommSet }, vonigoErrno: 0, success: true, result: { dateService } }); } catch { /* audit best-effort */ }
+        return json({ success: true, jobID, woID, dateService, durMin, resCommSet });
+      } catch (e) {
+        await releaseLock();
+        console.error('[bookLead] exception', e);
+        return json({ success: false, step: 'exception', error: 'Booking failed — the slot was released.' }, 500);
+      }
+    }
+
     if (action === 'cancelJob') {
       const { jobID, categoryOptionID, reasonOptionID } = body;
       const comments = String(body.comments || '');
