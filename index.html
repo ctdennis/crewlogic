@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.17 | 2026-08-16">
+  <meta name="crewlogic-version" content="v5.125.18 | 2026-08-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15623,11 +15623,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     async function bwLoad() {
+      // PERF (2026-08-16): the combined 5-type/400-row list took ~8s (bad query plan at the limit), while each
+      // subset is <1s. So load the ACTIONABLE types first for a fast first paint, then fetch cases (read-only,
+      // the high-volume tail) in the BACKGROUND and merge. Cuts perceived load from ~8s to ~1s.
+      const ACTIONABLE = ['lead', 'unconverted_estimate', 'cancellation', 'ucb'];
       try {
-        // Same read-only edge call the Follow-up Pipeline uses; own state so the two never collide.
-        // Also fetch the live 30-day franchise avg-job-size — the workspace opportunity floor for unpriced items.
         const [res, avgRes] = await Promise.all([
-          edgeFunctionCall('crewlogic-pipeline', { action: 'list', franchiseID: currentUser.franchiseID }),
+          edgeFunctionCall('crewlogic-pipeline', { action: 'list', franchiseID: currentUser.franchiseID, types: ACTIONABLE }),
           edgeFunctionCall('crewlogic-pipeline', { action: 'avgJobSize', franchiseID: currentUser.franchiseID }).catch(() => null)
         ]);
         if (res && res.success) { _bwItems = res.items || []; _bwCounts = res.counts || {}; _bwOpen = res.open || 0; _bwTotal = res.total || _bwItems.length; }
@@ -15637,7 +15639,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // LEADS window: P(close) is age-decayed, so a lead >2 weeks old is effectively dead. Show only leads
       // from the last 14 days (other types keep their own relevance window). Keeps the queue + forecast honest.
       _bwItems = (_bwItems || []).filter(it => it.type !== 'lead' || bwDaysOld(it.occurred_at) <= 14);
-      bwPaint();
+      bwPaint(); // fast first paint (actionable types); cases fill in below
+      // Background: cases (read-only, ~229 rows) — append + repaint the Cases group without blocking first paint.
+      edgeFunctionCall('crewlogic-pipeline', { action: 'list', franchiseID: currentUser.franchiseID, types: ['case'] })
+        .then(cr => { if (cr && cr.success && Array.isArray(cr.items) && cr.items.length) { const have = new Set(_bwItems.map(i => String(i.id))); _bwItems = _bwItems.concat(cr.items.filter(i => !have.has(String(i.id)))); bwPaint(); } })
+        .catch(e => console.warn('[bizdev] cases background load failed', e));
     }
 
     function bwPaint() {
