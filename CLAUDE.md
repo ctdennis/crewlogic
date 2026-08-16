@@ -185,6 +185,10 @@ The rebrand from "CrewLogic" to "CrewLogicAI" happened recently. The brand name 
 - **Button color standard (locked 2026-06-15):** secondary/utility buttons on dark surfaces use `.btn-surface` or `var(--btn-surface)` (#34485d) / `var(--btn-surface-border)` (#46596d) — NOT `--bg-input` (#253545), which is nearly identical to `--bg-card` (#1e2f40) and renders buttons near-invisible. Primary/accent buttons keep `--accent-green`/`--accent-yellow`.
 - The app is mobile-first / PWA-style (`apple-mobile-web-app-capable`, fixed viewport, no user scaling).
 
+### Always show a loading indicator (added 2026-08-16 — owner flagged repeatedly)
+
+EVERY async/slow operation — screen/module open, `edgeFunctionCall`/`supabaseFetch`, save, Vonigo sync, the booking dry-run + slot fetch, PDF gen — MUST show a **visual in-progress indicator** shown **before the await** and cleared in a `finally` (so an error can't leave it stuck). Put it where the user is looking: a spinner/skeleton in the empty content region for a screen open, or **disable the button + change its label** ("Book appointment" → "Booking…") for an action. **Static text alone reads as frozen — use motion** (reuse the global `.spinner-inline`, animation `spin`). For multi-second work (Vonigo sync, big fetch) name what's happening ("Syncing from Vonigo…"). Never leave a blank/unchanged screen or a dead button during a wait. This is a build-time checklist item on any change that adds/moves an awaited operation a user waits on.
+
 ### UI state preservation — check this on EVERY change that renders or saves (added 2026-07-21)
 
 Every `render*()` in this app rebuilds a section with `innerHTML`, which **destroys everything inside it** — open dropdowns, focus, scroll position, half-typed input. That's harmless on first paint. It is a **bug** whenever the rebuild can fire *while the owner is mid-interaction*, i.e. any re-render triggered by something asynchronous finishing: a save landing, a fetch returning, a poll tick, a timer.

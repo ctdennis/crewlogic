@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.11 | 2026-08-16">
+  <meta name="crewlogic-version" content="v5.125.12 | 2026-08-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15617,7 +15617,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     async function renderBizDev() {
       bwEnsureStyles();
       const scr = document.getElementById('bizdevScreen');
-      scr.innerHTML = '<div class="bw-app"><div class="bw-empty">Loading sales workspace…</div></div>';
+      scr.innerHTML = '<div class="bw-app"><div class="bw-empty" style="display:flex;align-items:center;justify-content:center;gap:10px;padding:72px 16px"><span class="spinner-inline"></span>Loading sales workspace…</div></div>';
       await bwLoad();
     }
 
@@ -15914,6 +15914,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _bwBook = null; // { id, clientID, zip, durMin, slotDay, slot }
     const _BW_BI = 'width:100%;box-sizing:border-box;padding:8px 9px;margin:4px 0 11px;background:var(--bg-input,#253545);border:1px solid var(--btn-surface-border,#46596d);border-radius:6px;color:var(--text-primary);font-size:13px;';
     const _BW_BL = 'display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);font-weight:700;';
+    // Modal buttons use INLINE styles (the modal renders on <body>, outside #bizdevScreen, so .bw-btn doesn't reach it).
+    const _BW_BTN = 'padding:9px 14px;border-radius:8px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:13px;cursor:pointer;';
+    const _BW_BTNP = 'padding:9px 16px;border-radius:8px;border:none;background:var(--accent-green,#00E785);color:#06121d;font-weight:800;font-size:13px;cursor:pointer;';
     function bwOpenBook(id) {
       const it = _bwItems.find(x => String(x.id) === String(id)); if (!it) return;
       if (it.type !== 'lead') { bwSetStage(id, 'won'); return; } // only leads use this flow for now
@@ -15932,11 +15935,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         <label style="${_BW_BL}">Items to remove</label>
         <input id="bwBookItems" placeholder="e.g. 3 mattresses, boxes, a couch" style="${_BW_BI}">
         <label style="${_BW_BL}">Pick a day</label>
-        <div style="display:flex;gap:8px;align-items:center;margin:4px 0 6px"><input type="date" id="bwBookDate" style="${_BW_BI}margin:0;flex:0 0 auto;width:auto"><button class="bw-btn" onclick="bwBookFindSlots()">Find times</button></div>
+        <div style="display:flex;gap:8px;align-items:center;margin:4px 0 6px"><input type="date" id="bwBookDate" style="${_BW_BI}margin:0;flex:0 0 auto;width:auto"><button style="${_BW_BTN}" onclick="bwBookFindSlots()">Find times</button></div>
         <div id="bwBookSlots" style="margin:6px 0 4px;display:flex;flex-wrap:wrap;gap:6px"></div>
-        <div class="bw-actions" style="margin-top:14px">
-          <button class="bw-btn primary" id="bwBookGo" disabled onclick="bwBookConfirm()">Book appointment</button>
-          <button class="bw-btn" onclick="plCloseModal()">Cancel</button>
+        <div style="display:flex;gap:8px;margin-top:16px">
+          <button style="${_BW_BTNP}opacity:.5" id="bwBookGo" disabled onclick="bwBookConfirm()">Book appointment</button>
+          <button style="${_BW_BTN}" onclick="plCloseModal()">Cancel</button>
         </div>
       </div>`);
       edgeFunctionCall('crewlogic-dispatch', { action: 'bookLead', franchiseID: currentUser.franchiseID, clientID, zip, dryRun: true })
@@ -15950,7 +15953,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const dstr = (document.getElementById('bwBookDate') || {}).value || '';
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dstr)) { bwToast('Pick a day first'); return; }
       const dayID = dstr.replace(/-/g, ''); _bwBook.slotDay = dayID; _bwBook.slot = null;
-      const go = document.getElementById('bwBookGo'); if (go) go.disabled = true;
+      const go = document.getElementById('bwBookGo'); if (go) { go.disabled = true; go.style.opacity = '.5'; }
       const cont = document.getElementById('bwBookSlots'); if (cont) cont.innerHTML = '<span style="color:var(--text-muted);font-size:12px">Finding open times…</span>';
       try {
         const r = await edgeFunctionCall('crewlogic-dispatch', { action: 'suggestSlots', franchiseID: currentUser.franchiseID, dayID, zip: _bwBook.zip, durationMin: _bwBook.durMin || 120, serviceTypeID: '11' });
@@ -15958,7 +15961,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (!slots.length) { cont.innerHTML = '<span style="color:var(--text-muted);font-size:12px">No open times that day — try another.</span>'; return; }
         const seen = new Set(), uniq = [];
         slots.slice().sort((a, b) => a.startTime - b.startTime).forEach(s => { if (!seen.has(s.startTime)) { seen.add(s.startTime); uniq.push(s); } });
-        cont.innerHTML = uniq.map(s => '<button class="bw-btn bwslot" style="padding:6px 10px;font-size:12px" onclick="bwBookPickSlot(this,\'' + s.routeID + '\',' + s.startTime + ')">' + _escHtml(s.label) + '</button>').join('');
+        cont.innerHTML = uniq.map(s => '<button class="bwslot" style="' + _BW_BTN + 'padding:6px 10px;font-size:12px" onclick="bwBookPickSlot(this,\'' + s.routeID + '\',' + s.startTime + ')">' + _escHtml(s.label) + '</button>').join('');
       } catch (e) { if (cont) cont.innerHTML = '<span style="color:var(--accent-red,#e0645a);font-size:12px">Could not load times.</span>'; }
     }
     function bwBookPickSlot(btn, routeID, startTime) {
@@ -15967,7 +15970,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _bwBook.slot = { routeID: String(routeID), startTime: Number(startTime), label: lbl, dayID: _bwBook.slotDay };
       document.querySelectorAll('#bwBookSlots .bwslot').forEach(b => { b.style.background = ''; b.style.color = ''; b.style.borderColor = ''; });
       if (btn) { btn.style.background = 'var(--accent-green,#00E785)'; btn.style.color = '#06121d'; btn.style.borderColor = 'var(--accent-green,#00E785)'; }
-      const go = document.getElementById('bwBookGo'); if (go) go.disabled = false;
+      const go = document.getElementById('bwBookGo'); if (go) { go.disabled = false; go.style.opacity = '1'; }
     }
     async function bwBookConfirm() {
       if (!_bwBook || !_bwBook.slot) { bwToast('Pick a time first'); return; }
