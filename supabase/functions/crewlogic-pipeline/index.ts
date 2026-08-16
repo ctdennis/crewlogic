@@ -29,7 +29,10 @@ const EST_LABEL_TEXT: Record<number, string> = { 9996: 'Est. completed — estim
 const CONVERTED_LABELS = new Set([9970, 9975]); // Est-Converted-EstOnly / Est-Converted-Job
 const UNCONV_RECHECK_HOURS = 12;                // how often to re-check a still-unconverted estimate's email trail
 // UCB lane is matched by route_name (~URGENTCB) off the mirror; the Vonigo route objectID (2987) is no longer needed.
-const ALL_TYPES = ['lead', 'unconverted_estimate', 'cancellation', 'ucb', 'case'];
+// 'case' killed 2026-08-15 (owner: cases are call-center kudos/questions/issues, not bookable opportunities).
+// Removing it here stops the Vonigo Cases fetch (_passCases), keeps them out of counts, and — via the list
+// default below — hides any existing case rows. Reversible: re-add 'case' to revive sync + display.
+const ALL_TYPES = ['lead', 'unconverted_estimate', 'cancellation', 'ucb'];
 
 // Starter sequences seeded per franchise on first use (then owner-editable). Each is the auto-default for
 // its item type (hybrid: new items auto-enter it; the owner can reassign). Email/text steps carry a
@@ -198,6 +201,7 @@ Deno.serve(async (req: Request) => {
       const COLS = 'id, type, source_provider, source_external_id, customer_name, phone, email, address, zip, amount, reason, detail, occurred_at, stage, assigned_to, next_action_at, sequence_id, cadence, notes, last_synced_at';
       let q = supabase.from('pipeline_items').select(COLS).eq('franchise_id', franchiseInternalID);
       if (Array.isArray(body.types) && body.types.length) q = q.in('type', body.types.map(String));
+      else q = q.in('type', ALL_TYPES); // default to live types only — hides retired 'case' rows (2026-08-15)
       if (Array.isArray(body.stages) && body.stages.length) q = q.in('stage', body.stages.map(String));
       if (body.assignee) q = q.eq('assigned_to', String(body.assignee));
       if (body.search) q = q.ilike('customer_name', '%' + String(body.search) + '%');
