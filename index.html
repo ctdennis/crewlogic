@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.8 | 2026-08-16">
+  <meta name="crewlogic-version" content="v5.125.9 | 2026-08-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15882,7 +15882,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         ${body}
         <div class="bw-actions">
           ${openBtn}
-          <button class="bw-btn primary" onclick="bwSetStage('${_escHtml(String(i.id))}','won')">${_escHtml(act)}</button>
+          <button class="bw-btn primary" onclick="${i.type === 'lead' ? `bwOpenBook('${_escHtml(String(i.id))}')` : `bwSetStage('${_escHtml(String(i.id))}','won')`}">${_escHtml(act)}</button>
           <button class="bw-btn" onclick="bwStub('Reschedule')">Reschedule</button>
           <button class="bw-btn" onclick="bwStub('Set follow-up')">Set follow-up</button>
         </div>
@@ -15906,6 +15906,84 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       else bwToast('No CrewLogic estimate found for this item');
     }
     function bwStub(action) { bwToast(action + ' — next phase'); }
+
+    // ── FW-66 Leads booking (bookLead) — qualify + slot picker modal ─────────────────────────────
+    // Lead's "Schedule / book" opens this: validate the lead (dry-run → duration), collect res/comm +
+    // situation + items, pick a day → open times (suggestSlots) → Book → crewlogic-dispatch bookLead → Won.
+    let _bwBook = null; // { id, clientID, zip, durMin, slotDay, slot }
+    const _BW_BI = 'width:100%;box-sizing:border-box;padding:8px 9px;margin:4px 0 11px;background:var(--bg-input,#253545);border:1px solid var(--btn-surface-border,#46596d);border-radius:6px;color:var(--text-primary);font-size:13px;';
+    const _BW_BL = 'display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);font-weight:700;';
+    function bwOpenBook(id) {
+      const it = _bwItems.find(x => String(x.id) === String(id)); if (!it) return;
+      if (it.type !== 'lead') { bwSetStage(id, 'won'); return; } // only leads use this flow for now
+      const clientID = String(it.source_external_id || '');
+      const zip = String(it.zip || (String(it.address || '').match(/\b(\d{5})\b/) || [])[1] || '');
+      _bwBook = { id, clientID, zip, durMin: 0, slotDay: '', slot: null };
+      plModal(`<div style="max-width:460px">
+        <h3 style="margin:0 0 2px">Book lead — ${_escHtml(it.customer_name || 'Unknown')}</h3>
+        <div style="color:var(--text-muted);font-size:12.5px;margin-bottom:12px">${_escHtml(it.address || 'No address on file')}${zip ? ' · ' + _escHtml(zip) : ''}</div>
+        <div id="bwBookStatus" style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px">Checking availability…</div>
+        <label style="${_BW_BL}">Property type</label>
+        <select id="bwBookResComm" style="${_BW_BI}"><option value="">— leave unchanged —</option><option value="59">Residential</option><option value="60">Commercial</option></select>
+        <label style="${_BW_BL}">Customer situation</label>
+        <textarea id="bwBookDesc" rows="2" placeholder="What's going on / notes for the crew" style="${_BW_BI}resize:vertical"></textarea>
+        <label style="${_BW_BL}">Items to remove</label>
+        <input id="bwBookItems" placeholder="e.g. 3 mattresses, boxes, a couch" style="${_BW_BI}">
+        <label style="${_BW_BL}">Pick a day</label>
+        <div style="display:flex;gap:8px;align-items:center;margin:4px 0 6px"><input type="date" id="bwBookDate" style="${_BW_BI}margin:0;flex:0 0 auto;width:auto"><button class="bw-btn" onclick="bwBookFindSlots()">Find times</button></div>
+        <div id="bwBookSlots" style="margin:6px 0 4px;display:flex;flex-wrap:wrap;gap:6px"></div>
+        <div class="bw-actions" style="margin-top:14px">
+          <button class="bw-btn primary" id="bwBookGo" disabled onclick="bwBookConfirm()">Book appointment</button>
+          <button class="bw-btn" onclick="plCloseModal()">Cancel</button>
+        </div>
+      </div>`);
+      edgeFunctionCall('crewlogic-dispatch', { action: 'bookLead', franchiseID: currentUser.franchiseID, clientID, zip, dryRun: true })
+        .then(r => { const st = document.getElementById('bwBookStatus'); if (!st) return;
+          if (r && r.success) { _bwBook.durMin = Number(r.resolved.durMin) || 0; st.textContent = 'Bookable · ' + _bwBook.durMin + '-min appointment (zone default). Campaign will carry over from the lead.'; }
+          else { st.innerHTML = '<span style="color:var(--accent-red,#e0645a)">Can’t book: ' + _escHtml((r && r.error) || 'this lead has no contact/location on file') + '</span>'; } })
+        .catch(() => { const st = document.getElementById('bwBookStatus'); if (st) st.textContent = 'Could not check availability — try again.'; });
+    }
+    async function bwBookFindSlots() {
+      if (!_bwBook) return;
+      const dstr = (document.getElementById('bwBookDate') || {}).value || '';
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dstr)) { bwToast('Pick a day first'); return; }
+      const dayID = dstr.replace(/-/g, ''); _bwBook.slotDay = dayID; _bwBook.slot = null;
+      const go = document.getElementById('bwBookGo'); if (go) go.disabled = true;
+      const cont = document.getElementById('bwBookSlots'); if (cont) cont.innerHTML = '<span style="color:var(--text-muted);font-size:12px">Finding open times…</span>';
+      try {
+        const r = await edgeFunctionCall('crewlogic-dispatch', { action: 'suggestSlots', franchiseID: currentUser.franchiseID, dayID, zip: _bwBook.zip, durationMin: _bwBook.durMin || 120, serviceTypeID: '11' });
+        const slots = (r && r.slots) || []; if (!cont) return;
+        if (!slots.length) { cont.innerHTML = '<span style="color:var(--text-muted);font-size:12px">No open times that day — try another.</span>'; return; }
+        const seen = new Set(), uniq = [];
+        slots.slice().sort((a, b) => a.startTime - b.startTime).forEach(s => { if (!seen.has(s.startTime)) { seen.add(s.startTime); uniq.push(s); } });
+        cont.innerHTML = uniq.map(s => '<button class="bw-btn bwslot" style="padding:6px 10px;font-size:12px" onclick="bwBookPickSlot(this,\'' + s.routeID + '\',' + s.startTime + ')">' + _escHtml(s.label) + '</button>').join('');
+      } catch (e) { if (cont) cont.innerHTML = '<span style="color:var(--accent-red,#e0645a);font-size:12px">Could not load times.</span>'; }
+    }
+    function bwBookPickSlot(btn, routeID, startTime) {
+      if (!_bwBook) return;
+      const lbl = btn ? btn.textContent : '';
+      _bwBook.slot = { routeID: String(routeID), startTime: Number(startTime), label: lbl, dayID: _bwBook.slotDay };
+      document.querySelectorAll('#bwBookSlots .bwslot').forEach(b => { b.style.background = ''; b.style.color = ''; b.style.borderColor = ''; });
+      if (btn) { btn.style.background = 'var(--accent-green,#00E785)'; btn.style.color = '#06121d'; btn.style.borderColor = 'var(--accent-green,#00E785)'; }
+      const go = document.getElementById('bwBookGo'); if (go) go.disabled = false;
+    }
+    async function bwBookConfirm() {
+      if (!_bwBook || !_bwBook.slot) { bwToast('Pick a time first'); return; }
+      const go = document.getElementById('bwBookGo'); if (go) { go.disabled = true; go.textContent = 'Booking…'; }
+      const bk = _bwBook;
+      try {
+        const r = await edgeFunctionCall('crewlogic-dispatch', {
+          action: 'bookLead', franchiseID: currentUser.franchiseID, clientID: bk.clientID, zip: bk.zip,
+          dayID: bk.slot.dayID, routeID: bk.slot.routeID, startTime: String(bk.slot.startTime),
+          items: (document.getElementById('bwBookItems') || {}).value || '',
+          desc: (document.getElementById('bwBookDesc') || {}).value || '',
+          resCommOptionID: (document.getElementById('bwBookResComm') || {}).value || '',
+          actorEmail: (currentUser && currentUser.email) || '',
+        });
+        if (r && r.success) { bwToast('Booked · ' + bk.slot.label + ' — job #' + (r.jobID || '?')); plCloseModal(); bwSetStage(bk.id, 'won'); _bwBook = null; }
+        else { if (go) { go.disabled = false; go.textContent = 'Book appointment'; } bwToast('Booking failed: ' + ((r && r.error) || 'try another time')); }
+      } catch (e) { if (go) { go.disabled = false; go.textContent = 'Book appointment'; } bwToast('Booking failed — try again.'); }
+    }
 
     // ── sequences (builder) ───────────────────────────────────────────
     function plOpenSequences() {

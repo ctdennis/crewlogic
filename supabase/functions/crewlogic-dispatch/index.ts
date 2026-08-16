@@ -744,7 +744,8 @@ Deno.serve(async (req: Request) => {
       const items = String(body.items || '').trim(), desc = String(body.desc || '').trim();
       const resCommOptionID = body.resCommOptionID != null ? String(body.resCommOptionID) : ''; // 59 Residential / 60 Commercial (Client field 121)
       const dryRun = body.dryRun === true;
-      if (!clientID || !dayID || !routeID || startTime === '') return json({ success: false, error: 'bookLead needs clientID, dayID, routeID, startTime' }, 400);
+      if (!clientID) return json({ success: false, error: 'bookLead needs clientID' }, 400);
+      if (!dryRun && (!dayID || !routeID || startTime === '')) return json({ success: false, error: 'bookLead needs dayID, routeID, startTime' }, 400);
 
       // 1) Resolve the client → contactID + locationID (required for the WO create)
       const cr = await vpost(token, '/data/Clients/', { method: '-1', objectID: clientID, isCompleteObject: 'true' });
