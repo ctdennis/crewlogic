@@ -29,10 +29,11 @@ const EST_LABEL_TEXT: Record<number, string> = { 9996: 'Est. completed — estim
 const CONVERTED_LABELS = new Set([9970, 9975]); // Est-Converted-EstOnly / Est-Converted-Job
 const UNCONV_RECHECK_HOURS = 12;                // how often to re-check a still-unconverted estimate's email trail
 // UCB lane is matched by route_name (~URGENTCB) off the mirror; the Vonigo route objectID (2987) is no longer needed.
-// 'case' killed 2026-08-15 (owner: cases are call-center kudos/questions/issues, not bookable opportunities).
-// Removing it here stops the Vonigo Cases fetch (_passCases), keeps them out of counts, and — via the list
-// default below — hides any existing case rows. Reversible: re-add 'case' to revive sync + display.
-const ALL_TYPES = ['lead', 'unconverted_estimate', 'cancellation', 'ucb'];
+// 'case' — EXPOSED but READ-ONLY (owner 2026-08-16, revised from the 2026-08-15 kill). Cases are call-center
+// kudos/questions/issues, NOT bookable opportunities; they surface in the pipeline (left rail, click for
+// details) but carry NO booking/action affordance — the client renders a case detail with no action bar,
+// stage dropdown, or opportunity strip (see bwDetailHtml case branch).
+const ALL_TYPES = ['lead', 'unconverted_estimate', 'cancellation', 'ucb', 'case'];
 
 // Starter sequences seeded per franchise on first use (then owner-editable). Each is the auto-default for
 // its item type (hybrid: new items auto-enter it; the owner can reassign). Email/text steps carry a
@@ -564,15 +565,21 @@ Deno.serve(async (req: Request) => {
       });
     })() : Promise.resolve();
 
-    // ---- C) Cases = /data/Cases plural key (franchise's own) ----
+    // ---- C) Cases = /data/Cases (franchise's own). NOTE: Vonigo returns the array under the SINGULAR key
+    //      `Case` (not `Cases`) — reading `r.Cases` silently dropped every case (bug fixed 2026-08-16). ----
     const _passCases = want('case') ? (async () => {
+      const seenCase = new Set<string>();
       for (let pg = 1; pg <= 6; pg++) {
         const r = await vpost('/data/Cases/', { securityToken: token, franchiseID, sortMode: '1', sortDirection: '1', pageNo: String(pg), pageSize: '50', isCompleteObject: 'true' });
         if (r.errNo !== 0) break;
-        const page = (r.Cases as Record<string, unknown>[]) || [];
+        const page = (Array.isArray(r.Case) ? r.Case : (r.Cases as Record<string, unknown>[])) || [];
+        let added = 0;
         for (const cs of page) {
+          const id = String(cs.objectID);
+          if (seenCase.has(id)) continue; // /data/Cases may ignore pageNo → skip repeated objectIDs (avoids dup conflict keys)
+          seenCase.add(id);
           const cf = cs.Fields as VField[];
-          rows.push(mk('case', 'case', String(cs.objectID), {
+          rows.push(mk('case', 'case', id, {
             customer_name: rel(cs.Relations as VRel[], 'client')?.name || '',
             phone: getField(cf, F.casePhone)?.fieldValue || null,
             email: getField(cf, F.caseEmail)?.fieldValue || null,
@@ -580,8 +587,9 @@ Deno.serve(async (req: Request) => {
             detail: getField(cf, F.caseNarr)?.fieldValue || null,
             occurred_at: iso(cs.dateCreated), raw: cs,
           }));
+          added++;
         }
-        if (page.length < 50) break;
+        if (page.length < 50 || added === 0) break; // done, or the page brought nothing new (pageNo ignored)
       }
     })() : Promise.resolve();
 
@@ -595,7 +603,12 @@ Deno.serve(async (req: Request) => {
     // ---- Upsert (merge-duplicates): only source-derived cols in the payload → CRM fields preserved. ----
     let upserted = 0;
     if (rows.length) {
-      const { error } = await supabase.from('pipeline_items').upsert(rows, { onConflict: 'tenant_id,type,source_external_id' });
+      // Dedupe by the conflict key — Postgres upsert rejects a batch that touches the same (tenant,type,
+      // source_external_id) row twice ("ON CONFLICT DO UPDATE command cannot affect row a second time").
+      const _byKey = new Map<string, Record<string, unknown>>();
+      for (const r of rows) _byKey.set(`${(r as any).type}::${(r as any).source_external_id}`, r);
+      const _rows = Array.from(_byKey.values());
+      const { error } = await supabase.from('pipeline_items').upsert(_rows, { onConflict: 'tenant_id,type,source_external_id' });
       if (error) { console.error(`[pipeline:${reqId}] upsert failed:`, error); return json({ success: false, error: 'Save failed', reqId }, 500); }
       upserted = rows.length;
     }

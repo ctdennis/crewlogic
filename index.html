@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.7 | 2026-08-15">
+  <meta name="crewlogic-version" content="v5.125.8 | 2026-08-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -14924,8 +14924,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       { key: 'lead',                 label: 'Leads',              short: 'Lead',        icon: '🌱', color: '#22c55e' },
       { key: 'unconverted_estimate', label: 'Open estimates',      short: 'Open estimate', icon: '📝', color: '#e0a44f' },
       { key: 'cancellation',         label: 'Cancellations',      short: 'Cancelled',   icon: '✖️', color: '#e05a4f' },
-      { key: 'ucb',                  label: 'Urgent callbacks',   short: 'Urgent CB',   icon: '📞', color: '#f43f5e' }
-      // 'case' type removed 2026-08-15 (owner: cases are kudos/questions from the call center, not bookable) — re-add here + in crewlogic-pipeline ALL_TYPES to revive
+      { key: 'ucb',                  label: 'Urgent callbacks',   short: 'Urgent CB',   icon: '📞', color: '#f43f5e' },
+      { key: 'case',                 label: 'Cases',              short: 'Case',        icon: '🛟', color: '#8b5cf6' } // EXPOSED but READ-ONLY (owner 2026-08-16): visible + click for details, no action affordance (see bwDetailHtml case branch)
     ];
     const PL_STAGES = [
       { key: 'new', label: 'New' }, { key: 'contacted', label: 'Contacted' }, { key: 'working', label: 'Working' },
@@ -15076,7 +15076,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     // Grouped, oldest-first rendering (Owner 2026-08-11): sort BY GROUP (cases first), and within each group by
     // date oldest→newest, so the most-aged items to work surface at the top. Group order is easy to re-order.
-    const PL_GROUP_ORDER = ['ucb', 'cancellation', 'unconverted_estimate', 'lead']; // 'case' removed 2026-08-15 (owner)
+    const PL_GROUP_ORDER = ['case', 'ucb', 'cancellation', 'unconverted_estimate', 'lead']; // 'case' re-exposed read-only (owner 2026-08-16)
     function plGroupedHtml(items) {
       let html = '';
       for (const key of PL_GROUP_ORDER) {
@@ -15406,8 +15406,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       { type: 'unconverted_estimate', name: 'Open Estimates', color: '#35c26e' },
       { type: 'lead',                 name: 'Leads',          color: '#4a9fe0' },
       { type: 'cancellation',         name: 'Cancellations',  color: '#e0645a' },
-      { type: 'ucb',                  name: 'UCB',            color: '#e0904a' }
-      // 'case' removed 2026-08-15 (owner)
+      { type: 'ucb',                  name: 'UCB',            color: '#e0904a' },
+      { type: 'case',                 name: 'Cases',          color: '#8b5cf6' } // read-only group (owner 2026-08-16): details only, no actions
     ];
     const BW_BADGE = { unconverted_estimate: 'Estimate', lead: 'Lead', cancellation: 'Cancellation', ucb: 'UCB', case: 'Case' };
     const BW_ACT   = { unconverted_estimate: 'Schedule / book', lead: 'Schedule / book', cancellation: 'Schedule / book', ucb: 'Schedule / book', case: 'Schedule / book' };
@@ -15498,7 +15498,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const decay = Math.max(0.4, 1 - bwDaysOld(it.occurred_at) * 0.03);
       return Math.max(0, Math.min(1, base * decay));
     }
-    function bwForecast(it) { const opp = bwOppAmount(it); return (opp != null && opp > 0) ? Math.round(bwPclose(it) * opp) : null; } // uses real amount, else avg-job fallback
+    function bwForecast(it) { if (it.type === 'case') return null; const opp = bwOppAmount(it); return (opp != null && opp > 0) ? Math.round(bwPclose(it) * opp) : null; } // cases aren't opportunities (owner 2026-08-16); else real amount, else avg-job fallback
     function bwSortKey(it) { const f = bwForecast(it); return (f == null) ? -1 : f; } // items with neither amount nor avg sort last
 
     function bwToast(msg) {
@@ -15715,18 +15715,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     function bwRailHtml() {
       return BW_GROUPS.map((g, gi) => {
+        const isCase = g.type === 'case'; // cases are informational — count only, no forecast total (owner 2026-08-16)
         const items = _bwItems.filter(i => i.type === g.type && bwActive(i)).sort((a, b) => bwSortKey(b) - bwSortKey(a));
-        const ftot = items.reduce((s, i) => s + (bwForecast(i) || 0), 0);
+        const ftot = isCase ? 0 : items.reduce((s, i) => s + (bwForecast(i) || 0), 0);
         const open = _bwOpenGroups ? _bwOpenGroups.has(g.type) : (gi < 1); // preserve open groups across repaint; default first group
         const rows = items.map(i => bwRowHtml(i)).join('') || '<div class="bw-row-none">— none —</div>';
         return `<details class="bw-group" data-type="${g.type}"${open ? ' open' : ''}>
-          <summary class="bw-grp-h"><span class="bw-caret"></span><span class="bw-dot" style="background:${g.color}"></span><span class="bw-grp-name">${g.name}</span><span class="bw-grp-meta"><span class="bw-pill bw-tnum">${items.length}</span><span class="bw-tnum bw-grp-fc" data-type="${g.type}" title="group forecast (opportunity × P close)">${bwEvk(ftot)}</span></span></summary>
+          <summary class="bw-grp-h"><span class="bw-caret"></span><span class="bw-dot" style="background:${g.color}"></span><span class="bw-grp-name">${g.name}</span><span class="bw-grp-meta"><span class="bw-pill bw-tnum">${items.length}</span>${isCase ? '' : `<span class="bw-tnum bw-grp-fc" data-type="${g.type}" title="group forecast (opportunity × P close)">${bwEvk(ftot)}</span>`}</span></summary>
           <div class="bw-grp-body">${rows}</div>
         </details>`;
       }).join('');
     }
 
     function bwRowRightHtml(i) {
+      if (i.type === 'case') return `<span class="bw-fc-opp" style="opacity:.7">Info</span>`; // cases are informational, no forecast (owner 2026-08-16)
       if (bwHasAmount(i)) return `<span class="bw-fc-amt bw-tnum">${bwUsd(bwForecast(i))}</span><span class="bw-fc-opp bw-tnum">of ${bwUsd(i.amount)}</span>`;
       if (bwIsFallback(i)) return `<span class="bw-fc-amt bw-tnum">${bwUsd(bwForecast(i))}</span><span class="bw-fc-opp bw-tnum" style="opacity:.65" title="franchise average job (30-day)">of ~${bwUsd(bwAvgJob())}</span>`;
       return `<span class="bw-fc-amt bw-none">—</span><span class="bw-fc-opp">AI estimate pending</span>`;
@@ -15767,6 +15769,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     function bwDetailHtml(i) {
+      // Cases are INFORMATIONAL only (owner 2026-08-16): show details, but NO action affordance —
+      // no opportunity strip, no P(close), no stage dropdown, no action bar. Details-only render.
+      if (i.type === 'case') {
+        const cg = BW_GROUPS.find(x => x.type === 'case') || { color: '#8b5cf6', name: 'Cases' };
+        const cch = [];
+        if (i.phone) cch.push(`<a class="bw-chip" href="tel:${plTel(i.phone)}"><span class="bw-k">Call</span>${_escHtml(i.phone)}</a>`);
+        if (i.email) cch.push(`<a class="bw-chip" href="mailto:${_escHtml(i.email)}"><span class="bw-k">Email</span>${_escHtml(i.email)}</a>`);
+        return `<div class="bw-sf-head">
+          <div class="bw-sf-top">
+            <span class="bw-badge" style="color:${cg.color};border-color:${cg.color}">Case</span>
+            <div style="min-width:0">
+              <h2>${_escHtml(i.customer_name || 'Unknown')}</h2>
+              <div class="bw-sf-loc">${_escHtml(i.address || 'No address on file')}</div>
+            </div>
+          </div>
+          <div class="bw-sf-contact">${cch.join('') || '<span class="bw-ctx" style="font-size:12px">No contact on file</span>'}</div>
+        </div>
+        <div class="bw-sf-body">
+          ${i.reason ? `<div class="bw-card"><h3>Type</h3><div class="bw-ctx">${_escHtml(i.reason)}</div></div>` : ''}
+          <div class="bw-card"><h3>Case notes</h3><div class="bw-ctx">${_escHtml(i.detail || 'No details on this case.')}</div></div>
+          <div class="bw-card"><div class="bw-ctx" style="font-size:12px;color:var(--text-muted,#9fb0c0)">&#8505;&#65039; Informational only &mdash; cases come from the appointment center (kudos, questions, issues). There is no action to take here.</div></div>
+        </div>`;
+      }
       const g = BW_GROUPS.find(x => x.type === i.type) || { color: '#6e8194', name: i.type };
       const has = bwHasAmount(i), fc = bwForecast(i), p = Math.round(bwPclose(i) * 100);
       const isEst = (i.type === 'unconverted_estimate');
