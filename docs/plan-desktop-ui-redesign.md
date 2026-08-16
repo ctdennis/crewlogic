@@ -42,6 +42,30 @@ Left-rail groups (each expands to its screens):
 - **This is a NAVIGATION + CHROME reskin, not a screen rewrite.** The screens' internals stay; they get a
   desktop frame around them and a real nav to reach them.
 
+## Settings — apply the SAME pattern (left categories · right columns/portlets)
+Today's Settings is a row of **grouped icon-links across the top** — not professional-quality. Redesign it to
+mirror the main desktop shell: a **left sub-menu of settings categories**, and the selected category's
+**details on the right**, laid out in **columns / portlets** that actually use the wide screen (not one long
+stacked column).
+
+- **Left settings menu (owner's categories):** Franchise · Account · Trucks · Cost · Proposal · Routes ·
+  Pricing · Yard Signs · Tools · … (the current settings tabs, moved to a left rail — click a category, its
+  detail fills the right).
+- **Right detail pane = multiple portlets in columns**, not one long form. Each portlet is a self-contained
+  card (title + its fields). **Example — Franchise → a "Branding" portlet AND a "Company Info" portlet side
+  by side.** Categories with many fields spread across 2–3 columns of portlets.
+- **Consistency:** identical left-nav / right-detail model as the app shell, so Settings feels native to the
+  desktop UI rather than a bolted-on tab strip.
+- **Mobile:** the settings categories collapse back to the existing stacked/tab behavior (responsive) — the
+  phone experience is unchanged.
+- **Additive, not a rewrite:** reuse the existing `showSettingsTab` + settings render/save functions; the
+  redesign is **layout + navigation chrome** (regrouping existing fields into portlets/columns), NOT new
+  settings logic. Every existing setting and its save path is preserved (the regression guard below applies
+  here too).
+
+Settings-specific open items: confirm the full category list + which fields group into which portlet per
+category; whether "Tools" in Settings overlaps the main-nav "Other tools" group or is settings-only.
+
 ## HARD REGRESSION GUARD (mandatory when this is built)
 Per the code-gen regression-guard rule, this project's build prompt MUST open with a preservation inventory:
 **every existing screen, nav path, and feature keeps working**; the desktop shell is **additive** (a new
