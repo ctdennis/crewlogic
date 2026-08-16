@@ -192,6 +192,20 @@ lets us count precisely (raw proximity is only a proxy). **Reschedule** = the sa
 current date marked; "move" = pick a denser bookable date. Everything feeding this panel already exists
 except the density overlay (mirror radius query + the date/slot re-rank) and the shared slot-lock.
 
+**Launch point (owner 2026-08-16):** this density panel is what **"Find times"** opens in the future phase.
+Today Find times returns a flat, zoned, in-hours slot list (the groundwork). Later it opens the map + date/
+route/nearby-jobs view so the manager combines **dates × routes × future jobs** into an informed placement
+decision — same button, richer surface. (Prereqs already shipped in the booking modal: zip → zone → duration,
+territory guard, availability-template hours.)
+
+**Drive time + miles per candidate (owner 2026-08-16):** for each candidate date/slot, show the **drive time
+and miles** to reach this job — from the **nearby anchor job on the serving route** (same town / adjacent
+time), not just from the office. This frames the ROI: "book next to the Falmouth 12:30 → +6 min / +3 mi vs a
+standalone day at +40 min / +22 mi." It quantifies the time/fuel savings of co-locating and makes the ★
+recommended day concrete. **Mechanics already exist:** Google Distance Matrix is wired (`crewlogic-estimate`
+`calcDistances` for cost-analysis routing + the dispatch map's point-to-point) — reuse it: anchor job coord →
+this address, per candidate date. Show it inline on each date row and on the map leg.
+
 ## 7. Customer history (best-effort, async)
 
 Vonigo allows **duplicate customers** — every online booking mints a NEW Client, no auto-merge. So:
