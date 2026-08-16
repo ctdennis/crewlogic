@@ -174,5 +174,44 @@ status Open, correct date/route/client. Findings:
 4. Client: workspace **qualify form** for leads → slot picker → confirm → `bookLead` → Won.
 5. Verify on dev #90 with a throwaway lead (real Vonigo create), then cancel it, before promotion.
 
+## Contact-record backend (the remaining build) — field maps discovered 2026-08-16
+
+To let ANY lead book (leads usually have a Location object but a sparse/blank address, or the manager needs
+to correct it), `bookLead` must **update the client's Contact + Location from the modal fields BEFORE booking**
+(the WO create references the `locationID`, so the location must be right first). Real Vonigo writes — GATED.
+
+**Contact** (`POST /data/Contacts/ method:2 objectID:<contactID>`; `isCanEdit:true`):
+| Field | ID |
+|---|---|
+| Phone | **1088** |
+| Email | **97** |
+| First name | **127** · Last name **128** (display 9795 likely derived — don't rely on editing it) |
+
+**Location** (`POST /data/Locations/ method:2 objectID:<locationID>`; `isCanEdit:true`):
+| Field | ID | Note |
+|---|---|---|
+| Street address | **773** | line 2 = 774 |
+| Zip | **775** | |
+| City | **776** | |
+| State | **778** | a **select — needs optionID**, not text |
+| Country | **779** | select optionID (US = 9906) |
+
+**State/country optionIDs come from the zip lookup** (`/resources/zips/ method:1` → `Zip.provinceOptionID`,
+`Zip.countryOptionID`, `Zip.defaultCity`) — the SAME call already used for duration. So one zip lookup yields
+duration + province/country optionIDs + city. (Text fields like street/city/zip take plain values; state is
+the only select.)
+
+**Flow:** resolve client → contactID + locationID → zip lookup (duration + province/country optionIDs) →
+**update Contact (97/1088) + Location (773/776/775/778/779)** from modal fields → lock slot → create WO →
+deactivate lead. For a lead with NO location relation at all, CREATE the Location/Contact (method 3) first —
+a smaller follow-up (most leads already have the objects, just sparse).
+
+**Gotcha:** `/data/Locations/ method:0 objectID:<id>` retrieval is unreliable (returned a different location
+than requested — the same wrong-record quirk seen on WOs); trust the client's `location` relation id for the
+UPDATE target, don't round-trip-verify by re-retrieving that id.
+
+**⚠ Booking auto-sends a Vonigo appointment confirmation to the customer** — test ONLY on a throwaway/old lead
+with the address+email changed to your own (owner 2026-08-16). See the memory `vonigo-booking-sends-confirmation`.
+
 ---
 *No code until this contract is signed off. Cancellation contract is next.*
