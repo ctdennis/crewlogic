@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.13 | 2026-08-16">
+  <meta name="crewlogic-version" content="v5.125.14 | 2026-08-16">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -15948,10 +15948,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         <div style="display:flex;gap:8px"><div style="flex:2"><label style="${_BW_BL}">City</label><input id="bwBookCity" style="${_BW_BI}" value="${_escHtml(a.city || '')}"></div><div style="flex:.6"><label style="${_BW_BL}">State</label><input id="bwBookState" style="${_BW_BI}" maxlength="2" value="${_escHtml(a.state || '')}"></div><div style="flex:1"><label style="${_BW_BL}">Zip</label><input id="bwBookZip" style="${_BW_BI}" value="${_escHtml(zip)}"></div></div>
         <label style="${_BW_BL}">Country</label><input style="${_grey}" value="United States" disabled>
         <div style="${_sect}">Job</div>
-        <label style="${_BW_BL}">Property type</label><select id="bwBookResComm" style="${_BW_BI}"><option value="">— select —</option><option value="59">Residential</option><option value="60">Commercial</option></select>
+        <label style="${_BW_BL}">Property type</label><select id="bwBookResComm" style="${_BW_BI}"><option value="59" selected>Residential</option><option value="60">Commercial</option></select>
         <label style="${_BW_BL}">Campaign source</label><input style="${_grey}" value="Carries over from the lead" disabled>
-        <label style="${_BW_BL}">Customer situation</label><textarea id="bwBookDesc" rows="2" placeholder="What's going on / notes for the crew" style="${_BW_BI}resize:vertical"></textarea>
-        <label style="${_BW_BL}">Items to remove</label><input id="bwBookItems" placeholder="e.g. 3 mattresses, boxes, a couch" style="${_BW_BI}">
+        <label style="${_BW_BL}">Customer situation</label><textarea id="bwBookDesc" rows="3" placeholder="What's going on / notes for the crew" style="${_BW_BI}resize:vertical;min-height:64px"></textarea>
+        <label style="${_BW_BL}">Items to remove</label><textarea id="bwBookItems" rows="3" placeholder="e.g. 3 mattresses, boxes, a couch, misc bags" style="${_BW_BI}resize:vertical;min-height:64px"></textarea>
         <div style="${_sect}">Appointment</div>
         <label style="${_BW_BL}">Pick a day</label>
         <div style="display:flex;gap:8px;align-items:center;margin:4px 0 6px"><input type="date" id="bwBookDate" style="${_BW_BI}margin:0;flex:0 0 auto;width:auto"><button style="${_BW_BTN}" onclick="bwBookFindSlots()">Find times</button></div>
@@ -15979,8 +15979,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const r = await edgeFunctionCall('crewlogic-dispatch', { action: 'suggestSlots', franchiseID: currentUser.franchiseID, dayID, zip: zipNow, durationMin: _bwBook.durMin || 120, serviceTypeID: '11' });
         const slots = (r && r.slots) || []; if (!cont) return;
         if (!slots.length) { cont.innerHTML = '<span style="color:var(--text-muted);font-size:12px">No open times that day — try another.</span>'; return; }
+        // Business-hours window (STOPGAP — owner: "respect the zone / when it's open for business"; we don't
+        // book 6am or 5pm). Only offer slots that START at/after OPEN and whose job ENDS by CLOSE.
+        // TODO: read the zone's real open/close (this hardcodes 7:00 AM open, 5:00 PM close for every zone).
+        const BW_OPEN = 420, BW_CLOSE = 1020, _dur = _bwBook.durMin || 120;
         const seen = new Set(), uniq = [];
-        slots.slice().sort((a, b) => a.startTime - b.startTime).forEach(s => { if (!seen.has(s.startTime)) { seen.add(s.startTime); uniq.push(s); } });
+        slots.slice().sort((a, b) => a.startTime - b.startTime).forEach(s => { if (s.startTime >= BW_OPEN && (s.startTime + _dur) <= BW_CLOSE && !seen.has(s.startTime)) { seen.add(s.startTime); uniq.push(s); } });
+        if (!uniq.length) { cont.innerHTML = '<span style="color:var(--text-muted);font-size:12px">No open times within business hours that day — try another day.</span>'; return; }
         cont.innerHTML = uniq.map(s => '<button class="bwslot" style="' + _BW_BTN + 'padding:6px 10px;font-size:12px" onclick="bwBookPickSlot(this,\'' + s.routeID + '\',' + s.startTime + ')">' + _escHtml(s.label) + '</button>').join('');
       } catch (e) { if (cont) cont.innerHTML = '<span style="color:var(--accent-red,#e0645a);font-size:12px">Could not load times.</span>'; }
     }
