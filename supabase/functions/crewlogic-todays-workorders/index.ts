@@ -419,6 +419,9 @@ Deno.serve(async (req: Request) => {
           dateService,
           price,
           isComplete: statusOptionID === STATUS_COMPLETED || statusOptionID === STATUS_ARCHIVED,
+          // completedAt: for a completed job, the WO's last-edited epoch ≈ when the crew marked it done/paid —
+          // surfaced as the "crew left ~<time>" line in the dispatch popup (owner 2026-08-17). Proxy, not exact.
+          completedAt: (statusOptionID === STATUS_COMPLETED || statusOptionID === STATUS_ARCHIVED) && (wo as { dateLastEdited?: string | number }).dateLastEdited ? Number((wo as { dateLastEdited?: string | number }).dateLastEdited) || null : null,
           // isCancelled: cancel variants — plain "Cancelled" (162) + same-day "Cancelled - Today" (163);
           // matched by id OR status text so all variants flag. Only surfaced when includeCancelled.
           isCancelled: statusOptionID === STATUS_CANCELLED || /cancel/i.test(String(statusLabel || '')),

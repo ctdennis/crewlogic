@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.29 | 2026-08-17">
+  <meta name="crewlogic-version" content="v5.125.36 | 2026-08-17">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10412,6 +10412,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _fillNearestTruck() {
       const root = _detailRoot(); if (!root) return;
       const slot = root.querySelector('.rail-nearest'); if (!slot) return;
+      // Completed job → it's done; a truck "Expected Arrival" (esp. the outside-window warning) is misleading.
+      // Show a completion line instead. (owner 2026-08-17) TODO: surface the actual "crew left at" time.
+      if (slot.getAttribute('data-jdone') === '1') {
+        const at = Number(slot.getAttribute('data-jdoneat')) || 0;
+        const t = at ? ' · crew left ~' + new Date(at * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
+        slot.innerHTML = '<div style="margin-top:3px;color:#22c55e;font-weight:600;">✓ Job completed' + _truckEsc(t) + '</div>';
+        return;
+      }
       const jlat = Number(slot.getAttribute('data-jlat')), jlon = Number(slot.getAttribute('data-jlon'));
       const jtime = slot.getAttribute('data-jtime'), jtlabel = slot.getAttribute('data-jtlabel'), jdur = slot.getAttribute('data-jdur'), joffset = slot.getAttribute('data-joffset');
       if (!Number.isFinite(jlat) || !Number.isFinite(jlon)) return;
@@ -10628,7 +10636,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + (Number(j.price) > 0 ? '<br><span style="color:var(--text-muted);">Job Total: </span><span style="font-weight:800;color:#00E785;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>' : '')
             + (addr ? '<br>' + _addrLink(addr, addr, _truckEsc, '#6db3ff') : '')
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:var(--text-muted);">Loading phone…</div>'
-            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (base + k) + '"></div>'
+            + '<div class="rail-nearest" data-jdone="' + (j.isComplete ? '1' : '') + '" data-jdoneat="' + (j.completedAt || '') + '" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (base + k) + '"></div>'
             + _crewLineHtml(j.crew)
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap);
@@ -11035,15 +11043,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Cache: jobID -> Promise<phone string|''> (reuses crewlogic-job-lookup → clientPhone).
     let _jobPhones = {};
     let _jobClients = {}; // jobID -> clientName (from the same crewlogic-job-lookup as the phone) — for the SMS greeting
+    let _jobEmails = {};  // jobID -> clientEmail (same lookup) — for the clickable mailto: link
     function _renderJobPhoneSlot(jobID, phone) {
       const e = document.getElementById('jobph-' + jobID);
       if (!e) return;
       if (phone == null) { e.innerHTML = '<span style="color:var(--text-muted);">Phone unavailable — reopen to retry</span>'; return; } // lookup FAILED — do NOT claim "no phone on file"
       const digits = String(phone || '').replace(/[^0-9+]/g, '');
-      e.innerHTML = phone
-        ? '📞 <a href="tel:' + digits + '" style="color:#6db3ff;font-weight:600;text-decoration:none;">' + _truckEsc(_fmtPhone(phone)) + '</a>'
-          + ' &nbsp;·&nbsp; <a href="' + _smsHref(digits, buildSmsBody({ clientName: _jobClients[jobID] || '' })) + '" style="color:#6db3ff;font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>'
-        : '<span style="color:var(--text-muted);">No phone on file</span>'; // '' = genuinely no phone (successful lookup)
+      const email = _jobEmails[jobID] || '';
+      const parts = [];
+      if (phone) {
+        parts.push('📞 <a href="tel:' + digits + '" style="color:#6db3ff;font-weight:600;text-decoration:none;">' + _truckEsc(_fmtPhone(phone)) + '</a>');
+        parts.push('<a href="' + _smsHref(digits, buildSmsBody({ clientName: _jobClients[jobID] || '' })) + '" style="color:#6db3ff;font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>');
+      }
+      if (email) parts.push('<a href="mailto:' + _truckEsc(email) + '" style="color:#6db3ff;font-weight:600;text-decoration:none;white-space:nowrap;">✉️ Email</a>');
+      e.innerHTML = parts.length ? parts.join(' &nbsp;·&nbsp; ') : '<span style="color:var(--text-muted);">No phone on file</span>';
     }
     function _prefetchJobPhone(jobID) {
       // Cache only a RESOLVED lookup (a real phone OR a genuine ''). A FAILED lookup (502/!success) returns null
@@ -11054,6 +11067,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         .then(r => {
           if (!r || r.success !== true) return null;                 // lookup FAILED — null (≠ '' = genuinely no phone); don't cache → retry next open
           if (r.clientName) _jobClients[jobID] = String(r.clientName).trim();
+          if (r.clientEmail) _jobEmails[jobID] = String(r.clientEmail).trim();
           const ph = r.clientPhone ? String(r.clientPhone).trim() : '';
           _jobPhones[jobID] = ph;                                    // cache the real result (phone or genuine no-phone)
           return ph;
@@ -11133,7 +11147,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             // Phone directly under the address, so address+phone read as one contact block, and
             // truck+crew group together below it.
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:var(--text-muted);">Loading phone…</div>'
-            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (_trucksJobDay || 0) + '"></div>'
+            + '<div class="rail-nearest" data-jdone="' + (j.isComplete ? '1' : '') + '" data-jdoneat="' + (j.completedAt || '') + '" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (_trucksJobDay || 0) + '"></div>'
             // Measure button ABOVE crew/items: on the rail-less trucks card the popup is height-capped, so
             // keeping "Measure from here" below the items list buried it — only the (short) truck popup's
             // measure button was reachable. Placed here it stays visible without scrolling. (FW-21 parity)
@@ -12025,6 +12039,39 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _mjMenuDay = '', _mjMenuRid = '', _mjMenuName = '';
     function _mjSD(dayID) { const d = String(dayID || _mjBoardDayID || ''); if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d; return d.length === 8 ? d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6, 8) : ''; } // accepts a dayID (YYYYMMDD) OR an already-formatted serviceDate
     function _mjTruckName(tk) { const r = _mjRoster.find(t => t.truckKey === tk); return r ? (r.name || tk.replace(/^(vin:|name:)/, '')) : tk.replace(/^(vin:|name:)/, ''); }
+    // ── Crew-finder (NYC/owner 2026-08-17): nearest OTHER trucks + whether they have a schedule gap to help.
+    // Haversine (owner: good enough) → route→truck assignment (_mjAssignByDate) → that route's board jobs for the gap.
+    function _cfFmtMin(m) { m = ((Math.round(m) % 1440) + 1440) % 1440; const h = Math.floor(m / 60), mm = m % 60, ap = h >= 12 ? 'PM' : 'AM', h12 = ((h + 11) % 12) + 1; return h12 + ':' + String(mm).padStart(2, '0') + ' ' + ap; }
+    // A live Motive truck can be assigned by EITHER its vin-key or its name-key (the app links via both — see
+    // posByKey), so we must match on both. Returning one key missed trucks assigned under the other.
+    function _cfTruckKeysOf(t) { const ks = []; if (t.vin) ks.push('vin:' + t.vin); if (t.name) ks.push('name:' + t.name); return ks; }
+    function _cfRouteForKeys(keys, sd) { const byRoute = _mjAssignByDate[sd] || {}; for (const rid in byRoute) { const set = new Set((byRoute[rid] || []).map(a => a.truckKey)); if (keys.some(k => set.has(k))) return rid; } return null; }
+    function _cfGap(routeId, nowMin) {
+      const dur = j => Number(j.durationMin) || 90;
+      const jobs = Object.values(_mjBoardByID || {}).filter(j => String(j.routeID) === String(routeId) && j.time != null && !j.completed && !j.isComplete).sort((a, b) => a.time - b.time);
+      if (!jobs.length) return { rank: 0, text: 'free — no jobs on its route' };
+      const active = jobs.find(j => nowMin >= j.time && nowMin < j.time + dur(j));
+      if (active) { const end = active.time + dur(active); const next = jobs.find(j => j.time >= end); const soon = end - nowMin <= 30; return { rank: soon ? 1 : 3, text: 'on a job until ' + _cfFmtMin(end) + (next ? ' · then open to ' + _cfFmtMin(next.time) : ' · open after') }; }
+      const next = jobs.find(j => j.time > nowMin);
+      return { rank: 0, text: next ? ('free now until ' + _cfFmtMin(next.time)) : 'free now — done for the day' };
+    }
+    function _crewFinderHTML(j) {
+      if (!j || j.lat == null || j.lon == null || !(_trucksData || []).length) return '';
+      const sd = _mjSD(j._day || _mjBoardDayID);
+      const ownKeys = new Set(((_mjAssignByDate[sd] || {})[String(j.routeID || '')] || []).map(a => a.truckKey)); // this job's own crew — exclude
+      const near = (_trucksData || []).filter(t => t.lat != null && t.lon != null && !_cfTruckKeysOf(t).some(k => ownKeys.has(k)))
+        .map(t => ({ t, mi: haversine(j.lat, j.lon, t.lat, t.lon) * 0.621371 }))
+        .sort((a, b) => a.mi - b.mi).slice(0, 3);
+      if (!near.length) return '';
+      const nd = new Date(), nowMin = nd.getHours() * 60 + nd.getMinutes();
+      const rows = near.map(({ t, mi }) => {
+        const rid = _cfRouteForKeys(_cfTruckKeysOf(t), sd);
+        const av = rid ? _cfGap(rid, nowMin) : { rank: 4, text: 'not assigned to a route yet' };
+        const col = av.rank === 0 ? '#22c55e' : (av.rank === 1 ? '#eab308' : (av.rank >= 4 ? 'var(--text-muted)' : '#8ea3b5'));
+        return '<div style="margin-bottom:2px;">🚚 <b>' + mjEsc(t.name || t.number || 'Truck') + '</b> · ' + mi.toFixed(1) + ' mi · <span style="color:' + col + ';">' + mjEsc(av.text) + '</span></div>';
+      }).join('');
+      return '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border);"><div style="color:var(--text-muted);font-weight:700;margin-bottom:2px;">🚑 Who can help? · nearest 3</div>' + rows + '</div>';
+    }
     function _mjTruckChipLabel(tk) { const nm = _mjTruckName(tk); const m = nm.match(/(\d+)/); return m ? ('T' + m[1]) : (nm.length > 6 ? nm.slice(0, 6) : nm); } // "Truck 12" -> "T12"
     // Day-start feasibility colors the ROUTE-CODE cell background: green = makes its windows, red = runs late.
     function _mjRouteBg(routeCode, dayID) {
@@ -13047,6 +13094,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // the nearest-truck line + drive-time ETA fill INSIDE the popup (via _detailRoot).
     function _railShowJob(pop, jobID, latlng) {
       const body = document.getElementById('dashLeftJobBody');
+      // UNIFY (owner 2026-08-17): on the dispatch dashboard a MAP click shows the SAME rich card as a board tap
+      // (mjJobInfoHTML, via mjTip) so both surfaces are identical. Only when the board job is loaded; else the
+      // compact `pop` fallback below (e.g. the standalone trucks map, which has no board).
+      if (body && jobID && typeof _mjBoardByID !== 'undefined' && _mjBoardByID && _mjBoardByID[String(jobID)]) { mjTip(null, String(jobID)); return; }
       if (!body) { if (_openDetailPopup(latlng, pop)) { if (jobID) _prefetchJobPhone(jobID).then(ph => _renderJobPhoneSlot(jobID, ph)); _fillNearestTruck(); } return; }
       body.innerHTML = '<div style="text-align:right;margin:-2px -2px 2px 0;"><span onclick="_railClearJob()" style="cursor:pointer;color:var(--text-muted);font-size:18px;line-height:1;">×</span></div>' + (pop || '');
       body.style.display = ''; // make sure the section is open
@@ -13750,8 +13801,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const parts = s.split(',').map(x => x.trim()).filter(Boolean);
       return { street: parts[0] || s, city: parts.length >= 2 ? parts[parts.length - 2] : '', zip: (s.match(/\b(\d{5})\b/) || [])[1] || '' };
     }
-    function _mjRow(k, v) { return '<div style="display:flex;gap:8px;margin-bottom:4px;"><span style="color:var(--text-muted);flex:0 0 54px;">' + mjEsc(k) + '</span><span style="color:var(--text-primary);word-break:break-word;">' + v + '</span></div>'; }
-    function _mjBlock(k, v) { return '<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--border);"><div style="color:var(--text-muted);margin-bottom:2px;">' + mjEsc(k) + '</div><div style="color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:140px;overflow-y:auto;">' + v + '</div></div>'; }
+    function _mjRow(k, v) { return '<div style="display:flex;gap:8px;margin-bottom:2px;"><span style="color:var(--text-muted);flex:0 0 50px;">' + mjEsc(k) + '</span><span style="color:var(--text-primary);word-break:break-word;">' + v + '</span></div>'; }
+    function _mjBlock(k, v) { return '<div style="margin-top:5px;padding-top:5px;border-top:1px solid var(--border);"><div style="color:var(--text-muted);margin-bottom:1px;">' + mjEsc(k) + '</div><div style="color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:120px;overflow-y:auto;">' + v + '</div></div>'; }
     // Part B — the anticipated-arrival statement for a job, from the day-start feasibility + truck assignment.
     // Has the truck already ARRIVED at this job (per the geofence event log)? → {arrivedAt, leftAt, vehicle}.
     function _mjJobArrival(woid) {
@@ -13773,8 +13824,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const arr = _mjJobArrival(String(j.woID || ''));
       if (arr) {
         const veh = arr.vehicle ? mjEsc(arr.vehicle) : 'The crew';
-        if (arr.leftAt) return '<div style="background:rgba(148,163,180,0.16);border:1px solid #94a3b4;border-radius:9px;padding:9px 11px;margin-bottom:9px;font-size:12.5px;line-height:1.5;color:var(--text-primary);">✓ <b>' + veh + '</b> was on site <b>' + mjEsc(arr.arrivedAt) + '</b>–<b>' + mjEsc(arr.leftAt) + '</b> — departed.</div>';
-        return '<div style="background:rgba(0,231,133,0.16);border:1px solid #00E785;border-radius:9px;padding:9px 11px;margin-bottom:9px;font-size:12.5px;line-height:1.5;color:var(--text-primary);">🚚 <b>' + veh + '</b> arrived at <b>' + mjEsc(arr.arrivedAt) + '</b> — on site now.</div>';
+        if (arr.leftAt) return '<div style="background:rgba(148,163,180,0.16);border:1px solid #94a3b4;border-radius:9px;padding:6px 9px;margin-bottom:6px;font-size:11.5px;line-height:1.35;color:var(--text-primary);">✓ <b>' + veh + '</b> was on site <b>' + mjEsc(arr.arrivedAt) + '</b>–<b>' + mjEsc(arr.leftAt) + '</b> — departed.</div>';
+        return '<div style="background:rgba(0,231,133,0.16);border:1px solid #00E785;border-radius:9px;padding:6px 9px;margin-bottom:6px;font-size:11.5px;line-height:1.35;color:var(--text-primary);">🚚 <b>' + veh + '</b> arrived at <b>' + mjEsc(arr.arrivedAt) + '</b> — on site now.</div>';
       }
       const sd = _mjSD(j._day || _mjBoardDayID);
       const eta = (_mjEtaByDate[sd] || {})[j.routeCode];
@@ -13786,13 +13837,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       let name = String(j.client || '').trim(); const cp = name.split(','); if (cp.length === 2) name = cp[1].trim() + ' ' + cp[0].trim();
       const town = mjAddrParts(j.address).city, townStr = town ? _titleCaseTown(town) : '';
       const st = pj.status, m = pj.minutesEarlyLate || 0;
-      if (st === 'arrived') return '<div style="background:rgba(0,231,133,0.16);border:1px solid #00E785;border-radius:9px;padding:9px 11px;margin-bottom:9px;font-size:12.5px;line-height:1.5;color:var(--text-primary);">🚚 <b>' + mjEsc(truckStr) + '</b> on site now' + (name ? ' at <b>' + mjEsc(name) + '</b>' : '') + (townStr ? ' in ' + mjEsc(townStr) : '') + ' — arrived <b>' + mjEsc(pj.predictedEta) + '</b>.</div>';
+      if (st === 'arrived') return '<div style="background:rgba(0,231,133,0.16);border:1px solid #00E785;border-radius:9px;padding:6px 9px;margin-bottom:6px;font-size:11.5px;line-height:1.35;color:var(--text-primary);">🚚 <b>' + mjEsc(truckStr) + '</b> on site now' + (name ? ' at <b>' + mjEsc(name) + '</b>' : '') + (townStr ? ' in ' + mjEsc(townStr) : '') + ' — arrived <b>' + mjEsc(pj.predictedEta) + '</b>.</div>';
       const win = mjEsc(pj.windowStart) + '–' + mjEsc(pj.windowEnd);
       let winTxt, bg, bd;
       if (st === 'late') { winTxt = '<b>' + m + ' min past</b> the ' + win + ' window'; bg = 'rgba(239,68,68,0.16)'; bd = '#ef4444'; }
       else if (st === 'window') { winTxt = 'within the ' + win + ' window — <b>' + m + ' min after</b> the ' + mjEsc(pj.windowStart) + ' start'; bg = 'rgba(234,179,8,0.16)'; bd = '#eab308'; }
       else { winTxt = m > 0 ? ('<b>early by ' + _mjEarlyStr(m) + '</b> — before the ' + mjEsc(pj.windowStart) + ' start') : ('on time — arriving by the ' + mjEsc(pj.windowStart) + ' start'); bg = 'rgba(0,231,133,0.14)'; bd = '#00E785'; }
-      let h = '<div style="background:' + bg + ';border:1px solid ' + bd + ';border-radius:9px;padding:9px 11px;margin-bottom:9px;font-size:12.5px;line-height:1.5;color:var(--text-primary);">'
+      let h = '<div style="background:' + bg + ';border:1px solid ' + bd + ';border-radius:9px;padding:6px 9px;margin-bottom:6px;font-size:11.5px;line-height:1.35;color:var(--text-primary);">'
         + 'We anticipate <b>' + mjEsc(truckStr) + '</b> at <b>' + mjEsc(pj.predictedEta) + '</b>'
         + (name ? ' for <b>' + mjEsc(name) + '</b>' : '') + (townStr ? ' in ' + mjEsc(townStr) : '')
         + '. This is ' + winTxt + '.';
@@ -13821,18 +13872,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Job info (summary + items) before the duration action.
       if (j.summary && String(j.summary).trim()) h += _mjBlock('Summary', mjEsc(String(j.summary).trim()));
       if (j.items && String(j.items).trim()) h += _mjBlock('Item(s) List', mjEsc(String(j.items).trim()));
-      // Quick duration (0.5h–5h, 30-min steps) — tap a length → confirm. Hidden on completed jobs.
-      const _jdone = !!(j.completed || j.labelDone);
+      h += _crewFinderHTML(j); // 🚑 nearest 3 OTHER trucks + their schedule gaps (who can back up this crew)
       _mjLastTipJob = j; // remember this job for the Cancel-job button (one tooltip shows at a time)
-      if (!_jdone && j.woID) {
-        h += '<div id="mjDurWrap" style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px;">' + _mjDurButtonsHTML(mjEsc(String(j.woID || j.jobID || '')), Number(j.durationMin) || 0) + '</div>'; // woID = unique per appointment (copies share jobID)
-      }
-      if (!_jdone && j.woID) {
-        h += '<button onclick="mjTipReschedule()" style="margin-top:8px;width:100%;padding:10px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;">📅 Reschedule / Move</button>';
-      }
-      if (!_jdone && j.jobID) {
-        h += '<button onclick="mjCancelJob()" style="margin-top:8px;width:100%;padding:9px;background:transparent;color:#ff6b6b;border:1px solid #e5484d;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">✕ Cancel job</button>';
-      }
+      h += _jobActionsHTML(j);
+      return '<div style="font-size:12px;line-height:1.4;">' + h + '</div>'; // compact base size (owner 2026-08-17 — smaller card)
+    }
+    // Shared job-action buttons (Set duration / Reschedule / Cancel), used by BOTH the board tip card and the
+    // unified compact map/details card so the actions are identical everywhere. Needs the board-shaped job
+    // (woID). Hidden on completed jobs. (owner 2026-08-17 — unify the dispatch job card)
+    function _jobActionsHTML(j) {
+      if (!j) return '';
+      const _jdone = !!(j.completed || j.labelDone || j.isComplete);
+      let h = '';
+      if (!_jdone && j.woID) h += '<div id="mjDurWrap" style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px;">' + _mjDurButtonsHTML(mjEsc(String(j.woID || j.jobID || '')), Number(j.durationMin) || 0) + '</div>';
+      if (!_jdone && j.woID) h += '<button onclick="mjTipReschedule()" style="margin-top:8px;width:100%;padding:10px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;">📅 Reschedule / Move</button>';
+      if (!_jdone && j.jobID) h += '<button onclick="mjCancelJob()" style="margin-top:8px;width:100%;padding:9px;background:transparent;color:#ff6b6b;border:1px solid #e5484d;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">✕ Cancel job</button>';
       return h;
     }
     // ── Cancel-job button (tooltip) → reason picker → same execute kind:'cancel' path as voice ──
@@ -13981,7 +14035,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Job tooltip — desktop hover (quick peek) + mobile tap (sticky, dismiss via × or tap-outside).
     let _mjTipSticky = false;
     function mjTip(ev, jobID, sticky) {
-      const j = _mjBoardByID[String(jobID)], tip = document.getElementById('mjTip'); if (!j || !tip) return;
+      const j = _mjBoardByID[String(jobID)]; if (!j) return;
+      // UNIFY (owner 2026-08-17): on the desktop dispatch dashboard a job tap fills the left "Details" section —
+      // the SAME surface as a map click — instead of a floating popup. Renders the SAME rich card (mjJobInfoHTML,
+      // with its Set-duration / Reschedule / Cancel actions). Mobile (no rail) keeps the floating popup below.
+      const rail = document.getElementById('dashLeftJobBody');
+      if (rail) {
+        if (ev) ev.stopPropagation();
+        rail.innerHTML = '<div style="text-align:right;margin:-2px -2px 2px 0;"><span onclick="_railClearJob()" style="cursor:pointer;color:var(--text-muted);font-size:18px;line-height:1;">×</span></div>' + mjJobInfoHTML(j, false);
+        rail.style.display = '';
+        const hdr = rail.previousElementSibling, chev = hdr && hdr.querySelector('span'); if (chev) chev.textContent = '▾';
+        rail.scrollTop = 0;
+        if (j.jobID) mjLoadJobPhone(String(j.jobID));
+        return;
+      }
+      const tip = document.getElementById('mjTip'); if (!tip) return;
       // Touch devices have no real hover — a non-sticky (hover-preview) popup would hide the instant the
       // finger moves, so taps land behind it. Force sticky on touch so the popup stays open + tappable.
       if (!sticky && (('ontouchstart' in window) || navigator.maxTouchPoints > 0)) sticky = true;
@@ -14130,10 +14198,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       slot.dataset.loaded = '1'; slot.style.color = 'var(--text-muted)';
       _prefetchJobPhone(jobID).then(ph => {
         const digits = String(ph || '').replace(/[^0-9+]/g, '');
-        slot.innerHTML = ph
-          ? '📞 <a href="tel:' + digits + '" onclick="event.stopPropagation()" style="color:var(--accent-green,#00E785);font-weight:600;text-decoration:none;">' + mjEsc(_fmtPhone(ph)) + '</a>'
-            + ' &nbsp;·&nbsp; <a href="' + _smsHref(digits, buildSmsBody({ clientName: _jobClients[jobID] || '' })) + '" onclick="event.stopPropagation()" style="color:var(--accent-green,#00E785);font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>'
-          : '<span style="color:var(--text-muted);">No phone on file</span>';
+        const email = _jobEmails[jobID] || '';
+        const parts = [];
+        if (ph) {
+          parts.push('📞 <a href="tel:' + digits + '" onclick="event.stopPropagation()" style="color:var(--accent-green,#00E785);font-weight:600;text-decoration:none;">' + mjEsc(_fmtPhone(ph)) + '</a>');
+          parts.push('<a href="' + _smsHref(digits, buildSmsBody({ clientName: _jobClients[jobID] || '' })) + '" onclick="event.stopPropagation()" style="color:var(--accent-green,#00E785);font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>');
+        }
+        if (email) parts.push('<a href="mailto:' + mjEsc(email) + '" onclick="event.stopPropagation()" style="color:var(--accent-green,#00E785);font-weight:600;text-decoration:none;white-space:nowrap;">✉️ Email</a>');
+        slot.innerHTML = parts.length ? parts.join(' &nbsp;·&nbsp; ') : '<span style="color:var(--text-muted);">No phone on file</span>';
       }).catch(() => { slot.innerHTML = '<span style="color:var(--text-muted);">No phone on file</span>'; });
     }
     function mjCancelPlan() {
