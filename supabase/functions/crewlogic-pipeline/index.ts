@@ -29,6 +29,10 @@ const EST_LABEL_TEXT: Record<number, string> = { 9996: 'Est. completed — estim
 const CONVERTED_LABELS = new Set([9970, 9975]); // Est-Converted-EstOnly / Est-Converted-Job
 const UNCONV_RECHECK_HOURS = 12;                // how often to re-check a still-unconverted estimate's email trail
 // UCB lane is matched by route_name (~URGENTCB) off the mirror; the Vonigo route objectID (2987) is no longer needed.
+// 'case' — EXPOSED but READ-ONLY (owner 2026-08-16, revised from the 2026-08-15 kill). Cases are call-center
+// kudos/questions/issues, NOT bookable opportunities; they surface in the pipeline (left rail, click for
+// details) but carry NO booking/action affordance — the client renders a case detail with no action bar,
+// stage dropdown, or opportunity strip (see bwDetailHtml case branch).
 const ALL_TYPES = ['lead', 'unconverted_estimate', 'cancellation', 'ucb', 'case'];
 
 // Starter sequences seeded per franchise on first use (then owner-editable). Each is the auto-default for
@@ -159,7 +163,7 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || '').trim();
     const franchiseID = String(body.franchiseID || '').trim();
-    const ACTIONS = ['sync', 'list', 'reminders', 'detail', 'update', 'dismiss', 'touchDone', 'snooze', 'seqList', 'seqSave', 'seqDelete', 'assignSequence', 'unassignSequence'];
+    const ACTIONS = ['sync', 'list', 'reminders', 'detail', 'update', 'dismiss', 'touchDone', 'snooze', 'seqList', 'seqSave', 'seqDelete', 'assignSequence', 'unassignSequence', 'avgJobSize'];
     if (!ACTIONS.includes(action)) return json({ success: false, error: 'unknown action', reqId }, 400);
     if (!franchiseID) return json({ success: false, error: 'franchiseID required', reqId }, 400);
 
@@ -170,11 +174,35 @@ Deno.serve(async (req: Request) => {
     const CLOSED = new Set(['won', 'lost', 'dismissed', 'resolved']);
     const ownItem = async (id: string) => (await supabase.from('pipeline_items').select('id').eq('id', id).eq('franchise_id', franchiseInternalID).maybeSingle()).data; // franchise-scope guard
 
+    // ===== AVG JOB SIZE (read-only) — average closed-job revenue over the last 30 days from the job mirror =====
+    // Closed job = job_appointments.status='done' (Vonigo WorkOrder status 164 Completed / 165 Archived, per the
+    // importer's apptStatus). Revenue = job_source_snapshot.import_total (woPrice field 813 at import time).
+    // Franchise-scoped. Returns { avg, count, sumRevenue, days:30 } — a suggestion the owner may Apply; no writes.
+    if (action === 'avgJobSize') {
+      const days = 30;
+      const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10); // YYYY-MM-DD
+      const { data: rows, error: err } = await supabase
+        .from('job_source_snapshot')
+        .select('import_total, job_appointments!inner(status, scheduled_date)')
+        .eq('franchise_id', franchiseInternalID)
+        .eq('job_appointments.status', 'done')
+        .gte('job_appointments.scheduled_date', cutoff);
+      if (err) return json({ success: false, error: err.message, reqId }, 500);
+      let sum = 0, count = 0;
+      for (const r of ((rows || []) as Record<string, unknown>[])) {
+        const v = Number(r.import_total);
+        if (Number.isFinite(v) && v > 0) { sum += v; count++; }
+      }
+      const avg = count > 0 ? Math.round(sum / count) : 0;
+      return json({ success: true, avg, count, sumRevenue: Math.round(sum), days, reqId });
+    }
+
     // ===== CRM actions (DB only; no Vonigo) =====
     if (action === 'list') {
       const COLS = 'id, type, source_provider, source_external_id, customer_name, phone, email, address, zip, amount, reason, detail, occurred_at, stage, assigned_to, next_action_at, sequence_id, cadence, notes, last_synced_at';
       let q = supabase.from('pipeline_items').select(COLS).eq('franchise_id', franchiseInternalID);
       if (Array.isArray(body.types) && body.types.length) q = q.in('type', body.types.map(String));
+      else q = q.in('type', ALL_TYPES); // default to live types only — hides retired 'case' rows (2026-08-15)
       if (Array.isArray(body.stages) && body.stages.length) q = q.in('stage', body.stages.map(String));
       if (body.assignee) q = q.eq('assigned_to', String(body.assignee));
       if (body.search) q = q.ilike('customer_name', '%' + String(body.search) + '%');
@@ -190,6 +218,43 @@ Deno.serve(async (req: Request) => {
         for (const t of (ts || []) as Record<string, unknown>[]) { const k = String(t.pipeline_item_id); if (!touchByItem[k]) touchByItem[k] = { dueAt: t.due_at as string, channel: t.channel as string }; }
       }
       const out = (items || []).map((i: Record<string, unknown>) => ({ ...i, nextTouch: touchByItem[i.id as string] || null }));
+      // ── Bizdev enrichment: match unconverted_estimate items to their CrewLogic estimate row (the real quote
+      //    total_price) and expose the Vonigo jobID for a deep-link. The WO price field (813) is 0 for estimates,
+      //    so the CrewLogic estimate is the only real $ source; when present it overwrites amount. Two indexed reads.
+      const estOut = out.filter((i: Record<string, unknown>) => i.type === 'unconverted_estimate');
+      if (estOut.length) {
+        const { data: rawRows } = await supabase.from('pipeline_items').select('id, raw')
+          .eq('franchise_id', franchiseInternalID).eq('type', 'unconverted_estimate');
+        const jobByItem: Record<string, string> = {}; const jobIds: string[] = [];
+        for (const r of (rawRows || []) as Record<string, unknown>[]) {
+          const rels = (((r.raw as Record<string, unknown>) || {}).Relations as VRel[]) || [];
+          const j = (rels || []).find((x) => x && x.relationType === 'job');
+          if (j && j.objectID != null) { const jid = String(j.objectID); jobByItem[String(r.id)] = jid; jobIds.push(jid); }
+        }
+        const estByJob: Record<string, Record<string, unknown>> = {};
+        if (jobIds.length) {
+          const { data: ests } = await supabase.from('estimates')
+            .select('estimate_id, job_id, total_price, status, deleted_at')
+            .eq('franchise_id', franchiseInternalID).in('job_id', jobIds);
+          for (const e of (ests || []) as Record<string, unknown>[]) {
+            if (e.deleted_at) continue;
+            const k = String(e.job_id); const prev = estByJob[k];
+            if (!prev || Number(e.total_price || 0) > Number(prev.total_price || 0)) estByJob[k] = e; // keep the most-priced match
+          }
+        }
+        for (const it of estOut) {
+          const jid = jobByItem[String(it.id)] || null;
+          it.vonigo_job_id = jid;
+          const e = jid ? estByJob[jid] : null;
+          if (e) {
+            it.cl_present = true;
+            it.cl_estimate_id = e.estimate_id;
+            it.cl_status = e.status;
+            it.cl_total_price = Number(e.total_price || 0);
+            if ((it.amount == null || Number(it.amount) === 0) && Number(e.total_price || 0) > 0) it.amount = Number(e.total_price);
+          } else { it.cl_present = false; }
+        }
+      }
       const { data: allT } = await supabase.from('pipeline_items').select('type, stage').eq('franchise_id', franchiseInternalID);
       const counts: Record<string, number> = {}; let open = 0;
       for (const r of (allT || []) as Record<string, string>[]) { counts[r.type] = (counts[r.type] || 0) + 1; if (!CLOSED.has(r.stage)) open++; }
@@ -236,7 +301,7 @@ Deno.serve(async (req: Request) => {
       const p = (body.patch || {}) as Record<string, unknown>;
       const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
       if (action === 'dismiss') patch.stage = 'dismissed';
-      for (const k of ['stage', 'assigned_to', 'notes', 'cadence']) if (k in p) patch[k] = p[k] == null ? null : String(p[k]);
+      for (const k of ['stage', 'assigned_to', 'notes', 'cadence', 'close_reason']) if (k in p) patch[k] = p[k] == null ? null : String(p[k]);
       if ('next_action_at' in p) patch.next_action_at = p.next_action_at || null;
       const { error } = await supabase.from('pipeline_items').update(patch).eq('id', id).eq('franchise_id', franchiseInternalID);
       if (error) throw error;
@@ -364,6 +429,21 @@ Deno.serve(async (req: Request) => {
       source_object, source_external_id, last_synced_at: new Date().toISOString(), updated_at: new Date().toISOString(), ...extra,
     });
 
+    // Territory filter for leads (owner 2026-08-16): Vonigo national/mis-routed leads land in this franchise's feed
+    // multi-tagged to OTHER franchises. Franchise tags are unreliable (a [90]-only lead can be in IL; 90 can be listed
+    // first on an MD lead) — the ONLY reliable signal is the address zip's OWNING franchise (/resources/zips → the
+    // zone's serviceType.franchiseID). Cache per zip. Returns the owner id, null (zip not serviced by anyone), or
+    // undefined (transient lookup error → do NOT drop). `franchiseID` here is the Vonigo franchise id (e.g. "90").
+    const ootLeadExtIds: string[] = [];
+    const _zipOwnerCache = new Map<string, string | null | undefined>();
+    const zipOwnerOf = async (zStr: string): Promise<string | null | undefined> => {
+      if (_zipOwnerCache.has(zStr)) return _zipOwnerCache.get(zStr);
+      let owner: string | null | undefined;
+      try { const zr = await vpost('/resources/zips/', { securityToken: token, method: '1', zip: zStr }); const st = (zr.ServiceTypes || [])[0]; owner = st ? String(st.franchiseID) : null; }
+      catch { owner = undefined; }
+      _zipOwnerCache.set(zStr, owner); return owner;
+    };
+
     // WorkOrder-derived types (cancellation / unconverted_estimate / ucb) are READ FROM THE LOCAL JOB MIRROR
     // (job_appointments + job_source_snapshot), which crewlogic-vonigo-import already keeps fresh (prod: every
     // 15 min + a nightly ~90-day backfill). This replaces the old per-sync Vonigo WorkOrders scan (the 120-day UCB
@@ -479,6 +559,13 @@ Deno.serve(async (req: Request) => {
       const leads = clientPages.flat().filter((c) => (getField(c.Fields as VField[], F.clientStage)?.fieldValue || '') === 'Lead');
       await mapPool(leads, 6, async (c) => {
         const fields = c.Fields as VField[]; const rels = c.Relations as VRel[];
+        const address = (fields || []).map((f) => f.fieldValue).find((v) => /\d/.test(String(v)) && /,/.test(String(v))) || null;
+        // Territory filter: drop leads whose address zip is owned by a DIFFERENT franchise (or not serviced at all).
+        const zipStr = (String(address || '').match(/\b(\d{5})(?:-\d{4})?\b/) || [])[1] || '';
+        if (zipStr) {
+          const owner = await zipOwnerOf(zipStr);
+          if (owner !== undefined && owner !== String(franchiseID)) { ootLeadExtIds.push(String(c.objectID)); return; }
+        }
         let phone: string | null = null, email: string | null = null;
         const cachedC = knownLeadContact.get(String(c.objectID));
         if (cachedC && cachedC.phone) { phone = cachedC.phone; email = cachedC.email; } // already fetched — skip the Contact call
@@ -493,22 +580,27 @@ Deno.serve(async (req: Request) => {
           }
         }
         rows.push(mk('lead', 'client', String(c.objectID), {
-          customer_name: String(c.name || ''), phone, email,
-          address: (fields || []).map((f) => f.fieldValue).find((v) => /\d/.test(String(v)) && /,/.test(String(v))) || null,
+          customer_name: String(c.name || ''), phone, email, address,
           occurred_at: iso(c.dateCreated), raw: c,
         }));
       });
     })() : Promise.resolve();
 
-    // ---- C) Cases = /data/Cases plural key (franchise's own) ----
+    // ---- C) Cases = /data/Cases (franchise's own). NOTE: Vonigo returns the array under the SINGULAR key
+    //      `Case` (not `Cases`) — reading `r.Cases` silently dropped every case (bug fixed 2026-08-16). ----
     const _passCases = want('case') ? (async () => {
+      const seenCase = new Set<string>();
       for (let pg = 1; pg <= 6; pg++) {
         const r = await vpost('/data/Cases/', { securityToken: token, franchiseID, sortMode: '1', sortDirection: '1', pageNo: String(pg), pageSize: '50', isCompleteObject: 'true' });
         if (r.errNo !== 0) break;
-        const page = (r.Cases as Record<string, unknown>[]) || [];
+        const page = (Array.isArray(r.Case) ? r.Case : (r.Cases as Record<string, unknown>[])) || [];
+        let added = 0;
         for (const cs of page) {
+          const id = String(cs.objectID);
+          if (seenCase.has(id)) continue; // /data/Cases may ignore pageNo → skip repeated objectIDs (avoids dup conflict keys)
+          seenCase.add(id);
           const cf = cs.Fields as VField[];
-          rows.push(mk('case', 'case', String(cs.objectID), {
+          rows.push(mk('case', 'case', id, {
             customer_name: rel(cs.Relations as VRel[], 'client')?.name || '',
             phone: getField(cf, F.casePhone)?.fieldValue || null,
             email: getField(cf, F.caseEmail)?.fieldValue || null,
@@ -516,8 +608,9 @@ Deno.serve(async (req: Request) => {
             detail: getField(cf, F.caseNarr)?.fieldValue || null,
             occurred_at: iso(cs.dateCreated), raw: cs,
           }));
+          added++;
         }
-        if (page.length < 50) break;
+        if (page.length < 50 || added === 0) break; // done, or the page brought nothing new (pageNo ignored)
       }
     })() : Promise.resolve();
 
@@ -531,9 +624,29 @@ Deno.serve(async (req: Request) => {
     // ---- Upsert (merge-duplicates): only source-derived cols in the payload → CRM fields preserved. ----
     let upserted = 0;
     if (rows.length) {
-      const { error } = await supabase.from('pipeline_items').upsert(rows, { onConflict: 'tenant_id,type,source_external_id' });
+      // Dedupe by the conflict key — Postgres upsert rejects a batch that touches the same (tenant,type,
+      // source_external_id) row twice ("ON CONFLICT DO UPDATE command cannot affect row a second time").
+      const _byKey = new Map<string, Record<string, unknown>>();
+      for (const r of rows) _byKey.set(`${(r as any).type}::${(r as any).source_external_id}`, r);
+      const _rows = Array.from(_byKey.values());
+      const { error } = await supabase.from('pipeline_items').upsert(_rows, { onConflict: 'tenant_id,type,source_external_id' });
       if (error) { console.error(`[pipeline:${reqId}] upsert failed:`, error); return json({ success: false, error: 'Save failed', reqId }, 500); }
       upserted = rows.length;
+    }
+
+    // Purge any out-of-territory leads that were mirrored before the territory filter existed (or newly detected
+    // this run). They should never have entered the mirror — delete their touches then the rows. Bounded to the
+    // ext ids we POSITIVELY determined are OOT this sync (owner != this franchise / zip not serviced).
+    let ootPurged = 0;
+    if (ootLeadExtIds.length) {
+      const { data: ootRows } = await supabase.from('pipeline_items').select('id').eq('franchise_id', franchiseInternalID).eq('type', 'lead').in('source_external_id', ootLeadExtIds);
+      const ids = ((ootRows || []) as Record<string, string>[]).map((r) => r.id);
+      if (ids.length) {
+        await supabase.from('pipeline_touches').delete().in('pipeline_item_id', ids);
+        await supabase.from('pipeline_items').delete().in('id', ids);
+        ootPurged = ids.length;
+      }
+      console.log(`[pipeline:${reqId}] territory filter: ${ootLeadExtIds.length} OOT leads skipped, ${ootPurged} purged from mirror`);
     }
 
     // Hybrid auto-default: brand-new items auto-enter their type's default sequence (schedule starts now).
@@ -580,7 +693,7 @@ Deno.serve(async (req: Request) => {
 
     const counts: Record<string, number> = {};
     for (const t of ALL_TYPES) counts[t] = rows.filter((r) => r.type === t).length;
-    return json({ success: true, franchiseID, window: { dateStart, dateEnd, days }, upserted, autoSeeded, reconciled, counts, reqId });
+    return json({ success: true, franchiseID, window: { dateStart, dateEnd, days }, upserted, autoSeeded, reconciled, ootPurged, ootSkipped: ootLeadExtIds.length, counts, reqId });
   } catch (e) {
     if (e instanceof VonigoUnavailable) return json(VONIGO_DOWN_BODY, 503);
     console.error(`[pipeline:${reqId}] error:`, (e as Error)?.stack || String(e));

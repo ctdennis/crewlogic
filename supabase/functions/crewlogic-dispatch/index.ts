@@ -23,12 +23,19 @@ const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers
 const TENANT_ID = '946a4535-aa61-45b6-a6fb-9190ff546d41';
 const VONIGO_BASE = 'https://junkluggers.vonigo.com/api/v1';
 // WorkOrder fieldIDs
-const F = { status: 181, client: 183, address: 184, date: 185, duration: 186, time: 9082, price: 813, summary: 200, items: 10336, label: 201, bookedOnlineFlag: 9920 };
-// Field 9920 = Vonigo's durable "booked online" boolean ('true'/'false'). Verified against live #90 WorkOrders
-// (2026-07-30): true for every online-booked job, false for every phone/office job, and it SURVIVES a note
-// edit — unlike the "Online booking." text in the summary (field 200), which the office overwrites when it
-// edits the job (Nash/Lawrence lost the badge that way). So 9920 is the primary signal; the summary text is
-// kept only as a legacy fallback so nothing that reads online today ever regresses.
+const F = { status: 181, client: 183, address: 184, date: 185, duration: 186, time: 9082, price: 813, summary: 200, items: 10336, label: 201 };
+// "Booked online" = the WorkOrder's CREATOR relation is Vonigo's online-booking API user "API, DevHub"
+// (objectID 5065). Verified live #90 2026-08-13 against owner-labelled jobs: BOTH online jobs (Primini 875866,
+// Thompson 876594 — Vonigo Request "Originated On: Online") were Created By "API, DevHub"; every phone/office
+// job was created by a human (Motta→Dennis Skip, Littlefield/Call-Center→Okotie Paul, Lynch→Anderson Kayla).
+// FREE signal — the creator relation is already in the WorkOrders payload (no per-job Request call). The truly
+// authoritative field is the Request's "Originated On" (Call Center/Corporate/Franchise/Online) but reading it
+// needs a separate /data/Requests call per job; the creator relation aligns 1:1 with it on every sample.
+// CrewLogic's own submitQuote logs in with per-franchise creds (a human user) → its jobs are NOT "API, DevHub",
+// so no false positive. DISPROVEN, do NOT reuse: field 9920 ('true' on phone jobs too → striped everything);
+// summary "Online booking." text (office overwrites it; an online booking's summary reads "Created via API");
+// field 9949 (NOT origin — online job 875866 and Call-Center job 877559 share optionID 22599).
+const ONLINE_CREATOR_ID = '5065'; // Vonigo user "API, DevHub" — the online-booking integration (Junkluggers tenant)
 // Field-201 LABEL optionIDs that mean a job is "done" → render gray. Mapped from Vonigo 2026-06-22:
 // 245=Estimate Completed (Job), 9996=Estimate Completed (Est. Only), 9993=Lost. (Converted labels 9975/9970
 // stay ACTIVE until status Archived; National Account also grays only on Archived — handled by status.)
@@ -242,11 +249,12 @@ async function listRouteJobs(token: string, franchiseID: string, dayID: string, 
     const labelDone = GRAY_LABELS.has(gf(f, F.label).optionID || 0);
     const zoneRel = rel.find((x: any) => x.relationType === 'zone');
     const clientRel = rel.find((x: any) => x.relationType === 'client'); // CLIENT account name (e.g. "Clean City Pros"); field 183 is the on-site CONTACT — wrong for commercial clients
+    const creatorRel = rel.find((x: any) => x.relationType === 'creator'); // online bookings are Created By Vonigo's API user "API, DevHub" (objectID 5065)
     // Crew comes through as one Relation per member (crew id=7435 Nicholson, Joe). Names only — the
     // job card just shows who is on it. driver/lugger role is NOT in this relation; it lives in the
     // crew-member record, so the card can't distinguish them yet.
     const crew = rel.filter((x: any) => x.relationType === 'crew').map((c: any) => String(c.name || '').trim()).filter(Boolean);
-    return { jobID: jobRel ? String(jobRel.objectID) : null, crew, woID: String(w.objectID), route: rname, routeCode: shortRoute(rname), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: (clientRel && clientRel.name) || gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), labelDone, labelOpt: gf(f, F.label).optionID || 0, apptCount: parseInt(String(w.countWorkOrders ?? '0'), 10) || 0, bookedOnline: gf(f, F.bookedOnlineFlag).fieldValue === 'true' || /online booking/i.test(gf(f, F.summary).fieldValue || ''), dateCreated: String(w.dateCreated || ''), dateService: String(w.dateService || ''), zoneID: zoneRel ? String(zoneRel.objectID) : '', zoneName: zoneRel ? zoneRel.name : '', lat: null as number | null, lon: null as number | null };
+    return { jobID: jobRel ? String(jobRel.objectID) : null, crew, woID: String(w.objectID), route: rname, routeCode: shortRoute(rname), routeID: routeRel ? String(routeRel.objectID) : null, timeMin, timeLabel: timeLabel(timeMin), durationMin: parseInt(gf(f, F.duration).fieldValue || '0', 10), client: (clientRel && clientRel.name) || gf(f, F.client).fieldValue || '', address: addr, zip: zipOf(addr), price: gf(f, F.price).fieldValue || '', summary: gf(f, F.summary).fieldValue || '', items: gf(f, F.items).fieldValue || '', status: statusVal, statusOptionID: gf(f, F.status).optionID || 0, completed: /archiv|complet/i.test(statusVal), labelDone, labelOpt: gf(f, F.label).optionID || 0, apptCount: parseInt(String(w.countWorkOrders ?? '0'), 10) || 0, bookedOnline: !!creatorRel && (String(creatorRel.objectID) === ONLINE_CREATOR_ID || /^api,\s*devhub$/i.test(String(creatorRel.name || ''))), dateCreated: String(w.dateCreated || ''), dateService: String(w.dateService || ''), zoneID: zoneRel ? String(zoneRel.objectID) : '', zoneName: zoneRel ? zoneRel.name : '', lat: null as number | null, lon: null as number | null };
   });
   // Day-wide CANCELLED count — these jobs are hidden from the board (below), but the dispatch header
   // surfaces "how many cancelled today". Same predicate as the hide filter: optionID 162 OR text "cancel".
@@ -673,6 +681,17 @@ Deno.serve(async (req: Request) => {
     if (action === 'suggestSlots') {
       const dayID = String(body.dayID); const ds = dayEpoch(dayID), de = ds + 79200;
       const duration = String(body.durationMin || 120), serviceTypeID = String(body.serviceTypeID || '11');
+      // Territory guard (opt-in via checkTerritory). Vonigo does NOT error on an out-of-territory zip — the
+      // availability query silently falls back to the UNZONED all-routes set (6am–6:30pm). The reliable signal
+      // is /resources/zips/ method:1 → the zone's franchiseID. If that isn't THIS franchise, refuse: another
+      // franchise owns that zip (e.g. 02108 → franchise 53 "MA - Greater Boston").
+      if (body.checkTerritory && body.zip) {
+        const zr = await vpost(token, '/resources/zips/', { method: '1', zip: String(body.zip) });
+        const zst = (zr.ServiceTypes || [])[0] as any;
+        if (!zst || (zst.franchiseID != null && String(zst.franchiseID) !== String(franchiseID))) {
+          return json({ success: true, dayID, zoned: true, count: 0, slots: [], outOfTerritory: true, zip: String(body.zip), servicedBy: zst ? String(zst.franchise || '') : null });
+        }
+      }
       const p: any = { method: '0', dateStart: String(ds), dateEnd: String(de), duration, locationID: '1', serviceTypeID, pageNo: '1', pageSize: '400' };
       if (body.zip) p.zip = String(body.zip);
       if (body.routeID) p.routeID = String(body.routeID);
@@ -718,6 +737,208 @@ Deno.serve(async (req: Request) => {
       // Vonigo state (not exposed by availability/routes) — omitted; routeID+dayID+timeStart+requestID pin the slot.
       console.log(`[dispatch][reserveSlot] route=${routeID} ${dayID} start=${startTime} dur=${duration} lockID=${lockID} errNo=${lock.errNo}`);
       return json({ success: true, lockID, requestID: lockID, dayID: String(dayID), routeID: String(routeID), startTime: Number(startTime), durationMin: Number(duration) });
+    }
+
+    // action=bookLead — FW-66 leads booking (contract: docs/contract-bizdev-leads-booking.md, approved).
+    // Books a lead (an existing Vonigo Client) into a chosen slot: resolve client → zip-zone duration → lock
+    // slot → create WorkOrder (method 3, which auto-creates the parent Job + appointment) → set res/comm on
+    // the client → release the lock on any failure. Real Vonigo WRITE. dryRun:true validates + returns the
+    // intended payloads only.
+    // CAMPAIGN: the created Job auto-inherits the lead's own campaign source (its real origin — the correct
+    // default for a lead). Explicit override is NOT a /data/Jobs method-2 field edit (969/983 are relation-
+    // managed selects → Vonigo returns "No Data to update"); an override path (via the campaign relation /
+    // campaignID) is a tracked follow-up, not v1.
+    if (action === 'bookLead') {
+      const clientID = String(body.clientID || '');
+      const dayID = String(body.dayID || ''), routeID = String(body.routeID || ''), startTime = String(body.startTime ?? '');
+      const zip = String(body.zip || ''), svc = String(body.serviceTypeID || '11');
+      const items = String(body.items || '').trim(), desc = String(body.desc || '').trim();
+      const resCommOptionID = body.resCommOptionID != null ? String(body.resCommOptionID) : ''; // 59 Residential / 60 Commercial (Client field 121)
+      const dryRun = body.dryRun === true;
+      if (!clientID) return json({ success: false, error: 'bookLead needs clientID' }, 400);
+      if (!dryRun && (!dayID || !routeID || startTime === '')) return json({ success: false, error: 'bookLead needs dayID, routeID, startTime' }, 400);
+
+      // 1) Resolve the client → contactID + locationID (required for the WO create)
+      const cr = await vpost(token, '/data/Clients/', { method: '-1', objectID: clientID, isCompleteObject: 'true' });
+      const client = (cr.Clients && cr.Clients[0]) || null;
+      if (!client) return json({ success: false, step: 'client', error: 'Lead client not found', clientID }, 404);
+      const crel: Record<string, string[]> = ((client.Relations || []) as any[]).reduce((m: any, x: any) => { (m[x.relationType] = m[x.relationType] || []).push(String(x.objectID)); return m; }, {});
+      const contactID = crel.contact && crel.contact[0];
+      let locationID = (crel.location && crel.location[0]) || (crel.location1 && crel.location1[0]);
+      // Every lead has a contact (phone lives there); many phone/web leads have NO location. Contact is required;
+      // a missing location is CREATED below from the modal address (step 2.4). Only a missing contact is fatal.
+      if (!contactID) return json({ success: false, step: 'client', error: 'Lead has no contact record — cannot book.', contactID: null }, 409);
+
+      // 2) Zip lookup — ONE call yields duration + province/country optionIDs + default city (contract:
+      //    /resources/zips/ method 1 → ServiceTypes[0].duration, Zip.provinceOptionID/countryOptionID).
+      let durMin = Number(body.durationMin || 0);
+      let zipInfo: any = null;
+      if (zip) { try { const zr = await vpost(token, '/resources/zips/', { method: '1', zip }); zipInfo = zr.Zip || zr.zip || (Array.isArray(zr.Zips) ? zr.Zips[0] : null) || null; const st = (zr.ServiceTypes || [])[0]; if (!durMin && st && st.duration) durMin = Number(st.duration); } catch { /* fall through */ } }
+      if (!durMin) durMin = 120;
+      const zProvince = zipInfo ? String(zipInfo.provinceOptionID || zipInfo.ProvinceOptionID || '') : '';
+      const zCountry = zipInfo ? String(zipInfo.countryOptionID || zipInfo.CountryOptionID || '9906') : '9906';
+      const zCity = zipInfo ? String(zipInfo.defaultCity || zipInfo.DefaultCity || '') : ''; // fallback city if the modal has none
+
+      // 2.5) Contact-record update — refresh the client's Contact + Location from the modal fields BEFORE the
+      //    WO create (the WO references locationID, so the address must be right first). Only fields the manager
+      //    actually supplied are sent — never blank existing data. State (778) is a select → needs the zip's
+      //    provinceOptionID; skipped if the zip lookup didn't yield one (leaves the existing state). Contract:
+      //    docs/contract-bizdev-leads-booking.md "Contact-record backend". Real Vonigo writes — GATED.
+      const mc: any = body.contact || {}, ma: any = body.address || {};
+      const needLocation = !locationID; // bare lead (contact but no location) — CREATE one from the modal address
+      const contactFields: any[] = [];
+      if (mc.email != null && String(mc.email).trim()) contactFields.push({ fieldID: '97', fieldValue: String(mc.email).trim() });
+      if (mc.phone != null && String(mc.phone).trim()) contactFields.push({ fieldID: '1088', fieldValue: String(mc.phone).trim() });
+      if (mc.name != null && String(mc.name).trim()) { const nm = String(mc.name).trim(); const sp = nm.lastIndexOf(' '); const first = sp > 0 ? nm.slice(0, sp) : nm; const last = sp > 0 ? nm.slice(sp + 1) : ''; contactFields.push({ fieldID: '127', fieldValue: first }); if (last) contactFields.push({ fieldID: '128', fieldValue: last }); }
+
+      // Client-record fields — the Client (obj 7) carries its OWN name (126 + 130), stored "Last, First" (e.g.
+      //    "Higginbotham, Michael"). Updating the Contact's name does NOT set this — a bare lead stays "No name"
+      //    on the client until 126/130 are set. Res/comm (Client Type 121) is folded into the same edit.
+      const clientFields: any[] = [];
+      if (mc.name != null && String(mc.name).trim()) { const raw = String(mc.name).trim(); const sp = raw.lastIndexOf(' '); const lastFirst = raw.includes(',') ? raw : (sp > 0 ? (raw.slice(sp + 1) + ', ' + raw.slice(0, sp)) : raw); clientFields.push({ fieldID: '126', fieldValue: lastFirst }); clientFields.push({ fieldID: '130', fieldValue: lastFirst }); }
+      if (resCommOptionID) clientFields.push({ fieldID: '121', optionID: resCommOptionID });
+
+      // Address fields (shared by the location CREATE for a bare lead and the location UPDATE for an existing one).
+      const aStreet = String(ma.street || '').trim(), aZip = String(ma.zip || (needLocation ? zip : '') || '').trim();
+      const aCity = String(ma.city || '').trim() || zCity; // fall back to the zip's default city if the modal left it blank
+      const addrFields: any[] = [];
+      if (aStreet) addrFields.push({ fieldID: '773', fieldValue: aStreet });
+      if (aCity) addrFields.push({ fieldID: '776', fieldValue: aCity });
+      if (aZip) addrFields.push({ fieldID: '775', fieldValue: aZip });
+      if (zProvince) addrFields.push({ fieldID: '778', optionID: zProvince });
+      if (zCountry && addrFields.length) addrFields.push({ fieldID: '779', optionID: zCountry });
+      // A CREATE needs street + zip (a select-only Fields set would make an addressless location). An UPDATE can
+      //    patch whatever subset the manager supplied.
+      const canCreateLoc = !!(aStreet && aZip);
+
+      if (dryRun) return json({ success: true, dryRun: true, needLocation, resolved: { clientID, contactID, locationID: locationID || null, durMin, zip, zProvince, zCountry }, wouldPost: { contactEdit: contactFields.length ? { method: '2', objectID: contactID, Fields: contactFields } : null, locationCreate: needLocation ? { method: '3', clientID, contactID, canCreate: canCreateLoc, Fields: addrFields } : null, locationEdit: (!needLocation && addrFields.length) ? { method: '2', objectID: locationID, Fields: addrFields } : null, lock: { dayID, routeID, startTime, duration: durMin, serviceTypeID: svc }, wo: { method: '3', clientID, contactID, locationID: locationID || '(new)', serviceTypeID: svc, Fields: [{ fieldID: '10336', fieldValue: items }, { fieldID: '200', fieldValue: desc }, { fieldID: '186', fieldValue: String(durMin) }] }, clientEdit: clientFields.length ? { method: '2', objectID: clientID, Fields: clientFields } : null } });
+
+      // Execute the Contact update (best-effort) + the Location create/update (flags returned so the manager sees what stuck).
+      let contactUpdated: boolean | null = null, locationUpdated: boolean | null = null, locationCreated = false, clientUpdated: boolean | null = null;
+      if (contactFields.length) { try { const ce = await vpost(token, '/data/Contacts/', { method: '2', objectID: String(contactID), Fields: contactFields }); contactUpdated = ce?.errNo === 0; if (!contactUpdated) console.error('[bookLead] contact update failed', { contactID, errNo: ce?.errNo, errMsg: ce?.errMsg }); } catch (e) { contactUpdated = false; console.error('[bookLead] contact update threw', e); } }
+      // Set the Client's own name (126/130) + res/comm (121) in one edit — otherwise the client stays "No name".
+      if (clientFields.length) { try { const cue = await vpost(token, '/data/Clients/', { method: '2', objectID: clientID, Fields: clientFields }); clientUpdated = cue?.errNo === 0; if (!clientUpdated) console.error('[bookLead] client update failed', { clientID, errNo: cue?.errNo, errMsg: cue?.errMsg }); } catch (e) { clientUpdated = false; console.error('[bookLead] client update threw', e); } }
+      const resCommSet: boolean | null = resCommOptionID ? clientUpdated : null;
+      if (needLocation) {
+        // CREATE the service address (standard Vonigo child-create: clientID + contactID; franchise/locationType auto-derive).
+        if (!canCreateLoc) return json({ success: false, step: 'location', error: 'This lead has no service address on file — enter at least a street and zip to book.' }, 409);
+        const lc = await vpost(token, '/data/Locations/', { method: '3', clientID, contactID: String(contactID), Fields: addrFields });
+        const newLoc = lc.Location || (lc.Locations && lc.Locations[0]) || null;
+        const newLocID = newLoc ? String(newLoc.objectID) : null;
+        if (!newLocID || lc?.errNo !== 0) { console.error('[bookLead] location create failed', { clientID, contactID, errNo: lc?.errNo, errMsg: lc?.errMsg }); return json({ success: false, step: 'locationCreate', error: 'Could not create the service address in Vonigo.', errNo: lc?.errNo, errMsg: lc?.errMsg || null }, 502); }
+        locationID = newLocID; locationCreated = true; locationUpdated = true;
+        console.log('[bookLead] location created', { clientID, contactID, locationID });
+      } else if (addrFields.length) {
+        // UPDATE the existing location. (Reads-by-id are unreliable for locations, but writes-by-id are trusted — contract.)
+        try { const le = await vpost(token, '/data/Locations/', { method: '2', objectID: String(locationID), Fields: addrFields }); locationUpdated = le?.errNo === 0; if (!locationUpdated) console.error('[bookLead] location update failed', { locationID, errNo: le?.errNo, errMsg: le?.errMsg }); } catch (e) { locationUpdated = false; console.error('[bookLead] location update threw', e); }
+      }
+
+      // 3) Lock the slot (availability method 2 → lockID)
+      const lock = await vpost(token, '/resources/availability/', { method: '2', dayID, routeID, zip, serviceTypeID: svc, duration: String(durMin), startTime });
+      const lockID = (lock.Ids && (lock.Ids.lockID || lock.Ids.LockID)) || null;
+      if (!lockID) return json({ success: false, step: 'lock', error: 'That slot isn’t open — pick another time.', errNo: lock?.errNo }, 409);
+      const releaseLock = async () => { try { await vpost(token, '/resources/availability/', { method: '4', lockID: String(lockID) }); } catch { /* best effort */ } };
+
+      try {
+        // 4) Create the WorkOrder (method 3) — auto-creates the parent Job + appointment in the locked slot
+        const wo = await vpost(token, '/data/WorkOrders/', { method: '3', lockID: String(lockID), clientID, contactID: String(contactID), locationID: String(locationID), serviceTypeID: svc, Fields: [{ fieldID: '10336', fieldValue: items || 'n/a' }, { fieldID: '200', fieldValue: desc || '' }, { fieldID: '186', fieldValue: String(durMin) }] });
+        if (wo?.errNo !== 0) { await releaseLock(); console.error('[bookLead] WO create failed', { franchiseID, clientID, errNo: wo?.errNo, errMsg: wo?.errMsg }); return json({ success: false, step: 'woCreate', error: 'Booking failed at the scheduling step — the slot was released.', errNo: wo?.errNo }, 502); }
+        const woObj = wo.WorkOrder || null;
+        const woID = woObj ? String(woObj.objectID) : null;
+        const jobRel = ((woObj?.Relations || []) as any[]).find((x: any) => x.relationType === 'job');
+        const jobID = jobRel ? String(jobRel.objectID) : (woObj?.name ? (String(woObj.name).match(/(\d+)-/) || [])[1] || null : null);
+        const dateService = woObj?.dateService || null;
+
+        // 5) (Client name + res/comm already set pre-lock in one /data/Clients edit — see clientFields above.)
+
+        // 6) Deactivate the LEAD so it drops out of the pipeline (owner 2026-08-16: the id we hold IS the lead
+        //    object id — no job existed until now; deactivating the lead record does NOT touch the new job).
+        //    Best-effort: a booked job that leaves the lead active is a minor re-surface, not a failed booking.
+        let leadDeactivated: boolean | null = null;
+        if (body.deactivateLead !== false) {
+          try { const dl = await vpost(token, '/data/Leads/', { method: '5', objectID: clientID }); leadDeactivated = dl?.errNo === 0; if (!leadDeactivated) console.error('[bookLead] lead deactivate failed', { clientID, errNo: dl?.errNo, errMsg: dl?.errMsg }); }
+          catch (e) { leadDeactivated = false; console.error('[bookLead] lead deactivate threw', e); }
+        }
+
+        console.log('[bookLead] booked', { franchiseID, clientID, jobID, woID, dayID, routeID, startTime, durMin, contactUpdated, clientUpdated, locationCreated, locationUpdated, resCommSet, leadDeactivated });
+        try { await audit({ franchiseID, action: 'bookLead', actorEmail: body.actorEmail, resolved: { clientID, contactID, locationID, dayID, routeID, startTime, durMin }, fieldsWritten: { woID, jobID, contactUpdated, clientUpdated, locationCreated, locationUpdated, resCommSet, leadDeactivated }, vonigoErrno: 0, success: true, result: { dateService } }); } catch { /* audit best-effort */ }
+        return json({ success: true, jobID, woID, dateService, durMin, contactUpdated, clientUpdated, locationCreated, locationUpdated, resCommSet, leadDeactivated });
+      } catch (e) {
+        await releaseLock();
+        console.error('[bookLead] exception', e);
+        return json({ success: false, step: 'exception', error: 'Booking failed — the slot was released.' }, 500);
+      }
+    }
+
+    // action=inspectClient — READ-ONLY diagnostic: dump a client's raw Relations + Fields so we can see what
+    // objects (contact/location) a lead actually carries. Safe (method -1 read). Used to design the bare-lead
+    // create path and for support triage.
+    if (action === 'inspectClient') {
+      const clientID = String(body.clientID || '');
+      if (!clientID) return json({ success: false, error: 'inspectClient needs clientID' }, 400);
+      const cr = await vpost(token, '/data/Clients/', { method: '-1', objectID: clientID, isCompleteObject: 'true' });
+      const client = (cr.Clients && cr.Clients[0]) || null;
+      if (!client) return json({ success: false, error: 'client not found', clientID, raw: cr });
+      const relTypes: Record<string, string[]> = ((client.Relations || []) as any[]).reduce((m: any, x: any) => { (m[x.relationType] = m[x.relationType] || []).push(String(x.objectID)); return m; }, {});
+      const out: any = { success: true, clientID, name: client.name || null, relationTypes: relTypes, fields: (client.Fields || []).map((f: any) => ({ id: f.fieldID, name: f.name, value: f.fieldValue, optionID: f.optionID })) };
+      // Optionally dump the linked contact + location objects (read-only) to see their fields/relations.
+      if (body.deep) {
+        const dump = async (path: string, id: string) => { try { const r = await vpost(token, path, { method: '-1', objectID: id, isCompleteObject: 'true' }); const key = Object.keys(r).find(k => Array.isArray((r as any)[k]) && (r as any)[k][0] && (r as any)[k][0].objectID); const o = key ? (r as any)[key][0] : null; return o ? { objectID: o.objectID, name: o.name, relations: (o.Relations || []).map((x: any) => ({ type: x.relationType, id: x.objectID })), fields: (o.Fields || []).map((f: any) => ({ id: f.fieldID, name: f.name, value: f.fieldValue, optionID: f.optionID })) } : { raw: r }; } catch (e) { return { error: String(e) }; } };
+        if (relTypes.contact) out.contact = await dump('/data/Contacts/', relTypes.contact[0]);
+        if (relTypes.location) out.location = await dump('/data/Locations/', relTypes.location[0]);
+      }
+      return json(out);
+    }
+
+    // action=objMeta — READ-ONLY: dump a Vonigo object's field + option metadata (/system/objects method 1).
+    // Used to design creates (required fields, option sets). Safe.
+    if (action === 'objMeta') {
+      const objectID = String(body.objectID || '');
+      if (!objectID) return json({ success: false, error: 'objMeta needs objectID' }, 400);
+      const b: any = { method: '1', objectID };
+      if (body.serviceTypeID) b.serviceTypeID = String(body.serviceTypeID);
+      const m = await vpost(token, '/system/objects/', b);
+      return json({ success: true, objectID, name: m.name || m.objectName || null, fields: (m.Fields || []).map((f: any) => ({ id: f.fieldID, name: f.name, required: f.isFieldRequired, type: f.type })), optionCount: (m.Options || []).length });
+    }
+
+    // action=leadsProbe — READ-ONLY diagnostic: dump /data/Leads/ for the franchise so we can see the real Lead
+    // objects (distinct from the Client). Optionally filter to a name substring. Safe.
+    if (action === 'leadsProbe') {
+      const method = String(body.method || '-1');
+      const nameLike = String(body.nameLike || '').toLowerCase();
+      const b: any = { method, pageNo: String(body.pageNo || '1'), pageSize: String(body.pageSize || '50'), sortMode: String(body.sortMode || '1'), sortDirection: String(body.sortDirection || '0'), isCompleteObject: 'true' };
+      if (body.franchiseID2) b.franchiseID = String(body.franchiseID2);
+      if (body.dateMode) { b.dateMode = String(body.dateMode); b.dateStart = String(body.dateStart || ''); b.dateEnd = String(body.dateEnd || ''); }
+      const r = await vpost(token, '/data/Leads/', b);
+      const arr = (r.Leads || r.Lead || r.Clients || []) as any[];
+      const trim = (o: any) => ({ objectID: o.objectID, name: o.name, dateCreated: o.dateCreated, relations: (o.Relations || []).map((x: any) => ({ type: x.relationType, id: x.objectID })), fields: (o.Fields || []).filter((f: any) => f.fieldValue || f.optionID).map((f: any) => ({ id: f.fieldID, value: f.fieldValue, optionID: f.optionID })) });
+      const rows = arr.filter((o: any) => !nameLike || String(o.name || '').toLowerCase().includes(nameLike)).map(trim);
+      const rawKeys: Record<string, string> = {}; for (const k of Object.keys(r)) { const v: any = (r as any)[k]; rawKeys[k] = Array.isArray(v) ? `array[${v.length}]` : typeof v; }
+      return json({ success: true, errNo: r.errNo, arrayKey: r.Leads ? 'Leads' : (r.Lead ? 'Lead' : null), count: arr.length, matched: rows.length, rows: rows.slice(0, Number(body.limit || 10)), rawKeys, rawSample: arr.length === 0 ? r : undefined });
+    }
+
+    // action=zipOwner — READ-ONLY: which franchise owns a zip (territory check). Returns ServiceTypes[0].franchiseID.
+    if (action === 'zipOwner') {
+      const z = String(body.zip || '');
+      if (!z) return json({ success: false, error: 'zipOwner needs zip' }, 400);
+      const zr = await vpost(token, '/resources/zips/', { method: '1', zip: z });
+      const st = (zr.ServiceTypes || [])[0] || null;
+      const zi = zr.Zip || zr.zip || null;
+      return json({ success: true, zip: z, ownerFranchiseID: st ? String(st.franchiseID) : null, defaultCity: zi ? (zi.defaultCity || null) : null, errNo: zr.errNo, found: !!st });
+    }
+
+    // action=deactivateLead — mark a DEAD lead: deactivate it in Vonigo (/data/Leads/ method 5) so it drops
+    // out of the lead pool for good. Real Vonigo WRITE, but LEAD-GATED (method 5 only affects a lead — it
+    // won't touch a customer who has a job). Owner-triggered from the workspace "Dead lead" button.
+    if (action === 'deactivateLead') {
+      const clientID = String(body.clientID || '');
+      if (!clientID) return json({ success: false, error: 'deactivateLead needs clientID' }, 400);
+      const dl = await vpost(token, '/data/Leads/', { method: '5', objectID: clientID });
+      const ok = dl?.errNo === 0;
+      console.log('[deactivateLead]', { franchiseID, clientID, errNo: dl?.errNo });
+      try { await audit({ franchiseID, action: 'deactivateLead', actorEmail: body.actorEmail, resolved: { clientID }, fieldsWritten: { method: 5 }, vonigoErrno: dl?.errNo, success: ok, result: { errMsg: dl?.errMsg || null } }); } catch { /* audit best-effort */ }
+      if (!ok) return json({ success: false, error: 'Could not deactivate the lead in Vonigo.', errNo: dl?.errNo, errMsg: dl?.errMsg }, 502);
+      return json({ success: true, clientID });
     }
 
     if (action === 'cancelJob') {

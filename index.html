@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.124.15 | 2026-08-13">
+  <meta name="crewlogic-version" content="v5.125.25 | 2026-08-17">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1529,6 +1529,12 @@
             <div class="module-desc">Leads, unconverted estimates &amp; cancellations to work</div>
           </div>
 
+          <div class="module-card fade-in fade-in-delay-2" id="bizdevCard" data-card="bizdev" onclick="openModule('bizdev')" style="display:none;">
+            <div class="module-icon">📈</div>
+            <div class="module-name">Biz Dev</div>
+            <div class="module-desc">Forecast-ranked biz-dev worklist (desktop beta)</div>
+          </div>
+
           <div class="module-card fade-in fade-in-delay-3" id="routerCard" data-card="router" onclick="openModule('router')" style="display:none;">
             <div class="module-icon">🚛</div>
             <div class="module-name">Route Optimizer</div>
@@ -1545,6 +1551,12 @@
             <div class="module-icon">📡</div>
             <div class="module-name">Truck Alerts</div>
             <div class="module-desc">Live geofence &amp; ignition alerts (mobile-friendly)</div>
+          </div>
+
+          <div class="module-card fade-in fade-in-delay-3" id="recyclingCard" data-card="recycling" onclick="openRecycling()" style="display:none;">
+            <div class="module-icon">♻️</div>
+            <div class="module-name">Recycling</div>
+            <div class="module-desc">Recycler visits &amp; revenue collected (mobile-friendly)</div>
           </div>
 
           <div class="module-card fade-in fade-in-delay-3" id="disposalRouterCard" data-card="disposalRouter" onclick="openModule('disposalRouter')" style="display:none;">
@@ -1725,6 +1737,8 @@
       <div id="estimatesDashboardScreen" style="display:none;box-sizing:border-box;padding:12px 24px 32px;"></div>
       <!-- FOLLOW-UP PIPELINE — unified list of leads / unconverted estimates / cancellations / UCBs / cases + sequence builder (renderPipeline) -->
       <div id="pipelineScreen" style="display:none;box-sizing:border-box;padding:12px 16px 32px;"></div>
+      <!-- BIZ-DEV SALES WORKSPACE (FW-66 P0) — read-only forecast-ranked worklist over the same pipeline data (renderBizDev) -->
+      <div id="bizdevScreen" style="display:none;box-sizing:border-box;padding:12px 24px 32px;"></div>
 
       <!-- JOB PLAN -->
       <div class="job-plan-section" id="jobPlanScreen">
@@ -1997,6 +2011,10 @@
                   <div class="settings-input-group">
                     <label class="settings-input-label">Default Recycling $/truck</label>
                     <input type="number" class="form-input cost-compact-input" id="settingsRecyclingRevenue" placeholder="130" inputmode="decimal" min="0">
+                  </div>
+                  <div class="settings-input-group">
+                    <label class="settings-input-label" title="AJS = Average Job Size. Manual override; Biz Dev uses the live 30-day calculated average unless you set a value here.">AJS</label>
+                    <input type="number" class="form-input cost-compact-input" id="settingsAvgJobSize" placeholder="0" inputmode="decimal" min="0" step="1" title="AJS — Average Job Size. Manual override; Biz Dev uses the live 30-day calculated average unless set.">
                   </div>
                 </div>
               </div>
@@ -4407,16 +4425,30 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     // Helper for Edge Function calls — POST JSON, returns parsed JSON.
-    async function edgeFunctionCall(name, body) {
-      const res = await fetch(EDGE_BASE + '/' + name, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + EDGE_ANON_KEY,
-          'apikey': EDGE_ANON_KEY
-        },
-        body: JSON.stringify(body)
-      });
+    async function edgeFunctionCall(name, body, timeoutMs) {
+      // Optional client-side timeout: an edge fn that hangs (e.g. a Vonigo call that never returns) must not
+      // leave the UI stuck forever waiting on the gateway. Callers that need a bound pass timeoutMs; the abort
+      // surfaces as a clean {success:false} error object, same as any other failure.
+      const ctrl = (timeoutMs && typeof AbortController !== 'undefined') ? new AbortController() : null;
+      const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+      let res;
+      try {
+        res = await fetch(EDGE_BASE + '/' + name, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + EDGE_ANON_KEY,
+            'apikey': EDGE_ANON_KEY
+          },
+          body: JSON.stringify(body),
+          signal: ctrl ? ctrl.signal : undefined
+        });
+      } catch (e) {
+        if (timer) clearTimeout(timer);
+        if (e && e.name === 'AbortError') return { success: false, error: 'The request timed out. Please try again.' };
+        return { success: false, error: 'Network error — please try again.' };
+      }
+      if (timer) clearTimeout(timer);
       // Defensive parse: a gateway/timeout/error can return an HTML page, not JSON.
       // Don't let a raw "Unexpected token '<'" JSON.parse error reach the UI — callers
       // check `data.success`, so return a clean error object instead.
@@ -7913,6 +7945,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       { key: 'router', label: 'Route Optimizer', icon: '🚛' },
       { key: 'trucks', label: 'Where Are My Trucks?', icon: '🚚' },
       { key: 'truckAlerts', label: 'Truck Alerts', icon: '📡' },
+      { key: 'recycling', label: 'Recycling', icon: '♻️' },
       { key: 'disposalRouter', label: 'Job Router', icon: '♻️' },
       { key: 'dashboard', label: 'Dispatch', icon: '🗺️' },
       { key: 'estimatesDashboard', label: 'Estimates Desk', icon: '📋' },
@@ -8883,6 +8916,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (trucksCard) trucksCard.style.display = ''; // shown; per-user visibility handled by applyTileToggles() (default-off for non-owners)
       const truckAlertsCard = document.getElementById('truckAlertsCard'); // mobile-friendly alerts (owner-gated, no desktop-width restriction)
       if (truckAlertsCard) truckAlertsCard.style.display = ''; // shown; per-user visibility handled by applyTileToggles() (default-off for non-owners)
+      // Recycling report standalone — the recycling revenue/visits report (openRecycling modal) lives on the
+      // dispatch Live Alerts rail, which is desktop-only. This card gives mobile access (owner at the recycler).
+      const recyclingCard = document.getElementById('recyclingCard');
+      if (recyclingCard) recyclingCard.style.display = ''; // shown; per-user visibility handled by applyTileToggles() (default-off for non-owners)
       // Estimate Costing (reverse-estimate) — gated feature, entitlement default-off: dev + super-admin only for now
       const ecCard = document.getElementById('estimateCostingCard');
       // Estimate Costing prod access: dev env (all), franchise #90 (whole franchise), and Kevin McGill (NY #31) by user.
@@ -8894,6 +8931,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Pipeline is #90-only on prod for now (Owner 2026-08-11) — dev env (all), super-admin, and franchise #90.
       const _pipelineAudience = (IS_DEV_ENV || currentUser.franchiseID === '90' || currentUser.email === 'charles.dennis@junkluggers.com');
       if (plCard) plCard.style.display = _pipelineAudience ? '' : 'none';
+      // Sales Workspace (FW-66 P0, biz-dev) — desktop beta: dev env (all) OR super-admin only for now.
+      const bwCard = document.getElementById('bizdevCard');
+      const _bizdevAudience = (IS_DEV_ENV || currentUser.email === 'charles.dennis@junkluggers.com');
+      if (bwCard) bwCard.style.display = _bizdevAudience ? '' : 'none';
       // Route Classification settings tab — same audience (owner-only tab; drives estimate-route scoping + board grouping).
       const _routesTab = document.getElementById('stab-routes');
       if (_routesTab) _routesTab.style.display = (_ecAudience && currentUser.role === 'owner') ? '' : 'none';
@@ -9003,7 +9044,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       'disposalRouterScreen',
       'storageScreen', 'storageResultsScreen',
       'mattressScreen', 'mattressResultsScreen',
-      'priceLookupScreen', 'promosScreen', 'backupScheduleScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'truckAlertsScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen', 'estimateCostingScreen', 'pipelineScreen'
+      'priceLookupScreen', 'promosScreen', 'backupScheduleScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'truckAlertsScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen', 'estimateCostingScreen', 'pipelineScreen', 'bizdevScreen'
     ];
 
     function hideAll() {
@@ -9013,7 +9054,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (_eeNode && _estEditorHome && _eeNode.parentElement !== _estEditorHome) { _eeNode.classList.remove('active'); _estEditorHome.appendChild(_eeNode); }
       _stopTrucksAutoRefresh();
       // Restore the app shell + content to their default (480px) width; the desktop dashboard widens them.
-      ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) el.style.maxWidth = ''; });
+      ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) { el.style.maxWidth = ''; el.classList.remove('ec-wide'); } });
       allScreens.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -14263,8 +14304,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       div.id = 'estimateCostingScreen';
       div.style.display = 'none';
       div.innerHTML =
-        '<div style="max-width:1100px;margin:0 auto;">' +
-          '<div id="ecPhotos" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;"></div>' +
+        '<div class="ec-layout" style="max-width:1400px;margin:0 auto;">' +
+          '<div id="ecPhotos" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;"></div>' +
           '<div id="ecResults"></div>' +
         '</div>' +
         '<div id="ecRoomModal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;" onclick="if(event.target===this)ecCloseModal()">' +
@@ -14283,13 +14324,24 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '</div>' +
         '</div>';
       document.getElementById('homeScreen').parentNode.appendChild(div);
-      if (!document.getElementById('ecKeyframes')) { const st = document.createElement('style'); st.id = 'ecKeyframes'; st.textContent = '@keyframes ecslide{0%{margin-left:-40%}100%{margin-left:100%}}'; document.head.appendChild(st); }
+      if (!document.getElementById('ecKeyframes')) { const st = document.createElement('style'); st.id = 'ecKeyframes'; st.textContent =
+        '@keyframes ecslide{0%{margin-left:-40%}100%{margin-left:100%}}'
+        // Adaptive full width via a class (+!important — beats the 480px cap AND survives inline-style resets).
+        // Inside the results, desktop (≥1000px) splits into rooms/volume on the LEFT (narrow) and the money —
+        // Adjustments + Price & margin — on the RIGHT (wide); phones stay single-column.
+        + '.app-content.ec-wide,.app-shell.ec-wide{max-width:none !important;}'
+        + '.ec-cols{display:grid;grid-template-columns:1fr;gap:16px;align-items:start;}'
+        + '@media (min-width:1000px){.ec-cols{grid-template-columns:minmax(260px,340px) minmax(0,1fr);}}';
+        document.head.appendChild(st); }
       try { const r = await edgeFunctionCall('crewlogic-ny-estimate', { action:'rooms' }); if (r && r.success) _ec.roomOptions = r.rooms || []; } catch(_e){}
     }
 
     async function ecOpen() {
       await ecEnsureScreen();
       document.getElementById('estimateCostingScreen').style.display = 'block';
+      // Adaptive full width — applied HERE (the screen's own open fn) so it fires on every path, incl. the
+      // session-restore that shows this screen on reload without going through openModule's width override.
+      document.querySelectorAll('.app-content, .app-shell').forEach(el => el.classList.add('ec-wide'));
       _ec.jobID = null; _ec.photos = []; _ec.rooms = []; _ec.spend = 0; _ec.estimates = []; _ec.counts = {}; _ec.est = null; _ec.priceBook = []; _ec.adjustments = []; _ec.adjType = 'surcharge'; _ec.cost = { crew: 2, hours: '', disposalSiteIdx: 0, recycleSiteIdx: 0, donateSiteIdx: 0, recyclePct: 0, donatePct: 0, targetMargin: 60, dist: null, driveMin: '', driveMiles: '', include: { disposal: true, labor: true, driveLabor: true, fuel: true, royalty: true } };
       document.getElementById('ecPhotos').innerHTML = '';
       document.getElementById('ecResults').innerHTML = '';
@@ -14353,7 +14405,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
 
     function ecRoomSelect(idx, selected) {
-      const opts = _ec.roomOptions.length ? _ec.roomOptions : ['Other'];
+      // Rooms sorted alphabetically (case-insensitive) for quick scanning; "Other" always kept last.
+      const opts = (_ec.roomOptions.length ? _ec.roomOptions : ['Other']).slice().sort((a, b) => {
+        const ao = /^other$/i.test(String(a)), bo = /^other$/i.test(String(b));
+        if (ao !== bo) return ao ? 1 : -1;
+        return String(a).localeCompare(String(b), undefined, { sensitivity: 'base' });
+      });
       return '<select class="form-select" style="font-size:12px;padding:4px 6px;margin-top:4px;width:100%;max-width:100%;box-sizing:border-box;" onchange="ecSetRoom('+idx+', this.value)">' +
         '<option value="">— room —</option>' +
         opts.map(o => '<option value="'+_ecEsc(o)+'"'+(o===selected?' selected':'')+'>'+_ecEsc(o)+'</option>').join('') +
@@ -14363,10 +14420,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function ecFixPhotoCols(){
       const grid = document.getElementById('ecPhotos'); if (!grid) return;
       const w = grid.getBoundingClientRect().width || (grid.parentElement && grid.parentElement.getBoundingClientRect().width) || 320;
-      const cols = Math.max(2, Math.min(5, Math.floor(w / 115)));
+      const cols = Math.max(2, Math.min(8, Math.floor(w / 210))); // ~210px thumbs → ~6 cols on a wide desktop, up to 8
       grid.style.gridTemplateColumns = 'repeat(' + cols + ', minmax(0, 1fr))';
     }
     function ecRenderPhotos() {
+      _ecWide(); // unlock full desktop width BEFORE ecFixPhotoCols measures the grid (else it sees 480px → 2 cols)
       const grid = document.getElementById('ecPhotos');
       grid.style.display = 'grid';
       grid.style.gap = '8px';
@@ -14379,6 +14437,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }).join('');
       ecFixPhotoCols();
     }
+    // Unlock the 480px mobile cap for the Estimate Costing screen (class + !important; survives inline resets).
+    // Called from every content render so ANY entry path — openModule, job-pick, session-restore — gets full width.
+    function _ecWide(){ document.querySelectorAll('.app-content, .app-shell').forEach(el => el.classList.add('ec-wide')); }
     window.addEventListener('resize', function(){ if (document.getElementById('ecPhotos') && (document.getElementById('ecPhotos').childElementCount)) ecFixPhotoCols(); });
     function ecSetRoom(idx, val){ if (_ec.photos[idx]) { _ec.photos[idx].room = val; const c = document.getElementById('ecRoomCell'+idx); if (c) c.innerHTML = ecRoomSelect(idx, val); const card = document.getElementById('ecPhotoCard'+idx); if (card) card.style.border = (val && String(val).trim()) ? '1px solid var(--border)' : '2px solid #e05a4f'; } }
     // Lightbox: click a thumbnail → full-size photo + the room dropdown, so you can read the room and assign it.
@@ -14765,16 +14826,23 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _ec.rooms.forEach(rm => { rm.rawCy = parseFloat(rm.volume_cuyd)||0; rm.eighths = ecCyToEighths(rm.rawCy); rm.volume_cuyd = ecEighthsToCy(rm.eighths); });
       const grid = document.getElementById('ecPhotos'); if (grid) grid.style.display = 'none'; // photos now live inside their rooms
       const rows = _ec.rooms.map((rm,i) => ecRoomRow(rm,i)).join('');
+      _ecWide();
       document.getElementById('ecResults').innerHTML =
         '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:12px 0;display:flex;gap:20px;flex-wrap:wrap;">' +
           '<div><div id="ecTotalCuyd" style="font-size:24px;font-weight:800;color:var(--accent-green);"></div><div style="font-size:12px;color:var(--text-muted);">total cu yd</div></div>' +
           '<div><div id="ecBilled" style="font-size:24px;font-weight:800;color:var(--accent-green);"></div><div style="font-size:12px;color:var(--text-muted);">billed (min 1, 1/8-truck steps)</div></div>' +
           '<div><div id="ecTrucks" style="font-size:24px;font-weight:800;color:var(--accent-green);"></div><div style="font-size:12px;color:var(--text-muted);">16-cy truckloads</div></div>' +
         '</div>' +
-        '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Tap a room to see its photos + items and set its truck volume. Totals update live.</div>' +
-        rows +
-        '<div id="ecAdjPanel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:14px 0;">'+ecAdjustmentsHtml()+'</div>' +
-        '<div id="ecMarginPanel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:14px 0;">'+ecMarginPanelHtml()+'</div>';
+        '<div class="ec-cols">' +
+          '<div>' +
+            '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Tap a room to see its photos + items and set its truck volume. Totals update live.</div>' +
+            rows +
+          '</div>' +
+          '<div>' +
+            '<div id="ecAdjPanel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:0 0 14px;">'+ecAdjustmentsHtml()+'</div>' +
+            '<div id="ecMarginPanel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin:0;">'+ecMarginPanelHtml()+'</div>' +
+          '</div>' +
+        '</div>';
       ecRecalcTotals();
       // Auto-calculate drive distances on first margin render so Drive labor + Fuel populate without a manual tap;
       // the user hits Recalc distances after changing a disposal/recycling/donation site. Fire-and-forget.
@@ -14843,7 +14911,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '<input id="ecAdjQty" type="number" min="1" value="1" style="width:54px;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:6px;padding:5px 6px;font-size:13px;">' +
           '<button class="btn-surface" style="padding:6px 12px;font-weight:700;" onclick="ecAdjAdd()">Add</button>' +
         '</div>' +
-        '<div style="margin-top:10px;font-size:13px;color:var(--text-muted);">Net adjustments: <span style="font-weight:700;color:var(--accent-green);">'+(net<0?'-$':'$')+Math.abs(net).toFixed(2)+'</span> <span style="font-size:11px;">(applied to margin next)</span></div>';
+        '<div style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px;color:var(--text-muted);">' +
+          '<span style="flex:1;">Net adjustments <span style="font-size:11px;">(applied to margin next)</span></span>' +
+          '<span style="font-weight:700;color:var(--accent-green);min-width:66px;text-align:right;">'+(net<0?'-$':'$')+Math.abs(net).toFixed(2)+'</span>' +
+          '<span style="padding:0 4px;visibility:hidden;font-weight:800;">×</span>' +
+        '</div>';
     }
     function ecRoomDetails(i) {
       const rm = _ec.rooms[i]; if (!rm) return;
@@ -14867,7 +14939,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       { key: 'unconverted_estimate', label: 'Open estimates',      short: 'Open estimate', icon: '📝', color: '#e0a44f' },
       { key: 'cancellation',         label: 'Cancellations',      short: 'Cancelled',   icon: '✖️', color: '#e05a4f' },
       { key: 'ucb',                  label: 'Urgent callbacks',   short: 'Urgent CB',   icon: '📞', color: '#f43f5e' },
-      { key: 'case',                 label: 'Cases',              short: 'Case',        icon: '🛟', color: '#8b5cf6' }
+      { key: 'case',                 label: 'Cases',              short: 'Case',        icon: '🛟', color: '#8b5cf6' } // EXPOSED but READ-ONLY (owner 2026-08-16): visible + click for details, no action affordance (see bwDetailHtml case branch)
     ];
     const PL_STAGES = [
       { key: 'new', label: 'New' }, { key: 'contacted', label: 'Contacted' }, { key: 'working', label: 'Working' },
@@ -15018,7 +15090,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
     // Grouped, oldest-first rendering (Owner 2026-08-11): sort BY GROUP (cases first), and within each group by
     // date oldest→newest, so the most-aged items to work surface at the top. Group order is easy to re-order.
-    const PL_GROUP_ORDER = ['case', 'ucb', 'cancellation', 'unconverted_estimate', 'lead'];
+    const PL_GROUP_ORDER = ['case', 'ucb', 'cancellation', 'unconverted_estimate', 'lead']; // 'case' re-exposed read-only (owner 2026-08-16)
     function plGroupedHtml(items) {
       let html = '';
       for (const key of PL_GROUP_ORDER) {
@@ -15336,6 +15408,700 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function plCloseModal() { const m = document.getElementById('plModalHost'); if (m) m.innerHTML = ''; }
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+    // BIZ-DEV SALES WORKSPACE (FW-66 P0) — read-only desktop worklist over the SAME
+    // crewlogic-pipeline data, forecast-ranked. Fully ADDITIVE: own bw* state / functions /
+    // CSS; touches nothing in the Follow-up Pipeline (_pl*). It reuses the read-only edge
+    // 'list' action + the shared _escHtml / plTel helpers only. No DB or Vonigo writes in P0 —
+    // every action button is a stubbed toast. Gated to dev / super-admin (see applyOwnerCards).
+    // Plan: docs/plan-bizdev-workspace.md
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+    const BW_GROUPS = [
+      { type: 'unconverted_estimate', name: 'Open Estimates', color: '#35c26e' },
+      { type: 'lead',                 name: 'Leads',          color: '#4a9fe0' },
+      { type: 'cancellation',         name: 'Cancellations',  color: '#e0645a' },
+      { type: 'ucb',                  name: 'UCB',            color: '#e0904a' },
+      { type: 'case',                 name: 'Cases',          color: '#8b5cf6' } // read-only group (owner 2026-08-16): details only, no actions
+    ];
+    const BW_BADGE = { unconverted_estimate: 'Estimate', lead: 'Lead', cancellation: 'Cancellation', ucb: 'UCB', case: 'Case' };
+    const BW_ACT   = { unconverted_estimate: 'Schedule / book', lead: 'Schedule / book', cancellation: 'Schedule / book', ucb: 'Schedule / book', case: 'Schedule / book' };
+    // P(close) base by type (client-side heuristic, new in P0). Combined with an age-decay below.
+    const BW_PBASE = { unconverted_estimate: 0.55, ucb: 0.5, lead: 0.3, cancellation: 0.25, case: 0.1 };
+
+    let _bwItems = [], _bwCounts = {}, _bwOpen = 0, _bwTotal = 0, _bwSel = null, _bwToastT = null, _bwPOverride = {}, _bwOpenGroups = null, _bwAvgCalc = 0; // _bwPOverride: session P(close) overrides; _bwOpenGroups: open rail groups; _bwAvgCalc: live 30-day franchise avg-job-size (opportunity floor)
+
+    function bwUsd(n) { return '$' + (Math.round(Number(n) || 0)).toLocaleString('en-US'); }
+    function bwEvk(n) { n = Number(n) || 0; return n >= 1000 ? '$' + (n / 1000).toFixed(1) + 'k' : '$' + Math.round(n); }
+    function bwDaysOld(occurred) { if (!occurred) return 0; const ms = Date.now() - new Date(occurred).getTime(); return ms > 0 ? ms / 86400000 : 0; }
+    function bwDate(iso, withYear) { if (!iso) return ''; const d = new Date(iso); return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', withYear ? { month: 'short', day: 'numeric', year: 'numeric' } : { month: 'short', day: 'numeric' }); }
+    function bwHasAmount(it) { const a = Number(it && it.amount); return isFinite(a) && a > 0; }
+    // Avg-job-size fallback (client-side, from the loaded cost settings). When an item has NO real amount
+    // but the franchise has an Avg job size $ set, the average becomes the floor Opportunity at Low confidence.
+    function bwAvgJob() { const m = Number((currentUser && currentUser.costSettings && currentUser.costSettings.avgJobSize)); if (isFinite(m) && m > 0) return m; return (isFinite(_bwAvgCalc) && _bwAvgCalc > 0) ? _bwAvgCalc : 0; } // manual AJS override wins; else the live 30-day calculated average
+    function bwIsFallback(it) { return !bwHasAmount(it) && bwAvgJob() > 0; } // opportunity comes from the franchise average
+    function bwOppAmount(it) { if (bwHasAmount(it)) return Number(it.amount); const avg = bwAvgJob(); return avg > 0 ? avg : null; } // effective opportunity ($), or null when neither
+    const BW_CLOSED = new Set(['won', 'lost', 'dismissed', 'resolved']);
+    function bwActive(it) { return !BW_CLOSED.has(String((it && it.stage) || 'new').toLowerCase()); } // closed stages hidden from the active worklist + forecast (funnel still counts won/lost)
+    // Persist a stage change (CrewLogic-side write to pipeline_items.stage, franchise-scoped via the edge fn's
+    // 'update' action). Closed stages (won/lost/dismissed) drop the item off the active worklist; Schedule → won.
+    // Reason codes shared by lost + dismissed closes (structured close_reason on pipeline_items).
+    const BW_CLOSE_REASONS = ['Pricing', 'Duplicate', 'Customer unreachable', 'Items already removed', 'Service already performed', 'Other'];
+    // Stage <select> entry point: closing stages (lost/dismissed) prompt for a reason BEFORE persisting;
+    // all other stages persist immediately (unchanged behavior).
+    function bwStageSel(id, stage) {
+      stage = String(stage || '').toLowerCase();
+      if (stage === 'lost' || stage === 'dismissed') { bwReasonPicker(id, stage); return; }
+      bwSetStage(id, stage);
+    }
+    // Inline reason menu injected under the detail header. Pick → persist stage + reason together; Cancel → revert.
+    function bwReasonPicker(id, stage) {
+      const it = _bwItems.find(i => String(i.id) === String(id)); if (!it) return;
+      const surf = document.getElementById('bwSurface'); if (!surf) return;
+      const head = surf.querySelector('.bw-sf-head'); if (!head) return;
+      const ex = document.getElementById('bwReasonMenu'); if (ex) ex.remove();
+      const chips = BW_CLOSE_REASONS.map(r => `<button class="bw-btn bw-reason-chip" data-r="${_escHtml(r)}" onclick="bwPickReason('${_escHtml(String(id))}','${stage}', this.dataset.r)">${_escHtml(r)}</button>`).join('');
+      const menu = document.createElement('div');
+      menu.id = 'bwReasonMenu';
+      menu.style.cssText = 'margin:8px 0;padding:10px;border:1px solid var(--btn-surface-border,#46596d);border-radius:8px;background:var(--bg-card,#1e2f40)';
+      menu.innerHTML = `<div style="font-size:12px;color:var(--text-muted,#9fb0c0);margin-bottom:8px">Reason for marking <b>${stage}</b> — pick one</div>`
+        + `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">${chips}</div>`
+        + `<button class="bw-btn" onclick="bwCancelReason('${_escHtml(String(id))}')">Cancel</button>`;
+      head.insertAdjacentElement('afterend', menu);
+    }
+    async function bwPickReason(id, stage, reason) {
+      const menu = document.getElementById('bwReasonMenu'); if (menu) menu.remove();
+      await bwSetStage(id, stage, reason);
+    }
+    function bwCancelReason(id) {
+      const menu = document.getElementById('bwReasonMenu'); if (menu) menu.remove();
+      const it = _bwItems.find(i => String(i.id) === String(id));
+      const sel = document.querySelector('#bwSurface .bw-stage-sel');
+      if (sel && it) sel.value = String(it.stage || 'new').toLowerCase(); // revert dropdown to persisted stage
+    }
+    async function bwSetStage(id, stage, reason) {
+      const it = _bwItems.find(i => String(i.id) === String(id)); if (!it) return;
+      const prev = it.stage, prevReason = it.close_reason; stage = String(stage || '').toLowerCase(); it.stage = stage; // optimistic
+      if (reason != null) it.close_reason = reason;
+      if (!bwActive(it) && _bwSel === it.id) _bwSel = null; // closing the open item clears the detail
+      bwPaint();
+      try {
+        const patch = { stage };
+        if (reason != null) patch.close_reason = reason;
+        const d = await edgeFunctionCall('crewlogic-pipeline', { action: 'update', franchiseID: currentUser.franchiseID, id: it.id, patch });
+        if (!d || d.success === false) throw new Error((d && d.error) || 'update failed');
+        bwToast(!bwActive(it) ? (stage === 'won' ? 'Marked Won — off the active list' : 'Marked ' + stage + (reason ? ' · ' + reason : '') + ' — off the active list') : ('Stage → ' + stage));
+      } catch (e) {
+        it.stage = prev; it.close_reason = prevReason; bwPaint(); bwToast('Could not save stage — ' + ((e && e.message) || 'try again'));
+      }
+    }
+    // Pin the grid to the viewport so the worklist + detail each scroll INTERNALLY (the page itself doesn't
+    // scroll). Without this, a click on a bottom-of-list item leaves the detail off-screen up top.
+    function bwFitHeight() {
+      const scr = document.getElementById('bizdevScreen'); if (!scr) return;
+      ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) el.style.maxWidth = 'none'; });
+      // A DEFINITE pixel width on .bw-app breaks the flex:1 shrink-wrap chain — .app-content is a flex item that
+      // content-sized the workspace, so it flickered narrow↔wide by detail content. Viewport-based; CSS
+      // max-width:1680 still caps it, margin:0 auto still centers it.
+      const app = scr.querySelector('.bw-app');
+      if (app) app.style.width = Math.max(360, document.documentElement.clientWidth - 88) + 'px';
+      const g = scr.querySelector('.bw-grid');
+      if (g) g.style.height = Math.max(360, window.innerHeight - g.getBoundingClientRect().top - 20) + 'px';
+    }
+    function bwPclose(it) {
+      if (_bwPOverride[it.id] != null) return _bwPOverride[it.id]; // manager override wins over the heuristic
+      const base = (BW_PBASE[it.type] != null) ? BW_PBASE[it.type] : 0.3;
+      const decay = Math.max(0.4, 1 - bwDaysOld(it.occurred_at) * 0.03);
+      return Math.max(0, Math.min(1, base * decay));
+    }
+    function bwForecast(it) { if (it.type === 'case') return null; const opp = bwOppAmount(it); return (opp != null && opp > 0) ? Math.round(bwPclose(it) * opp) : null; } // cases aren't opportunities (owner 2026-08-16); else real amount, else avg-job fallback
+    function bwSortKey(it) { const f = bwForecast(it); return (f == null) ? -1 : f; } // items with neither amount nor avg sort last
+
+    function bwToast(msg) {
+      let t = document.getElementById('bwToast');
+      if (!t) { t = document.createElement('div'); t.id = 'bwToast'; document.body.appendChild(t); }
+      t.style.cssText = 'position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:100002;background:var(--accent-green,#35c26e);color:#06210f;font-weight:700;padding:11px 18px;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.4);font-size:13px;max-width:90vw;';
+      t.textContent = msg; t.style.display = 'block';
+      clearTimeout(_bwToastT); _bwToastT = setTimeout(() => { if (t) t.style.display = 'none'; }, 2800);
+    }
+
+    function bwEnsureStyles() {
+      if (document.getElementById('bwStyles')) return;
+      const st = document.createElement('style'); st.id = 'bwStyles';
+      st.textContent = `
+        #bizdevScreen{width:100%;}
+        #bizdevScreen .bw-app{max-width:1680px;margin:0 auto;width:100%;}
+        #bizdevScreen .bw-tnum{font-variant-numeric:tabular-nums;}
+        #bizdevScreen .bw-mono{font-family:var(--mono,ui-monospace,Menlo,Consolas,monospace);color:var(--accent-green,#35c26e);}
+        #bizdevScreen .bw-none{color:var(--text-muted,#8ea3b5);}
+        #bizdevScreen .bw-topbar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:12px 16px;background:var(--bg-card,#1e2f40);border:1px solid var(--border,#2c3e50);border-radius:12px;margin-bottom:14px;}
+        #bizdevScreen .bw-brand{display:flex;flex-direction:column;gap:2px;margin-right:auto;}
+        #bizdevScreen .bw-brand b{font-size:15px;letter-spacing:.2px;color:var(--text-primary);}
+        #bizdevScreen .bw-brand span{color:var(--text-muted,#8ea3b5);font-size:11.5px;}
+        #bizdevScreen .bw-funnel{display:flex;gap:8px;flex-wrap:wrap;}
+        #bizdevScreen .bw-kpi{background:var(--bg-input,#253545);border:1px solid var(--border,#2c3e50);border-radius:8px;padding:6px 11px;text-align:center;min-width:60px;}
+        #bizdevScreen .bw-kpi b{display:block;font-size:16px;line-height:1.1;color:var(--text-primary);}
+        #bizdevScreen .bw-kpi span{font-size:10px;color:var(--text-muted,#8ea3b5);text-transform:uppercase;letter-spacing:.4px;}
+        #bizdevScreen .bw-kpi.fc{background:rgba(53,194,110,.16);border-color:var(--accent-green,#35c26e);}
+        #bizdevScreen .bw-kpi.fc b{color:var(--accent-green,#35c26e);}
+        #bizdevScreen .bw-kpi.win b{color:var(--accent-green,#35c26e);}
+        #bizdevScreen .bw-grid{display:grid;grid-template-columns:380px 10px minmax(0,1fr);gap:0;align-items:stretch;}
+        @media (max-width:860px){#bizdevScreen .bw-grid{grid-template-columns:1fr;}}
+        /* Draggable rail/detail divider (mirrors the dispatch dashboard's rail dividers; persists in localStorage). */
+        #bizdevScreen .bw-divider{cursor:col-resize;align-self:stretch;display:flex;align-items:center;justify-content:center;touch-action:none;}
+        #bizdevScreen .bw-divider::before{content:"";width:2px;height:100%;background:var(--border,#2c3e50);border-radius:2px;transition:background .15s,width .15s;}
+        #bizdevScreen .bw-divider:hover::before,#bizdevScreen .bw-divider.dragging::before{background:var(--accent-green,#35c26e);width:4px;}
+        @media (max-width:860px){#bizdevScreen .bw-divider{display:none;}}
+        #bizdevScreen .bw-src-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+        #bizdevScreen .bw-rail{background:var(--bg-card,#1e2f40);border:1px solid var(--border,#2c3e50);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;max-height:100%;}
+        #bizdevScreen #bwRail{overflow-y:auto;flex:1;min-height:0;}
+        #bizdevScreen .bw-rail-h{padding:11px 14px;border-bottom:1px solid var(--border,#2c3e50);display:flex;align-items:center;gap:8px;}
+        #bizdevScreen .bw-rail-h b{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted,#8ea3b5);}
+        #bizdevScreen .bw-railsub{margin-left:auto;color:var(--text-muted,#8ea3b5);font-size:11.5px;}
+        #bizdevScreen .bw-group{border-top:1px solid var(--border,#2c3e50);}
+        #bizdevScreen .bw-group:first-child{border-top:0;}
+        #bizdevScreen .bw-grp-h{display:flex;align-items:center;gap:9px;padding:10px 14px;color:var(--text-primary);cursor:pointer;list-style:none;user-select:none;}
+        #bizdevScreen .bw-grp-h::-webkit-details-marker{display:none;}
+        #bizdevScreen .bw-grp-h:hover{background:var(--bg-input,#253545);}
+        #bizdevScreen .bw-caret{width:9px;height:9px;border-right:2px solid var(--text-muted,#8ea3b5);border-bottom:2px solid var(--text-muted,#8ea3b5);transform:rotate(-45deg);transition:transform .16s;flex:none;}
+        #bizdevScreen .bw-group[open] .bw-caret{transform:rotate(45deg);}
+        #bizdevScreen .bw-dot{width:8px;height:8px;border-radius:50%;flex:none;}
+        #bizdevScreen .bw-grp-name{font-weight:700;font-size:13px;}
+        #bizdevScreen .bw-grp-meta{margin-left:auto;display:flex;gap:8px;align-items:center;color:var(--text-muted,#8ea3b5);font-size:11.5px;}
+        #bizdevScreen .bw-pill{background:var(--bg-input,#253545);border:1px solid var(--border,#2c3e50);border-radius:20px;padding:1px 8px;font-size:11px;}
+        #bizdevScreen .bw-grp-body{border-top:1px solid var(--border,#2c3e50);}
+        #bizdevScreen .bw-row-none{color:var(--text-muted,#8ea3b5);padding:9px 14px 9px 30px;font-size:12px;}
+        #bizdevScreen .bw-row{width:100%;display:flex;align-items:center;gap:12px;padding:11px 16px 11px 30px;background:transparent;border:0;border-top:1px solid var(--border,#2c3e50);color:var(--text-primary);text-align:left;cursor:pointer;font-family:inherit;}
+        #bizdevScreen .bw-grp-body .bw-row:first-child{border-top:0;}
+        #bizdevScreen .bw-row:hover{background:var(--bg-input,#253545);}
+        #bizdevScreen .bw-row.sel{background:rgba(53,194,110,.16);box-shadow:inset 3px 0 0 var(--accent-green,#35c26e);}
+        #bizdevScreen .bw-row-main{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px;}
+        #bizdevScreen .bw-row-name{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        #bizdevScreen .bw-row-sub{color:var(--text-muted,#8ea3b5);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        #bizdevScreen .bw-row-fc{display:flex;flex-direction:column;align-items:flex-end;flex:none;line-height:1.25;}
+        #bizdevScreen .bw-fc-amt{font-weight:800;font-size:13px;color:var(--accent-green,#35c26e);}
+        #bizdevScreen .bw-fc-amt.bw-none{color:var(--text-muted,#8ea3b5);}
+        #bizdevScreen .bw-fc-opp{font-size:10px;color:var(--text-muted,#8ea3b5);white-space:nowrap;}
+        #bizdevScreen .bw-pedit{display:flex;align-items:center;gap:9px;padding:14px 18px 0;flex-wrap:wrap;}
+        #bizdevScreen .bw-pedit-l{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted,#8ea3b5);}
+        #bizdevScreen .bw-pin{width:62px;background:var(--bg-input,#253545);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:8px;padding:5px 8px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;}
+        #bizdevScreen .bw-pin:focus{outline:2px solid var(--accent-green,#35c26e);outline-offset:1px;}
+        #bizdevScreen .bw-help{position:relative;display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;border:1px solid var(--text-muted,#8ea3b5);color:var(--text-muted,#8ea3b5);font-size:10px;font-weight:700;cursor:help;margin-left:2px;}
+        #bizdevScreen .bw-tip{visibility:hidden;opacity:0;position:absolute;bottom:140%;left:50%;transform:translateX(-50%);width:250px;background:#333;color:#fff;padding:8px 10px;border-radius:6px;font-size:11.5px;font-weight:400;line-height:1.4;letter-spacing:0;text-transform:none;text-align:left;white-space:normal;z-index:100003;box-shadow:0 6px 20px rgba(0,0,0,.45);transition:opacity .2s;pointer-events:none;}
+        #bizdevScreen .bw-help:hover .bw-tip{visibility:visible;opacity:1;}
+        #bizdevScreen .bw-surface{background:var(--bg-card,#1e2f40);border:1px solid var(--border,#2c3e50);border-radius:12px;min-height:0;overflow-y:auto;}
+        #bizdevScreen .bw-empty,#bizdevScreen .bw-empty-lg{height:520px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--text-muted,#8ea3b5);text-align:center;padding:24px;}
+        #bizdevScreen .bw-big{font-size:34px;}
+        #bizdevScreen .bw-sf-head{padding:16px 18px;border-bottom:1px solid var(--border,#2c3e50);}
+        #bizdevScreen .bw-sf-top{display:flex;align-items:flex-start;gap:12px;}
+        #bizdevScreen .bw-sf-top h2{font-size:19px;margin:0;color:var(--text-primary);font-weight:800;}
+        #bizdevScreen .bw-sf-loc{color:var(--text-muted,#8ea3b5);font-size:12.5px;margin-top:3px;}
+        #bizdevScreen .bw-sf-stage{margin-top:9px;font-size:11px;color:var(--text-muted,#8ea3b5);display:flex;align-items:center;gap:8px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;}
+        #bizdevScreen .bw-stage-pill{background:var(--bg-input,#253545);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:20px;padding:3px 12px;font-size:12px;font-weight:700;letter-spacing:0;text-transform:capitalize;}
+        #bizdevScreen .bw-stage-sel{background:var(--bg-input,#253545);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);border-radius:20px;padding:3px 12px;font-size:12px;font-weight:700;letter-spacing:0;text-transform:capitalize;cursor:pointer;}
+        #bizdevScreen .bw-stage-sel:focus-visible{outline:2px solid var(--accent-green,#35c26e);outline-offset:2px;}
+        #bizdevScreen .bw-badge{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:3px 9px;border-radius:20px;border:1px solid;flex:none;}
+        #bizdevScreen .bw-sf-ev{margin-left:auto;text-align:right;flex:none;}
+        #bizdevScreen .bw-sf-ev b{font-size:20px;color:var(--accent-green,#35c26e);display:block;}
+        #bizdevScreen .bw-sf-ev b.bw-none{color:var(--text-muted,#8ea3b5);}
+        #bizdevScreen .bw-sf-ev span{font-size:10px;color:var(--text-muted,#8ea3b5);text-transform:uppercase;letter-spacing:.4px;}
+        #bizdevScreen .bw-sf-contact{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px;}
+        #bizdevScreen .bw-chip{display:inline-flex;align-items:center;gap:7px;background:var(--bg-input,#253545);border:1px solid var(--border,#2c3e50);border-radius:20px;padding:5px 12px;font-size:12.5px;color:var(--text-primary);text-decoration:none;font-variant-numeric:tabular-nums;}
+        #bizdevScreen .bw-chip:hover{border-color:var(--accent-green,#35c26e);color:var(--accent-green,#35c26e);}
+        #bizdevScreen .bw-chip .bw-k{color:var(--text-muted,#8ea3b5);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
+        #bizdevScreen .bw-sf-body{padding:16px 18px;}
+        #bizdevScreen .bw-card{background:var(--bg-input,#253545);border:1px solid var(--border,#2c3e50);border-radius:12px;padding:14px 16px;margin-bottom:14px;}
+        #bizdevScreen .bw-card h3{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted,#8ea3b5);margin:0 0 10px;}
+        #bizdevScreen .bw-card-sub{text-transform:none;letter-spacing:0;font-weight:400;color:var(--text-muted,#8ea3b5);}
+        #bizdevScreen .bw-strip{display:flex;gap:24px;flex-wrap:wrap;}
+        #bizdevScreen .bw-m b{font-size:22px;color:var(--text-primary);display:block;line-height:1.1;}
+        #bizdevScreen .bw-m span{font-size:11px;color:var(--text-muted,#8ea3b5);}
+        #bizdevScreen .bw-ctx{color:var(--text-muted,#8ea3b5);font-size:13px;line-height:1.5;}
+        #bizdevScreen .bw-ctx b{color:var(--text-primary);}
+        #bizdevScreen .bw-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:4px;}
+        #bizdevScreen .bw-btn{border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);border-radius:8px;padding:9px 15px;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit;}
+        #bizdevScreen .bw-btn:hover{filter:brightness(1.08);}
+        #bizdevScreen .bw-btn.primary{background:var(--accent-green,#35c26e);border-color:var(--accent-green,#35c26e);color:#06210f;}
+        #bizdevScreen .bw-btn.open{background:transparent;}
+        #bizdevScreen .bw-btn.danger{background:transparent;border-color:rgba(224,100,90,.5);color:#e0645a;}
+        #bizdevScreen .bw-btn.danger:hover{background:rgba(224,100,90,.13);filter:none;}
+        #bizdevScreen .bw-foot{margin-top:14px;color:var(--text-muted,#8ea3b5);font-size:11.5px;text-align:center;opacity:.8;}
+      `;
+      document.head.appendChild(st);
+    }
+
+    async function renderBizDev() {
+      bwEnsureStyles();
+      const scr = document.getElementById('bizdevScreen');
+      scr.innerHTML = '<div class="bw-app"><div class="bw-empty" style="display:flex;align-items:center;justify-content:center;gap:10px;padding:72px 16px"><span class="spinner-inline"></span>Loading sales workspace…</div></div>';
+      await bwLoad();
+    }
+
+    async function bwLoad() {
+      // PERF (2026-08-16): the combined 5-type/400-row list took ~8s (bad query plan at the limit), while each
+      // subset is <1s. So load the ACTIONABLE types first for a fast first paint, then fetch cases (read-only,
+      // the high-volume tail) in the BACKGROUND and merge. Cuts perceived load from ~8s to ~1s.
+      const ACTIONABLE = ['lead', 'unconverted_estimate', 'cancellation', 'ucb'];
+      try {
+        const [res, avgRes] = await Promise.all([
+          edgeFunctionCall('crewlogic-pipeline', { action: 'list', franchiseID: currentUser.franchiseID, types: ACTIONABLE }),
+          edgeFunctionCall('crewlogic-pipeline', { action: 'avgJobSize', franchiseID: currentUser.franchiseID }).catch(() => null)
+        ]);
+        if (res && res.success) { _bwItems = res.items || []; _bwCounts = res.counts || {}; _bwOpen = res.open || 0; _bwTotal = res.total || _bwItems.length; }
+        else { console.error('[bizdev] list failed', res && res.error); _bwItems = []; }
+        _bwAvgCalc = (avgRes && avgRes.success && Number(avgRes.avg) > 0) ? Math.round(Number(avgRes.avg)) : 0;
+      } catch (e) { console.error('[bizdev] load error', e); _bwItems = []; }
+      // LEADS window: P(close) is age-decayed, so a lead >2 weeks old is effectively dead. Show only leads
+      // from the last 14 days (other types keep their own relevance window). Keeps the queue + forecast honest.
+      _bwItems = (_bwItems || []).filter(it => it.type !== 'lead' || bwDaysOld(it.occurred_at) <= 14);
+      bwPaint(); // fast first paint (actionable types); cases fill in below
+      // Background: cases (read-only, ~229 rows) — append + repaint the Cases group without blocking first paint.
+      edgeFunctionCall('crewlogic-pipeline', { action: 'list', franchiseID: currentUser.franchiseID, types: ['case'] })
+        .then(cr => { if (cr && cr.success && Array.isArray(cr.items) && cr.items.length) { const have = new Set(_bwItems.map(i => String(i.id))); _bwItems = _bwItems.concat(cr.items.filter(i => !have.has(String(i.id)))); bwPaint(); } })
+        .catch(e => console.warn('[bizdev] cases background load failed', e));
+    }
+
+    function bwPaint() {
+      const scr = document.getElementById('bizdevScreen'); if (!scr) return;
+      if (scr.querySelector('.bw-group')) _bwOpenGroups = new Set(Array.from(scr.querySelectorAll('.bw-group[open]')).map(d => d.getAttribute('data-type'))); // preserve which rail groups are open across repaint
+      const fcTotal = _bwItems.filter(bwActive).reduce((s, i) => s + (bwForecast(i) || 0), 0); // forecast KPI = Σ over ACTIVE items with an amount (won/lost excluded)
+      const st = k => _bwItems.filter(i => (i.stage || 'new') === k).length;
+      const nNew = st('new'), nContacted = st('contacted'), nWorking = st('working'), nWon = st('won'), nLost = st('lost');
+      const winPct = (nWon + nLost) ? Math.round(nWon / (nWon + nLost) * 100) + '%' : '—';
+      scr.innerHTML = `
+        <div class="bw-app">
+          <div class="bw-topbar">
+            <div class="bw-brand"><b>Biz Dev</b><span>Biz-dev worklist · franchise <span class="bw-mono">#${_escHtml(String(currentUser.franchiseID || ''))}</span> · read-only beta</span></div>
+            <div class="bw-funnel">
+              <div class="bw-kpi fc"><b class="bw-tnum" id="bwFcKpi">${bwEvk(fcTotal)}</b><span>Forecast</span></div>
+              <div class="bw-kpi"><b class="bw-tnum">${nNew}</b><span>New</span></div>
+              <div class="bw-kpi"><b class="bw-tnum">${nContacted}</b><span>Contacted</span></div>
+              <div class="bw-kpi"><b class="bw-tnum">${nWorking}</b><span>Working</span></div>
+              <div class="bw-kpi"><b class="bw-tnum">${nWon}</b><span>Won</span></div>
+              <div class="bw-kpi win"><b class="bw-tnum">${winPct}</b><span>Win</span></div>
+            </div>
+          </div>
+          <div class="bw-grid">
+            <div class="bw-rail">
+              <div class="bw-rail-h"><b>Worklist</b><span class="bw-railsub">ranked by forecast</span></div>
+              <div id="bwRail">${bwRailHtml()}</div>
+            </div>
+            <div class="bw-divider" title="Drag to resize"></div>
+            <div class="bw-surface" id="bwSurface">${bwEmptyHtml()}</div>
+          </div>
+          <div class="bw-foot">Read-only P0 · scheduling &amp; write-back land next phase · FW-66 · docs/plan-bizdev-workspace.md</div>
+        </div>`;
+      if (_bwSel && _bwItems.some(i => i.id === _bwSel)) bwPick(_bwSel); // re-open a prior selection if it still exists
+      bwFitHeight();
+      _bwApplyGrid(); _bwInitDivider(); // restore the persisted rail width + bind the drag handle (ADDITIVE — does not touch bwFitHeight's .bw-app width)
+      if (!window._bwFitBound) { window.addEventListener('resize', bwFitHeight); window._bwFitBound = true; }
+      if (!window._bwGridBound) { window.addEventListener('resize', _bwApplyGrid); window._bwGridBound = true; }
+    }
+
+    // ── Draggable, persisted rail/detail divider (Part 2). Mirrors the dispatch dashboard's rail-divider pattern
+    //    (see _dashInitDividers / dashRailW_* localStorage). Here the column SPLIT changes only — bwFitHeight still
+    //    owns the definite .bw-app width, so the two never fight. Key: bizdev.railWidth. Clamp 260–760px, default 380.
+    function _bwRailWidth() {
+      const v = parseInt(localStorage.getItem('bizdev.railWidth') || '', 10);
+      return Math.max(260, Math.min(760, Number.isFinite(v) ? v : 380));
+    }
+    function _bwApplyGrid() {
+      const g = document.querySelector('#bizdevScreen .bw-grid'); if (!g) return;
+      if (window.innerWidth <= 860) { g.style.gridTemplateColumns = '1fr'; return; } // stack on mobile (divider hidden via CSS)
+      g.style.gridTemplateColumns = _bwRailWidth() + 'px 10px minmax(0,1fr)';
+    }
+    function _bwInitDivider() {
+      const d = document.querySelector('#bizdevScreen .bw-divider'); if (!d || d._bwBound) return; d._bwBound = true;
+      d.onmousedown = function (e) {
+        e.preventDefault();
+        const g = document.querySelector('#bizdevScreen .bw-grid'); const rail = document.querySelector('#bizdevScreen .bw-rail'); if (!g || !rail) return;
+        const startX = e.clientX, startW = rail.getBoundingClientRect().width;
+        d.classList.add('dragging'); document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
+        const onMove = function (ev) {
+          const w = Math.max(260, Math.min(760, Math.round(startW + (ev.clientX - startX))));
+          g.style.gridTemplateColumns = w + 'px 10px minmax(0,1fr)';
+        };
+        const onUp = function () {
+          document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+          d.classList.remove('dragging'); document.body.style.cursor = ''; document.body.style.userSelect = '';
+          const w = Math.max(260, Math.min(760, Math.round(rail.getBoundingClientRect().width)));
+          try { localStorage.setItem('bizdev.railWidth', String(w)); } catch (_e) {}
+        };
+        document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+      };
+    }
+
+    function bwEmptyHtml() {
+      return '<div class="bw-empty-lg"><div class="bw-big">☰</div><div>Pick a pipeline item on the left.<br>Estimates open in their source; every item is read-only in P0.</div></div>';
+    }
+
+    function bwRailHtml() {
+      return BW_GROUPS.map((g, gi) => {
+        const isCase = g.type === 'case'; // cases are informational — count only, no forecast total (owner 2026-08-16)
+        const items = _bwItems.filter(i => i.type === g.type && bwActive(i)).sort((a, b) => bwSortKey(b) - bwSortKey(a));
+        const ftot = isCase ? 0 : items.reduce((s, i) => s + (bwForecast(i) || 0), 0);
+        const open = _bwOpenGroups ? _bwOpenGroups.has(g.type) : (gi < 1); // preserve open groups across repaint; default first group
+        const rows = items.map(i => bwRowHtml(i)).join('') || '<div class="bw-row-none">— none —</div>';
+        return `<details class="bw-group" data-type="${g.type}"${open ? ' open' : ''}>
+          <summary class="bw-grp-h"><span class="bw-caret"></span><span class="bw-dot" style="background:${g.color}"></span><span class="bw-grp-name">${g.name}</span><span class="bw-grp-meta"><span class="bw-pill bw-tnum">${items.length}</span>${isCase ? '' : `<span class="bw-tnum bw-grp-fc" data-type="${g.type}" title="group forecast (opportunity × P close)">${bwEvk(ftot)}</span>`}</span></summary>
+          <div class="bw-grp-body">${rows}</div>
+        </details>`;
+      }).join('');
+    }
+
+    function bwRowRightHtml(i) {
+      if (i.type === 'case') return `<span class="bw-fc-opp" style="opacity:.7">Info</span>`; // cases are informational, no forecast (owner 2026-08-16)
+      if (bwHasAmount(i)) return `<span class="bw-fc-amt bw-tnum">${bwUsd(bwForecast(i))}</span><span class="bw-fc-opp bw-tnum">of ${bwUsd(i.amount)}</span>`;
+      if (bwIsFallback(i)) return `<span class="bw-fc-amt bw-tnum">${bwUsd(bwForecast(i))}</span><span class="bw-fc-opp bw-tnum" style="opacity:.65" title="franchise average job (30-day)">of ~${bwUsd(bwAvgJob())}</span>`;
+      return `<span class="bw-fc-amt bw-none">—</span><span class="bw-fc-opp">AI estimate pending</span>`;
+    }
+    function bwRowHtml(i) {
+      const dt = bwDate(i.occurred_at);
+      const sub = _escHtml([i.address, (i.reason || i.detail || ''), (dt ? 'in ' + dt : '')].filter(Boolean).join(' · ')) || '—';
+      const sel = (_bwSel === i.id) ? ' sel' : '';
+      const stg = String(i.stage || 'new').toLowerCase();
+      const pill = `<span style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.09);color:var(--text-muted,#8ea3b5);margin-left:6px;vertical-align:middle">${_escHtml(stg)}</span>`;
+      return `<button class="bw-row${sel}" data-id="${_escHtml(String(i.id))}" onclick="bwPick('${_escHtml(String(i.id))}')">
+        <span class="bw-row-main"><span class="bw-row-name">${_escHtml(i.customer_name || 'Unknown')}${pill}</span><span class="bw-row-sub">${sub}</span></span>
+        <span class="bw-row-fc">${bwRowRightHtml(i)}</span>
+      </button>`;
+    }
+    // Manager overrides P(close) → recompute forecast in place: detail pane + that row's number + the KPI/group
+    // totals. Deliberately does NOT re-sort the rail on edit (would make the row jump); sort re-applies on reload.
+    function bwSetP(id, val) {
+      const it = _bwItems.find(i => String(i.id) === String(id)); if (!it) return;
+      _bwPOverride[it.id] = Math.max(0, Math.min(100, Math.round(Number(val) || 0))) / 100;
+      const surf = document.getElementById('bwSurface'); if (surf) surf.innerHTML = bwDetailHtml(it);
+      const cell = document.querySelector('#bwRail .bw-row[data-id="' + (window.CSS && CSS.escape ? CSS.escape(String(it.id)) : String(it.id)) + '"] .bw-row-fc');
+      if (cell) cell.innerHTML = bwRowRightHtml(it);
+      bwRecalcTotals();
+    }
+    function bwRecalcTotals() {
+      const kpi = document.getElementById('bwFcKpi');
+      if (kpi) kpi.textContent = bwEvk(_bwItems.filter(bwActive).reduce((s, i) => s + (bwForecast(i) || 0), 0));
+      document.querySelectorAll('#bwRail .bw-grp-fc').forEach(el => {
+        const t = el.getAttribute('data-type');
+        el.textContent = bwEvk(_bwItems.filter(i => i.type === t && bwActive(i)).reduce((s, i) => s + (bwForecast(i) || 0), 0));
+      });
+    }
+
+    function bwPick(id) {
+      const it = _bwItems.find(i => String(i.id) === String(id)); if (!it) return;
+      _bwSel = it.id;
+      document.querySelectorAll('#bwRail .bw-row').forEach(r => r.classList.toggle('sel', String(r.dataset.id) === String(id)));
+      const s = document.getElementById('bwSurface'); if (s) s.innerHTML = bwDetailHtml(it); // paints ONLY the right pane; rail (open groups/scroll) untouched
+      bwFitHeight(); // re-assert full width + fit height (guards the content-width flicker on click)
+    }
+
+    function bwDetailHtml(i) {
+      // Cases are INFORMATIONAL only (owner 2026-08-16): show details, but NO action affordance —
+      // no opportunity strip, no P(close), no stage dropdown, no action bar. Details-only render.
+      if (i.type === 'case') {
+        const cg = BW_GROUPS.find(x => x.type === 'case') || { color: '#8b5cf6', name: 'Cases' };
+        const cch = [];
+        if (i.phone) cch.push(`<a class="bw-chip" href="tel:${plTel(i.phone)}"><span class="bw-k">Call</span>${_escHtml(_fmtPhone(i.phone))}</a>`);
+        if (i.email) cch.push(`<a class="bw-chip" href="mailto:${_escHtml(i.email)}"><span class="bw-k">Email</span>${_escHtml(i.email)}</a>`);
+        return `<div class="bw-sf-head">
+          <div class="bw-sf-top">
+            <span class="bw-badge" style="color:${cg.color};border-color:${cg.color}">Case</span>
+            <div style="min-width:0">
+              <h2>${_escHtml(i.customer_name || 'Unknown')}</h2>
+              <div class="bw-sf-loc">${_escHtml(i.address || 'No address on file')}</div>
+            </div>
+          </div>
+          <div class="bw-sf-contact">${cch.join('') || '<span class="bw-ctx" style="font-size:12px">No contact on file</span>'}</div>
+        </div>
+        <div class="bw-sf-body">
+          ${i.reason ? `<div class="bw-card"><h3>Type</h3><div class="bw-ctx">${_escHtml(i.reason)}</div></div>` : ''}
+          <div class="bw-card"><h3>Case notes</h3><div class="bw-ctx">${_escHtml(i.detail || 'No details on this case.')}</div></div>
+          <div class="bw-card"><div class="bw-ctx" style="font-size:12px;color:var(--text-muted,#9fb0c0)">&#8505;&#65039; Informational only &mdash; cases come from the appointment center (kudos, questions, issues). There is no action to take here.</div></div>
+        </div>`;
+      }
+      const g = BW_GROUPS.find(x => x.type === i.type) || { color: '#6e8194', name: i.type };
+      const has = bwHasAmount(i), fc = bwForecast(i), p = Math.round(bwPclose(i) * 100);
+      const isEst = (i.type === 'unconverted_estimate');
+      const isFb = bwIsFallback(i), avg = bwAvgJob();
+      const clPresent = !!(isEst && i.cl_present && i.cl_estimate_id);
+      const chips = [];
+      if (i.phone) chips.push(`<a class="bw-chip" href="tel:${plTel(i.phone)}"><span class="bw-k">Call</span>${_escHtml(_fmtPhone(i.phone))}</a>`);
+      if (i.email) chips.push(`<a class="bw-chip" href="mailto:${_escHtml(i.email)}"><span class="bw-k">Email</span>${_escHtml(i.email)}</a>`);
+      // Header EV summary (kept) — forecast, or the AI-pending note when there's no amount and no avg-job floor.
+      const evHtml = (has || isFb)
+        ? `<b class="bw-tnum">${bwUsd(fc)}</b><span>forecast · ${has ? bwUsd(i.amount) : '~' + bwUsd(avg)} × ${p}%${(!has && isFb) ? ' · avg job' : ''}</span>`
+        : `<b class="bw-tnum bw-none">—</b><span>AI estimate pending</span>`;
+
+      // ── UNIFIED top strip (Part 4) — SAME [Quote|Opportunity · Prob. of close · Forecast] for EVERY type.
+      //    Uses the item's real amount when present, else the avg-job floor (Low), else "— / AI estimate pending".
+      const oppLabel = isEst ? 'Quote' : 'Opportunity';
+      const oppVal = has ? bwUsd(i.amount) : (isFb ? '~' + bwUsd(avg) : '—');
+      const oppSub = has
+        ? (isEst ? (clPresent ? 'CrewLogic estimate' : 'priced') : 'priced')
+        : (isFb ? 'AJS (30 day avg)' : 'AI estimate pending');
+      const fcVal = (has || isFb) ? bwUsd(fc) : '—';
+      const strip = `<div class="bw-card">
+          <div class="bw-strip">
+            <div class="bw-m"><b class="bw-tnum">${oppVal}</b><span>${(isFb && !has) ? '' : oppLabel + ' · '}<span class="bw-card-sub">${oppSub}</span></span></div>
+            <div class="bw-m"><b class="bw-tnum">${p}%</b><span>Prob. of close</span></div>
+            <div class="bw-m"><b class="bw-tnum" style="color:var(--accent-green,#35c26e)">${fcVal}</b><span>forecast</span></div>
+          </div>
+          ${(!has && isFb) ? `<div class="bw-ctx" style="margin-top:9px;font-size:12px">No priced value yet — using the <b>franchise average job (30-day)</b> as the floor Opportunity. ${isEst ? 'Add a quote in CrewLogic or Vonigo for a precise number.' : 'A precise AI-derived opportunity is a later phase.'}</div>` : ''}
+          ${(!has && !isFb) ? `<div class="bw-ctx" style="margin-top:9px;font-size:12px">No dollar value yet — <b>AI estimate pending</b>. Set an <b>Avg job size $</b> in Settings → Cost Analysis to use the franchise average as a floor.</div>` : ''}
+        </div>`;
+
+      // ── Estimate-only Source card (Part 3b/3c): badge (CrewLogic/Vonigo/Both), Vonigo estimate #, CrewLogic $/status.
+      let estMeta = '';
+      if (isEst) {
+        const badge = clPresent ? 'Both' : 'Vonigo';
+        const badgeColor = clPresent ? '#35c26e' : '#6db3ff';
+        const woNum = _escHtml(String(i.source_external_id || ''));
+        const clStatus = i.cl_status ? ' · ' + _escHtml(String(i.cl_status)) : '';
+        estMeta = `<div class="bw-card">
+          <h3>Source</h3>
+          <div class="bw-src-row">
+            <span class="bw-badge" style="color:${badgeColor};border-color:${badgeColor}">${badge}</span>
+            ${woNum ? `<span class="bw-chip"><span class="bw-k">Vonigo est.</span>#${woNum}</span>` : ''}
+            ${clPresent ? `<span class="bw-chip"><span class="bw-k">CrewLogic</span>${has ? bwUsd(i.amount) : 'estimate'}${clStatus}</span>` : ''}
+          </div>
+          <div class="bw-ctx" style="margin-top:9px;font-size:12px">${clPresent
+            ? 'This estimate exists in <b>both</b> CrewLogic (costing record) and Vonigo (submitted quote) — open either below.'
+            : 'This estimate came from <b>Vonigo</b>. No matching CrewLogic costing record was found for this job.'}</div>
+        </div>`;
+      }
+
+      // ── Type-specific CONTEXT card (kept BELOW the strip; the only per-type difference besides badge + open controls).
+      let ctxCard;
+      if (isEst) {
+        const adjustWhere = clPresent ? 'CrewLogic or Vonigo' : 'Vonigo';
+        ctxCard = `<div class="bw-card"><h3>Context</h3>
+          <div class="bw-ctx">${i.reason ? _escHtml(i.reason) : 'Open estimate awaiting conversion.'}</div>
+          <div class="bw-ctx" style="margin-top:9px;font-size:12px">Read-only here. Adjust the estimate in <b>${adjustWhere}</b> — the only place changes are made.</div>
+        </div>`;
+      } else {
+        ctxCard = `<div class="bw-card"><h3>Context</h3><div class="bw-ctx">${_escHtml(i.detail || i.reason || 'No additional context on this item.')}</div></div>`;
+      }
+      const body = strip + estMeta + ctxCard;
+
+      // ── Open controls (estimate-only): Open in CrewLogic (real editor) and/or Open in Vonigo (real deep-link).
+      const openBtns = [];
+      if (isEst) {
+        if (clPresent) openBtns.push(`<button class="bw-btn open" onclick="bwOpenCrewlogic('${_escHtml(String(i.id))}')">Open in CrewLogic ↗</button>`);
+        openBtns.push(`<button class="bw-btn open" onclick="bwOpenVonigo('${_escHtml(String(i.id))}')">Open in Vonigo ↗</button>`);
+      }
+      const openBtn = openBtns.join('');
+      const act = BW_ACT[i.type] || 'Schedule / book';
+      return `<div class="bw-sf-head">
+        <div class="bw-sf-top">
+          <span class="bw-badge" style="color:${g.color};border-color:${g.color}">${_escHtml(BW_BADGE[i.type] || i.type)}</span>
+          <div style="min-width:0">
+            <h2>${_escHtml(i.customer_name || 'Unknown')}</h2>
+            <div class="bw-sf-loc">${_escHtml(i.address || 'No address on file')}</div>
+            <div class="bw-sf-stage">Stage <select class="bw-stage-sel" onchange="bwStageSel('${_escHtml(String(i.id))}', this.value)">${['new','contacted','working','won','lost','dismissed'].map(s => `<option value="${s}"${(String(i.stage||'new').toLowerCase()===s)?' selected':''}>${s}</option>`).join('')}</select></div>
+            ${i.occurred_at ? `<div style="margin-top:7px;font-size:11.5px;color:var(--text-muted,#8ea3b5)">Came in <b style="color:var(--text-primary,#e6edf3);font-weight:700">${_escHtml(bwDate(i.occurred_at, true))}</b></div>` : ''}
+            ${(['lost','dismissed'].includes(String(i.stage||'').toLowerCase()) && i.close_reason) ? `<div class="bw-sf-closed" style="font-size:12px;color:var(--text-muted,#9fb0c0);margin-top:4px">Closed: ${_escHtml(String(i.stage).charAt(0).toUpperCase() + String(i.stage).slice(1))} · ${_escHtml(String(i.close_reason))}</div>` : ''}
+          </div>
+          <div class="bw-sf-ev">${evHtml}</div>
+        </div>
+        <div class="bw-sf-contact">${chips.join('') || '<span class="bw-ctx" style="font-size:12px">No contact on file</span>'}</div>
+      </div>
+      <div class="bw-sf-body">
+        <div class="bw-pedit"><span class="bw-pedit-l">Probability of Close <span class="bw-help">?<span class="bw-tip">A confidence factor — the probability this lead gets booked to a job. It multiplies the Opportunity to give the forecast (Opportunity × Probability = Forecast).</span></span></span><input type="number" class="bw-pin" min="0" max="100" step="5" value="${p}" onchange="bwSetP('${_escHtml(String(i.id))}', this.value)"><span class="bw-pedit-l" style="text-transform:none;letter-spacing:0;font-weight:400">% — tunes the forecast (Opportunity × P)</span></div>
+        ${body}
+        <div class="bw-actions">
+          ${openBtn}
+          <button class="bw-btn primary" onclick="${i.type === 'lead' ? `bwOpenBook('${_escHtml(String(i.id))}')` : `bwSetStage('${_escHtml(String(i.id))}','won')`}">${_escHtml(act)}</button>
+          ${i.type === 'lead'
+    ? `<button class="bw-btn" onclick="bwDeadLead('${_escHtml(String(i.id))}')">Dead lead</button>`
+    : `<button class="bw-btn" onclick="bwStub('Reschedule')">Reschedule</button><button class="bw-btn" onclick="bwStub('Set follow-up')">Set follow-up</button>`}
+        </div>
+      </div>`;
+    }
+
+    // Open in Vonigo — REAL deep-link to the job page (same URL pattern the dispatch map uses:
+    // /Schedule/Job/Job_Main.aspx?jobID=). vonigo_job_id comes from the WO's 'job' relation (edge `list` enrichment).
+    function bwOpenVonigo(id) {
+      const i = _bwItems.find(x => String(x.id) === String(id)); if (!i) return;
+      if (i.vonigo_job_id) {
+        window.open('https://junkluggers.vonigo.com/Schedule/Job/Job_Main.aspx?jobID=' + encodeURIComponent(String(i.vonigo_job_id)), '_blank', 'noopener');
+      } else {
+        bwToast('Vonigo estimate #' + (i.source_external_id || '?') + ' — no direct job link on this item');
+      }
+    }
+    // Open in CrewLogic — loads the matched CrewLogic estimate/costing record into the estimate editor (real nav).
+    function bwOpenCrewlogic(id) {
+      const i = _bwItems.find(x => String(x.id) === String(id)); if (!i) return;
+      if (i.cl_estimate_id) { openEstimate(String(i.cl_estimate_id)); }
+      else bwToast('No CrewLogic estimate found for this item');
+    }
+    function bwStub(action) { bwToast(action + ' — next phase'); }
+
+    // ── FW-66 Leads booking (bookLead) — qualify + slot picker modal ─────────────────────────────
+    // Lead's "Schedule / book" opens this: validate the lead (dry-run → duration), collect res/comm +
+    // situation + items, pick a day → open times (suggestSlots) → Book → crewlogic-dispatch bookLead → Won.
+    let _bwBook = null; // { id, clientID, zip, durMin, slotDay, slot }
+    const _BW_BI = 'width:100%;box-sizing:border-box;padding:8px 9px;margin:4px 0 11px;background:var(--bg-input,#253545);border:1px solid var(--btn-surface-border,#46596d);border-radius:6px;color:var(--text-primary);font-size:13px;';
+    const _BW_BL = 'display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);font-weight:700;';
+    // Modal buttons use INLINE styles (the modal renders on <body>, outside #bizdevScreen, so .bw-btn doesn't reach it).
+    const _BW_BTN = 'padding:9px 14px;border-radius:8px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;font-size:13px;cursor:pointer;';
+    const _BW_BTNP = 'padding:9px 16px;border-radius:8px;border:none;background:var(--accent-green,#00E785);color:#06121d;font-weight:800;font-size:13px;cursor:pointer;';
+    function _bwParseAddr(s) { // split a lead's address into parts. Vonigo commonly stores "STREET\nCITY, ST ZIP"
+      const raw = String(s || '').replace(/\r/g, '').trim();
+      const zip = (raw.match(/\b(\d{5})(?:-\d{4})?\b/) || [])[1] || '';
+      const state = ((raw.match(/\b([A-Za-z]{2})\s+\d{5}\b/) || [])[1] || '').toUpperCase();
+      let street = '', city = '';
+      const lines = raw.split('\n').map(x => x.trim()).filter(Boolean);
+      if (lines.length >= 2) {
+        // street on the first line(s), "CITY, ST ZIP" (or "CITY ST ZIP") on the last line — the newline is the
+        // street/city boundary. Do NOT collapse it first (that's what merged the city into the street).
+        street = lines.slice(0, lines.length - 1).join(', ');
+        city = lines[lines.length - 1].replace(/,?\s*[A-Za-z]{2}\s+\d{5}(?:-\d{4})?\s*$/, '').replace(/,\s*$/, '').trim();
+      } else {
+        const one = raw.replace(/\s+/g, ' ');
+        const m = one.match(/^(.*?),\s*([^,]+?),?\s*[A-Za-z]{2}\s+\d{5}/); // single line "street, city, ST zip"
+        if (m) { street = m[1].trim(); city = m[2].trim(); }
+        else { street = zip ? one.replace(/,?\s*[A-Za-z]{2}\s+\d{5}.*$/, '').replace(/,\s*$/, '').trim() : one; }
+      }
+      return { street, city, state, zip };
+    }
+    function bwOpenBook(id) {
+      const it = _bwItems.find(x => String(x.id) === String(id)); if (!it) return;
+      if (it.type !== 'lead') { bwSetStage(id, 'won'); return; } // only leads use this flow for now
+      plEnsureStyles(); // the booking modal reuses .pl-mback/.pl-mcard (idempotent) — otherwise the modal renders unstyled/invisible on the bizdev screen
+      const clientID = String(it.source_external_id || '');
+      const a = _bwParseAddr(it.address || '');
+      const zip = String(it.zip || a.zip || '');
+      _bwBook = { id, clientID, zip, durMin: 0, slotDay: '', slot: null };
+      const _grey = _BW_BI + 'opacity:.5;cursor:not-allowed;';
+      const _sect = 'font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--accent-green,#35c26e);margin:10px 0 6px;';
+      plModal(`<div style="max-width:520px">
+        <h3 style="margin:0 0 2px">Book lead — ${_escHtml(it.customer_name || 'Unknown')}</h3>
+        <div id="bwBookStatus" style="font-size:12.5px;color:var(--text-muted);margin:6px 0 4px">Checking availability…</div>
+        <div style="${_sect}margin-top:6px">Contact</div>
+        <label style="${_BW_BL}">Name</label><input id="bwBookName" style="${_BW_BI}" value="${_escHtml(it.customer_name || '')}">
+        <div style="display:flex;gap:8px"><div style="flex:1"><label style="${_BW_BL}">Phone</label><input id="bwBookPhone" style="${_BW_BI}" value="${_escHtml(it.phone || '')}"></div><div style="flex:1.4"><label style="${_BW_BL}">Email</label><input id="bwBookEmail" style="${_BW_BI}" value="${_escHtml(it.email || '')}"></div></div>
+        <div style="${_sect}">Service address</div>
+        <label style="${_BW_BL}">Street address</label><input id="bwBookStreet" style="${_BW_BI}" placeholder="e.g. 12 Main St" value="${_escHtml(a.street || '')}">
+        <div style="display:flex;gap:8px"><div style="flex:2"><label style="${_BW_BL}">City</label><input id="bwBookCity" style="${_BW_BI}" value="${_escHtml(a.city || '')}"></div><div style="flex:.6"><label style="${_BW_BL}">State</label><input id="bwBookState" style="${_BW_BI}" maxlength="2" value="${_escHtml(a.state || '')}"></div><div style="flex:1"><label style="${_BW_BL}">Zip</label><input id="bwBookZip" style="${_BW_BI}" value="${_escHtml(zip)}" oninput="bwBookZipChg()"></div></div>
+        <label style="${_BW_BL}">Country</label><input style="${_grey}" value="United States" disabled>
+        <div style="${_sect}">Job</div>
+        <label style="${_BW_BL}">Property type</label><select id="bwBookResComm" style="${_BW_BI}"><option value="59" selected>Residential</option><option value="60">Commercial</option></select>
+        <label style="${_BW_BL}">Campaign source</label><input style="${_grey}" value="Carries over from the lead" disabled>
+        <label style="${_BW_BL}">Customer situation</label><textarea id="bwBookDesc" rows="3" placeholder="What's going on / notes for the crew" style="${_BW_BI}resize:vertical;min-height:64px"></textarea>
+        <label style="${_BW_BL}">Items to remove</label><textarea id="bwBookItems" rows="3" placeholder="e.g. 3 mattresses, boxes, a couch, misc bags" style="${_BW_BI}resize:vertical;min-height:64px"></textarea>
+        <div style="${_sect}">Appointment</div>
+        <label style="${_BW_BL}">Pick a day</label>
+        <div style="display:flex;gap:8px;align-items:center;margin:4px 0 6px"><input type="date" id="bwBookDate" style="${_BW_BI}margin:0;flex:0 0 auto;width:auto"><button id="bwBookFind" style="${_BW_BTN}${/^\d{5}$/.test(zip) ? '' : 'opacity:.5;cursor:not-allowed'}" ${/^\d{5}$/.test(zip) ? '' : 'disabled'} onclick="bwBookFindSlots()">Find times</button></div>
+        <div id="bwBookSlots" style="margin:6px 0 4px;display:flex;flex-wrap:wrap;gap:6px"></div>
+        <div style="display:flex;gap:8px;margin-top:16px">
+          <button style="${_BW_BTNP}opacity:.5" id="bwBookGo" disabled onclick="bwBookConfirm()">Book appointment</button>
+          <button style="${_BW_BTN}" onclick="plCloseModal()">Cancel</button>
+        </div>
+      </div>`);
+      edgeFunctionCall('crewlogic-dispatch', { action: 'bookLead', franchiseID: currentUser.franchiseID, clientID, zip, dryRun: true })
+        .then(r => { const st = document.getElementById('bwBookStatus'); if (!st) return;
+          if (r && r.success) { _bwBook.durMin = Number(r.resolved && r.resolved.durMin) || 0;
+            if (r.needLocation) { st.innerHTML = '<span style="color:var(--accent-yellow,#e0b23a)">No service address on file for this lead — fill in the address below; it will be created in Vonigo when you book.</span>'; }
+            else { st.textContent = 'Bookable · ' + _bwBook.durMin + '-min appointment (zone default). Campaign will carry over from the lead.'; } }
+          else { st.innerHTML = '<span style="color:var(--accent-red,#e0645a)">Can’t book: ' + _escHtml((r && r.error) || 'this lead has no contact record on file') + '</span>'; } })
+        .catch(() => { const st = document.getElementById('bwBookStatus'); if (st) st.textContent = 'Could not check availability — try again.'; });
+    }
+    function bwBookZipChg() { // enable "Find times" only with a valid 5-digit zip; clear stale slots on change
+      const z = ((document.getElementById('bwBookZip') || {}).value || '').trim();
+      const ok = /^\d{5}$/.test(z);
+      const b = document.getElementById('bwBookFind'); if (b) { b.disabled = !ok; b.style.opacity = ok ? '1' : '.5'; b.style.cursor = ok ? 'pointer' : 'not-allowed'; }
+      const c = document.getElementById('bwBookSlots'); if (c) c.innerHTML = '';
+      if (_bwBook) _bwBook.slot = null;
+      const go = document.getElementById('bwBookGo'); if (go) { go.disabled = true; go.style.opacity = '.5'; }
+    }
+    async function bwBookFindSlots() {
+      if (!_bwBook) return;
+      const dstr = (document.getElementById('bwBookDate') || {}).value || '';
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dstr)) { bwToast('Pick a day first'); return; }
+      const dayID = dstr.replace(/-/g, ''); _bwBook.slotDay = dayID; _bwBook.slot = null;
+      const zipNow = ((document.getElementById('bwBookZip') || {}).value || '').trim(); _bwBook.zip = zipNow;
+      // A ZIP IS REQUIRED — availability is zoned by zip and each zone's availability template sets its own
+      // open/close hours. Without a zip the query is unzoned and returns EVERY route's raw 6am–6:30pm slots.
+      if (!/^\d{5}$/.test(zipNow)) { bwToast('Enter the 5-digit service zip first'); const c0 = document.getElementById('bwBookSlots'); if (c0) c0.innerHTML = '<span style="color:var(--accent-red,#e0645a);font-size:12px">Enter the service zip above — open times come from that zip’s zone.</span>'; return; }
+      const go = document.getElementById('bwBookGo'); if (go) { go.disabled = true; go.style.opacity = '.5'; }
+      const cont = document.getElementById('bwBookSlots'); if (cont) cont.innerHTML = '<span style="color:var(--text-muted);font-size:12px">Finding open times…</span>';
+      try {
+        const r = await edgeFunctionCall('crewlogic-dispatch', { action: 'suggestSlots', franchiseID: currentUser.franchiseID, dayID, zip: _bwBook.zip, durationMin: _bwBook.durMin || 120, serviceTypeID: '11', checkTerritory: true });
+        if (!cont) return;
+        if (r && r.outOfTerritory) { cont.innerHTML = '<span style="color:var(--accent-red,#e0645a);font-size:12.5px">Zip <b>' + _escHtml(r.zip || _bwBook.zip) + '</b> is outside your service territory' + (r.servicedBy ? ' — serviced by <b>' + _escHtml(r.servicedBy) + '</b>' : '') + '. You can’t book a job to that zip.</span>'; return; }
+        const slots = (r && r.slots) || [];
+        if (!slots.length) { cont.innerHTML = '<span style="color:var(--text-muted);font-size:12px">No open times that day for this zone — try another day.</span>'; return; }
+        // Availability ALREADY respects the zone's availability-template hours (verified: RI opens ~9:30 AM,
+        // local ~8 AM, and the latest start leaves room to finish by close). Just dedup by start time — no
+        // hardcoded window. The zip requirement above prevents the unzoned all-routes case.
+        const seen = new Set(), uniq = [];
+        slots.slice().sort((a, b) => a.startTime - b.startTime).forEach(s => { if (!seen.has(s.startTime)) { seen.add(s.startTime); uniq.push(s); } });
+        cont.innerHTML = uniq.map(s => '<button class="bwslot" style="' + _BW_BTN + 'padding:6px 10px;font-size:12px" onclick="bwBookPickSlot(this,\'' + s.routeID + '\',' + s.startTime + ')">' + _escHtml(s.label) + '</button>').join('');
+      } catch (e) { if (cont) cont.innerHTML = '<span style="color:var(--accent-red,#e0645a);font-size:12px">Could not load times.</span>'; }
+    }
+    function bwBookPickSlot(btn, routeID, startTime) {
+      if (!_bwBook) return;
+      const lbl = btn ? btn.textContent : '';
+      _bwBook.slot = { routeID: String(routeID), startTime: Number(startTime), label: lbl, dayID: _bwBook.slotDay };
+      document.querySelectorAll('#bwBookSlots .bwslot').forEach(b => { b.style.background = ''; b.style.color = ''; b.style.borderColor = ''; });
+      if (btn) { btn.style.background = 'var(--accent-green,#00E785)'; btn.style.color = '#06121d'; btn.style.borderColor = 'var(--accent-green,#00E785)'; }
+      const go = document.getElementById('bwBookGo'); if (go) { go.disabled = false; go.style.opacity = '1'; }
+    }
+    async function bwBookConfirm() {
+      if (!_bwBook || !_bwBook.slot) { bwToast('Pick a time first'); return; }
+      const go = document.getElementById('bwBookGo'); if (go) { go.disabled = true; go.textContent = 'Booking…'; }
+      const bk = _bwBook;
+      try {
+        const gv = (elId) => (document.getElementById(elId) || {}).value || '';
+        const r = await edgeFunctionCall('crewlogic-dispatch', {
+          action: 'bookLead', franchiseID: currentUser.franchiseID, clientID: bk.clientID,
+          zip: gv('bwBookZip') || bk.zip,
+          dayID: bk.slot.dayID, routeID: bk.slot.routeID, startTime: String(bk.slot.startTime),
+          items: gv('bwBookItems'), desc: gv('bwBookDesc'), resCommOptionID: gv('bwBookResComm'),
+          // Contact/address — bookLead updates the client's Vonigo Contact (email 97 / phone 1088) + Location
+          // (street 773 / city 776 / zip 775; state 778 + country 779 as optionIDs from the zip lookup) from
+          // these BEFORE creating the WO, so a sparse/blank lead can book. state/country text below is unused —
+          // the backend derives their optionIDs from the zip. Only non-blank fields are written (never wiped).
+          contact: { name: gv('bwBookName'), phone: gv('bwBookPhone'), email: gv('bwBookEmail') },
+          address: { street: gv('bwBookStreet'), city: gv('bwBookCity'), state: gv('bwBookState'), zip: gv('bwBookZip'), country: 'United States' },
+          actorEmail: (currentUser && currentUser.email) || '',
+        });
+        if (r && r.success) { bwToast('Booked · ' + bk.slot.label + ' — job #' + (r.jobID || '?')); plCloseModal(); bwSetStage(bk.id, 'won'); _bwBook = null; }
+        else { if (go) { go.disabled = false; go.textContent = 'Book appointment'; } bwToast('Booking failed: ' + ((r && r.error) || 'try another time')); }
+      } catch (e) { if (go) { go.disabled = false; go.textContent = 'Book appointment'; } bwToast('Booking failed — try again.'); }
+    }
+    // Dead lead — most leads won't book (owner 2026-08-16). Deactivate it in Vonigo (drops it from the pool)
+    // + close the workspace item as dismissed · "Dead lead". Real Vonigo write, triggered by the manager here.
+    function bwDeadLead(id) {
+      const it = _bwItems.find(x => String(x.id) === String(id)); if (!it || it.type !== 'lead') return;
+      const clientID = String(it.source_external_id || '');
+      if (!clientID) { bwToast('No lead id on this item'); return; }
+      // Non-blocking custom modal (NOT window.confirm — the native dialog froze the app when the deactivate
+      // call hung). The action is bounded by a client-side timeout so a hung Vonigo call can never wedge the UI.
+      plEnsureStyles();
+      plModal(`<div style="max-width:420px">
+        <h3 style="margin:0 0 8px">Mark this lead DEAD?</h3>
+        <div style="font-size:13px;color:var(--text-muted);line-height:1.5;margin-bottom:6px">It will be deactivated in Vonigo and removed from the pool.</div>
+        <div id="bwDeadErr" style="font-size:12.5px;color:var(--accent-red,#e0645a);margin:4px 0;display:none"></div>
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <button id="bwDeadGo" style="${_BW_BTNP}background:var(--accent-red,#e0645a);border-color:var(--accent-red,#e0645a)" onclick="bwDeadLeadGo('${_escHtml(String(id))}','${_escHtml(clientID)}')">Mark dead</button>
+          <button style="${_BW_BTN}" onclick="plCloseModal()">Cancel</button>
+        </div>
+      </div>`);
+    }
+    async function bwDeadLeadGo(id, clientID) {
+      const go = document.getElementById('bwDeadGo'); const err = document.getElementById('bwDeadErr');
+      if (go) { go.disabled = true; go.textContent = 'Deactivating…'; go.style.opacity = '.6'; }
+      if (err) err.style.display = 'none';
+      try {
+        const r = await edgeFunctionCall('crewlogic-dispatch', { action: 'deactivateLead', franchiseID: currentUser.franchiseID, clientID, actorEmail: (currentUser && currentUser.email) || '' }, 25000);
+        if (r && r.success) { plCloseModal(); bwToast('Lead deactivated — removed from the pool'); bwSetStage(id, 'dismissed', 'Dead lead'); return; }
+        const msg = (r && (r.errMsg || r.error)) || 'try again'; const en = (r && r.errNo != null) ? ' (Vonigo ' + r.errNo + ')' : '';
+        if (err) { err.textContent = 'Could not deactivate: ' + msg + en; err.style.display = 'block'; } else { bwToast('Could not deactivate: ' + msg); }
+      } catch (e) {
+        if (err) { err.textContent = 'Deactivate failed — try again.'; err.style.display = 'block'; } else { bwToast('Deactivate failed — try again.'); }
+      } finally {
+        if (go) { go.disabled = false; go.textContent = 'Mark dead'; go.style.opacity = '1'; }
+      }
+    }
+
     // ── sequences (builder) ───────────────────────────────────────────
     function plOpenSequences() {
       const cards = _plSeqs.map(s => {
@@ -15466,7 +16232,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('headerTitle').textContent = 'Estimate Costing';
         currentScreen = 'estimateCosting';
         showSecondaryToolbar('estimateCosting'); // picker + Calculate live in the sticky header
-        ecOpen();
+        ecOpen(); // ecOpen applies the .ec-wide full-width class (covers this path + the session-restore path)
         return;
       }
       if (module === 'pipeline') {
@@ -15474,6 +16240,19 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         document.getElementById('headerTitle').textContent = 'Follow-up Pipeline';
         currentScreen = 'pipeline';
         renderPipeline();
+        return;
+      }
+      if (module === 'bizdev') {
+        document.getElementById('bizdevScreen').style.display = 'block';
+        document.getElementById('headerTitle').textContent = 'Biz Dev';
+        currentScreen = 'bizdev';
+        _bwSel = null; // fresh entry starts with no selection
+        // FULL DESKTOP WIDTH — mirror the dispatch dashboard EXACTLY (inline max-width:none on shell+content,
+        // set AFTER hideAll). The class-based _ecWide() did NOT size this screen (rendered as a 480px mobile
+        // column). See memory: full-width-desktop-screens-use-dispatch-width-mechanism.
+        ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) el.style.maxWidth = 'none'; });
+        try { window.scrollTo(0, 0); } catch (e) {}
+        renderBizDev();
         return;
       }
       if (module === 'trucks') {
@@ -28930,7 +29709,7 @@ Please review the estimate below. If you have any questions or would like to adj
       'truckCY',
       'truckHome','MPG','fuelCost','crewRate','disposalCost',
       'disposalWait','recyclingWait','donationWait',
-      'recyclingRevenue','royaltyPct',
+      'recyclingRevenue','royaltyPct','avgJobSize',
       'costMattress','costTV','costFreon','costTire','costPaint',
       'costPallet','costCardboard',
       'containerRateDefault','containerIncludedTonsDefault','containerOverageDefault'
@@ -29018,6 +29797,34 @@ Please review the estimate below. If you have any questions or would like to adj
         if (el && cs[f] !== undefined) el.value = cs[f];
       });
       renderAllFacilityLists();
+      // AJS suggestion UI removed from Settings (owner) — Biz Dev uses the calculated 30-day average directly via the avgJobSize action.
+    }
+
+    // ===== AVG JOB SIZE — 30-day auto-compute (read-only) =====
+    // Fetches the franchise's average closed-job revenue over the last 30 days from the job mirror
+    // (crewlogic-pipeline action:'avgJobSize') and offers it as a one-tap suggestion. Never overwrites
+    // a value the owner already typed — the owner taps Apply to fill the field.
+    async function loadAvgJobSuggestion() {
+      const box = document.getElementById('avgJobSuggest');
+      if (!box) return;
+      box.style.display = 'none';
+      box.innerHTML = '';
+      try {
+        const res = await edgeFunctionCall('crewlogic-pipeline', { action: 'avgJobSize', franchiseID: currentUser.franchiseID });
+        if (!res || res.success === false) return;
+        const avg = Math.round(Number(res.avg) || 0);
+        const count = Number(res.count) || 0;
+        if (!(avg > 0) || !(count > 0)) return;
+        window._avgJobSuggestValue = avg;
+        box.innerHTML = 'Suggested: <b>$' + avg.toLocaleString('en-US') + '</b> (last 30 days, ' + count + ' job' + (count === 1 ? '' : 's') +
+          ') <button type="button" class="btn-surface" style="padding:2px 8px;font-size:11px;border-radius:6px;margin-left:4px;cursor:pointer;" onclick="applyAvgJobSuggestion()">Apply</button>';
+        box.style.display = 'block';
+      } catch (e) { /* non-fatal: manual field still works */ }
+    }
+    function applyAvgJobSuggestion() {
+      const el = document.getElementById('settingsAvgJobSize');
+      const v = window._avgJobSuggestValue;
+      if (el && v > 0) { el.value = v; _settingsDirty = true; }
     }
 
     // ===== COST ANALYSIS PANEL =====

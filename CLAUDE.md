@@ -22,6 +22,7 @@ Approvals in `.claude/settings.local.json` match by **exact command prefix, one 
 - **Before ANY command that may prompt** (anything prod-touching, destructive, or not matching an allow-rule), FIRST write a one-line plain-English note — **What it does · what it touches (dev vs prod) · impact & reversibility** — then run it. Never fire a gated command without that line.
 - **Read-only prod access is PRE-APPROVED** (owner standing approval, 2026-05-27): inspecting prod is fine without asking — e.g. `supabase functions logs ... --project-ref ozfkpxyachigfpcmvekz`, `supabase secrets list` (names/digests only), read-only `SELECT`s and `GET`s against prod (incl. via the public anon key). **Still write the one-line note first.** "Read-only" means **nothing is mutated** — no INSERT/UPDATE/DELETE, no deploy, no secret set/unset, no config change. Anything that writes to prod stays gated.
 - **Always gated (do not bypass):** `git push origin main`; `supabase functions deploy` / `secrets set` / `secrets unset` with the **prod** ref `ozfkpxyachigfpcmvekz`; `supabase db push`; any prod **write**.
+- **Vonigo is PRODUCTION — every mutating write hits the live Junkluggers CRM (there is NO dev Vonigo). Any Vonigo CREATE / DELETE / DEACTIVATE / EDIT (jobs, work orders, quotes, leads, clients, campaigns, availability locks-that-persist, etc.) requires a HARD APPROVAL GATE: STOP and get explicit owner approval FIRST**, with a one-line note (what it does · what it touches · impact & reversibility). This applies to *testing* too — "we can do some testing" is NOT blanket write approval. **Read-only Vonigo probes (retrieve/list/`/system/objects`/`/resources/*`) stay ungated.** The dev edge functions call the same prod Vonigo, so running a mutating action "on dev" is still a prod write. (Owner directive 2026-08-16.)
 
 ## What this is
 
@@ -183,6 +184,10 @@ The rebrand from "CrewLogic" to "CrewLogicAI" happened recently. The brand name 
 - UI is inline-style heavy and uses the CSS variables above — match existing variables rather than hardcoding colors.
 - **Button color standard (locked 2026-06-15):** secondary/utility buttons on dark surfaces use `.btn-surface` or `var(--btn-surface)` (#34485d) / `var(--btn-surface-border)` (#46596d) — NOT `--bg-input` (#253545), which is nearly identical to `--bg-card` (#1e2f40) and renders buttons near-invisible. Primary/accent buttons keep `--accent-green`/`--accent-yellow`.
 - The app is mobile-first / PWA-style (`apple-mobile-web-app-capable`, fixed viewport, no user scaling).
+
+### Always show a loading indicator (added 2026-08-16 — owner flagged repeatedly)
+
+EVERY async/slow operation — screen/module open, `edgeFunctionCall`/`supabaseFetch`, save, Vonigo sync, the booking dry-run + slot fetch, PDF gen — MUST show a **visual in-progress indicator** shown **before the await** and cleared in a `finally` (so an error can't leave it stuck). Put it where the user is looking: a spinner/skeleton in the empty content region for a screen open, or **disable the button + change its label** ("Book appointment" → "Booking…") for an action. **Static text alone reads as frozen — use motion** (reuse the global `.spinner-inline`, animation `spin`). For multi-second work (Vonigo sync, big fetch) name what's happening ("Syncing from Vonigo…"). Never leave a blank/unchanged screen or a dead button during a wait. This is a build-time checklist item on any change that adds/moves an awaited operation a user waits on.
 
 ### UI state preservation — check this on EVERY change that renders or saves (added 2026-07-21)
 

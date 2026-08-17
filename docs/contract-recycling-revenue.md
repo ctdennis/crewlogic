@@ -273,3 +273,73 @@ above will be applied unless vetoed.
 On approval: migrations `0056`–`0058`, the `import` action on `crewlogic-motive-history`, then UI.
 Dev-first with a right-sized test script at promote (**MEDIUM+** — data writes, real money,
 multi-touch-point). **No code until this is approved.**
+
+---
+
+## Addendum A — Manual recycling-revenue entry for un-geofenced trips (FW-67)
+
+**Status:** DRAFT for owner sign-off (added 2026-08-16). Extends this contract; **no code until approved**
+(contract-before-code). Brief: `docs/plan-recycling-manual-revenue.md`. Register: **FW-67**.
+
+### A.1 Problem
+§5.1 revenue entry only surfaces revenue that has a **visit** — and a visit only exists when a truck's
+geofence **exit** dwell was captured. When the truck **never triggered the recycling geofence** (device
+unplugged, GPS gap, facility not geofenced, dwell too short to register) there is **no visit row**, so that
+trip's revenue has nowhere to be entered and goes uncounted. This addendum adds a **manual trip** the owner
+can record directly.
+
+### A.2 Data model — reuse `telematics_visits`, `source = 'manual'` (already reserved)
+No new visit table. A manual trip is a `telematics_visits` row with `source = 'manual'`:
+
+| Field | Value for a manual trip |
+|---|---|
+| `provider` | `'manual'` (a distinct provider — keeps it out of webhook/backfill idempotency) |
+| `provider_event_id` | a generated id, e.g. `man:<uuid>` — satisfies `unique(franchise_id, provider, provider_event_id)` with zero collision risk against motive/linxup rows |
+| `facility_id` | the chosen **recycling** facility (from the franchise's revenue facilities) |
+| `provider_geofence_id` | the facility's geofence id if known, else null |
+| `vehicle_label` | the truck/route the owner selects (free-select from that day's routes, or typed) |
+| `started_at` | the trip **date** the owner picks (UTC via `_shared/tz.ts` from the franchise zone); `ended_at` optional |
+| `amount` / `weight_lbs` / `settled_at` / `settled_by` | same settlement fields as §5.1 (0 allowed, D3) |
+| `source` | `'manual'` |
+| `note` | optional free text (e.g. "device was unplugged") |
+
+**Reconcile before build:** §3.2 defines `amount` on `telematics_visits`, but migration **0062
+(`visit_settlements`)** is the "one deviation" (a settlement row exists only when money was received). The
+manual row must slot into **whichever wiring is live** — confirm against `0057`/`0062`/`0063` first. If
+settlements are a separate table, a manual trip = a `source='manual'` visit **plus** its settlement row.
+
+### A.3 Dedupe — THE load-bearing decision (prevents double-counting)
+A manual row (`provider='manual'`) and a later real geofence row (`provider='motive'`) have **different**
+unique keys, so they will **not** auto-merge. If the telematics event arrives late for a trip already
+entered manually, both would count. Rule (recommended — never auto-double-count, never silently delete):
+1. **At manual-entry time** — if an **unsettled** real visit already matches (same facility + vehicle +
+   day, within a window), steer the owner to **settle that existing visit** instead of creating a manual row.
+2. **At ingest time** — when a real geofence visit lands that matches an existing **settled manual** entry
+   (facility + vehicle + same day), **flag it as a possible duplicate** and surface both to the owner to
+   **merge or dismiss**. Do not auto-delete either.
+3. Optional: manual rows carry a nullable **`matched_visit_id`**; a reconciliation view links/relinks.
+
+Open decision for owner: auto-merge on a confident match, or always leave the merge to the owner? *(Lean:
+surface, let the owner decide — money + irreversibility.)*
+
+### A.4 UI (extends §5.1) + edge action
+- The Recycling revenue screen gains an **"Add trip"** button → a small mobile form: **date · truck ·
+  facility · amount · weight (optional) · note** → one save. Manual entries are **visually flagged**
+  (`manual` badge) in the list and the §5.2 report so they're distinguishable from geofenced visits.
+- `crewlogic-recycling` gains a **`saveManualVisit`** action (create the `source='manual'` visit + settle it),
+  franchise-scoped + audited, with the A.3 duplicate check.
+- §5.2 report aggregates include manual trips (same math), subject to the A.3 dedupe.
+
+### A.5 Open questions (answer at scheduling)
+1. Entry granularity — per trip, or a daily/facility lump sum? *(Lean: per trip — matches the visit model.)*
+2. Truck selection — dropdown of that day's routes, or free text? *(Lean: dropdown, free-text fallback.)*
+3. Dedupe — auto-merge on confident match vs owner-resolves (A.3). *(Lean: owner-resolves.)*
+4. A standing **"manual-only" facility mode** for recyclers that are never geofenced (skip the geofence
+   join entirely for those)? Ties to `settlement_mode` (0063).
+5. Should this also cover non-recycling **transfer-station** trips missed the same way (Q-R5 allowed it)?
+
+### A.6 Build sequence (on sign-off)
+1. Confirm live visit/settlement wiring (§3.2 vs 0062); pick the manual-row shape; add `matched_visit_id` if
+   used. 2. `crewlogic-recycling` `saveManualVisit` + the A.3 duplicate check (dev). 3. "Add trip" UI +
+   `manual` flag in list & report. 4. Verify: a manual trip enters, appears in the report, and is NOT
+   double-counted when a matching real visit later ingests. Dev-first, **MEDIUM+** test script (real money).
