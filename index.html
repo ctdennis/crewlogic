@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.33 | 2026-08-17">
+  <meta name="crewlogic-version" content="v5.125.34 | 2026-08-17">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -13061,6 +13061,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // the nearest-truck line + drive-time ETA fill INSIDE the popup (via _detailRoot).
     function _railShowJob(pop, jobID, latlng) {
       const body = document.getElementById('dashLeftJobBody');
+      // UNIFY (owner 2026-08-17): on the dispatch dashboard a MAP click shows the SAME rich card as a board tap
+      // (mjJobInfoHTML, via mjTip) so both surfaces are identical. Only when the board job is loaded; else the
+      // compact `pop` fallback below (e.g. the standalone trucks map, which has no board).
+      if (body && jobID && typeof _mjBoardByID !== 'undefined' && _mjBoardByID && _mjBoardByID[String(jobID)]) { mjTip(null, String(jobID)); return; }
       if (!body) { if (_openDetailPopup(latlng, pop)) { if (jobID) _prefetchJobPhone(jobID).then(ph => _renderJobPhoneSlot(jobID, ph)); _fillNearestTruck(); } return; }
       body.innerHTML = '<div style="text-align:right;margin:-2px -2px 2px 0;"><span onclick="_railClearJob()" style="cursor:pointer;color:var(--text-muted);font-size:18px;line-height:1;">×</span></div>' + (pop || '');
       body.style.display = ''; // make sure the section is open
@@ -13764,8 +13768,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const parts = s.split(',').map(x => x.trim()).filter(Boolean);
       return { street: parts[0] || s, city: parts.length >= 2 ? parts[parts.length - 2] : '', zip: (s.match(/\b(\d{5})\b/) || [])[1] || '' };
     }
-    function _mjRow(k, v) { return '<div style="display:flex;gap:8px;margin-bottom:4px;"><span style="color:var(--text-muted);flex:0 0 54px;">' + mjEsc(k) + '</span><span style="color:var(--text-primary);word-break:break-word;">' + v + '</span></div>'; }
-    function _mjBlock(k, v) { return '<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--border);"><div style="color:var(--text-muted);margin-bottom:2px;">' + mjEsc(k) + '</div><div style="color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:140px;overflow-y:auto;">' + v + '</div></div>'; }
+    function _mjRow(k, v) { return '<div style="display:flex;gap:8px;margin-bottom:2px;"><span style="color:var(--text-muted);flex:0 0 50px;">' + mjEsc(k) + '</span><span style="color:var(--text-primary);word-break:break-word;">' + v + '</span></div>'; }
+    function _mjBlock(k, v) { return '<div style="margin-top:5px;padding-top:5px;border-top:1px solid var(--border);"><div style="color:var(--text-muted);margin-bottom:1px;">' + mjEsc(k) + '</div><div style="color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:120px;overflow-y:auto;">' + v + '</div></div>'; }
     // Part B — the anticipated-arrival statement for a job, from the day-start feasibility + truck assignment.
     // Has the truck already ARRIVED at this job (per the geofence event log)? → {arrivedAt, leftAt, vehicle}.
     function _mjJobArrival(woid) {
@@ -13787,8 +13791,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const arr = _mjJobArrival(String(j.woID || ''));
       if (arr) {
         const veh = arr.vehicle ? mjEsc(arr.vehicle) : 'The crew';
-        if (arr.leftAt) return '<div style="background:rgba(148,163,180,0.16);border:1px solid #94a3b4;border-radius:9px;padding:9px 11px;margin-bottom:9px;font-size:12.5px;line-height:1.5;color:var(--text-primary);">✓ <b>' + veh + '</b> was on site <b>' + mjEsc(arr.arrivedAt) + '</b>–<b>' + mjEsc(arr.leftAt) + '</b> — departed.</div>';
-        return '<div style="background:rgba(0,231,133,0.16);border:1px solid #00E785;border-radius:9px;padding:9px 11px;margin-bottom:9px;font-size:12.5px;line-height:1.5;color:var(--text-primary);">🚚 <b>' + veh + '</b> arrived at <b>' + mjEsc(arr.arrivedAt) + '</b> — on site now.</div>';
+        if (arr.leftAt) return '<div style="background:rgba(148,163,180,0.16);border:1px solid #94a3b4;border-radius:9px;padding:6px 9px;margin-bottom:6px;font-size:11.5px;line-height:1.35;color:var(--text-primary);">✓ <b>' + veh + '</b> was on site <b>' + mjEsc(arr.arrivedAt) + '</b>–<b>' + mjEsc(arr.leftAt) + '</b> — departed.</div>';
+        return '<div style="background:rgba(0,231,133,0.16);border:1px solid #00E785;border-radius:9px;padding:6px 9px;margin-bottom:6px;font-size:11.5px;line-height:1.35;color:var(--text-primary);">🚚 <b>' + veh + '</b> arrived at <b>' + mjEsc(arr.arrivedAt) + '</b> — on site now.</div>';
       }
       const sd = _mjSD(j._day || _mjBoardDayID);
       const eta = (_mjEtaByDate[sd] || {})[j.routeCode];
@@ -13800,13 +13804,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       let name = String(j.client || '').trim(); const cp = name.split(','); if (cp.length === 2) name = cp[1].trim() + ' ' + cp[0].trim();
       const town = mjAddrParts(j.address).city, townStr = town ? _titleCaseTown(town) : '';
       const st = pj.status, m = pj.minutesEarlyLate || 0;
-      if (st === 'arrived') return '<div style="background:rgba(0,231,133,0.16);border:1px solid #00E785;border-radius:9px;padding:9px 11px;margin-bottom:9px;font-size:12.5px;line-height:1.5;color:var(--text-primary);">🚚 <b>' + mjEsc(truckStr) + '</b> on site now' + (name ? ' at <b>' + mjEsc(name) + '</b>' : '') + (townStr ? ' in ' + mjEsc(townStr) : '') + ' — arrived <b>' + mjEsc(pj.predictedEta) + '</b>.</div>';
+      if (st === 'arrived') return '<div style="background:rgba(0,231,133,0.16);border:1px solid #00E785;border-radius:9px;padding:6px 9px;margin-bottom:6px;font-size:11.5px;line-height:1.35;color:var(--text-primary);">🚚 <b>' + mjEsc(truckStr) + '</b> on site now' + (name ? ' at <b>' + mjEsc(name) + '</b>' : '') + (townStr ? ' in ' + mjEsc(townStr) : '') + ' — arrived <b>' + mjEsc(pj.predictedEta) + '</b>.</div>';
       const win = mjEsc(pj.windowStart) + '–' + mjEsc(pj.windowEnd);
       let winTxt, bg, bd;
       if (st === 'late') { winTxt = '<b>' + m + ' min past</b> the ' + win + ' window'; bg = 'rgba(239,68,68,0.16)'; bd = '#ef4444'; }
       else if (st === 'window') { winTxt = 'within the ' + win + ' window — <b>' + m + ' min after</b> the ' + mjEsc(pj.windowStart) + ' start'; bg = 'rgba(234,179,8,0.16)'; bd = '#eab308'; }
       else { winTxt = m > 0 ? ('<b>early by ' + _mjEarlyStr(m) + '</b> — before the ' + mjEsc(pj.windowStart) + ' start') : ('on time — arriving by the ' + mjEsc(pj.windowStart) + ' start'); bg = 'rgba(0,231,133,0.14)'; bd = '#00E785'; }
-      let h = '<div style="background:' + bg + ';border:1px solid ' + bd + ';border-radius:9px;padding:9px 11px;margin-bottom:9px;font-size:12.5px;line-height:1.5;color:var(--text-primary);">'
+      let h = '<div style="background:' + bg + ';border:1px solid ' + bd + ';border-radius:9px;padding:6px 9px;margin-bottom:6px;font-size:11.5px;line-height:1.35;color:var(--text-primary);">'
         + 'We anticipate <b>' + mjEsc(truckStr) + '</b> at <b>' + mjEsc(pj.predictedEta) + '</b>'
         + (name ? ' for <b>' + mjEsc(name) + '</b>' : '') + (townStr ? ' in ' + mjEsc(townStr) : '')
         + '. This is ' + winTxt + '.';
@@ -13835,18 +13839,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Job info (summary + items) before the duration action.
       if (j.summary && String(j.summary).trim()) h += _mjBlock('Summary', mjEsc(String(j.summary).trim()));
       if (j.items && String(j.items).trim()) h += _mjBlock('Item(s) List', mjEsc(String(j.items).trim()));
-      // Quick duration (0.5h–5h, 30-min steps) — tap a length → confirm. Hidden on completed jobs.
-      const _jdone = !!(j.completed || j.labelDone);
       _mjLastTipJob = j; // remember this job for the Cancel-job button (one tooltip shows at a time)
-      if (!_jdone && j.woID) {
-        h += '<div id="mjDurWrap" style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px;">' + _mjDurButtonsHTML(mjEsc(String(j.woID || j.jobID || '')), Number(j.durationMin) || 0) + '</div>'; // woID = unique per appointment (copies share jobID)
-      }
-      if (!_jdone && j.woID) {
-        h += '<button onclick="mjTipReschedule()" style="margin-top:8px;width:100%;padding:10px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;">📅 Reschedule / Move</button>';
-      }
-      if (!_jdone && j.jobID) {
-        h += '<button onclick="mjCancelJob()" style="margin-top:8px;width:100%;padding:9px;background:transparent;color:#ff6b6b;border:1px solid #e5484d;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">✕ Cancel job</button>';
-      }
+      h += _jobActionsHTML(j);
+      return '<div style="font-size:12px;line-height:1.4;">' + h + '</div>'; // compact base size (owner 2026-08-17 — smaller card)
+    }
+    // Shared job-action buttons (Set duration / Reschedule / Cancel), used by BOTH the board tip card and the
+    // unified compact map/details card so the actions are identical everywhere. Needs the board-shaped job
+    // (woID). Hidden on completed jobs. (owner 2026-08-17 — unify the dispatch job card)
+    function _jobActionsHTML(j) {
+      if (!j) return '';
+      const _jdone = !!(j.completed || j.labelDone || j.isComplete);
+      let h = '';
+      if (!_jdone && j.woID) h += '<div id="mjDurWrap" style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px;">' + _mjDurButtonsHTML(mjEsc(String(j.woID || j.jobID || '')), Number(j.durationMin) || 0) + '</div>';
+      if (!_jdone && j.woID) h += '<button onclick="mjTipReschedule()" style="margin-top:8px;width:100%;padding:10px;background:var(--accent-green,#00E785);color:#06121d;border:none;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;">📅 Reschedule / Move</button>';
+      if (!_jdone && j.jobID) h += '<button onclick="mjCancelJob()" style="margin-top:8px;width:100%;padding:9px;background:transparent;color:#ff6b6b;border:1px solid #e5484d;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">✕ Cancel job</button>';
       return h;
     }
     // ── Cancel-job button (tooltip) → reason picker → same execute kind:'cancel' path as voice ──
