@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.35 | 2026-08-17">
+  <meta name="crewlogic-version" content="v5.125.36 | 2026-08-17">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12042,8 +12042,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // ── Crew-finder (NYC/owner 2026-08-17): nearest OTHER trucks + whether they have a schedule gap to help.
     // Haversine (owner: good enough) → route→truck assignment (_mjAssignByDate) → that route's board jobs for the gap.
     function _cfFmtMin(m) { m = ((Math.round(m) % 1440) + 1440) % 1440; const h = Math.floor(m / 60), mm = m % 60, ap = h >= 12 ? 'PM' : 'AM', h12 = ((h + 11) % 12) + 1; return h12 + ':' + String(mm).padStart(2, '0') + ' ' + ap; }
-    function _cfTruckKey(t) { return t.vin ? ('vin:' + t.vin) : (t.name ? ('name:' + t.name) : null); }
-    function _cfRouteForTruck(truckKey, sd) { const byRoute = _mjAssignByDate[sd] || {}; for (const rid in byRoute) if ((byRoute[rid] || []).some(a => a.truckKey === truckKey)) return rid; return null; }
+    // A live Motive truck can be assigned by EITHER its vin-key or its name-key (the app links via both — see
+    // posByKey), so we must match on both. Returning one key missed trucks assigned under the other.
+    function _cfTruckKeysOf(t) { const ks = []; if (t.vin) ks.push('vin:' + t.vin); if (t.name) ks.push('name:' + t.name); return ks; }
+    function _cfRouteForKeys(keys, sd) { const byRoute = _mjAssignByDate[sd] || {}; for (const rid in byRoute) { const set = new Set((byRoute[rid] || []).map(a => a.truckKey)); if (keys.some(k => set.has(k))) return rid; } return null; }
     function _cfGap(routeId, nowMin) {
       const dur = j => Number(j.durationMin) || 90;
       const jobs = Object.values(_mjBoardByID || {}).filter(j => String(j.routeID) === String(routeId) && j.time != null && !j.completed && !j.isComplete).sort((a, b) => a.time - b.time);
@@ -12057,13 +12059,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!j || j.lat == null || j.lon == null || !(_trucksData || []).length) return '';
       const sd = _mjSD(j._day || _mjBoardDayID);
       const ownKeys = new Set(((_mjAssignByDate[sd] || {})[String(j.routeID || '')] || []).map(a => a.truckKey)); // this job's own crew — exclude
-      const near = (_trucksData || []).filter(t => t.lat != null && t.lon != null && !ownKeys.has(_cfTruckKey(t)))
+      const near = (_trucksData || []).filter(t => t.lat != null && t.lon != null && !_cfTruckKeysOf(t).some(k => ownKeys.has(k)))
         .map(t => ({ t, mi: haversine(j.lat, j.lon, t.lat, t.lon) * 0.621371 }))
         .sort((a, b) => a.mi - b.mi).slice(0, 3);
       if (!near.length) return '';
       const nd = new Date(), nowMin = nd.getHours() * 60 + nd.getMinutes();
       const rows = near.map(({ t, mi }) => {
-        const key = _cfTruckKey(t), rid = key ? _cfRouteForTruck(key, sd) : null;
+        const rid = _cfRouteForKeys(_cfTruckKeysOf(t), sd);
         const av = rid ? _cfGap(rid, nowMin) : { rank: 4, text: 'not assigned to a route yet' };
         const col = av.rank === 0 ? '#22c55e' : (av.rank === 1 ? '#eab308' : (av.rank >= 4 ? 'var(--text-muted)' : '#8ea3b5'));
         return '<div style="margin-bottom:2px;">🚚 <b>' + mjEsc(t.name || t.number || 'Truck') + '</b> · ' + mi.toFixed(1) + ' mi · <span style="color:' + col + ';">' + mjEsc(av.text) + '</span></div>';
