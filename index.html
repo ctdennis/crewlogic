@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.30 | 2026-08-17">
+  <meta name="crewlogic-version" content="v5.125.31 | 2026-08-17">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10412,6 +10412,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     function _fillNearestTruck() {
       const root = _detailRoot(); if (!root) return;
       const slot = root.querySelector('.rail-nearest'); if (!slot) return;
+      // Completed job → it's done; a truck "Expected Arrival" (esp. the outside-window warning) is misleading.
+      // Show a completion line instead. (owner 2026-08-17) TODO: surface the actual "crew left at" time.
+      if (slot.getAttribute('data-jdone') === '1') { slot.innerHTML = '<div style="margin-top:3px;color:#22c55e;font-weight:600;">✓ Job completed</div>'; return; }
       const jlat = Number(slot.getAttribute('data-jlat')), jlon = Number(slot.getAttribute('data-jlon'));
       const jtime = slot.getAttribute('data-jtime'), jtlabel = slot.getAttribute('data-jtlabel'), jdur = slot.getAttribute('data-jdur'), joffset = slot.getAttribute('data-joffset');
       if (!Number.isFinite(jlat) || !Number.isFinite(jlon)) return;
@@ -10628,7 +10631,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             + (Number(j.price) > 0 ? '<br><span style="color:var(--text-muted);">Job Total: </span><span style="font-weight:800;color:#00E785;">$' + Number(j.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</span>' : '')
             + (addr ? '<br>' + _addrLink(addr, addr, _truckEsc, '#6db3ff') : '')
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:var(--text-muted);">Loading phone…</div>'
-            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (base + k) + '"></div>'
+            + '<div class="rail-nearest" data-jdone="' + (j.isComplete ? '1' : '') + '" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (base + k) + '"></div>'
             + _crewLineHtml(j.crew)
             + '</div>';
           const m = L.marker([j.lat, j.lon], { icon, opacity: 0.95, zIndexOffset: -500 }).addTo(_trucksMap);
@@ -11139,7 +11142,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             // Phone directly under the address, so address+phone read as one contact block, and
             // truck+crew group together below it.
             + '<div id="jobph-' + _truckEsc(String(j.jobID)) + '" style="color:var(--text-muted);">Loading phone…</div>'
-            + '<div class="rail-nearest" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (_trucksJobDay || 0) + '"></div>'
+            + '<div class="rail-nearest" data-jdone="' + (j.isComplete ? '1' : '') + '" data-jlat="' + j.lat + '" data-jlon="' + j.lon + '" data-jtime="' + (j.time != null ? j.time : '') + '" data-jtlabel="' + _truckEsc(String(j.timeLabel || '')) + '" data-jdur="' + (j.durationMin != null ? j.durationMin : '') + '" data-joffset="' + (_trucksJobDay || 0) + '"></div>'
             // Measure button ABOVE crew/items: on the rail-less trucks card the popup is height-capped, so
             // keeping "Measure from here" below the items list buried it — only the (short) truck popup's
             // measure button was reachable. Placed here it stays visible without scrolling. (FW-21 parity)
