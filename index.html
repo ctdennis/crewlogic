@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.32 | 2026-08-17">
+  <meta name="crewlogic-version" content="v5.125.33 | 2026-08-17">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -13995,7 +13995,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Job tooltip — desktop hover (quick peek) + mobile tap (sticky, dismiss via × or tap-outside).
     let _mjTipSticky = false;
     function mjTip(ev, jobID, sticky) {
-      const j = _mjBoardByID[String(jobID)], tip = document.getElementById('mjTip'); if (!j || !tip) return;
+      const j = _mjBoardByID[String(jobID)]; if (!j) return;
+      // UNIFY (owner 2026-08-17): on the desktop dispatch dashboard a job tap fills the left "Details" section —
+      // the SAME surface as a map click — instead of a floating popup. Renders the SAME rich card (mjJobInfoHTML,
+      // with its Set-duration / Reschedule / Cancel actions). Mobile (no rail) keeps the floating popup below.
+      const rail = document.getElementById('dashLeftJobBody');
+      if (rail) {
+        if (ev) ev.stopPropagation();
+        rail.innerHTML = '<div style="text-align:right;margin:-2px -2px 2px 0;"><span onclick="_railClearJob()" style="cursor:pointer;color:var(--text-muted);font-size:18px;line-height:1;">×</span></div>' + mjJobInfoHTML(j, false);
+        rail.style.display = '';
+        const hdr = rail.previousElementSibling, chev = hdr && hdr.querySelector('span'); if (chev) chev.textContent = '▾';
+        rail.scrollTop = 0;
+        if (j.jobID) mjLoadJobPhone(String(j.jobID));
+        return;
+      }
+      const tip = document.getElementById('mjTip'); if (!tip) return;
       // Touch devices have no real hover — a non-sticky (hover-preview) popup would hide the instant the
       // finger moves, so taps land behind it. Force sticky on touch so the popup stays open + tappable.
       if (!sticky && (('ontouchstart' in window) || navigator.maxTouchPoints > 0)) sticky = true;
