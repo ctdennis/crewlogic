@@ -34,6 +34,11 @@ const UNCONV_RECHECK_HOURS = 12;                // how often to re-check a still
 // details) but carry NO booking/action affordance — the client renders a case detail with no action bar,
 // stage dropdown, or opportunity strip (see bwDetailHtml case branch).
 const ALL_TYPES = ['lead', 'unconverted_estimate', 'cancellation', 'ucb', 'case'];
+// A cancellation is a Biz Dev opportunity ONLY if it's a RESCHEDULE — the customer still wants service, just not
+// now/this date. Owner 2026-08-17: surface reschedules only, not dead cancels (duplicate, service-no-longer-
+// required, priced-out, kept-items). Match a reschedule reason CODE or a reference in the detail/comments.
+const RESCHEDULE_RX = /reschedul|date no longer works|customer not ready|no contact with customer/i;
+const isRescheduleCancel = (reason: string | null, detail: string | null) => RESCHEDULE_RX.test(String(reason || '') + ' ' + String(detail || ''));
 
 // Starter sequences seeded per franchise on first use (then owner-editable). Each is the auto-default for
 // its item type (hybrid: new items auto-enter it; the owner can reassign). Email/text steps carry a
@@ -483,7 +488,9 @@ Deno.serve(async (req: Request) => {
         const convertedJobs = new Set(((convRows || []) as Record<string, unknown>[]).map((r) => String((r.job_appointments as Record<string, unknown>)?.job_id ?? '')));
         const { data } = await supabase.from('job_source_snapshot').select(SNAP_SELECT).eq('franchise_id', franchiseInternalID).in('label_optionid', [...EST_LABELS]);
         const cands = ((data || []) as Record<string, unknown>[]).map(mirrorWO)
-          .filter((w) => w.woID && !(w.woEpoch && w.woEpoch < dateStart) && !(w.jobId && convertedJobs.has(w.jobId)));
+          // Exclude CANCELLED estimate WOs (status 162/163): a cancelled estimate is not an open opportunity —
+          // it belongs under Cancellations, not Open Estimates. (Owner 2026-08-17: a cancelled dup was showing in both.)
+          .filter((w) => w.woID && !(w.woEpoch && w.woEpoch < dateStart) && !(w.jobId && convertedJobs.has(w.jobId)) && !CANCEL_STATUS.has(w.status));
 
         // Fallback (email trail): catch conversions the mirror can't see yet (the -2 job is future-dated). Only check
         // jobs we haven't recently verified; cache the verdict (converted = permanent, unconverted re-checked after TTL).
@@ -532,6 +539,10 @@ Deno.serve(async (req: Request) => {
               } catch { /* reason optional */ }
             }
           }
+          // Reschedule-only (owner 2026-08-17): a dead cancel (duplicate / service-no-longer-required / priced-out /
+          // kept-items) is NOT a Biz Dev opportunity. Only surface reschedules. The reconcile then resolves any
+          // previously-listed non-reschedule cancellation (it's no longer in the fresh rows).
+          if (!isRescheduleCancel(reason, detail)) return;
           rows.push(mk('cancellation', 'workorder', w.woID, { ...w.base, reason, detail }));
         });
       }
