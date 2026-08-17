@@ -924,7 +924,15 @@ Deno.serve(async (req: Request) => {
       const zr = await vpost(token, '/resources/zips/', { method: '1', zip: z });
       const st = (zr.ServiceTypes || [])[0] || null;
       const zi = zr.Zip || zr.zip || null;
-      return json({ success: true, zip: z, ownerFranchiseID: st ? String(st.franchiseID) : null, defaultCity: zi ? (zi.defaultCity || null) : null, errNo: zr.errNo, found: !!st });
+      const dump = body.raw === true ? { rawKeys: Object.keys(zr), serviceType: st, zipObj: zi } : {};
+      return json({ success: true, zip: z, ownerFranchiseID: st ? String(st.franchiseID) : null, defaultCity: zi ? (zi.defaultCity || null) : null, errNo: zr.errNo, found: !!st, ...dump });
+    }
+
+    // action=franchisesList — READ-ONLY: Vonigo franchise directory (id → name/business unit). Safe.
+    if (action === 'franchisesList') {
+      const r = await vpost(token, '/resources/franchises/', {});
+      const arr = (r.Franchises || r.Franchise || []) as any[];
+      return json({ success: true, errNo: r.errNo, rawKeys: Object.keys(r), count: arr.length, rows: arr.slice(0, 300).map((f: any) => ({ id: f.objectID ?? f.franchiseID ?? f.id, name: f.name || f.businessUnit || f.title })) });
     }
 
     // action=deactivateLead — mark a DEAD lead: deactivate it in Vonigo (/data/Leads/ method 5) so it drops
