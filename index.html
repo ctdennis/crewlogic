@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.34 | 2026-08-17">
+  <meta name="crewlogic-version" content="v5.125.35 | 2026-08-17">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12039,6 +12039,37 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _mjMenuDay = '', _mjMenuRid = '', _mjMenuName = '';
     function _mjSD(dayID) { const d = String(dayID || _mjBoardDayID || ''); if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d; return d.length === 8 ? d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6, 8) : ''; } // accepts a dayID (YYYYMMDD) OR an already-formatted serviceDate
     function _mjTruckName(tk) { const r = _mjRoster.find(t => t.truckKey === tk); return r ? (r.name || tk.replace(/^(vin:|name:)/, '')) : tk.replace(/^(vin:|name:)/, ''); }
+    // ── Crew-finder (NYC/owner 2026-08-17): nearest OTHER trucks + whether they have a schedule gap to help.
+    // Haversine (owner: good enough) → route→truck assignment (_mjAssignByDate) → that route's board jobs for the gap.
+    function _cfFmtMin(m) { m = ((Math.round(m) % 1440) + 1440) % 1440; const h = Math.floor(m / 60), mm = m % 60, ap = h >= 12 ? 'PM' : 'AM', h12 = ((h + 11) % 12) + 1; return h12 + ':' + String(mm).padStart(2, '0') + ' ' + ap; }
+    function _cfTruckKey(t) { return t.vin ? ('vin:' + t.vin) : (t.name ? ('name:' + t.name) : null); }
+    function _cfRouteForTruck(truckKey, sd) { const byRoute = _mjAssignByDate[sd] || {}; for (const rid in byRoute) if ((byRoute[rid] || []).some(a => a.truckKey === truckKey)) return rid; return null; }
+    function _cfGap(routeId, nowMin) {
+      const dur = j => Number(j.durationMin) || 90;
+      const jobs = Object.values(_mjBoardByID || {}).filter(j => String(j.routeID) === String(routeId) && j.time != null && !j.completed && !j.isComplete).sort((a, b) => a.time - b.time);
+      if (!jobs.length) return { rank: 0, text: 'free — no jobs on its route' };
+      const active = jobs.find(j => nowMin >= j.time && nowMin < j.time + dur(j));
+      if (active) { const end = active.time + dur(active); const next = jobs.find(j => j.time >= end); const soon = end - nowMin <= 30; return { rank: soon ? 1 : 3, text: 'on a job until ' + _cfFmtMin(end) + (next ? ' · then open to ' + _cfFmtMin(next.time) : ' · open after') }; }
+      const next = jobs.find(j => j.time > nowMin);
+      return { rank: 0, text: next ? ('free now until ' + _cfFmtMin(next.time)) : 'free now — done for the day' };
+    }
+    function _crewFinderHTML(j) {
+      if (!j || j.lat == null || j.lon == null || !(_trucksData || []).length) return '';
+      const sd = _mjSD(j._day || _mjBoardDayID);
+      const ownKeys = new Set(((_mjAssignByDate[sd] || {})[String(j.routeID || '')] || []).map(a => a.truckKey)); // this job's own crew — exclude
+      const near = (_trucksData || []).filter(t => t.lat != null && t.lon != null && !ownKeys.has(_cfTruckKey(t)))
+        .map(t => ({ t, mi: haversine(j.lat, j.lon, t.lat, t.lon) * 0.621371 }))
+        .sort((a, b) => a.mi - b.mi).slice(0, 3);
+      if (!near.length) return '';
+      const nd = new Date(), nowMin = nd.getHours() * 60 + nd.getMinutes();
+      const rows = near.map(({ t, mi }) => {
+        const key = _cfTruckKey(t), rid = key ? _cfRouteForTruck(key, sd) : null;
+        const av = rid ? _cfGap(rid, nowMin) : { rank: 4, text: 'not assigned to a route yet' };
+        const col = av.rank === 0 ? '#22c55e' : (av.rank === 1 ? '#eab308' : (av.rank >= 4 ? 'var(--text-muted)' : '#8ea3b5'));
+        return '<div style="margin-bottom:2px;">🚚 <b>' + mjEsc(t.name || t.number || 'Truck') + '</b> · ' + mi.toFixed(1) + ' mi · <span style="color:' + col + ';">' + mjEsc(av.text) + '</span></div>';
+      }).join('');
+      return '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border);"><div style="color:var(--text-muted);font-weight:700;margin-bottom:2px;">🚑 Who can help? · nearest 3</div>' + rows + '</div>';
+    }
     function _mjTruckChipLabel(tk) { const nm = _mjTruckName(tk); const m = nm.match(/(\d+)/); return m ? ('T' + m[1]) : (nm.length > 6 ? nm.slice(0, 6) : nm); } // "Truck 12" -> "T12"
     // Day-start feasibility colors the ROUTE-CODE cell background: green = makes its windows, red = runs late.
     function _mjRouteBg(routeCode, dayID) {
@@ -13839,6 +13870,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Job info (summary + items) before the duration action.
       if (j.summary && String(j.summary).trim()) h += _mjBlock('Summary', mjEsc(String(j.summary).trim()));
       if (j.items && String(j.items).trim()) h += _mjBlock('Item(s) List', mjEsc(String(j.items).trim()));
+      h += _crewFinderHTML(j); // 🚑 nearest 3 OTHER trucks + their schedule gaps (who can back up this crew)
       _mjLastTipJob = j; // remember this job for the Cancel-job button (one tooltip shows at a time)
       h += _jobActionsHTML(j);
       return '<div style="font-size:12px;line-height:1.4;">' + h + '</div>'; // compact base size (owner 2026-08-17 — smaller card)
