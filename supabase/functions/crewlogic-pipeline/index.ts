@@ -261,9 +261,11 @@ Deno.serve(async (req: Request) => {
         }
       }
       const { data: allT } = await supabase.from('pipeline_items').select('type, stage').eq('franchise_id', franchiseInternalID);
-      const counts: Record<string, number> = {}; let open = 0;
-      for (const r of (allT || []) as Record<string, string>[]) { counts[r.type] = (counts[r.type] || 0) + 1; if (!CLOSED.has(r.stage)) open++; }
-      return json({ success: true, items: out, counts, open, total: out.length, reqId });
+      const counts: Record<string, number> = {}; const stageCounts: Record<string, number> = {}; let open = 0;
+      for (const r of (allT || []) as Record<string, string>[]) { counts[r.type] = (counts[r.type] || 0) + 1; const stg = String(r.stage || 'new'); stageCounts[stg] = (stageCounts[stg] || 0) + 1; if (!CLOSED.has(r.stage)) open++; }
+      // stageCounts (new/contacted/working/won/lost/…) let the client show the funnel + win-rate even when it
+      // requests view:'attention' (active-only) for a FAST list — the won/lost items aren't in `items` then.
+      return json({ success: true, items: out, counts, stageCounts, open, total: out.length, reqId });
     }
 
     // Full detail for one item (incl. the stored `raw` Vonigo object) — powers the row detail modal. On demand
