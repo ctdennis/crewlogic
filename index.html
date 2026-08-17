@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.125.29 | 2026-08-17">
+  <meta name="crewlogic-version" content="v5.125.30 | 2026-08-17">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11035,15 +11035,20 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Cache: jobID -> Promise<phone string|''> (reuses crewlogic-job-lookup → clientPhone).
     let _jobPhones = {};
     let _jobClients = {}; // jobID -> clientName (from the same crewlogic-job-lookup as the phone) — for the SMS greeting
+    let _jobEmails = {};  // jobID -> clientEmail (same lookup) — for the clickable mailto: link
     function _renderJobPhoneSlot(jobID, phone) {
       const e = document.getElementById('jobph-' + jobID);
       if (!e) return;
       if (phone == null) { e.innerHTML = '<span style="color:var(--text-muted);">Phone unavailable — reopen to retry</span>'; return; } // lookup FAILED — do NOT claim "no phone on file"
       const digits = String(phone || '').replace(/[^0-9+]/g, '');
-      e.innerHTML = phone
-        ? '📞 <a href="tel:' + digits + '" style="color:#6db3ff;font-weight:600;text-decoration:none;">' + _truckEsc(_fmtPhone(phone)) + '</a>'
-          + ' &nbsp;·&nbsp; <a href="' + _smsHref(digits, buildSmsBody({ clientName: _jobClients[jobID] || '' })) + '" style="color:#6db3ff;font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>'
-        : '<span style="color:var(--text-muted);">No phone on file</span>'; // '' = genuinely no phone (successful lookup)
+      const email = _jobEmails[jobID] || '';
+      const parts = [];
+      if (phone) {
+        parts.push('📞 <a href="tel:' + digits + '" style="color:#6db3ff;font-weight:600;text-decoration:none;">' + _truckEsc(_fmtPhone(phone)) + '</a>');
+        parts.push('<a href="' + _smsHref(digits, buildSmsBody({ clientName: _jobClients[jobID] || '' })) + '" style="color:#6db3ff;font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>');
+      }
+      if (email) parts.push('<a href="mailto:' + _truckEsc(email) + '" style="color:#6db3ff;font-weight:600;text-decoration:none;white-space:nowrap;">✉️ Email</a>');
+      e.innerHTML = parts.length ? parts.join(' &nbsp;·&nbsp; ') : '<span style="color:var(--text-muted);">No phone on file</span>';
     }
     function _prefetchJobPhone(jobID) {
       // Cache only a RESOLVED lookup (a real phone OR a genuine ''). A FAILED lookup (502/!success) returns null
@@ -11054,6 +11059,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         .then(r => {
           if (!r || r.success !== true) return null;                 // lookup FAILED — null (≠ '' = genuinely no phone); don't cache → retry next open
           if (r.clientName) _jobClients[jobID] = String(r.clientName).trim();
+          if (r.clientEmail) _jobEmails[jobID] = String(r.clientEmail).trim();
           const ph = r.clientPhone ? String(r.clientPhone).trim() : '';
           _jobPhones[jobID] = ph;                                    // cache the real result (phone or genuine no-phone)
           return ph;
@@ -14130,10 +14136,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       slot.dataset.loaded = '1'; slot.style.color = 'var(--text-muted)';
       _prefetchJobPhone(jobID).then(ph => {
         const digits = String(ph || '').replace(/[^0-9+]/g, '');
-        slot.innerHTML = ph
-          ? '📞 <a href="tel:' + digits + '" onclick="event.stopPropagation()" style="color:var(--accent-green,#00E785);font-weight:600;text-decoration:none;">' + mjEsc(_fmtPhone(ph)) + '</a>'
-            + ' &nbsp;·&nbsp; <a href="' + _smsHref(digits, buildSmsBody({ clientName: _jobClients[jobID] || '' })) + '" onclick="event.stopPropagation()" style="color:var(--accent-green,#00E785);font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>'
-          : '<span style="color:var(--text-muted);">No phone on file</span>';
+        const email = _jobEmails[jobID] || '';
+        const parts = [];
+        if (ph) {
+          parts.push('📞 <a href="tel:' + digits + '" onclick="event.stopPropagation()" style="color:var(--accent-green,#00E785);font-weight:600;text-decoration:none;">' + mjEsc(_fmtPhone(ph)) + '</a>');
+          parts.push('<a href="' + _smsHref(digits, buildSmsBody({ clientName: _jobClients[jobID] || '' })) + '" onclick="event.stopPropagation()" style="color:var(--accent-green,#00E785);font-weight:600;text-decoration:none;white-space:nowrap;">💬 Text</a>');
+        }
+        if (email) parts.push('<a href="mailto:' + mjEsc(email) + '" onclick="event.stopPropagation()" style="color:var(--accent-green,#00E785);font-weight:600;text-decoration:none;white-space:nowrap;">✉️ Email</a>');
+        slot.innerHTML = parts.length ? parts.join(' &nbsp;·&nbsp; ') : '<span style="color:var(--text-muted);">No phone on file</span>';
       }).catch(() => { slot.innerHTML = '<span style="color:var(--text-muted);">No phone on file</span>'; });
     }
     function mjCancelPlan() {
