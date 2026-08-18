@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.130.1 | 2026-08-18">
+  <meta name="crewlogic-version" content="v5.130.2 | 2026-08-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1111,6 +1111,9 @@
       #deskNav .dn-group.dn-open .dn-caret { transform: rotate(90deg); }
       #deskNav .dn-item.dn-active { background: rgba(0,238,118,0.13); color: var(--text-primary); box-shadow: inset 3px 0 0 var(--accent-green); }
       #deskNav .dn-item.dn-active .dn-ic { color: var(--accent-green); }
+      /* When a sub-item is active, the group header gets just the accent stripe + icon (the section cue). */
+      #deskNav .dn-item.dn-parent-active { box-shadow: inset 3px 0 0 var(--accent-green); }
+      #deskNav .dn-item.dn-parent-active .dn-ic { color: var(--accent-green); }
 
       #deskNav .dn-sub-wrap { display: none; padding: 2px 0 6px; }
       #deskNav .dn-group.dn-open .dn-sub-wrap { display: block; }
@@ -9244,9 +9247,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // no matter how you got there (rail click, dashboard KPI tile, back button). Opens the item's group too.
     function _shellSyncActive() {
       const nav = document.getElementById('deskNav'); if (!nav) return;
-      nav.querySelectorAll('.dn-active').forEach(n => n.classList.remove('dn-active'));
+      nav.querySelectorAll('.dn-active, .dn-parent-active').forEach(n => n.classList.remove('dn-active', 'dn-parent-active'));
       const el = nav.querySelector('[data-nav="' + currentScreen + '"]');
-      if (el) { el.classList.add('dn-active'); const g = el.closest('.dn-group'); if (g) g.classList.add('dn-open'); }
+      if (el) {
+        el.classList.add('dn-active');
+        const g = el.closest('.dn-group');
+        if (g) {
+          g.classList.add('dn-open');
+          // Sub-item active → give the group's header the accent stripe too (the "you're in this section" cue).
+          if (el.classList.contains('dn-sub')) { const head = g.querySelector('.dn-item'); if (head) head.classList.add('dn-parent-active'); }
+        }
+      }
     }
     function _shellNav(key, el) {
       // keep the parent group expanded so the active sub-item stays visible
