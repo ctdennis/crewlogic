@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.130.0 | 2026-08-18">
+  <meta name="crewlogic-version" content="v5.130.1 | 2026-08-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1513,11 +1513,11 @@
       <div class="dn-scroll">
         <div class="dn-lbl">Workspace</div>
 
-        <div class="dn-item" id="dnHome" onclick="_shellNav('homeDash',this)">
+        <div class="dn-item" id="dnHome" data-nav="homeDash" onclick="_shellNav('homeDash',this)">
           <span class="dn-ic">🏠</span> Home
         </div>
 
-        <div class="dn-item" onclick="_shellNav('dashboard',this)">
+        <div class="dn-item" data-nav="dashboard" onclick="_shellNav('dashboard',this)">
           <span class="dn-ic">🚚</span> Dispatch
         </div>
 
@@ -1526,20 +1526,20 @@
             <span class="dn-ic">📋</span> Estimates <span class="dn-caret">▸</span>
           </div>
           <div class="dn-sub-wrap">
-            <div class="dn-sub" onclick="_shellNav('estimates',this)">
+            <div class="dn-sub" data-nav="estimates" onclick="_shellNav('estimates',this)">
               <b>CrewLogic Estimates</b><small>estimates started &amp; built here in CrewLogic</small>
             </div>
-            <div class="dn-sub" onclick="_shellNav('estimateCosting',this)">
+            <div class="dn-sub" data-nav="estimateCosting" onclick="_shellNav('estimateCosting',this)">
               <b>Margin Analysis</b><small>profit &amp; margin review of Vonigo estimates</small>
             </div>
           </div>
         </div>
 
-        <div class="dn-item" onclick="_shellNav('bizdev',this)">
+        <div class="dn-item" data-nav="bizdev" onclick="_shellNav('bizdev',this)">
           <span class="dn-ic">📈</span> Business Development
         </div>
 
-        <div class="dn-item" onclick="_shellNav('backupSchedule',this)">
+        <div class="dn-item" data-nav="backupSchedule" onclick="_shellNav('backupSchedule',this)">
           <span class="dn-ic">🛡️</span> Disaster Recovery
         </div>
 
@@ -1548,12 +1548,12 @@
             <span class="dn-ic">🧰</span> Yard Signs &amp; Other Tools <span class="dn-caret">▸</span>
           </div>
           <div class="dn-sub-wrap">
-            <div class="dn-sub" onclick="_shellNav('signs',this)"><b>Yard Signs</b></div>
+            <div class="dn-sub" data-nav="signs" onclick="_shellNav('signs',this)"><b>Yard Signs</b></div>
             <div class="dn-sub" onclick="_shellNav('recycling',this)"><b>Recycling</b></div>
-            <div class="dn-sub" onclick="_shellNav('trucks',this)"><b>Where Are My Trucks?</b></div>
-            <div class="dn-sub" onclick="_shellNav('priceLookup',this)"><b>Price Lookup</b></div>
-            <div class="dn-sub" onclick="_shellNav('promos',this)"><b>Coupons / Campaigns</b></div>
-            <div class="dn-sub" onclick="_shellNav('jobPlan',this)"><b>Job Plan</b></div>
+            <div class="dn-sub" data-nav="trucks" onclick="_shellNav('trucks',this)"><b>Where Are My Trucks?</b></div>
+            <div class="dn-sub" data-nav="priceLookup" onclick="_shellNav('priceLookup',this)"><b>Price Lookup</b></div>
+            <div class="dn-sub" data-nav="promos" onclick="_shellNav('promos',this)"><b>Coupons / Campaigns</b></div>
+            <div class="dn-sub" data-nav="jobPlan" onclick="_shellNav('jobPlan',this)"><b>Job Plan</b></div>
           </div>
         </div>
       </div>
@@ -9240,13 +9240,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.querySelectorAll('#deskNav .dn-active').forEach(n => n.classList.remove('dn-active'));
       if (el) el.classList.add('dn-active');
     }
+    // Highlight the left-nav item whose data-nav matches the CURRENT screen, so the active state is correct
+    // no matter how you got there (rail click, dashboard KPI tile, back button). Opens the item's group too.
+    function _shellSyncActive() {
+      const nav = document.getElementById('deskNav'); if (!nav) return;
+      nav.querySelectorAll('.dn-active').forEach(n => n.classList.remove('dn-active'));
+      const el = nav.querySelector('[data-nav="' + currentScreen + '"]');
+      if (el) { el.classList.add('dn-active'); const g = el.closest('.dn-group'); if (g) g.classList.add('dn-open'); }
+    }
     function _shellNav(key, el) {
-      _shellSetActive(el);
       // keep the parent group expanded so the active sub-item stays visible
       if (el) { const g = el.closest('.dn-group'); if (g) g.classList.add('dn-open'); }
       if (key === 'homeDash') { openHomeDash(); }
       else if (key === 'recycling') { openRecycling(); }
       else { openModule(key); }
+      _shellSyncActive(); // reflect the screen we just navigated to
     }
 
     // Secondary toolbar control — appears beneath the global header on certain screens
@@ -9472,7 +9480,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.getElementById('backBtn').classList.remove('visible');
       document.getElementById('headerTitle').textContent = 'Home';
       currentScreen = 'homeDash';
-      _shellSetActive(document.getElementById('dnHome'));
+      _shellSyncActive(); // currentScreen is 'homeDash' → highlights the Home nav item
       // Desktop full-bleed. max-width:none alone does NOT fill: .app-content keeps its margin:0 auto
       // (L1078) and, as a flex child of the column .app-shell, those auto side-margins override
       // align-items:stretch and shrink it to a narrow centered column. .hd-fullbleed also zeroes the
@@ -9503,7 +9511,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (val === null) return '';
       const t = _HD_TONE[c.tone] || _HD_TONE.g;
       const valColor = c.valGreen ? 'var(--accent-green)' : 'var(--text-primary)';
-      const click = c.go ? ' onclick="' + c.go + '" role="button" tabindex="0"' : '';
+      const click = c.go ? ' onclick="' + c.go + ';_shellSyncActive()" role="button" tabindex="0"' : '';
       const cursor = c.go ? ' style="cursor:pointer;"' : '';
       return '<div class="hd-hcard"' + cursor + click + '>'
         + '<div class="hd-ic" style="background:' + t.bg + ';color:' + t.fg + ';">' + c.icon + '</div>'
@@ -9518,7 +9526,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const isAmber = a.tone === 'amber';
       const fg = isAmber ? 'var(--accent-yellow)' : 'var(--accent-blue)';
       const bg = isAmber ? 'rgba(251,191,36,.13)' : 'rgba(96,165,250,.13)';
-      const click = a.go ? ' onclick="' + a.go + '" role="button" tabindex="0"' : '';
+      const click = a.go ? ' onclick="' + a.go + ';_shellSyncActive()" role="button" tabindex="0"' : '';
       return '<div class="hd-att" style="background:' + bg + ';border-color:' + fg + ';cursor:pointer;"' + click + '>'
         + '<div class="hd-att-big" style="color:' + fg + ';">' + Number(a.k).toLocaleString('en-US') + '</div>'
         + '<div><div class="hd-att-t">' + a.title + '</div><div class="hd-att-d">' + a.desc + '</div></div>'
@@ -9533,7 +9541,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       let valColor = 'var(--text-primary)';
       if (s.green) valColor = 'var(--accent-green)';
       else if (s.amber) valColor = 'var(--accent-yellow)';
-      const click = s.go ? ' onclick="' + s.go + '" role="button" tabindex="0"' : '';
+      const click = s.go ? ' onclick="' + s.go + ';_shellSyncActive()" role="button" tabindex="0"' : '';
       const cls = s.go ? 'hd-stat hd-clk' : 'hd-stat';
       const cursor = s.go ? ' style="cursor:pointer;"' : '';
       return '<div class="' + cls + '"' + cursor + click + '>'
@@ -9574,7 +9582,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         const cCnt = es.crewlogicCount30d != null ? es.crewlogicCount30d : 0;
         const extra = '<div style="margin-top:9px;padding-top:9px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted);">'
           + 'CrewLogic only&nbsp; <b style="color:var(--text-primary);font-family:\'Space Mono\',monospace;">' + cVal + '</b> · ' + cCnt + ' not yet posted</div>';
-        estCombined = '<div class="hd-stat hd-clk" style="cursor:pointer;" onclick="openModule(\'estimates\')" role="button" tabindex="0">'
+        estCombined = '<div class="hd-stat hd-clk" style="cursor:pointer;" onclick="openModule(\'estimates\');_shellSyncActive()" role="button" tabindex="0">'
           + '<div class="hd-slbl">Estimate value · 30 days</div>'
           + '<div class="hd-sval" style="color:var(--accent-green);">' + vVal + '</div>'
           + '<div class="hd-ssub">in Vonigo · ' + vCnt + ' submitted</div>'
