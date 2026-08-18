@@ -1,8 +1,39 @@
 # Future Project — Professional Desktop UI (responsive SaaS shell)
 
-**Status:** BACKLOG / future project (captured 2026-08-16, owner). Not scheduled; not approved for build.
-Register: **FW-68**. This is a LARGE, cross-cutting UI project — it will need its own approved plan + a strict
-regression guard before any code.
+**Status:** APPROVED FOR BUILD — wireframe signed off by owner 2026-08-18 ("That looks much better. Let's roll
+with it"). Building the desktop shell additively on `dev`. Register: **FW-68**. LARGE, cross-cutting UI project;
+strict regression guard (below) is in force.
+
+## APPROVED BUILD SPEC (2026-08-18) — supersedes the "Proposed nav structure" section below
+Wireframe approved: `crewlogic-desktop-shell-mock` + `crewlogic-desktop-preview-on-phone` artifacts.
+
+**Locked decisions:**
+- **Shell = outer frame only.** Left nav + top bar wrap the EXISTING screens. No screen internals change —
+  the Dispatch board (and every other screen) renders exactly as today (owner: "the layout of the dispatch
+  board shouldn't change from what we have"). Nav items call the existing `hideAll()` + `show*/render*`.
+- **Content fills the whole window** to the right of the nav (maximized), NOT a centered/boxed column
+  (owner: "as large a window as the user's system will allow").
+- **Left-nav groups (final, 5):**
+  1. **Dispatch** — direct link (no sub-menu) → opens the Dispatch screen.
+  2. **Estimates** — expands to two sub-links, each a bold label + lowercase descriptor:
+     - **CrewLogic Estimates** — "estimates started and built here in CrewLogic".
+     - **Margin Analysis** — "profit & margin review of Vonigo estimates".
+  3. **Business Development** — direct link → the Sales Workspace (FW-66) pipeline.
+  4. **Disaster Recovery** — direct link → the **backup-schedule** screen (owner: the backup schedule IS
+     disaster recovery). OPEN: label "Disaster Recovery" vs "Recovery" — currently "Disaster Recovery".
+  5. **Yard Signs & Other Tools** — expands to: Yard Signs · Recycling · Where Are My Trucks · Price Lookup ·
+     Coupons/Campaigns · Job Plan. OPEN: confirm this list is complete.
+- **Top bar:** brand upper-left; franchise pill; account/settings/notifications menu upper-right.
+- **Theme:** matches the app's dark theme (reuse existing CSS vars).
+- **Hand-rolled vanilla** (no framework/build) — per technology-selection; open-question #2 resolved to default.
+- **Breakpoint:** desktop shell activates at **>= 1024px**; below that the current mobile UI is byte-for-byte
+  unchanged (open-question #1 resolved to default; revisit tablet if needed).
+
+**Non-blocking open items (defaults applied, easily changed):** DR label wording; Yard-Signs-group list
+completeness. Settings redesign (left categories → right portlets) is a SEPARATE follow-on phase, not this
+first shell build.
+
+**Tracking:** TaskList FW-68 subtasks (this session). Right-sized test = HIGH (global layout/nav).
 
 ## Problem
 CrewLogic is intentionally **mobile-first / PWA** (fixed viewport, no user scaling — crews work from phones in
