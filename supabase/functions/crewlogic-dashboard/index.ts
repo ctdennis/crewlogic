@@ -21,6 +21,9 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { resolveTimezone, todayPartsInTz, DEFAULT_TZ } from '../_shared/tz.ts';
+import { vonigoJson } from '../_shared/vonigo.ts';
+
+const VONIGO_BASE = 'https://junkluggers.vonigo.com/api/v1';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -76,6 +79,79 @@ function sumField(rows: Record<string, unknown>[] | null, field: string): number
   return s;
 }
 
+// ─────────────────────────── Vonigo INVOICED revenue ───────────────────────────
+// The revenueThisWeek / revenueThisMonth KPIs are the franchise's INVOICED "Subtotal" total from
+// Vonigo — its "Revenue Details Report by Invoice" basis (Subtotal = Price − Discount, PRE-tax) —
+// summed over ACTIVE invoices whose ISSUED date falls in the window. This is real billed revenue,
+// not the job-mirror's booked figure. Vonigo is READ-ONLY here (Retrieval only; no writes).
+//
+// Reconciled 2026-08-18 against #90's actual report — Aug 1–18 MTD = $41,486.50 across 51 active
+// invoices — which fixed two parameters the way this data really behaves (NOT the values first
+// assumed): (1) /data/Invoices/ requires method:"0" here (method:"1" returns "Data validation
+// failed"); (2) the issued-date basis is dateMode:"1" — dateMode:"3" is a DIFFERENT date (returned
+// 50 / $38,502.50, not the report's set). Subtotal is Field 949 (the numeric field whose active
+// total matched $41,486.50 / 51 exactly; Field 947 is Price-before-discount, 709 is tax).
+const F_INVOICE_SUBTOTAL = 949;
+const INVOICE_DATE_MODE = '1'; // issued-date basis, verified against the Revenue Details report
+
+interface VonigoField { fieldID: number; fieldValue: string | null; optionID?: number; }
+interface VonigoInvoice { objectID: string; isActive: boolean | string; Fields?: VonigoField[]; }
+
+// Parse a Vonigo money field ("813.46", "$1,234.50", "-50.0000") → number, or NaN.
+function money(v: unknown): number { return Number(String(v ?? '').replace(/[^0-9.\-]/g, '')); }
+function isActiveInvoice(inv: VonigoInvoice): boolean { return String(inv.isActive).toLowerCase() === 'true'; }
+
+// Resolve this franchise's Vonigo credentials (same lookup the sibling fns use: external franchiseID
+// + tenant → franchise row → get_vonigo_credential RPC, with a direct-table fallback).
+async function resolveVonigoCreds(db: DB, franchiseID: string, tenantID: string): Promise<{ vonigo_username: string; vonigo_md5: string } | null> {
+  const { data: fr } = await db.from('franchises').select('id').eq('external_id', franchiseID).eq('tenant_id', tenantID).maybeSingle();
+  const internalID = (fr as { id?: string } | null)?.id;
+  if (!internalID) return null;
+  // The Vonigo password (md5) lives in Supabase Vault; get_vonigo_credential(p_franchise_id) joins it out.
+  const { data, error } = await db.rpc('get_vonigo_credential', { p_franchise_id: internalID });
+  if (error) throw error;
+  if (Array.isArray(data) && data.length > 0) return data[0] as { vonigo_username: string; vonigo_md5: string };
+  return null;
+}
+
+// MD5 /security/login/ → securityToken (throws on failure; caller's try/catch → null KPI).
+async function vonigoLogin(creds: { vonigo_username: string; vonigo_md5: string }): Promise<string> {
+  const url = new URL(VONIGO_BASE + '/security/login/');
+  url.searchParams.set('company', 'Vonigo');
+  url.searchParams.set('userName', creds.vonigo_username);
+  url.searchParams.set('password', creds.vonigo_md5);
+  const auth = await vonigoJson(await fetch(url.toString()));
+  if (auth.errNo !== 0 || !auth.securityToken) throw new Error(`vonigo_auth_failed:${auth.errMsg || 'no token'}`);
+  return auth.securityToken as string;
+}
+
+// Page /data/Invoices/ (dateMode:3, isCompleteObject) for [startEpoch,endEpoch] and sum the Subtotal
+// field over ACTIVE invoices. Loops until a short page (< pageSize). Read-only (Retrieval, method:"1").
+async function sumInvoicedSubtotal(token: string, startEpoch: number, endEpoch: number): Promise<{ total: number; count: number }> {
+  const pageSize = 100;
+  let total = 0, count = 0, pageNo = 1;
+  for (;;) {
+    const data = await vonigoJson(await fetch(VONIGO_BASE + '/data/Invoices/', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        securityToken: token, method: '0', pageNo: String(pageNo), pageSize: String(pageSize),
+        sortMode: '1', sortDirection: '1', dateMode: INVOICE_DATE_MODE,
+        dateStart: String(startEpoch), dateEnd: String(endEpoch), isCompleteObject: 'true',
+      }),
+    }));
+    const invoices = (data.Invoices || []) as VonigoInvoice[];
+    for (const inv of invoices) {
+      if (!isActiveInvoice(inv)) continue;
+      const v = money((inv.Fields || []).find((f) => f.fieldID === F_INVOICE_SUBTOTAL)?.fieldValue);
+      if (Number.isFinite(v)) { total += v; count++; }
+    }
+    if (invoices.length < pageSize) break;
+    pageNo++;
+    if (pageNo > 200) { console.warn('[crewlogic-dashboard] invoice paging hit 200-page safety cap'); break; }
+  }
+  return { total: Math.round(total * 100) / 100, count };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ success: false, error: 'method_not_allowed' }, 405);
@@ -85,6 +161,8 @@ Deno.serve(async (req: Request) => {
     const franchiseInternalID = str(body.franchiseInternalID);
     if (!franchiseInternalID) return json({ success: false, error: 'franchiseInternalID required' }, 400);
     const fid = franchiseInternalID;
+    const franchiseID = str(body.franchiseID);
+    const tenantID = str(body.tenantID);
 
     const db: DB = createClient(SUPABASE_URL, SERVICE_KEY);
 
@@ -103,12 +181,14 @@ Deno.serve(async (req: Request) => {
     const todayStr = ymd(todayUTC);
     const dow = todayUTC.getUTCDay();                                // 0=Sun … 6=Sat (Sunday-start week)
     const weekStart = new Date(todayUTC); weekStart.setUTCDate(todayUTC.getUTCDate() - dow);
-    const weekEnd = new Date(weekStart); weekEnd.setUTCDate(weekStart.getUTCDate() + 6);
-    const weekStartStr = ymd(weekStart), weekEndStr = ymd(weekEnd);
-    const monthStartStr = `${tp.year}-${pad2(tp.month)}-01`;
-    const monthEnd = new Date(Date.UTC(tp.year, tp.month, 0));       // day 0 of next month = last day this month
-    const monthEndStr = ymd(monthEnd);
     const monthStartISO = zonedToUtcISO(tz, tp.year, tp.month, 1, 0);  // for timestamptz (outages/recycling)
+
+    // Vonigo invoice date windows — Vonigo's date fields use the naive (clock-as-UTC) convention, so
+    // encode franchise-local midnights with Date.UTC of the local calendar parts (see _shared/tz.ts).
+    // dateEnd = tomorrow-local-midnight so all of today's issued invoices are included (MTD "through now").
+    const weekStartEpoch = Math.floor(weekStart.getTime() / 1000);
+    const monthStartEpoch = Math.floor(Date.UTC(tp.year, tp.month - 1, 1, 0, 0, 0) / 1000);
+    const endEpoch = Math.floor((todayUTC.getTime() + 86400000) / 1000);
 
     const nowMs = Date.now();
     const iso7d = new Date(nowMs - 7 * 86400000).toISOString();
@@ -201,19 +281,21 @@ Deno.serve(async (req: Request) => {
     });
 
     // ══════════════════════════ MONEY ══════════════════════════
-    // Booked revenue = sum of import_total over non-cancelled appts scheduled within the range (franchise TZ).
-    const revenueForRange = async (fromStr: string, toStr: string) => {
-      const { data, error } = await db.from('job_source_snapshot')
-        .select('import_total, job_appointments!inner(scheduled_date, status)')
-        .eq('franchise_id', fid)
-        .gte('job_appointments.scheduled_date', fromStr)
-        .lte('job_appointments.scheduled_date', toStr)
-        .neq('job_appointments.status', 'cancelled');
-      if (error) throw error;
-      return Math.round(sumField((data || []) as Record<string, unknown>[], 'import_total') * 100) / 100;
-    };
-    const revenueThisWeek = await safe('money.revenueThisWeek', () => revenueForRange(weekStartStr, weekEndStr));
-    const revenueThisMonth = await safe('money.revenueThisMonth', () => revenueForRange(monthStartStr, monthEndStr));
+    // revenueThisWeek / revenueThisMonth = Vonigo INVOICED Subtotal (real billed revenue; see the
+    // F_INVOICE_SUBTOTAL note above), NOT the job-mirror booked figure. ops.bookedRevenueToday stays
+    // the mirror's booked total — only these two switch basis. One Vonigo login, reused for both
+    // windows. On ANY Vonigo failure (down/slow/auth) BOTH stay null: the dashboard must never break
+    // when Vonigo is unavailable. Full error → console; only null reaches the client.
+    let revenueThisWeek: number | null = null;
+    let revenueThisMonth: number | null = null;
+    await safe('money.invoicedRevenue', async () => {
+      const creds = await resolveVonigoCreds(db, franchiseID, tenantID);
+      if (!creds) { console.warn(`[crewlogic-dashboard] no Vonigo creds for franchise ${franchiseID}; invoiced revenue → null`); return null; }
+      const token = await vonigoLogin(creds);
+      revenueThisWeek = (await sumInvoicedSubtotal(token, weekStartEpoch, endEpoch)).total;
+      revenueThisMonth = (await sumInvoicedSubtotal(token, monthStartEpoch, endEpoch)).total;
+      return null;
+    });
     // recyclingCollectedMtd — sum of settled visit_settlements this month (a row exists only when collected).
     const recyclingCollectedMtd = await safe('money.recyclingCollectedMtd', async () => {
       const { data, error } = await db.from('visit_settlements').select('amount')
