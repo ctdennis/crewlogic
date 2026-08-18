@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.128.3 | 2026-08-18">
+  <meta name="crewlogic-version" content="v5.128.4 | 2026-08-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9485,12 +9485,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Fetch the window [_bsFrom .. _bsTo] from crewlogic-jobs and re-render.
     // Called on first open AND on any date-picker change (re-fetch). Preserves the
     // tools bar / picker values across a reload because they derive from module vars.
-    async function _bsLoad() {
+    async function _bsLoad(mode) {
       const listEl = document.getElementById('backupScheduleList');
       const bannerEl = document.getElementById('backupScheduleBanner');
       if (!listEl) return;
-      if (bannerEl) bannerEl.innerHTML = '';
-      listEl.innerHTML = '<div class="estimates-empty">Loading your schedule…</div>';
+      // Desktop month-nav (mode='month') repaints the calendar + day pane IN PLACE — don't blank the whole
+      // layout to "Loading…" (that read as a full-window refresh). Normal loads still show the blank.
+      if (mode !== 'month') { if (bannerEl) bannerEl.innerHTML = ''; listEl.innerHTML = '<div class="estimates-empty">Loading your schedule…</div>'; }
 
       // Auth matches the rest of the app: anon key + the franchise resolved at login (Google users have
       // no Supabase Auth JWT). Need a resolved franchise to scope the read.
@@ -9561,7 +9562,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _bsRenderTools();
       // Desktop widescreen layout (calendar + day detail + outage log). Renders even on an empty
       // window (the calendar / outage panel still show). Mobile path below is UNCHANGED.
-      if (window.innerWidth >= 1024) { _bsRenderDesktop(); return; }
+      if (window.innerWidth >= 1024) {
+        // Month-nav: repaint calendar + day pane in place (keeps the portlets + outage panel steady).
+        if (mode === 'month' && document.getElementById('bsDeskCal')) {
+          _bsSelectedDay = _bsDefaultSelectedDay();
+          _bsRenderCalendar(); _bsRenderDayDetail(); _bsRenderOutages();
+        } else { _bsRenderDesktop(); }
+        return;
+      }
       if (appts.length === 0) {
         listEl.innerHTML = '<div class="estimates-empty">No jobs in this window.</div>';
         return;
@@ -10064,10 +10072,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // the SAME portlet: identical card style (paneStyle), same max-height, and align-items:stretch makes
       // them equal height so they read as one consistent row.
       listEl.innerHTML =
-        '<div style="display:flex;gap:16px;align-items:stretch;">'
-        + '<div id="bsDeskCal" style="flex:0 0 340px;max-height:74vh;overflow-y:auto;' + paneStyle + '"></div>'
-        + '<div id="bsDeskDay" style="flex:1 1 0;min-width:0;max-height:74vh;overflow-y:auto;' + paneStyle + '"></div>'
-        + '<div id="bsDeskOut" style="flex:0 0 300px;max-height:74vh;overflow-y:auto;' + paneStyle + '"></div>'
+        '<div style="display:flex;gap:16px;align-items:flex-start;">'
+        + '<div id="bsDeskCal" style="flex:0 0 340px;height:72vh;overflow-y:auto;' + paneStyle + '"></div>'
+        + '<div id="bsDeskDay" style="flex:1 1 0;min-width:0;height:72vh;overflow-y:auto;' + paneStyle + '"></div>'
+        + '<div id="bsDeskOut" style="flex:0 0 300px;height:72vh;overflow-y:auto;' + paneStyle + '"></div>'
         + '</div>';
       _bsRenderCalendar();
       _bsRenderDayDetail();
@@ -10116,7 +10124,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Prev/next month → set the fetch window to the whole visible month and refetch (crewlogic-jobs).
     // _bsLoad shows its "Loading your schedule…" indicator; _bsRenderDesktop repaints on return and
     // picks a fresh default day for the new month.
-    function _bsCalNav(delta) {
+    async function _bsCalNav(delta) {
       let m = _bsCalM + delta, y = _bsCalY;
       while (m < 0) { m += 12; y--; }
       while (m > 11) { m -= 12; y++; }
@@ -10124,7 +10132,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _bsSelectedDay = '';               // force a default pick within the new month
       _bsFrom = _bsMonthFirst(y, m);
       _bsTo = _bsMonthLast(y, m);
-      _bsLoad();
+      // In-place loading cue (dim the calendar) instead of blanking the whole screen.
+      const cal = document.getElementById('bsDeskCal');
+      if (cal) cal.style.opacity = '0.45';
+      await _bsLoad('month');
+      const cal2 = document.getElementById('bsDeskCal');
+      if (cal2) cal2.style.opacity = '';
     }
 
     // Click a day → repaint the calendar (moves the selected highlight) + the day-detail pane only.
