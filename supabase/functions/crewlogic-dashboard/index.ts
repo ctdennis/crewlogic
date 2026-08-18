@@ -191,10 +191,8 @@ Deno.serve(async (req: Request) => {
     const endEpoch = Math.floor((todayUTC.getTime() + 86400000) / 1000);
 
     const nowMs = Date.now();
-    const iso7d = new Date(nowMs - 7 * 86400000).toISOString();
     const iso24h = new Date(nowMs - 24 * 3600000).toISOString();
     const iso30d = new Date(nowMs - 30 * 86400000).toISOString();
-    const iso90d = new Date(nowMs - 90 * 86400000).toISOString();
     const CLOSED = '(won,lost,dismissed,resolved)';
 
     // ══════════════════════════ OPS ══════════════════════════
@@ -228,9 +226,10 @@ Deno.serve(async (req: Request) => {
     }
 
     // ══════════════════════════ ESTIMATES ══════════════════════════
-    const created7d = await safe('estimates.created7d', async () =>
+    // created30d — estimates started in the last 30 days (any non-deleted status).
+    const created30d = await safe('estimates.created30d', async () =>
       count(await db.from('estimates').select('id', { count: 'exact', head: true })
-        .eq('franchise_id', fid).neq('status', 'deleted').gte('created_at', iso7d)));
+        .eq('franchise_id', fid).neq('status', 'deleted').gte('created_at', iso30d)));
     // conversionRate30d — won / (all non-deleted) created in the last 30d.
     const conversionRate30d = await safe('estimates.conversionRate30d', async () => {
       const total = await count(await db.from('estimates').select('id', { count: 'exact', head: true })
@@ -240,27 +239,30 @@ Deno.serve(async (req: Request) => {
         .eq('franchise_id', fid).eq('status', 'won').gte('created_at', iso30d));
       return Math.round((won / total) * 1000) / 1000;
     });
-    // avgTicket — mean total_price of won (booked) estimates over the last 90d; null if none.
-    const avgTicket = await safe('estimates.avgTicket', async () => {
+    // Estimate VALUE split, last 30d. submitted = posted to Vonigo (real pipeline in the CRM);
+    // draft = built in CrewLogic but not yet posted. Each query in its own guarded block → value AND
+    // count fall to null together on failure, never breaking the response (never-suppress: full error
+    // to console via safe()).
+    let inVonigoValue30d: number | null = null, inVonigoCount30d: number | null = null;
+    await safe('estimates.inVonigo30d', async () => {
       const { data, error } = await db.from('estimates').select('total_price')
-        .eq('franchise_id', fid).eq('status', 'won').gte('created_at', iso90d);
+        .eq('franchise_id', fid).eq('status', 'submitted').gte('created_at', iso30d);
       if (error) throw error;
-      const vals = (data || []).map((r: Record<string, unknown>) => Number(r.total_price)).filter((n) => Number.isFinite(n) && n > 0);
-      if (!vals.length) return null;
-      return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100;
+      const rows = (data || []) as Record<string, unknown>[];
+      inVonigoValue30d = Math.round(sumField(rows, 'total_price') * 100) / 100;
+      inVonigoCount30d = rows.length;
+      return null;
     });
-    // avgMargin — mean saved margin_pct (0..100) over the last 30d, normalized to 0..1; null if none.
-    const avgMargin = await safe('estimates.avgMargin', async () => {
-      const { data, error } = await db.from('estimate_costings').select('margin_pct')
-        .eq('franchise_id', fid).gte('created_at', iso30d);
+    let crewlogicValue30d: number | null = null, crewlogicCount30d: number | null = null;
+    await safe('estimates.crewlogic30d', async () => {
+      const { data, error } = await db.from('estimates').select('total_price')
+        .eq('franchise_id', fid).eq('status', 'draft').gte('created_at', iso30d);
       if (error) throw error;
-      const vals = (data || []).map((r: Record<string, unknown>) => Number(r.margin_pct)).filter((n) => Number.isFinite(n));
-      if (!vals.length) return null;
-      return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length / 100) * 1000) / 1000;
+      const rows = (data || []) as Record<string, unknown>[];
+      crewlogicValue30d = Math.round(sumField(rows, 'total_price') * 100) / 100;
+      crewlogicCount30d = rows.length;
+      return null;
     });
-    const openDrafts = await safe('estimates.openDrafts', async () =>
-      count(await db.from('estimates').select('id', { count: 'exact', head: true })
-        .eq('franchise_id', fid).eq('status', 'draft')));
 
     // ══════════════════════════ BIZDEV (pipeline) ══════════════════════════
     const pipelineEstimates = await safe('bizdev.pipelineEstimates', async () =>
@@ -337,7 +339,7 @@ Deno.serve(async (req: Request) => {
       generatedAt: new Date().toISOString(),
       franchiseTz: tz,
       ops: { jobsToday, activeRoutesToday, bookedRevenueToday, jobsCompletedToday, jobsRemainingToday },
-      estimates: { created7d, conversionRate30d, avgTicket, avgMargin, openDrafts },
+      estimates: { created30d, conversionRate30d, inVonigoValue30d, inVonigoCount30d, crewlogicValue30d, crewlogicCount30d },
       bizdev: { pipelineEstimates, newLeads24h, cancellationsToReschedule, pipelineTotalValue },
       money: { revenueThisWeek, revenueThisMonth, recyclingCollectedMtd },
       reliability: { vonigoUp, vonigoOutagesThisMonth, vonigoDowntimeSecThisMonth },
