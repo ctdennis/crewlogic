@@ -94,6 +94,28 @@ Deno.serve(async (req: Request) => {
       await db.from("service_health").update(patch).eq("service", "vonigo");
     }
 
+    // Outage timeline for the Disaster Recovery "known outages" log (migration 0095). Best-effort:
+    // wrapped so a failure here can NEVER break the health check or its state update above.
+    if (transitioned) {
+      try {
+        if (!newUp) {
+          // up->down (Nth strike confirmed): open a new outage if one isn't already open.
+          const { data: open } = await db.from("vonigo_outages").select("id").eq("service", "vonigo").is("ended_at", null).limit(1);
+          if (!open || !open.length) {
+            await db.from("vonigo_outages").insert({ service: "vonigo", started_at: now, detail, source: "auto" });
+          }
+        } else {
+          // down->up (first success): close the open outage and stamp its duration.
+          const { data: open } = await db.from("vonigo_outages").select("id, started_at").eq("service", "vonigo").is("ended_at", null).order("started_at", { ascending: false }).limit(1);
+          const row = open && open[0];
+          if (row) {
+            const dur = Math.max(0, Math.round((new Date(now).getTime() - new Date(row.started_at).getTime()) / 1000));
+            await db.from("vonigo_outages").update({ ended_at: now, duration_seconds: dur }).eq("id", row.id);
+          }
+        }
+      } catch (e) { console.error("[vonigo-health] outage log failed:", (e as Error).message); }
+    }
+
     if (transitioned) {
       const subject = ping.up
         ? "Vonigo is back UP"
