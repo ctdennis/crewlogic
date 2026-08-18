@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.128.2 | 2026-08-18">
+  <meta name="crewlogic-version" content="v5.128.3 | 2026-08-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10060,11 +10060,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (!_bsSelectedDay || _bsSelectedDay.indexOf(monthPrefix) !== 0) _bsSelectedDay = _bsDefaultSelectedDay();
       const paneStyle = 'box-sizing:border-box;background:var(--bg-card,#1e2f40);border:1px solid var(--border,#22354a);border-radius:var(--radius,12px);padding:14px;';
       // Stable 3-column row: calendar (far left) · jobs (fills the middle) · outage log (rightmost, beside
-      // the jobs). No wrap, so the outage box always sits to the RIGHT of the jobs on desktop.
+      // the jobs). No wrap, so the outage box always sits to the RIGHT of the jobs on desktop. All three are
+      // the SAME portlet: identical card style (paneStyle), same max-height, and align-items:stretch makes
+      // them equal height so they read as one consistent row.
       listEl.innerHTML =
-        '<div style="display:flex;gap:16px;align-items:flex-start;">'
-        + '<div id="bsDeskCal" style="flex:0 0 340px;' + paneStyle + '"></div>'
-        + '<div id="bsDeskDay" style="flex:1 1 0;min-width:0;max-height:74vh;overflow-y:auto;"></div>'
+        '<div style="display:flex;gap:16px;align-items:stretch;">'
+        + '<div id="bsDeskCal" style="flex:0 0 340px;max-height:74vh;overflow-y:auto;' + paneStyle + '"></div>'
+        + '<div id="bsDeskDay" style="flex:1 1 0;min-width:0;max-height:74vh;overflow-y:auto;' + paneStyle + '"></div>'
         + '<div id="bsDeskOut" style="flex:0 0 300px;max-height:74vh;overflow-y:auto;' + paneStyle + '"></div>'
         + '</div>';
       _bsRenderCalendar();
@@ -10146,7 +10148,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       });
       let h = '';
       h += '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px;">';
-      h += '<div style="font-size:16px;font-weight:800;color:var(--text-primary);">' + _bsEsc(_bsDayHeader(day) || day) + '</div>';
+      h += '<div style="font-size:14px;font-weight:800;color:var(--text-primary);">' + _bsEsc(_bsDayHeader(day) || day) + '</div>';
       h += '<div style="font-size:13px;color:var(--text-muted);">' + rows.length + ' job' + (rows.length === 1 ? '' : 's') + '</div>';
       h += '</div>';
       if (rows.length === 0) {
