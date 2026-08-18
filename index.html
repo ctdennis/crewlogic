@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.126.0 | 2026-08-18">
+  <meta name="crewlogic-version" content="v5.127.0 | 2026-08-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -12894,6 +12894,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // route-classification filter: multi-pick set of VISIBLE crewlogicTypes (all shown by default).
     let _boardVisibleTypes = new Set(['estimate', 'junk', 'reserve', 'dispatch', 'other']);
     let _dashCache = null;     // last aligned board data, so the filter re-renders without re-fetching Vonigo
+    const _DASH_CACHE_TTL = 90000;  // FW-68: within this window a Dispatch re-entry paints from cache with NO Vonigo call (matches the 90s auto-refresh cadence)
     function _dashNavBtnCss() { return 'width:26px;height:26px;border-radius:6px;border:1px solid var(--btn-surface-border,#46596d);background:var(--btn-surface,#34485d);color:var(--text-primary);font-size:12px;cursor:pointer;'; }
     function _dashDayLabel(dayID) {
       const today = mjNowParts().dayID;
@@ -13330,9 +13331,18 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     // Load BOTH days, union their routes, and render both boards with the SAME aligned route rows — so
     // every route is present on both (gray when inactive that day) and rows line up for cross-day drag.
-    async function dashLoadBoards() {
+    async function dashLoadBoards(quiet) {
       const srcC = document.getElementById('dashSrcBoard'), destC = document.getElementById('dashDestBoard');
-      [srcC, destC].forEach(c => { if (c) c.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">Loading…</div>'; });
+      // FW-68 re-entry cache: if these exact two days are already loaded, paint instantly from memory instead of
+      // re-fetching Vonigo. openModule reseeds to today/tomorrow on every open, so a quick re-entry hits this —
+      // no "Loading…", no edge call. Only when the cache has aged past the refresh window do we fire a QUIET
+      // full re-sync in the background (rebuilds the cache + repaints in place; never blanks a populated board).
+      if (!quiet && _dashCache && _dashCache.srcDay === _dashSrcDay && _dashCache.destDay === _dashDestDay) {
+        _dashRerenderBoards();
+        if (Date.now() - (_dashCache.at || 0) > _DASH_CACHE_TTL) dashLoadBoards(true);
+        return;
+      }
+      if (!quiet) [srcC, destC].forEach(c => { if (c) c.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">Loading…</div>'; });
       // Load the two boards SEQUENTIALLY (was Promise.all) — firing both boardGrids at once was half the
       // initial concurrent-edge burst that 502'd tomorrow's board. Serial is ~1.8s slower but reliable.
       const src = await dashFetchDay(_dashSrcDay);
@@ -13348,7 +13358,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       const axis = (sMin.length && eMax.length)
         ? { originH: Math.floor(Math.min(...sMin) / 60), endH: Math.ceil(Math.max(...eMax) / 60) }
         : _dashSharedAxis([srcR, destR]);
-      _dashCache = { srcR, destR, axis, srcDay: _dashSrcDay, destDay: _dashDestDay }; // for the route filter (re-render without re-fetch)
+      _dashCache = { srcR, destR, axis, srcDay: _dashSrcDay, destDay: _dashDestDay, at: Date.now() }; // for the route filter + FW-68 re-entry cache (age via .at)
       await Promise.all([_mjLoadAssignData(_dashSrcDay), _mjLoadAssignData(_dashDestDay), loadDashReminders(true)]); // FW-59: assignments for BOTH days before render; P4: reminders fetched here (skipRepaint) so the dots are in the FIRST board paint — no late re-render disturbing the map fit
       dashRenderBoard(_dashSrcDay, srcR, srcC, axis);
       dashRenderBoard(_dashDestDay, destR, destC, axis);
@@ -14795,6 +14805,17 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       return { trucks, volumePrice, adjNet, price, recyclePct, donatePct, recycleTrucks, donateTrucks, dispTrucks, sites, siteIdx, siteCost, recSites, recSiteIdx, donSites, donSiteIdx, recRevRate, recyclingRev, totalRevenue, crew, hours, crewRate, disposal, labor, dist, driveMin, driveMiles, driveHours, mpg, fuelPrice, driveLabor, fuel, royalty, royaltyFrac, useD, useL, useDL, useF, useR, cost, margin, marginPct, targetFrac, recPrice };
     }
     function ecSetCost(f, val){ if (!_ec.cost) _ec.cost = {}; _ec.cost[f] = val; ecRecalcMargin(); }
+    // Franchises think of margin BEFORE royalty (our 60% after-royalty = 74% before, when royalty=14%).
+    // The stored target (`targetMargin`) is the AFTER-royalty number (keeps the recommended-price math
+    // unchanged); this converts a BEFORE-royalty entry to after by subtracting the royalty points, then
+    // stores it. The two boxes stay in unison because both re-render from the single stored value.
+    function ecSetTargetBefore(beforeVal){
+      const cs = (currentUser && currentUser.costSettings) || {};
+      const rPts = ecInc('royalty') ? (isFinite(parseFloat(cs.royaltyPct)) ? parseFloat(cs.royaltyPct) : 14) : 0;
+      let after = (parseFloat(beforeVal) || 0) - rPts;
+      if (after < 0) after = 0;
+      ecSetCost('targetMargin', after);
+    }
     function ecInc(key){ const inc = (_ec.cost||{}).include || {}; return inc[key] !== false; }
     function ecToggleCost(key){ if (!_ec.cost.include) _ec.cost.include = {}; _ec.cost.include[key] = !ecInc(key); ecRecalcMargin(); }
     function ecRecalcMargin(){ const p = document.getElementById('ecMarginPanel'); if (p) p.innerHTML = ecMarginPanelHtml(); }
@@ -14842,6 +14863,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         : '<span style="font-size:12px;color:var(--text-muted);">(none)</span>') + '</div>';
       const numInput = (val, key, w, step) => '<input type="number" min="0"'+(step?' step="'+step+'"':'')+' value="'+val+'" onchange="ecSetCost(\''+key+'\', this.value)" style="width:'+w+'px;text-align:right;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:4px;padding:2px 4px;font-size:12px;">';
       const targetPct = m.targetFrac*100;
+      // Dual target boxes: BEFORE-royalty (how franchises think) and AFTER-royalty (stored). They move in
+      // unison — delta is the royalty points (0 when royalty is excluded from cost).
+      const _afterPct = +(m.targetFrac*100).toFixed(0);
+      const _royaltyPts = m.useR ? +(m.royaltyFrac*100).toFixed(0) : 0;
+      const _beforePct = _afterPct + _royaltyPts;
+      const tgtBeforeInput = '<input type="number" min="0" value="'+_beforePct+'" onchange="ecSetTargetBefore(this.value)" style="width:40px;text-align:right;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:4px;padding:2px 4px;font-size:12px;">';
+      const tgtAfterInput = numInput(_afterPct,'targetMargin',40);
       // Literal traffic-light colors (NOT var(--accent-green) — dev overrides that to amber, which would make good == below-target).
       const marginColor = m.marginPct >= targetPct ? '#22c55e' : (m.marginPct >= 0 ? '#e0a44f' : '#e05a4f');
       const targetHit = m.marginPct >= targetPct;
@@ -14891,7 +14919,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           '<span style="font-weight:800;font-size:22px;color:'+marginColor+';">'+ecMoney(m.margin)+' <span style="font-size:14px;">('+m.marginPct.toFixed(1)+'%)</span></span>' +
         '</div>' +
         '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--text-muted);">' +
-          '<span>Target '+numInput(+(m.targetFrac*100).toFixed(0),'targetMargin',40)+'% → recommended <b style="color:#22c55e;">'+ecMoney(m.recPrice)+'</b></span>' +
+          '<span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">Target margin: '+tgtBeforeInput+'% <span style="font-size:10px;color:var(--text-muted);">before royalty</span> = '+tgtAfterInput+'% <span style="font-size:10px;color:var(--text-muted);">after royalty</span> → recommended <b style="color:#22c55e;">'+ecMoney(m.recPrice)+'</b></span>' +
           '<span style="color:'+marginColor+';font-weight:700;">'+(m.marginPct<0?'losing money':tgtStatus)+'</span>' +
         '</div>' +
         (ecVolRate(1) === 0 ? '<div style="font-size:11px;color:#e0a44f;margin-top:6px;">⚠️ Volume price $0 — price book not loaded for this zip.</div>' : '') +
