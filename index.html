@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.128.4 | 2026-08-18">
+  <meta name="crewlogic-version" content="v5.129.0 | 2026-08-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1125,6 +1125,11 @@
 
       #deskNav .dn-foot { padding: 12px 18px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 13px; cursor: pointer; }
       #deskNav .dn-foot:hover { color: var(--text-primary); }
+
+      /* Home dashboard KPI tiles */
+      .hd-tile { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+      .hd-click { cursor: pointer; transition: border-color .12s; }
+      .hd-click:hover { border-color: var(--accent-green); }
     }
   /* Numbered map markers — neutralize Leaflet's default white div-icon box */
   .truck-num-marker, .job-stop-marker, .job-lookahead-dot { background: transparent !important; border: none !important; }
@@ -1473,6 +1478,10 @@
       <div class="dn-scroll">
         <div class="dn-lbl">Workspace</div>
 
+        <div class="dn-item" id="dnHome" onclick="_shellNav('homeDash',this)">
+          <span class="dn-ic">🏠</span> Home
+        </div>
+
         <div class="dn-item" onclick="_shellNav('dashboard',this)">
           <span class="dn-ic">🚚</span> Dispatch
         </div>
@@ -1593,6 +1602,9 @@
     </div>
 
     <div class="app-content">
+
+      <!-- HOME DASHBOARD (FW-68 desktop landing; mobile uses the tile grid below) -->
+      <div id="homeDashScreen" style="display:none;"></div>
 
       <!-- HOME -->
       <div id="homeScreen">
@@ -9149,7 +9161,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       'disposalRouterScreen',
       'storageScreen', 'storageResultsScreen',
       'mattressScreen', 'mattressResultsScreen',
-      'priceLookupScreen', 'promosScreen', 'backupScheduleScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'truckAlertsScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen', 'estimateCostingScreen', 'pipelineScreen', 'bizdevScreen'
+      'priceLookupScreen', 'promosScreen', 'backupScheduleScreen', 'settingsScreen', 'estimatesScreen', 'estimateEditorScreen', 'signsScreen', 'volumeCheckScreen', 'manageJobsScreen', 'jobPlanScreen', 'trucksScreen', 'truckAlertsScreen', 'dashboardScreen', 'estimatesDashboardScreen', 'subscriptionAdminScreen', 'usageDashboardScreen', 'estimateCostingScreen', 'pipelineScreen', 'bizdevScreen', 'homeDashScreen'
     ];
 
     function hideAll() {
@@ -9197,7 +9209,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _shellSetActive(el);
       // keep the parent group expanded so the active sub-item stays visible
       if (el) { const g = el.closest('.dn-group'); if (g) g.classList.add('dn-open'); }
-      if (key === 'recycling') { openRecycling(); }
+      if (key === 'homeDash') { openHomeDash(); }
+      else if (key === 'recycling') { openRecycling(); }
       else { openModule(key); }
     }
 
@@ -9402,6 +9415,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         if (!confirm('You have unsaved changes in Settings.\n\nLeave without saving?')) return;
         _settingsDirty = false;
       }
+      // Desktop (FW-68, >=1024px): Home is the KPI dashboard, not the mobile tile grid. Mobile keeps the tiles.
+      if (window.innerWidth >= 1024 && document.getElementById('appShell') && document.getElementById('appShell').classList.contains('active')) {
+        openHomeDash();
+        return;
+      }
       hideAll();
       document.getElementById('homeScreen').style.display = 'block';
       document.getElementById('backBtn').classList.remove('visible');
@@ -9410,6 +9428,115 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // Apply the user's saved card order, then enable drag-to-reorder (init once).
       applyHomeCardOrder();
       initHomeCardSort();
+    }
+
+    // ===== Home dashboard (FW-68, desktop >=1024px landing) — KPI rollups from crewlogic-dashboard. =====
+    // Mobile keeps the tile grid (#homeScreen). This is the desktop "Home" nav destination + login landing.
+    async function openHomeDash() {
+      hideAll();
+      document.getElementById('backBtn').classList.remove('visible');
+      document.getElementById('headerTitle').textContent = 'Home';
+      currentScreen = 'homeDash';
+      _shellSetActive(document.getElementById('dnHome'));
+      // Desktop full-width (like Dispatch/DR); hideAll() resets these on leave.
+      ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) el.style.maxWidth = 'none'; });
+      const scr = document.getElementById('homeDashScreen');
+      if (scr) scr.style.display = 'block';
+      renderHomeDash();
+    }
+    function _hdFmt(v, kind) {
+      if (v === null || v === undefined) return '';
+      if (kind === 'money') return '$' + Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
+      if (kind === 'pct') return Math.round(Number(v) * 100) + '%';
+      if (kind === 'status') return v ? 'Live' : 'Down';
+      return Number(v).toLocaleString('en-US');
+    }
+    function _hdTile(t) {
+      // status tiles render even when false; numeric tiles hide when null/undefined (no data for this franchise).
+      if (t.k === null || t.k === undefined) return '';
+      const isStatus = t.fmt === 'status';
+      const val = _hdFmt(t.k, t.fmt);
+      const valColor = isStatus ? (t.k ? 'var(--accent-green)' : 'var(--accent-red,#f87171)') : (t.tone || 'var(--text-primary)');
+      const cls = t.go ? 'hd-tile hd-click' : 'hd-tile';
+      const click = t.go ? ' onclick="' + t.go + '"' : '';
+      return '<div class="' + cls + '"' + click + '>'
+        + '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);">' + t.label + '</div>'
+        + '<div style="font-size:26px;font-weight:800;margin-top:6px;color:' + valColor + ';font-variant-numeric:tabular-nums;">' + val + '</div>'
+        + '</div>';
+    }
+    function _hdSection(title, tiles) {
+      const cells = tiles.map(_hdTile).filter(Boolean).join('');
+      if (!cells) return '';
+      return '<div style="margin-top:22px;">'
+        + '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:10px;">' + title + '</div>'
+        + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px;">' + cells + '</div>'
+        + '</div>';
+    }
+    function _hdRenderKpis(d) {
+      const ops = d.ops || {}, es = d.estimates || {}, bd = d.bizdev || {}, mo = d.money || {}, rl = d.reliability || {};
+      let html = '';
+      html += _hdSection('Today', [
+        { k: ops.jobsToday, label: 'Jobs today', fmt: 'int', go: "openModule('dashboard')" },
+        { k: ops.activeRoutesToday, label: 'Active routes', fmt: 'int', go: "openModule('dashboard')" },
+        { k: ops.bookedRevenueToday, label: 'Booked today', fmt: 'money', go: "openModule('dashboard')" },
+        { k: ops.jobsRemainingToday, label: 'Jobs remaining', fmt: 'int', go: "openModule('dashboard')" },
+      ]);
+      html += _hdSection('Estimates', [
+        { k: es.created7d, label: 'Estimates (7 days)', fmt: 'int', go: "openModule('estimates')" },
+        { k: es.conversionRate30d, label: 'Conversion (30 days)', fmt: 'pct', go: "openModule('estimates')" },
+        { k: es.avgTicket, label: 'Avg ticket', fmt: 'money', go: "openModule('estimates')" },
+        { k: es.avgMargin, label: 'Avg margin', fmt: 'pct', go: "openModule('estimateCosting')" },
+      ]);
+      html += _hdSection('Business Development', [
+        { k: bd.pipelineEstimates, label: 'Estimates in pipeline', fmt: 'int', go: "openModule('bizdev')" },
+        { k: bd.newLeads24h, label: 'New leads (24h)', fmt: 'int', go: "openModule('bizdev')" },
+        { k: bd.cancellationsToReschedule, label: 'Cancellations to work', fmt: 'int', go: "openModule('bizdev')" },
+        { k: bd.pipelineTotalValue, label: 'Pipeline value', fmt: 'money', go: "openModule('bizdev')" },
+      ]);
+      html += _hdSection('Money', [
+        { k: mo.revenueThisWeek, label: 'Revenue this week', fmt: 'money' },
+        { k: mo.revenueThisMonth, label: 'Revenue this month', fmt: 'money' },
+        { k: mo.recyclingCollectedMtd, label: 'Recycling (MTD)', fmt: 'money', go: 'openRecycling()' },
+      ]);
+      html += _hdSection('Reliability', [
+        { k: rl.vonigoUp, label: 'Vonigo', fmt: 'status', go: "openModule('backupSchedule')" },
+        { k: rl.vonigoOutagesThisMonth, label: 'Outages this month', fmt: 'int', go: "openModule('backupSchedule')" },
+      ]);
+      return html || '<div style="color:var(--text-muted);padding:24px 4px;">No stats to show yet.</div>';
+    }
+    function _hdHeaderHtml(greeting, name, dateStr) {
+      return '<div style="margin-bottom:6px;">'
+        + '<div style="font-size:24px;font-weight:800;color:var(--text-primary);">' + greeting + ', ' + _bsEsc(name) + '!</div>'
+        + '<div style="font-size:13px;color:var(--text-muted);margin-top:2px;">' + _bsEsc(dateStr) + '</div>'
+        + '</div>';
+    }
+    async function renderHomeDash() {
+      const scr = document.getElementById('homeDashScreen');
+      if (!scr) return;
+      const hour = new Date().getHours();
+      const firstName = (currentUser && currentUser.name) ? currentUser.name.split(' ')[0] : 'there';
+      const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+      const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+      scr.innerHTML = _hdHeaderHtml(greeting, firstName, dateStr)
+        + '<div id="hdGrid"><div style="display:flex;align-items:center;gap:10px;color:var(--text-muted);padding:40px 4px;"><span class="spinner-inline"></span> Loading your dashboard…</div></div>';
+      let data = null;
+      try {
+        // Same auth pattern as the Backup Schedule's crewlogic-jobs call (anon key as bearer; Google users
+        // have no Supabase JWT) so it passes the default gateway gate.
+        const res = await fetch(SUPABASE_URL + '/functions/v1/crewlogic-dashboard', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': EDGE_ANON_KEY, 'Authorization': 'Bearer ' + EDGE_ANON_KEY },
+          body: JSON.stringify({ franchiseID: currentUser.franchiseID, franchiseInternalID: currentUser.franchiseInternalID, tenantID: currentUser.tenantID }),
+        });
+        data = await res.json();
+      } catch (e) { console.error('[homeDash] load failed:', e); }
+      const grid = document.getElementById('hdGrid');
+      if (!grid) return; // navigated away during the await
+      if (!data || data.success !== true) {
+        grid.innerHTML = '<div style="color:var(--text-muted);padding:24px 4px;">Couldn’t load dashboard stats right now.</div>';
+        return;
+      }
+      grid.innerHTML = _hdRenderKpis(data);
     }
 
     // ===== Backup Schedule — local mirror of Vonigo jobs (crewlogic-jobs); works during a Vonigo outage =====
