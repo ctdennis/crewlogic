@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.127.0 | 2026-08-18">
+  <meta name="crewlogic-version" content="v5.128.0 | 2026-08-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9419,6 +9419,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       document.getElementById('backupScheduleScreen').classList.add('active');
       document.getElementById('headerTitle').textContent = 'Backup Schedule';
       currentScreen = 'backupSchedule';
+      // Desktop (FW-68, >=1024px): let the Disaster Recovery screen fill the window (the widescreen
+      // calendar / day-detail / outage layout needs the room). hideAll() resets these on leave.
+      if (window.innerWidth >= 1024) {
+        ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) el.style.maxWidth = 'none'; });
+      }
+      _bsInitResize();
       renderBackupSchedule();
     }
 
@@ -9463,6 +9469,16 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _bsTo = _bsDefaultTo();
       _bsRoute = '';
       _bsText = '';
+      // Desktop calendar defaults to the month of today, and fetches the whole visible month so the
+      // grid's day-badges are coherent (mobile keeps the tight today-1..+7 window). v-desktop-DR.
+      const _bsNow = new Date();
+      _bsCalY = _bsNow.getFullYear();
+      _bsCalM = _bsNow.getMonth();
+      _bsSelectedDay = '';
+      if (window.innerWidth >= 1024) {
+        _bsFrom = _bsMonthFirst(_bsCalY, _bsCalM);
+        _bsTo = _bsMonthLast(_bsCalY, _bsCalM);
+      }
       _bsLoad();
     }
 
@@ -9528,6 +9544,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       // operate on it WITHOUT re-fetching (v5.73.0).
       _bsData = appts;
       _bsHealth = health;
+      _bsOutages = Array.isArray(data.outages) ? data.outages : [];
       _bsTruncated = data.truncated === true;
       _bsBounds = data.bounds || null;
       _bsById = {};
@@ -9542,6 +9559,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       // Always render the tools bar (keeps the date pickers usable even on an empty window).
       _bsRenderTools();
+      // Desktop widescreen layout (calendar + day detail + outage log). Renders even on an empty
+      // window (the calendar / outage panel still show). Mobile path below is UNCHANGED.
+      if (window.innerWidth >= 1024) { _bsRenderDesktop(); return; }
       if (appts.length === 0) {
         listEl.innerHTML = '<div class="estimates-empty">No jobs in this window.</div>';
         return;
@@ -9568,6 +9588,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     let _bsTo = '';          // YYYY-MM-DD, fetch window end (To picker)
     let _bsRoute = '';       // selected snapshot.route_name ('' = All routes)
     let _bsText = '';        // free-text filter (customer name + address only)
+    // Desktop widescreen (>=1024px) state — additive; unused on the mobile stacked-list path.
+    let _bsOutages = [];     // Vonigo outage log from crewlogic-jobs `list` (newest first, up to 50)
+    let _bsSelectedDay = ''; // YYYY-MM-DD currently shown in the desktop day-detail pane
+    let _bsCalY = new Date().getFullYear(); // visible calendar year
+    let _bsCalM = new Date().getMonth();    // visible calendar month (0-based)
 
     function _bsYmd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
     function _bsDefaultFrom() { const d = new Date(); d.setDate(d.getDate() - 1); return _bsYmd(d); }
@@ -9622,7 +9647,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         return _bsMatch(a, q);
       });
     }
-    function _bsApplyFilter() { _bsRenderList(_bsCurrentFiltered()); _bsUpdateEmailBtn(); }
+    function _bsApplyFilter() {
+      // Desktop: filters re-badge the calendar + repaint the day pane in place (never rebuild the
+      // whole screen, so the outage panel's scroll survives). Mobile: the stacked list (UNCHANGED).
+      if (window.innerWidth >= 1024 && currentScreen === 'backupSchedule') {
+        _bsRenderCalendar(); _bsRenderDayDetail(); _bsUpdateEmailBtn(); return;
+      }
+      _bsRenderList(_bsCurrentFiltered()); _bsUpdateEmailBtn();
+    }
     // Flip the day order (newest / oldest first) — re-renders the toolbar (button label) + the list.
     function _bsToggleSort() { _bsSortDesc = !_bsSortDesc; _bsRenderTools(); _bsApplyFilter(); }
 
@@ -9709,7 +9741,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // Select / clear every appointment in the ACTIVE (filtered) window.
     function _bsToggleSelectAll(checked) {
       _bsCurrentFiltered().forEach(a => { const id = String(a.id); if (checked) _bsSelected.add(id); else _bsSelected.delete(id); });
-      _bsRenderList(_bsCurrentFiltered());
+      if (window.innerWidth >= 1024 && currentScreen === 'backupSchedule') _bsRenderDayDetail();
+      else _bsRenderList(_bsCurrentFiltered());
       _bsUpdateEmailBtn();
     }
     function _bsToggleSelect(id, checked) {
@@ -9739,47 +9772,53 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           return am - bm;
         });
         html += '<div style="margin:16px 0 8px;font-size:13px;font-weight:700;color:var(--text-muted);letter-spacing:0.3px;">' + _bsEsc(_bsDayHeader(day)) + '</div>';
-        rows.forEach(a => {
-          const snap = a.snapshot || {};
-          const job = a.job || {};
-          const isCancelled = a.status === 'cancelled';
-          const cust = _bsCust(a) || '—';
-          const addr = String(job.service_address || '').split('\n')[0];
-          const time = _bsMinutesToTime(a.start_minutes);
-          const money = (snap.import_total !== null && snap.import_total !== undefined && !isNaN(snap.import_total)) ? ('$' + Number(snap.import_total).toFixed(2)) : '';
-          const badge = _BS_BADGE[a.status] || { t: a.status || '—', c: 'var(--text-muted)' };
-          const lbl = _bsLabelOf(a);
-          const dim = isCancelled ? 'opacity:0.55;' : '';
-          const strike = isCancelled ? 'text-decoration:line-through;' : '';
-          const idEsc = _bsEsc(a.id);
-          const checked = _bsSelected.has(String(a.id)) ? 'checked' : '';
-
-          html += '<div onclick="_bsOpenDetail(\'' + idEsc + '\')" style="cursor:pointer;display:flex;gap:10px;align-items:stretch;padding:10px 12px;margin-bottom:8px;background:var(--bg-card,#1e2f40);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);' + dim + '">';
-          // Left color stripe = the Vonigo appointment-label color (matches the Vonigo schedule at a glance)
-          html += '<div style="flex:0 0 4px;align-self:stretch;border-radius:3px;background:' + (lbl ? lbl.c : 'transparent') + ';"></div>';
-          // Select checkbox (does not open the detail card)
-          html += '<div style="flex:0 0 auto;align-self:center;"><input type="checkbox" ' + checked + ' onclick="event.stopPropagation();_bsToggleSelect(\'' + idEsc + '\',this.checked)" style="width:18px;height:18px;cursor:pointer;"></div>';
-          // Time column
-          html += '<div style="flex:0 0 auto;min-width:66px;font-size:12px;font-weight:700;color:var(--text-secondary);font-family:\'Space Mono\',monospace;align-self:center;">' + _bsEsc(time) + '</div>';
-          // Body
-          html += '<div style="flex:1;min-width:0;">';
-          html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px;">';
-          html += '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;color:var(--text-primary);' + strike + '">' + _bsEsc(cust) + '</div>';
-          // Prefer the Vonigo label chip (color-matched to Vonigo); fall back to the canonical status badge.
-          if (lbl) html += '<span style="flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:0.3px;color:' + lbl.c + ';border:1px solid ' + lbl.c + ';border-radius:6px;padding:2px 7px;white-space:nowrap;">' + _bsEsc(lbl.t) + '</span>';
-          else html += '<span style="flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:0.4px;color:' + badge.c + ';border:1px solid ' + badge.c + ';border-radius:6px;padding:2px 7px;text-transform:uppercase;">' + _bsEsc(badge.t) + '</span>';
-          html += '</div>';
-          if (addr) html += '<div style="font-size:12px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📍 ' + _bsEsc(addr) + '</div>';
-          html += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:4px;">';
-          if (snap.route_name) html += '<span style="font-size:11px;color:var(--text-secondary);">🚚 ' + _bsEsc(snap.route_name) + '</span>';
-          if (money) html += '<span style="font-size:12px;color:var(--text-secondary);">💰 <strong style="color:var(--accent-green);font-family:\'Space Mono\',monospace;">' + _bsEsc(money) + '</strong></span>';
-          if (job.job_number) html += '<span style="font-size:10px;color:var(--text-muted);font-family:monospace;">#' + _bsEsc(job.job_number) + '</span>';
-          html += '</div>';
-          html += '</div>';
-          html += '</div>';
-        });
+        rows.forEach(a => { html += _bsApptCardHtml(a); });
       });
       listEl.innerHTML = html;
+    }
+
+    // Single appointment card markup (factored out of _bsRenderList v-desktop-DR so the desktop
+    // day-detail pane reuses the IDENTICAL card look). Output is byte-for-byte what the mobile list
+    // built inline before — do not diverge it.
+    function _bsApptCardHtml(a) {
+      const snap = a.snapshot || {};
+      const job = a.job || {};
+      const isCancelled = a.status === 'cancelled';
+      const cust = _bsCust(a) || '—';
+      const addr = String(job.service_address || '').split('\n')[0];
+      const time = _bsMinutesToTime(a.start_minutes);
+      const money = (snap.import_total !== null && snap.import_total !== undefined && !isNaN(snap.import_total)) ? ('$' + Number(snap.import_total).toFixed(2)) : '';
+      const badge = _BS_BADGE[a.status] || { t: a.status || '—', c: 'var(--text-muted)' };
+      const lbl = _bsLabelOf(a);
+      const dim = isCancelled ? 'opacity:0.55;' : '';
+      const strike = isCancelled ? 'text-decoration:line-through;' : '';
+      const idEsc = _bsEsc(a.id);
+      const checked = _bsSelected.has(String(a.id)) ? 'checked' : '';
+      let html = '';
+      html += '<div onclick="_bsOpenDetail(\'' + idEsc + '\')" style="cursor:pointer;display:flex;gap:10px;align-items:stretch;padding:10px 12px;margin-bottom:8px;background:var(--bg-card,#1e2f40);border:1px solid var(--border,#22354a);border-radius:var(--radius-sm,8px);' + dim + '">';
+      // Left color stripe = the Vonigo appointment-label color (matches the Vonigo schedule at a glance)
+      html += '<div style="flex:0 0 4px;align-self:stretch;border-radius:3px;background:' + (lbl ? lbl.c : 'transparent') + ';"></div>';
+      // Select checkbox (does not open the detail card)
+      html += '<div style="flex:0 0 auto;align-self:center;"><input type="checkbox" ' + checked + ' onclick="event.stopPropagation();_bsToggleSelect(\'' + idEsc + '\',this.checked)" style="width:18px;height:18px;cursor:pointer;"></div>';
+      // Time column
+      html += '<div style="flex:0 0 auto;min-width:66px;font-size:12px;font-weight:700;color:var(--text-secondary);font-family:\'Space Mono\',monospace;align-self:center;">' + _bsEsc(time) + '</div>';
+      // Body
+      html += '<div style="flex:1;min-width:0;">';
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px;">';
+      html += '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;color:var(--text-primary);' + strike + '">' + _bsEsc(cust) + '</div>';
+      // Prefer the Vonigo label chip (color-matched to Vonigo); fall back to the canonical status badge.
+      if (lbl) html += '<span style="flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:0.3px;color:' + lbl.c + ';border:1px solid ' + lbl.c + ';border-radius:6px;padding:2px 7px;white-space:nowrap;">' + _bsEsc(lbl.t) + '</span>';
+      else html += '<span style="flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:0.4px;color:' + badge.c + ';border:1px solid ' + badge.c + ';border-radius:6px;padding:2px 7px;text-transform:uppercase;">' + _bsEsc(badge.t) + '</span>';
+      html += '</div>';
+      if (addr) html += '<div style="font-size:12px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📍 ' + _bsEsc(addr) + '</div>';
+      html += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:4px;">';
+      if (snap.route_name) html += '<span style="font-size:11px;color:var(--text-secondary);">🚚 ' + _bsEsc(snap.route_name) + '</span>';
+      if (money) html += '<span style="font-size:12px;color:var(--text-secondary);">💰 <strong style="color:var(--accent-green);font-family:\'Space Mono\',monospace;">' + _bsEsc(money) + '</strong></span>';
+      if (job.job_number) html += '<span style="font-size:10px;color:var(--text-muted);font-family:monospace;">#' + _bsEsc(job.job_number) + '</span>';
+      html += '</div>';
+      html += '</div>';
+      html += '</div>';
+      return html;
     }
 
     // ---- Detail card (modal overlay) ----
@@ -9972,6 +10011,207 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         setTimeout(_bsCloseEmailModal, 1000);
       } else {
         if (msgEl) { msgEl.textContent = 'Couldn\'t send right now — please try again.'; msgEl.style.color = '#ff7676'; }
+      }
+    }
+
+    // ========================================================================================
+    // Backup Schedule — DESKTOP widescreen layout (v-desktop-DR, additive; renders ONLY >=1024px).
+    // Three regions injected into #backupScheduleList: month calendar (left) · day detail (center)
+    // · Vonigo outage log (right). Mobile (<1024px) keeps the stacked per-day list untouched.
+    // ========================================================================================
+    function _bsMonthFirst(y, m) { return y + '-' + String(m + 1).padStart(2, '0') + '-01'; }
+    function _bsMonthLast(y, m) { return _bsYmd(new Date(y, m + 1, 0)); }
+    // Seconds → "48 min" / "2 h 14 min" / "45 sec" for the outage log.
+    function _bsHumanDur(sec) {
+      if (sec == null || isNaN(sec)) return '';
+      sec = Math.max(0, Math.round(Number(sec)));
+      if (sec < 60) return sec + ' sec';
+      const mins = Math.round(sec / 60);
+      if (mins < 60) return mins + ' min';
+      const h = Math.floor(mins / 60), m = mins % 60;
+      return h + ' h' + (m ? ' ' + m + ' min' : '');
+    }
+
+    // Best default day for the visible month: today if it's this month AND has jobs; else the day
+    // with jobs nearest to today; else today (if in month); else the 1st.
+    function _bsDefaultSelectedDay() {
+      const counts = {};
+      _bsData.forEach(a => { const d = a.scheduled_date || ''; if (d) counts[d] = (counts[d] || 0) + 1; });
+      const monthPrefix = _bsCalY + '-' + String(_bsCalM + 1).padStart(2, '0');
+      const today = _bsYmd(new Date());
+      if (today.indexOf(monthPrefix) === 0 && counts[today]) return today;
+      const withJobs = Object.keys(counts).filter(d => d.indexOf(monthPrefix) === 0).sort();
+      if (withJobs.length) {
+        const ref = new Date(today + 'T00:00:00');
+        let best = withJobs[0], bestDiff = Infinity;
+        withJobs.forEach(d => { const diff = Math.abs(new Date(d + 'T00:00:00') - ref); if (diff < bestDiff) { bestDiff = diff; best = d; } });
+        return best;
+      }
+      if (today.indexOf(monthPrefix) === 0) return today;
+      return _bsMonthFirst(_bsCalY, _bsCalM);
+    }
+
+    // Build the 3-region scaffold once, then paint each region. Called on load + on a resize that
+    // crosses into desktop. Region painters update in place so a filter/day pick never rebuilds this.
+    function _bsRenderDesktop() {
+      const listEl = document.getElementById('backupScheduleList');
+      if (!listEl) return;
+      const monthPrefix = _bsCalY + '-' + String(_bsCalM + 1).padStart(2, '0');
+      if (!_bsSelectedDay || _bsSelectedDay.indexOf(monthPrefix) !== 0) _bsSelectedDay = _bsDefaultSelectedDay();
+      const paneStyle = 'box-sizing:border-box;background:var(--bg-card,#1e2f40);border:1px solid var(--border,#22354a);border-radius:var(--radius,12px);padding:14px;';
+      listEl.innerHTML =
+        '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">'
+        + '<div id="bsDeskCal" style="flex:0 0 340px;' + paneStyle + '"></div>'
+        + '<div id="bsDeskDay" style="flex:1 1 460px;min-width:0;max-height:74vh;overflow-y:auto;"></div>'
+        + '<div id="bsDeskOut" style="flex:0 0 300px;max-height:74vh;overflow-y:auto;' + paneStyle + '"></div>'
+        + '</div>';
+      _bsRenderCalendar();
+      _bsRenderDayDetail();
+      _bsRenderOutages();
+    }
+
+    // Month grid (Sun–Sat). Day cells carry a green count-pill when that day has jobs; today is
+    // outlined, the selected day is filled. Repainting this pane leaves the day/outage panes alone.
+    function _bsRenderCalendar() {
+      const el = document.getElementById('bsDeskCal');
+      if (!el) return;
+      const y = _bsCalY, m = _bsCalM;
+      const counts = {};
+      _bsCurrentFiltered().forEach(a => { const d = a.scheduled_date || ''; if (d) counts[d] = (counts[d] || 0) + 1; });
+      const first = new Date(y, m, 1), lead = first.getDay(), days = new Date(y, m + 1, 0).getDate();
+      const monthName = first.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      const today = _bsYmd(new Date());
+      const navBtn = 'background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);width:30px;height:30px;border-radius:var(--radius-sm,8px);font-size:16px;line-height:1;cursor:pointer;';
+      let h = '';
+      h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">';
+      h += '<button onclick="_bsCalNav(-1)" aria-label="Previous month" style="' + navBtn + '">‹</button>';
+      h += '<div style="font-size:14px;font-weight:800;color:var(--text-primary);">' + _bsEsc(monthName) + '</div>';
+      h += '<button onclick="_bsCalNav(1)" aria-label="Next month" style="' + navBtn + '">›</button>';
+      h += '</div>';
+      h += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;">';
+      ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].forEach(d => { h += '<div style="text-align:center;font-size:10px;font-weight:700;color:var(--text-muted);padding:2px 0;">' + d + '</div>'; });
+      for (let i = 0; i < lead; i++) h += '<div></div>';
+      for (let dnum = 1; dnum <= days; dnum++) {
+        const ymd = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(dnum).padStart(2, '0');
+        const isToday = ymd === today, isSel = ymd === _bsSelectedDay, cnt = counts[ymd] || 0;
+        let cell = 'cursor:pointer;text-align:center;padding:7px 0 5px;border-radius:var(--radius-sm,8px);font-size:13px;';
+        if (isSel) cell += 'background:var(--accent-green);color:#04371f;font-weight:800;';
+        else if (isToday) cell += 'background:var(--btn-surface,#34485d);color:var(--text-primary);font-weight:700;border:1px solid var(--accent-green);';
+        else cell += 'background:var(--bg-secondary,#182634);color:var(--text-secondary);border:1px solid var(--border,#22354a);';
+        let pill;
+        if (cnt > 0) {
+          const bg = isSel ? '#04371f' : 'var(--accent-green)', fg = isSel ? 'var(--accent-green)' : '#04371f';
+          pill = '<span style="display:block;width:fit-content;min-width:16px;margin:2px auto 0;padding:0 4px;font-size:9px;font-weight:800;line-height:14px;border-radius:8px;background:' + bg + ';color:' + fg + ';">' + cnt + '</span>';
+        } else pill = '<span style="display:block;height:16px;margin-top:2px;"></span>';
+        h += '<div onclick="_bsSelectDay(\'' + ymd + '\')" style="' + cell + '">' + dnum + pill + '</div>';
+      }
+      h += '</div>';
+      el.innerHTML = h;
+    }
+
+    // Prev/next month → set the fetch window to the whole visible month and refetch (crewlogic-jobs).
+    // _bsLoad shows its "Loading your schedule…" indicator; _bsRenderDesktop repaints on return and
+    // picks a fresh default day for the new month.
+    function _bsCalNav(delta) {
+      let m = _bsCalM + delta, y = _bsCalY;
+      while (m < 0) { m += 12; y--; }
+      while (m > 11) { m -= 12; y++; }
+      _bsCalY = y; _bsCalM = m;
+      _bsSelectedDay = '';               // force a default pick within the new month
+      _bsFrom = _bsMonthFirst(y, m);
+      _bsTo = _bsMonthLast(y, m);
+      _bsLoad();
+    }
+
+    // Click a day → repaint the calendar (moves the selected highlight) + the day-detail pane only.
+    // The outage panel is untouched, so its scroll position survives.
+    function _bsSelectDay(ymd) {
+      _bsSelectedDay = ymd;
+      _bsRenderCalendar();
+      _bsRenderDayDetail();
+    }
+
+    // Center pane: the selected day's job cards (same card look as the mobile list, via
+    // _bsApptCardHtml), honoring the route/search filters. Friendly empty state when the day is clear.
+    function _bsRenderDayDetail() {
+      const el = document.getElementById('bsDeskDay');
+      if (!el) return;
+      const day = _bsSelectedDay;
+      const rows = _bsCurrentFiltered().filter(a => (a.scheduled_date || '') === day).sort((a, b) => {
+        const am = (a.start_minutes == null) ? -1 : a.start_minutes;
+        const bm = (b.start_minutes == null) ? -1 : b.start_minutes;
+        return am - bm;
+      });
+      let h = '';
+      h += '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px;">';
+      h += '<div style="font-size:16px;font-weight:800;color:var(--text-primary);">' + _bsEsc(_bsDayHeader(day) || day) + '</div>';
+      h += '<div style="font-size:13px;color:var(--text-muted);">' + rows.length + ' job' + (rows.length === 1 ? '' : 's') + '</div>';
+      h += '</div>';
+      if (rows.length === 0) {
+        h += '<div class="estimates-empty" style="padding:44px 16px;color:var(--text-muted);">No jobs scheduled for this day.</div>';
+      } else {
+        rows.forEach(a => { h += _bsApptCardHtml(a); });
+      }
+      el.innerHTML = h;
+    }
+
+    // Right pane: the Vonigo outage log (newest first). Ongoing = red row; closed = start–end · duration.
+    function _bsRenderOutages() {
+      const el = document.getElementById('bsDeskOut');
+      if (!el) return;
+      let h = '<div style="font-size:14px;font-weight:800;color:var(--text-primary);margin-bottom:10px;">Vonigo outages</div>';
+      const list = Array.isArray(_bsOutages) ? _bsOutages : [];
+      if (!list.length) {
+        h += '<div style="font-size:12px;color:var(--text-muted);">No Vonigo outages recorded.</div>';
+        el.innerHTML = h;
+        return;
+      }
+      list.forEach(o => {
+        if (!o) return;
+        const detail = o.detail ? '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + _bsEsc(o.detail) + '</div>' : '';
+        if (o.ongoing) {
+          h += '<div style="padding:9px 10px;margin-bottom:7px;border-radius:var(--radius-sm,8px);background:rgba(214,81,54,0.14);border:1px solid #D65136;">';
+          h += '<div style="font-size:12px;font-weight:700;color:var(--text-primary);">🔴 Ongoing since ' + _bsEsc(_bsDateTime(o.startedAt)) + '</div>';
+          h += detail + '</div>';
+        } else {
+          const dur = _bsHumanDur(o.durationSeconds);
+          h += '<div style="padding:9px 10px;margin-bottom:7px;border-radius:var(--radius-sm,8px);background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);">';
+          h += '<div style="font-size:12px;font-weight:600;color:var(--text-primary);">⚠️ ' + _bsEsc(_bsDateTime(o.startedAt)) + ' – ' + _bsEsc(_bsTimeOnly(o.endedAt)) + (dur ? ' · ' + _bsEsc(dur) : '') + '</div>';
+          h += detail + '</div>';
+        }
+      });
+      el.innerHTML = h;
+    }
+
+    // One-time, debounced resize hook. When on the DR screen and the width crosses the 1024px line,
+    // re-render the correct layout FROM MEMORY (no refetch) and set/clear the full-width opt-out.
+    // Preserves _bsSelectedDay + the day-detail pane's scroll where practical.
+    function _bsInitResize() {
+      if (window._bsResizeBound) return;
+      window._bsResizeBound = true;
+      window.addEventListener('resize', function () {
+        if (typeof currentScreen === 'undefined' || currentScreen !== 'backupSchedule') return;
+        clearTimeout(window._bsResizeTimer);
+        window._bsResizeTimer = setTimeout(_bsOnResize, 200);
+      });
+    }
+    function _bsOnResize() {
+      if (currentScreen !== 'backupSchedule') return;
+      const desk = window.innerWidth >= 1024;
+      ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) el.style.maxWidth = desk ? 'none' : ''; });
+      if (desk) {
+        const prev = document.getElementById('bsDeskDay');
+        const savedScroll = prev ? prev.scrollTop : 0;
+        _bsRenderDesktop();
+        const now = document.getElementById('bsDeskDay');
+        if (now) now.scrollTop = savedScroll;
+      } else {
+        if (!_bsData || _bsData.length === 0) {
+          const listEl = document.getElementById('backupScheduleList');
+          if (listEl) listEl.innerHTML = '<div class="estimates-empty">No jobs in this window.</div>';
+        } else {
+          _bsRenderList(_bsCurrentFiltered());
+        }
       }
     }
 

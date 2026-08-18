@@ -40,6 +40,22 @@ async function vonigoHealth(db: ReturnType<typeof createClient>): Promise<Record
   } catch { return null; }
 }
 
+// Vonigo outage history for the DR "known outages" log (vonigo_outages, migration 0095; service-role only).
+// Newest first; an ongoing outage has ended_at null (ongoing:true). Best-effort — never breaks the list.
+async function vonigoOutages(db: ReturnType<typeof createClient>): Promise<Record<string, unknown>[]> {
+  try {
+    const { data } = await db.from('vonigo_outages')
+      .select('started_at, ended_at, duration_seconds, detail')
+      .eq('service', 'vonigo')
+      .order('started_at', { ascending: false })
+      .limit(50);
+    return (data || []).map((o) => ({
+      startedAt: o.started_at, endedAt: o.ended_at,
+      durationSeconds: o.duration_seconds, ongoing: !o.ended_at, detail: o.detail,
+    }));
+  } catch { return []; }
+}
+
 // Appointment + its job + provider snapshot.
 const APPT_SELECT =
   'id, scheduled_date, start_minutes, duration_minutes, status, ' +
@@ -83,7 +99,7 @@ Deno.serve(async (req: Request) => {
       const bounds = { min: (lo.data && lo.data[0]?.scheduled_date) || null, max: (hi.data && hi.data[0]?.scheduled_date) || null };
       const rows = data || [];
       const truncated = rows.length > LIMIT;
-      return json({ success: true, appointments: shape(truncated ? rows.slice(0, LIMIT) : rows), truncated, bounds, health: await vonigoHealth(db) });
+      return json({ success: true, appointments: shape(truncated ? rows.slice(0, LIMIT) : rows), truncated, bounds, health: await vonigoHealth(db), outages: await vonigoOutages(db) });
     }
 
     if (action === 'get') {
