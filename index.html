@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.130.3 | 2026-08-18">
+  <meta name="crewlogic-version" content="v5.130.4 | 2026-08-18">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1111,10 +1111,10 @@
       #deskNav .dn-group.dn-open .dn-caret { transform: rotate(90deg); }
       #deskNav .dn-item.dn-active { background: rgba(0,238,118,0.13); color: var(--text-primary); box-shadow: inset 3px 0 0 var(--accent-green); }
       #deskNav .dn-item.dn-active .dn-ic { color: var(--accent-green); }
-      /* An OPEN group's header shows the accent stripe + icon — appears the moment you expand it, and stays
-         while a sub-item under it is active (the group stays open). */
-      #deskNav .dn-group.dn-open > .dn-item { box-shadow: inset 3px 0 0 var(--accent-green); }
-      #deskNav .dn-group.dn-open > .dn-item .dn-ic { color: var(--accent-green); }
+      /* The single "active section" cue on a group header: accent stripe + icon, no competing background.
+         Exactly one .dn-section (or .dn-active) exists at a time — the nav JS moves it on every click/nav. */
+      #deskNav .dn-item.dn-section { box-shadow: inset 3px 0 0 var(--accent-green); }
+      #deskNav .dn-item.dn-section .dn-ic { color: var(--accent-green); }
 
       #deskNav .dn-sub-wrap { display: none; padding: 2px 0 6px; }
       #deskNav .dn-group.dn-open .dn-sub-wrap { display: block; }
@@ -9236,29 +9236,46 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     // ===== FW-68 desktop shell nav (additive; the left rail drives the EXISTING module router) =====
     // These only ever run from #deskNav clicks, which are visible only >=1024px. They do NOT change
     // any screen logic — they set the rail's active highlight and delegate to openModule/openRecycling.
+    // Clear every indicator (leaf highlight + section stripe). One helper so exactly one can exist at a time.
+    function _shellClearIndicators() {
+      document.querySelectorAll('#deskNav .dn-active, #deskNav .dn-section').forEach(n => n.classList.remove('dn-active', 'dn-section'));
+    }
     function _shellToggle(headEl) {
+      const nav = document.getElementById('deskNav');
       const g = headEl && headEl.closest('.dn-group');
-      if (g) g.classList.toggle('dn-open');
+      if (!nav || !g) return;
+      const willOpen = !g.classList.contains('dn-open');
+      // Accordion + single indicator: opening a group closes the others and moves the stripe onto this header.
+      nav.querySelectorAll('.dn-group.dn-open').forEach(x => x.classList.remove('dn-open'));
+      _shellClearIndicators();
+      if (willOpen) { g.classList.add('dn-open'); headEl.classList.add('dn-section'); }
     }
     function _shellSetActive(el) {
-      document.querySelectorAll('#deskNav .dn-active').forEach(n => n.classList.remove('dn-active'));
+      _shellClearIndicators();
       if (el) el.classList.add('dn-active');
     }
-    // Highlight the left-nav item whose data-nav matches the CURRENT screen, so the active state is correct
-    // no matter how you got there (rail click, dashboard KPI tile, back button). Opens the item's group too.
+    // Move the SINGLE section indicator to the current screen — exactly one at a time. Leaf screens
+    // (Dispatch, etc.) highlight the item and close all groups; a sub-screen highlights the sub AND puts the
+    // stripe on its group header, with all other groups closed. Works however you navigated (rail, KPI tile, back).
     function _shellSyncActive() {
       const nav = document.getElementById('deskNav'); if (!nav) return;
-      nav.querySelectorAll('.dn-active').forEach(n => n.classList.remove('dn-active'));
+      _shellClearIndicators();
       const el = nav.querySelector('[data-nav="' + currentScreen + '"]');
-      if (el) { el.classList.add('dn-active'); const g = el.closest('.dn-group'); if (g) g.classList.add('dn-open'); } // open group → header stripe (CSS)
+      const keepGroup = el ? el.closest('.dn-group') : null;
+      nav.querySelectorAll('.dn-group.dn-open').forEach(x => { if (x !== keepGroup) x.classList.remove('dn-open'); });
+      if (!el) return;
+      el.classList.add('dn-active');
+      if (keepGroup) {
+        keepGroup.classList.add('dn-open');
+        const head = keepGroup.querySelector('.dn-item');
+        if (head) head.classList.add('dn-section');
+      }
     }
     function _shellNav(key, el) {
-      // keep the parent group expanded so the active sub-item stays visible
-      if (el) { const g = el.closest('.dn-group'); if (g) g.classList.add('dn-open'); }
       if (key === 'homeDash') { openHomeDash(); }
       else if (key === 'recycling') { openRecycling(); }
       else { openModule(key); }
-      _shellSyncActive(); // reflect the screen we just navigated to
+      _shellSyncActive(); // reflect the screen we just navigated to (exactly one section indicator)
     }
 
     // Secondary toolbar control — appears beneath the global header on certain screens
