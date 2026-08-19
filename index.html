@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.130.5 | 2026-08-18">
+  <meta name="crewlogic-version" content="v5.131.0 | 2026-08-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -748,6 +748,44 @@
     .settings-save-btn.loading .btn-text { display: none; }
     .settings-save-btn.loading .spinner { display: block; }
     .settings-save-btn .spinner { border-top-color: var(--accent-text); }
+
+    /* ===== DESKTOP PAGE STANDARD — reusable fluid portlet grid (docs/desktop-page-standard.md) =====
+       repeat(3,1fr): 3 columns that stretch/shrink with the viewport. align-items:start: every column
+       starts on the same top line (clean rows, not a staggered stream). Collapses 3 → 2 → 1 as it
+       narrows, so phones still get a single stack. Reusable by any portletized settings tab / page. */
+    .page-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 18px; align-items: start; }
+    @media (max-width: 820px) { .page-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+    @media (max-width: 520px) { .page-grid { grid-template-columns: 1fr; } }
+    .page-grid > .settings-card { margin-bottom: 0; }  /* grid gap owns the spacing */
+
+    /* ===== SETTINGS DESKTOP FRAMEWORK (additive; visible ONLY >=1024px) =====
+       A left category rail replaces the top tab strip and the active tab's content becomes the portlet
+       grid. Below 1024px NONE of this applies — the mobile top-tab strip + stacked cards are unchanged. */
+    #settingsRail { display: none; }
+    /* Desktop page-level header save (right of the settings user card). Hidden on mobile — mobile keeps the
+       in-card saves. On desktop the in-card PRIMARY save (.js-tab-primary-save) hides and the header save runs it. */
+    #settingsHeaderSaveWrap { display: none; }
+    #settingsHeaderSave { width: auto; margin: 0; padding: 10px 18px; white-space: nowrap; }
+    @media (min-width: 1024px) {
+      #settingsUserCard { align-items: center; }
+      #settingsHeaderSaveWrap.has-save { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+      #settingsScreen .js-tab-primary-save { display: none; }
+    }
+    @media (min-width: 1024px) {
+      /* rail replaces the top strip */
+      #settingsTabBar { display: none !important; }
+      /* two-column shell: fixed rail + fluid content. id+class beats .settings-section.active (L663). */
+      #settingsScreen.active { display: grid; grid-template-columns: 200px minmax(0,1fr); column-gap: 24px; align-items: start; }
+      #settingsScreen.active > *:not(#settingsRail) { grid-column: 2; min-width: 0; }
+      #settingsRail { display: block; grid-column: 1; grid-row: 1 / span 50; position: sticky; top: 14px; align-self: start;
+        background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 8px; }
+      #settingsRail .srail-h { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); opacity: .7; font-weight: 800; padding: 6px 10px 8px; }
+      #settingsRail .srail-item { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 9px; color: var(--text-secondary); font-weight: 600; font-size: 13.5px; cursor: pointer; user-select: none; margin-bottom: 1px; }
+      #settingsRail .srail-item:hover { background: var(--bg-input); color: var(--text-primary); }
+      #settingsRail .srail-item.active { background: rgba(0,238,118,0.13); color: var(--text-primary); box-shadow: inset 3px 0 0 var(--accent-green); }
+      #settingsRail .srail-item.active .srail-i { color: var(--accent-green); }
+      #settingsRail .srail-i { width: 18px; text-align: center; flex: 0 0 auto; font-size: 15px; }
+    }
 
     .settings-feedback {
       font-size: 13px; text-align: center; margin-top: 10px; min-height: 20px;
@@ -1536,11 +1574,18 @@
             <div class="dn-sub" data-nav="estimateCosting" onclick="_shellNav('estimateCosting',this)">
               <b>Margin Analysis</b><small>profit &amp; margin review of Vonigo estimates</small>
             </div>
+            <div class="dn-sub" data-nav="estimatesDashboard" onclick="_shellNav('estimatesDashboard',this)">
+              <b>Estimates Desk</b><small>estimates + the schedule on one screen</small>
+            </div>
           </div>
         </div>
 
         <div class="dn-item" data-nav="bizdev" onclick="_shellNav('bizdev',this)">
           <span class="dn-ic">📈</span> Business Development
+        </div>
+
+        <div class="dn-item" data-nav="pipeline" onclick="_shellNav('pipeline',this)">
+          <span class="dn-ic">🔄</span> Follow-up Pipeline
         </div>
 
         <div class="dn-item" data-nav="backupSchedule" onclick="_shellNav('backupSchedule',this)">
@@ -1552,12 +1597,17 @@
             <span class="dn-ic">🧰</span> Yard Signs &amp; Other Tools <span class="dn-caret">▸</span>
           </div>
           <div class="dn-sub-wrap">
+            <div class="dn-sub" data-nav="volumeCheck" onclick="_shellNav('volumeCheck',this)"><b>Volume Check</b></div>
             <div class="dn-sub" data-nav="signs" onclick="_shellNav('signs',this)"><b>Yard Signs</b></div>
             <div class="dn-sub" onclick="_shellNav('recycling',this)"><b>Recycling</b></div>
             <div class="dn-sub" data-nav="trucks" onclick="_shellNav('trucks',this)"><b>Where Are My Trucks?</b></div>
+            <div class="dn-sub" data-nav="truckAlerts" onclick="_shellNav('truckAlerts',this)"><b>Truck Alerts</b></div>
             <div class="dn-sub" data-nav="priceLookup" onclick="_shellNav('priceLookup',this)"><b>Price Lookup</b></div>
             <div class="dn-sub" data-nav="promos" onclick="_shellNav('promos',this)"><b>Coupons / Campaigns</b></div>
             <div class="dn-sub" data-nav="jobPlan" onclick="_shellNav('jobPlan',this)"><b>Job Plan</b></div>
+            <div class="dn-sub" data-nav="manageJobs" onclick="_shellNav('manageJobs',this)"><b>Manage Jobs</b></div>
+            <div class="dn-sub" data-nav="disposalRouter" onclick="_shellNav('disposalRouter',this)"><b>Job Router</b></div>
+            <div class="dn-sub" data-nav="router" onclick="_shellNav('router',this)"><b>Route Optimizer</b></div>
           </div>
         </div>
       </div>
@@ -1955,6 +2005,23 @@
 
       <!-- SETTINGS -->
       <div class="settings-section" id="settingsScreen">
+
+        <!-- Desktop category rail (>=1024px only; mirrors the home nav look). Each item drives the EXISTING
+             showSettingsTab(). A category is hidden when its top-strip tab button is hidden, so owner/estimator
+             /feature gating (applyRoleRestrictions) is inherited automatically via _syncSettingsRail(). -->
+        <nav id="settingsRail" aria-label="Settings categories">
+          <div class="srail-h">Settings</div>
+          <div class="srail-item" data-stab="franchise" onclick="showSettingsTab('franchise')"><span class="srail-i">🏢</span> Franchise</div>
+          <div class="srail-item" data-stab="cost" onclick="showSettingsTab('cost')"><span class="srail-i">💰</span> Cost</div>
+          <div class="srail-item" data-stab="proposal" onclick="showSettingsTab('proposal')"><span class="srail-i">📄</span> Proposal</div>
+          <div class="srail-item" data-stab="pricing" onclick="showSettingsTab('pricing')"><span class="srail-i">★</span> Pricing</div>
+          <div class="srail-item" data-stab="signs" onclick="showSettingsTab('signs')"><span class="srail-i">🪧</span> Yard Signs</div>
+          <div class="srail-item" data-stab="tools" onclick="showSettingsTab('tools')"><span class="srail-i">🛠</span> Tools</div>
+          <div class="srail-item" data-stab="trucks" onclick="showSettingsTab('trucks')"><span class="srail-i">🚚</span> Trucks</div>
+          <div class="srail-item" data-stab="routes" onclick="showSettingsTab('routes')"><span class="srail-i">🧭</span> Routes</div>
+          <div class="srail-item" data-stab="account" onclick="showSettingsTab('account')"><span class="srail-i">⚙️</span> Account</div>
+        </nav>
+
         <div class="section-title fade-in">Settings</div>
 
         <!-- User card -->
@@ -1964,6 +2031,15 @@
             <div class="user-card-name" id="settingsName">—</div>
             <div class="user-card-email" id="settingsEmail">—</div>
             <div class="user-card-franchise" id="settingsFranchise">—</div>
+          </div>
+          <!-- Desktop page-level PRIMARY save (right of the header), consistent across Settings pages. Set
+               per tab by _setSettingsHeaderSave(); sub-cards with distinct saves (Vonigo, Branding, telematics
+               tokens/secrets) keep their own in-card buttons. Desktop-only; mobile keeps the in-card save. -->
+          <div id="settingsHeaderSaveWrap">
+            <div class="settings-feedback" id="settingsHeaderFeedback" style="margin:0;"></div>
+            <button class="settings-save-btn" id="settingsHeaderSave" onclick="_settingsHeaderSaveRun()">
+              <div class="spinner"></div><span class="btn-text">Save</span>
+            </button>
           </div>
         </div>
 
@@ -1984,43 +2060,29 @@
 
         <!-- TAB: Franchise -->
         <div id="stab-content-franchise">
+         <div class="page-grid">
 
-          <!-- Vonigo credentials -->
-          <div class="settings-card fade-in fade-in-delay-2" id="vonigoCard">
-            <div class="settings-card-title">Vonigo Integration</div>
-
-            <div style="margin-bottom:0;">
-              <div id="vonigoStatusBadge" class="config-status missing" style="display:inline-flex;align-items:center;gap:6px;">
-                <span class="config-status-dot"></span>
-                <span id="vonigoStatusText">Not configured</span>
-                <span id="vonigoChangeLink" onclick="toggleVonigoForm(event)"
-                  style="display:none;color:white;cursor:pointer;font-size:13px;border-left:1px solid rgba(255,255,255,0.4);padding-left:8px;margin-left:2px;">
-                  Change
-                </span>
-              </div>
+          <!-- Company Identity (keeps the franchiseInfoCard id + the canonical saveFranchiseInfo() button) -->
+          <div class="settings-card fade-in fade-in-delay-2 js-franchise-info" id="franchiseInfoCard">
+            <div class="settings-card-title">Company Identity</div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Company / Franchise Name</label>
+              <input type="text" class="form-input" id="settingsFranchiseName" placeholder="The Junkluggers of Akron-Canton" autocomplete="organization">
+              <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Appears on PDFs and customer-facing proposals.</div>
             </div>
-
-            <div id="vonigoForm" style="display:none;">
-              <div class="settings-input-group">
-                <label class="settings-input-label">Vonigo username</label>
-                <input type="text" class="form-input" id="settingsVonigoUser"
-                  placeholder="First.Last" autocomplete="off" autocapitalize="off">
-                <div class="form-hint">Your Vonigo login username (e.g. John.Smith)</div>
-              </div>
-
-              <div class="settings-input-group">
-                <label class="settings-input-label">Vonigo password</label>
-                <input type="password" class="form-input" id="settingsVonigoPass"
-                  placeholder="••••••••" autocomplete="current-password">
-                <div class="form-hint">Sent securely over HTTPS, never stored in the app</div>
-              </div>
-
-              <button class="settings-save-btn" id="settingsSaveBtn" onclick="saveVonigoCredentials()">
-                <div class="spinner"></div>
-                <span class="btn-text">Save credentials</span>
-              </button>
-              <div class="settings-feedback" id="settingsFeedback"></div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Website URL</label>
+              <input type="url" class="form-input" id="settingsWebsite" placeholder="https://www.yourcompany.com" autocomplete="off">
             </div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Office Phone</label>
+              <input type="tel" class="form-input" id="settingsPhone" placeholder="(555) 123-4567" autocomplete="off">
+            </div>
+            <button class="settings-save-btn js-tab-primary-save" id="franchiseSaveBtn" onclick="saveFranchiseInfo()">
+              <div class="spinner"></div>
+              <span class="btn-text">Save company info</span>
+            </button>
+            <div class="settings-feedback" id="franchiseFeedback"></div>
           </div>
 
           <!-- Branding -->
@@ -2071,18 +2133,9 @@
             <div class="settings-feedback" id="brandingFeedback"></div>
           </div>
 
-          <!-- Franchise Info -->
-          <div class="settings-card fade-in fade-in-delay-3" id="franchiseInfoCard">
-            <div class="settings-card-title">Company Info</div>
-            <div class="settings-input-group">
-              <label class="settings-input-label">Company / Franchise Name</label>
-              <input type="text" class="form-input" id="settingsFranchiseName" placeholder="The Junkluggers of Akron-Canton" autocomplete="organization">
-              <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Appears on PDFs and customer-facing proposals.</div>
-            </div>
-            <div class="settings-input-group">
-              <label class="settings-input-label">Office Phone</label>
-              <input type="tel" class="form-input" id="settingsPhone" placeholder="(555) 123-4567" autocomplete="off">
-            </div>
+          <!-- Location & Service Area (re-homed from the old Company Info card; saveFranchiseInfo reads by id) -->
+          <div class="settings-card fade-in fade-in-delay-3 js-franchise-info" id="locationCard">
+            <div class="settings-card-title">Location &amp; Service Area</div>
             <div class="settings-input-group">
               <label class="settings-input-label">Office Address</label>
               <input type="text" class="form-input" id="settingsOfficeAddress" placeholder="123 Main Street" autocomplete="off">
@@ -2102,171 +2155,156 @@
               </div>
             </div>
             <div class="settings-input-group">
-              <label class="settings-input-label">Time zone <span style="color:var(--text-muted);font-weight:400;">— drives your schedule board, job alerts and "today's jobs". Suggested from your state; change it if your office is in a different zone.</span></label>
-              <select class="form-input" id="settingsOfficeTimezone" onchange="_tzMarkChosen()"></select>
-              <div id="settingsTimezoneHint" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
-            </div>
-            <div class="settings-input-group">
               <label class="settings-input-label">States served <span style="color:var(--text-muted);font-weight:400;">— for town price lookup; comma-separated (e.g. MA, RI). Defaults to your office state.</span></label>
               <input type="text" class="form-input" id="settingsServiceStates" placeholder="MA, RI" autocomplete="off">
             </div>
-            <div class="settings-input-group">
-              <label class="settings-input-label">Website URL</label>
-              <input type="url" class="form-input" id="settingsWebsite" placeholder="https://www.yourcompany.com" autocomplete="off">
-            </div>
-            <button class="settings-save-btn" id="franchiseSaveBtn" onclick="saveFranchiseInfo()">
-              <div class="spinner"></div>
-              <span class="btn-text">Save company info</span>
-            </button>
-            <div class="settings-feedback" id="franchiseFeedback"></div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Saved with <b>Save company info</b>.</div>
           </div>
 
+          <!-- Vonigo Integration (credentials) -->
+          <div class="settings-card fade-in fade-in-delay-2" id="vonigoCard">
+            <div class="settings-card-title">Vonigo Integration</div>
+
+            <div style="margin-bottom:0;">
+              <div id="vonigoStatusBadge" class="config-status missing" style="display:inline-flex;align-items:center;gap:6px;">
+                <span class="config-status-dot"></span>
+                <span id="vonigoStatusText">Not configured</span>
+                <span id="vonigoChangeLink" onclick="toggleVonigoForm(event)"
+                  style="display:none;color:white;cursor:pointer;font-size:13px;border-left:1px solid rgba(255,255,255,0.4);padding-left:8px;margin-left:2px;">
+                  Change
+                </span>
+              </div>
+            </div>
+
+            <div id="vonigoForm" style="display:none;">
+              <div class="settings-input-group">
+                <label class="settings-input-label">Vonigo username</label>
+                <input type="text" class="form-input" id="settingsVonigoUser"
+                  placeholder="First.Last" autocomplete="off" autocapitalize="off">
+                <div class="form-hint">Your Vonigo login username (e.g. John.Smith)</div>
+              </div>
+
+              <div class="settings-input-group">
+                <label class="settings-input-label">Vonigo password</label>
+                <input type="password" class="form-input" id="settingsVonigoPass"
+                  placeholder="••••••••" autocomplete="current-password">
+                <div class="form-hint">Sent securely over HTTPS, never stored in the app</div>
+              </div>
+
+              <button class="settings-save-btn" id="settingsSaveBtn" onclick="saveVonigoCredentials()">
+                <div class="spinner"></div>
+                <span class="btn-text">Save credentials</span>
+              </button>
+              <div class="settings-feedback" id="settingsFeedback"></div>
+            </div>
+          </div>
+
+          <!-- Time Zone (re-homed; saveFranchiseInfo reads settingsOfficeTimezone by id) -->
+          <div class="settings-card fade-in fade-in-delay-3 js-franchise-info" id="timezoneCard">
+            <div class="settings-card-title">Time Zone</div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Office time zone <span style="color:var(--text-muted);font-weight:400;">— drives your schedule board, job alerts and "today's jobs". Suggested from your state; change it if your office is in a different zone.</span></label>
+              <select class="form-input" id="settingsOfficeTimezone" onchange="_tzMarkChosen()"></select>
+              <div id="settingsTimezoneHint" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Saved with <b>Save company info</b>.</div>
+          </div>
+
+         </div><!-- end page-grid -->
         </div><!-- end franchise tab -->
 
         <!-- TAB: Cost Analysis -->
         <div id="stab-content-cost" style="display:none;">
+         <!-- Desktop: 3-col portlet grid (page-grid), tops aligned, ordered big→small so rows balance.
+              Mobile: collapses to one stacked column. Every input id + save handler preserved. -->
+         <div class="page-grid">
 
+          <!-- Operations (big) -->
           <div class="settings-card">
-            <div class="settings-card-title">Cost Analysis</div>
-
-            <!-- Section: Operations -->
-            <div class="cost-section">
-              <div class="cost-section-header" onclick="toggleCostSection('ops')">
-                <span>⚙️ Operations</span><span id="cost-chevron-ops">▾</span>
+            <div class="settings-card-title">⚙️ Operations</div>
+            <div class="settings-input-group" style="margin-bottom:8px;">
+              <label class="settings-input-label">Truck Home Location</label>
+              <input type="text" class="form-input" id="settingsTruckHome" placeholder="123 Main Street, Mytown, OH 12345" autocomplete="off" style="font-size:13px;">
+            </div>
+            <div class="cost-grid" style="grid-template-columns:1fr 1fr;">
+              <div class="settings-input-group">
+                <label class="settings-input-label">Truck Size (CY)</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsTruckCY" placeholder="16" inputmode="decimal" min="1" step="0.5">
               </div>
-              <div id="cost-section-ops">
-                <div class="settings-input-group" style="margin-bottom:8px;">
-                  <label class="settings-input-label">Truck Home Location</label>
-                  <input type="text" class="form-input" id="settingsTruckHome" placeholder="123 Main Street, Mytown, OH 12345" autocomplete="off" style="font-size:13px;">
-                </div>
-                <div class="cost-grid" style="grid-template-columns:1fr 1fr 1fr 1fr;">
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Truck Size (CY)</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsTruckCY" placeholder="16" inputmode="decimal" min="1" step="0.5">
-                  </div>
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">MPG</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsMPG" placeholder="10" inputmode="decimal" min="1">
-                  </div>
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Fuel $/gal</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsFuelCost" placeholder="3.50" inputmode="decimal" min="0" step="0.01">
-                  </div>
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Crew $/hr <span style="font-weight:400;color:var(--text-muted);">(per person, fully loaded)</span></label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsCrewRate" placeholder="25" inputmode="decimal" min="0" title="Per-person fully-loaded hourly rate (wages + payroll taxes + benefits + overhead). Enter ONE crew member's cost — not the combined crew total.">
-                  </div>
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Royalty %</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsRoyaltyPct" placeholder="14" inputmode="decimal" min="0" max="100" step="0.1">
-                  </div>
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Default Disposal $/ton</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsDisposalCost" placeholder="200" inputmode="decimal" min="0">
-                  </div>
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Default Recycling $/truck</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsRecyclingRevenue" placeholder="130" inputmode="decimal" min="0">
-                  </div>
-                  <div class="settings-input-group">
-                    <label class="settings-input-label" title="AJS = Average Job Size. Manual override; Biz Dev uses the live 30-day calculated average unless you set a value here.">AJS</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsAvgJobSize" placeholder="0" inputmode="decimal" min="0" step="1" title="AJS — Average Job Size. Manual override; Biz Dev uses the live 30-day calculated average unless set.">
-                  </div>
-                </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">MPG</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsMPG" placeholder="10" inputmode="decimal" min="1">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Fuel $/gal</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsFuelCost" placeholder="3.50" inputmode="decimal" min="0" step="0.01">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Crew $/hr <span style="font-weight:400;color:var(--text-muted);">(per person, fully loaded)</span></label>
+                <input type="number" class="form-input cost-compact-input" id="settingsCrewRate" placeholder="25" inputmode="decimal" min="0" title="Per-person fully-loaded hourly rate (wages + payroll taxes + benefits + overhead). Enter ONE crew member's cost — not the combined crew total.">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Royalty %</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsRoyaltyPct" placeholder="14" inputmode="decimal" min="0" max="100" step="0.1">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Default Disposal $/ton</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsDisposalCost" placeholder="200" inputmode="decimal" min="0">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Default Recycling $/truck</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsRecyclingRevenue" placeholder="130" inputmode="decimal" min="0">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label" title="AJS = Average Job Size. Manual override; Biz Dev uses the live 30-day calculated average unless you set a value here.">AJS</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsAvgJobSize" placeholder="0" inputmode="decimal" min="0" step="1" title="AJS — Average Job Size. Manual override; Biz Dev uses the live 30-day calculated average unless set.">
               </div>
             </div>
+          </div>
 
-            <!-- Section: Wait Times -->
-            <div class="cost-section">
-              <div class="cost-section-header" onclick="toggleCostSection('wait')">
-                <span>⏱ Wait Times <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(minutes per load)</span></span><span id="cost-chevron-wait">▾</span>
+          <!-- Recycling Item Costs (medium) -->
+          <div class="settings-card">
+            <div class="settings-card-title">♻️ Recycling Item Costs <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(what you pay)</span></div>
+            <!-- auto-fit, not a fixed 5-up: Pallet + Cardboard were added here and a hard
+                 column count would have squeezed all seven off the edge on a phone. -->
+            <div class="cost-grid" style="grid-template-columns:repeat(auto-fit,minmax(84px,1fr));">
+              <div class="settings-input-group">
+                <label class="settings-input-label">Mattress</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsCostMattress" placeholder="10" inputmode="decimal" min="0">
               </div>
-              <div id="cost-section-wait">
-                <div class="cost-grid" style="grid-template-columns:1fr 1fr 1fr;">
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Disposal</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsDisposalWait" placeholder="15" inputmode="numeric" min="0">
-                  </div>
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Recycling</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsRecyclingWait" placeholder="20" inputmode="numeric" min="0">
-                  </div>
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Donation</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsDonationWait" placeholder="15" inputmode="numeric" min="0">
-                  </div>
-                </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">TV/Monitor</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsCostTV" placeholder="10" inputmode="decimal" min="0">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Freon Appl.</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsCostFreon" placeholder="25" inputmode="decimal" min="0">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Tire</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsCostTire" placeholder="5" inputmode="decimal" min="0">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Paint Can</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsCostPaint" placeholder="5" inputmode="decimal" min="0">
+              </div>
+              <!-- Pallet + Cardboard are PURE COST: no customer surcharge line exists for
+                   them, so unlike Mattress/TV/Freon/Tire/Paint they are not derived from the
+                   estimate's charges. Quantity is entered per-estimate in Cost Analysis. -->
+              <div class="settings-input-group">
+                <label class="settings-input-label">Pallet</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsCostPallet" placeholder="0" inputmode="decimal" min="0" title="What you pay per pallet at bulk drop-off. Pure cost — the customer is not charged for pallets.">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Cardboard</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsCostCardboard" placeholder="0" inputmode="decimal" min="0" title="What you pay per unit of cardboard at bulk drop-off. Pure cost — the customer is not charged for cardboard.">
               </div>
             </div>
+          </div>
 
-            <!-- Section: Recycling Costs -->
-            <div class="cost-section">
-              <div class="cost-section-header" onclick="toggleCostSection('recycle')">
-                <span>♻️ Recycling Disposal Costs <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(what you pay)</span></span><span id="cost-chevron-recycle">▾</span>
-              </div>
-              <div id="cost-section-recycle">
-                <!-- auto-fit, not a fixed 5-up: Pallet + Cardboard were added here and a hard
-                     column count would have squeezed all seven off the edge on a phone. -->
-                <div class="cost-grid" style="grid-template-columns:repeat(auto-fit,minmax(84px,1fr));">
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Mattress</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsCostMattress" placeholder="10" inputmode="decimal" min="0">
-                  </div>
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">TV/Monitor</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsCostTV" placeholder="10" inputmode="decimal" min="0">
-                  </div>
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Freon Appl.</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsCostFreon" placeholder="25" inputmode="decimal" min="0">
-                  </div>
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Tire</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsCostTire" placeholder="5" inputmode="decimal" min="0">
-                  </div>
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Paint Can</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsCostPaint" placeholder="5" inputmode="decimal" min="0">
-                  </div>
-                  <!-- Pallet + Cardboard are PURE COST: no customer surcharge line exists for
-                       them, so unlike Mattress/TV/Freon/Tire/Paint they are not derived from the
-                       estimate's charges. Quantity is entered per-estimate in Cost Analysis. -->
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Pallet</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsCostPallet" placeholder="0" inputmode="decimal" min="0" title="What you pay per pallet at bulk drop-off. Pure cost — the customer is not charged for pallets.">
-                  </div>
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Cardboard</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsCostCardboard" placeholder="0" inputmode="decimal" min="0" title="What you pay per unit of cardboard at bulk drop-off. Pure cost — the customer is not charged for cardboard.">
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Section: Container Defaults -->
-            <div class="cost-section">
-              <div class="cost-section-header" onclick="toggleCostSection('container')">
-                <span>📦 Container Defaults <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(per-estimate overridable)</span></span><span id="cost-chevron-container">▾</span>
-              </div>
-              <div id="cost-section-container">
-                <div class="cost-grid" style="grid-template-columns:1fr 1fr 1fr;">
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Rental Rate ($)</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsContainerRate" placeholder="400" inputmode="decimal" min="0">
-                  </div>
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Included Tons</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsContainerTons" placeholder="3" inputmode="decimal" min="0" step="0.5">
-                  </div>
-                  <div class="settings-input-group">
-                    <label class="settings-input-label">Overage $/ton</label>
-                    <input type="number" class="form-input cost-compact-input" id="settingsContainerOverage" placeholder="80" inputmode="decimal" min="0">
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="form-section-label" style="margin-top:12px;display:flex;align-items:baseline;justify-content:space-between;gap:10px;">
+          <!-- Facilities (big — disposal / recycling / donation site lists) -->
+          <div class="settings-card">
+            <div class="settings-card-title" style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;">
               <span>Facilities</span>
               <!-- Deterministic way to re-pull the geofence list. The list also refreshes when this
                    tab is opened, but a manual control removes any doubt after adding a geofence in
@@ -2280,13 +2318,6 @@
               <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">🗑 Disposal Sites</div>
               <div id="settingsDisposalSitesList"></div>
               <button onclick="addFacility('disposal')" style="width:100%;padding:7px;background:none;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;margin-top:4px;">+ Add Disposal Site</button>
-            </div>
-
-            <!-- Disposal Site Holidays (franchise-level) -->
-            <div style="margin-bottom:10px;">
-              <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">📅 Disposal Site Holidays (closed)</div>
-              <div class="form-hint" style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Checked holidays = all disposal sites treated as closed that day.</div>
-              <div id="settingsDisposalHolidaysList"></div>
             </div>
 
             <!-- Recycling Sites -->
@@ -2303,24 +2334,75 @@
             </div>
 
             <!-- Donation Sites -->
-            <div style="margin-bottom:10px;">
+            <div style="margin-bottom:0;">
               <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">🤝 Donation Sites</div>
               <div id="settingsDonationSitesList"></div>
               <button onclick="addFacility('donation')" style="width:100%;padding:7px;background:none;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-muted);font-size:12px;cursor:pointer;margin-top:4px;">+ Add Donation Site</button>
             </div>
-
-            <button class="settings-save-btn" id="costSettingsSaveBtn" onclick="saveCostSettings()">
-              <div class="spinner"></div>
-              <span class="btn-text">Save cost settings</span>
-            </button>
-            <div class="settings-feedback" id="costSettingsFeedback"></div>
           </div>
 
+          <!-- Wait Times (small) -->
+          <div class="settings-card">
+            <div class="settings-card-title">⏱ Wait Times <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(minutes per load)</span></div>
+            <div class="cost-grid" style="grid-template-columns:1fr 1fr 1fr;">
+              <div class="settings-input-group">
+                <label class="settings-input-label">Disposal</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsDisposalWait" placeholder="15" inputmode="numeric" min="0">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Recycling</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsRecyclingWait" placeholder="20" inputmode="numeric" min="0">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Donation</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsDonationWait" placeholder="15" inputmode="numeric" min="0">
+              </div>
+            </div>
+          </div>
+
+          <!-- Container Defaults (small) -->
+          <div class="settings-card">
+            <div class="settings-card-title">📦 Container Defaults <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(per-estimate overridable)</span></div>
+            <div class="cost-grid" style="grid-template-columns:1fr 1fr 1fr;">
+              <div class="settings-input-group">
+                <label class="settings-input-label">Rental Rate ($)</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsContainerRate" placeholder="400" inputmode="decimal" min="0">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Included Tons</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsContainerTons" placeholder="3" inputmode="decimal" min="0" step="0.5">
+              </div>
+              <div class="settings-input-group">
+                <label class="settings-input-label">Overage $/ton</label>
+                <input type="number" class="form-input cost-compact-input" id="settingsContainerOverage" placeholder="80" inputmode="decimal" min="0">
+              </div>
+            </div>
+          </div>
+
+          <!-- Disposal Holidays (small) -->
+          <div class="settings-card">
+            <div class="settings-card-title">📅 Disposal Site Holidays <span style="font-weight:400;color:var(--text-muted);font-size:11px;">(closed)</span></div>
+            <div class="form-hint" style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Checked holidays = all disposal sites treated as closed that day.</div>
+            <div id="settingsDisposalHolidaysList"></div>
+          </div>
+
+         </div><!-- end page-grid -->
+
+         <!-- Page-level PRIMARY save. Desktop: hidden (the header save runs saveCostSettings). Mobile: shown here. -->
+         <button class="settings-save-btn js-tab-primary-save" id="costSettingsSaveBtn" onclick="saveCostSettings()">
+           <div class="spinner"></div>
+           <span class="btn-text">Save cost settings</span>
+         </button>
+         <div class="settings-feedback" id="costSettingsFeedback"></div>
         </div><!-- end cost tab -->
 
         <!-- TAB: Proposal -->
         <div id="stab-content-proposal" style="display:none;">
+         <!-- Desktop: portlet grid. Mobile: stacked. Proposal Content + Customer Email are saved by the
+              page PRIMARY save (saveProposalSettings). The per-user SMS template keeps its OWN save. -->
+         <div class="page-grid">
 
+          <!-- Proposal Content (big) -->
           <div class="settings-card">
             <div class="settings-card-title">Proposal Pages</div>
             <div class="form-hint" style="margin-bottom:12px;">These pages are appended to every generated PDF proposal, styled to match your estimate.</div>
@@ -2343,8 +2425,12 @@
               <label class="settings-input-label">Custom Terms (leave blank for standard Junkluggers terms)</label>
               <textarea class="form-input" id="settingsProposalTerms" rows="5" placeholder="Optional: enter any custom terms or notes to include..." style="resize:vertical;font-size:13px;line-height:1.5;"></textarea>
             </div>
+          </div>
 
-            <div class="form-section-label" style="margin-top:12px;">Customer Email Template</div>
+          <!-- Customer Email (medium) -->
+          <div class="settings-card">
+            <div class="settings-card-title">Customer Email</div>
+            <div class="form-section-label">Customer Email Template</div>
             <div class="settings-input-group">
               <label class="settings-input-label">Email body sent with the PDF proposal</label>
               <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">
@@ -2368,14 +2454,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               <label class="settings-input-label">Casual name used in text messages — e.g. Junkluggers. Leave blank to use the full company name.</label>
               <input type="text" class="form-input" id="settingsCompanyNickname" placeholder="Junkluggers" autocomplete="off">
             </div>
+          </div>
 
-            <button class="settings-save-btn" id="proposalSettingsSaveBtn" onclick="saveProposalSettings()">
-              <div class="spinner"></div>
-              <span class="btn-text">Save proposal settings</span>
-            </button>
-            <div class="settings-feedback" id="proposalSettingsFeedback"></div>
-
-            <div class="form-section-label" style="margin-top:20px;border-top:1px solid var(--border,#22354a);padding-top:16px;">Text Message Template <span style="font-weight:normal;color:var(--text-muted);font-size:11px;">— per-user (each user sets their own)</span></div>
+          <!-- Text Message Template (per-user — its OWN save, not the page primary save) -->
+          <div class="settings-card">
+            <div class="settings-card-title">Text Message Template <span style="font-weight:normal;color:var(--text-muted);font-size:11px;">— per-user (each user sets their own)</span></div>
             <div class="settings-input-group">
               <label class="settings-input-label">Pre-filled when you tap a 💬 Text link</label>
               <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Tags: <code>{{customer name}}</code> <code>{{user name}}</code> <code>{{company name}}</code></div>
@@ -2388,6 +2471,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <div class="settings-feedback" id="smsTemplateFeedback"></div>
           </div>
 
+         </div><!-- end page-grid -->
+
+         <!-- Page-level PRIMARY save (Proposal Content + Customer Email). Desktop: hidden (header save runs it). Mobile: shown here. -->
+         <button class="settings-save-btn js-tab-primary-save" id="proposalSettingsSaveBtn" onclick="saveProposalSettings()">
+           <div class="spinner"></div>
+           <span class="btn-text">Save proposal settings</span>
+         </button>
+         <div class="settings-feedback" id="proposalSettingsFeedback"></div>
         </div><!-- end proposal tab -->
 
         <!-- TAB: Account -->
@@ -2402,10 +2493,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <button onclick="openTruckSetup()" style="display:inline-flex;align-items:center;gap:7px;background:var(--btn-surface,#34485d);border:1px solid var(--btn-surface-border,#46596d);color:var(--text-primary);font-size:13px;font-weight:700;padding:9px 14px;border-radius:var(--radius-sm);margin-bottom:16px;cursor:pointer;">🚚 Manage Trucks</button>
 
             <!-- Which provider currently feeds the trucks map -->
-            <div id="telematicsActiveHeader" style="font-size:13px;margin-bottom:16px;"></div>
+            <div id="telematicsActiveHeader" style="font-size:13px;margin-bottom:0;"></div>
+          </div>
+
+          <!-- Provider portlets: Motive + Linxup side by side on desktop, stacked on mobile. All saves stay per-credential (no page header save). -->
+          <div class="page-grid">
 
             <!-- ── Motive expander ─────────────────────────────────────────── -->
-            <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-bottom:14px;">
+            <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-bottom:0;">
               <button onclick="toggleTruckProvider('motive')" style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--bg-card);border:none;cursor:pointer;color:var(--text-primary);">
                 <span style="font-size:13px;font-weight:700;color:var(--text-primary);display:inline-flex;align-items:center;gap:8px;">🚛 Motive</span>
                 <span id="motiveProviderChevron" style="font-size:11px;color:var(--text-muted);">▾ Collapse</span>
@@ -2450,7 +2545,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             </div>
 
             <!-- ── Linxup expander ─────────────────────────────────────────── -->
-            <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-bottom:4px;">
+            <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-bottom:0;">
               <button onclick="toggleTruckProvider('linxup')" style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--bg-card);border:none;cursor:pointer;color:var(--text-primary);">
                 <span style="font-size:13px;font-weight:700;color:var(--text-primary);display:inline-flex;align-items:center;gap:8px;">🚛 Linxup</span>
                 <span id="linxupProviderChevron" style="font-size:11px;color:var(--text-muted);">▸ Expand</span>
@@ -2500,6 +2595,9 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         </div><!-- end trucks tab -->
 
         <div id="stab-content-account" style="display:none;">
+         <!-- Desktop: cards fan across the portlet grid (display:none cards drop out of flow cleanly).
+              No page header save — every card keeps its own buttons/actions. Conditional visibility unchanged. -->
+         <div class="page-grid">
 
           <!-- Team Members — owners only -->
           <div class="settings-card fade-in fade-in-delay-2" id="teamMembersCard" style="display:none;">
@@ -2593,10 +2691,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <button class="logout-btn" onclick="handleLogout()">Sign out</button>
           </div>
 
+         </div><!-- end page-grid -->
         </div><!-- end account tab -->
 
         <!-- TAB: Customer Pricing -->
         <div id="stab-content-pricing" style="display:none;">
+         <!-- Desktop: list + add/edit form side by side (form is display:none until +Add). Per-item saves; no page header save. -->
+         <div class="page-grid">
           <div class="settings-card fade-in fade-in-delay-2" id="customerPricingCard">
             <div class="settings-card-title" style="display:flex;align-items:center;justify-content:space-between;">
               <span>Customer Price Lists</span>
@@ -2645,6 +2746,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             </div>
             <div class="settings-feedback" id="cplFeedback"></div>
           </div>
+         </div><!-- end page-grid -->
         </div><!-- end pricing tab -->
 
         <!-- TAB: Price Book (native pricing, crm_provider=none) -->
@@ -2728,7 +2830,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               <button onclick="renderRouteClassTab(true)" style="padding:6px 12px;background:var(--btn-surface);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;">↻ Reload</button>
             </div>
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">
-              Classify each Vonigo route so CrewLogic knows which are estimate routes vs collection, etc. Your choice here is authoritative — it overrides Vonigo's route type (which is often mistyped). Used to scope Estimate Costing and group the dispatch board. Pre-filled from Vonigo; change any that are wrong.
+              Classify each Vonigo route so CrewLogic knows which are estimate routes vs collection, etc. Your choice here is authoritative — it overrides Vonigo's route type (which is often mistyped). <b>This drives the route-type filter on the Dispatch screen</b> (which routes you can show/hide on the board) and scopes Estimate Costing. Pre-filled from Vonigo; change any that are wrong.
             </div>
             <div id="routeClassList">Loading…</div>
           </div>
@@ -8768,7 +8870,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         ['franchise', 'cost', 'proposal', 'pricing', 'signs', 'tools', 'trucks', 'account'].forEach(function (t) {
           const b = document.getElementById('stab-' + t); if (b) b.style.display = ''; // (pricebook/customers/routes are shown by their own conditional logic below)
         });
-        const _fInfo = document.getElementById('franchiseInfoCard'); if (_fInfo) _fInfo.style.display = '';
+        // Company Identity / Location / Time Zone were split out of the old franchiseInfoCard; gate them together.
+        document.querySelectorAll('.js-franchise-info').forEach(function (el) { el.style.display = ''; });
         // Show team card
         const teamCard = document.getElementById('teamMembersCard');
         if (teamCard) teamCard.style.display = 'block';
@@ -8803,8 +8906,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Credentials / ownership cards stay OWNER-ONLY even inside a granted tab:
         const vonigoCard = document.getElementById('vonigoCard');
         if (vonigoCard) vonigoCard.style.display = 'none';                                   // Vonigo credentials
-        const franchiseInfoCard = document.getElementById('franchiseInfoCard');
-        if (franchiseInfoCard) franchiseInfoCard.style.display = _grants['cfg_franchise'] ? '' : 'none';
+        // Company Identity / Location / Time Zone (all .js-franchise-info) stay OWNER-ONLY unless cfg_franchise granted.
+        document.querySelectorAll('.js-franchise-info').forEach(function (el) { el.style.display = _grants['cfg_franchise'] ? '' : 'none'; });
 
         // Hide Submit to Vonigo button
         const submitBtn = document.getElementById('estSubmitBtn');
@@ -9621,11 +9724,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _hdStat({ label: 'Recycling (MTD)', k: mo.recyclingCollectedMtd, fmt: 'money', green: true, sub: 'collected this month', go: 'openRecycling()' }),
         _hdStat({ label: 'Vonigo outages (MTD)', k: rl.vonigoOutagesThisMonth, fmt: 'int', amber: true, sub: 'this month', go: "openModule('backupSchedule')" }),
       ].join('');
+      // CREW ON ROUTE TODAY — each person assigned to a route today, alphabetical, route alongside.
+      const crew = Array.isArray(d.crewToday) ? d.crewToday : [];
+      let crewHtml = '';
+      if (crew.length) {
+        const rows = crew.map((c, i) => '<div style="display:flex;justify-content:space-between;gap:14px;padding:8px 0;font-size:13.5px;' + (i ? 'border-top:1px solid var(--border);' : '') + '">'
+          + '<span style="font-weight:600;color:var(--text-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _bsEsc(c.name) + '</span>'
+          + '<span style="color:var(--text-muted);white-space:nowrap;">' + _bsEsc(c.route) + '</span></div>').join('');
+        crewHtml = '<div class="hd-sec"><div class="hd-sech"><h3>Crew on route today</h3><div class="hd-rule"></div></div>'
+          + '<div class="hd-stat" style="max-width:560px;cursor:default;padding-top:4px;">' + rows + '</div></div>';
+      }
       let html = '';
       if (hero.trim()) html += '<div class="hd-hero">' + hero + '</div>';
       if (band.trim()) html += '<div class="hd-band">' + band + '</div>';
       html += _hdSec('Estimates', estGrid);
       html += _hdSec('Operations &amp; reliability', opsGrid);
+      html += crewHtml;
       return html || '<div style="color:var(--text-muted);padding:24px 4px;">No stats to show yet.</div>';
     }
     function _hdHeaderHtml(greeting, name, dateStr, ops, vonigoUp) {
@@ -17110,12 +17224,29 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
       if (module === 'estimates') { initEstimatesList(); showSecondaryToolbar('list'); }
       if (module === 'settings') {
+        // Desktop full-bleed (>=1024px): un-cap the shell like the home dashboard so the left category rail
+        // + 3-col portlet grid use the full window. Reuses .hd-fullbleed (a generic full-bleed utility, gated
+        // to >=1024 in CSS so it's inert on mobile); hideAll() already clears maxWidth + removes hd-fullbleed on leave.
+        const _sShell = document.querySelector('.app-shell'); if (_sShell) _sShell.style.maxWidth = 'none';
+        const _sContent = document.querySelector('.app-content'); if (_sContent) _sContent.classList.add('hd-fullbleed');
         populateSettings();
         applyRoleRestrictions(); // recompute tab/setup access with the now-loaded tileToggles (init runs before toggles fetch)
         if (currentUser && currentUser.role === 'owner') loadTeamMembers();
         // Open a specific tab if one was requested (e.g. the "Set up Price Book" CTA) — done here,
         // after the Settings screen is actually shown, so it survives the leave-prompt detour.
         if (_pendingSettingsTab) { showSettingsTab(_pendingSettingsTab); _pendingSettingsTab = null; }
+        // Sync the desktop category rail to whatever tab is currently shown (owner defaults to Franchise;
+        // estimator path already ran showSettingsTab via applyRoleRestrictions). Inherits tab gating.
+        const _actBtn = document.querySelector('#settingsTabBar .settings-tab.active');
+        const _openTab = _actBtn ? _actBtn.id.replace('stab-', '') : 'franchise';
+        _syncSettingsRail(_openTab);
+        // Register the desktop header PRIMARY save for the tab shown on open (showSettingsTab isn't always
+        // called on first open). Mirrors the per-tab wiring in showSettingsTab.
+        if (_openTab === 'franchise') _setSettingsHeaderSave('Save company info', () => _saveFranchiseFromCard(document.getElementById('settingsHeaderSave'), 'settingsHeaderFeedback'));
+        else if (_openTab === 'cost') _setSettingsHeaderSave('Save cost settings', () => saveCostSettings('settingsHeaderSave', 'settingsHeaderFeedback'));
+        else if (_openTab === 'proposal') _setSettingsHeaderSave('Save proposal', () => saveProposalSettings('settingsHeaderSave', 'settingsHeaderFeedback'));
+        else if (_openTab === 'signs') _setSettingsHeaderSave('Save yard sign settings', () => saveSignsConfig());
+        else _setSettingsHeaderSave(null);
       }
       if (module === 'priceLookup') {
         const isEstimatorRole = (currentUser.role || 'estimator') !== 'owner';
@@ -28954,6 +29085,59 @@ RECYCLING & DONATION
       if (tab === 'trucks') renderTrucksTab();
       // Render route classification tab
       if (tab === 'routes') renderRouteClassTab();
+      // Keep the desktop category rail's active highlight in sync with the shown tab (no-op on mobile).
+      _syncSettingsRail(tab);
+      // Desktop page-level header save (right of the user card): the tab's PRIMARY save. Tabs whose config is
+      // all per-item / per-credential saves (trucks, tools, pricing, routes, account) get NO header save and
+      // keep their own in-card buttons. Phase 2 wires cost/proposal/signs as they're portletized.
+      if (tab === 'franchise') _setSettingsHeaderSave('Save company info', () => _saveFranchiseFromCard(document.getElementById('settingsHeaderSave'), 'settingsHeaderFeedback'));
+      else if (tab === 'cost') _setSettingsHeaderSave('Save cost settings', () => saveCostSettings('settingsHeaderSave', 'settingsHeaderFeedback'));
+      else if (tab === 'proposal') _setSettingsHeaderSave('Save proposal', () => saveProposalSettings('settingsHeaderSave', 'settingsHeaderFeedback'));
+      else if (tab === 'signs') _setSettingsHeaderSave('Save yard sign settings', () => saveSignsConfig());
+      else _setSettingsHeaderSave(null);
+    }
+    // Register (or clear) the desktop header PRIMARY save for the active tab. Toggles .has-save (CSS shows it
+    // only >=1024). fn=null clears it (tab has no single page save).
+    let _settingsHeaderSaveFn = null;
+    function _setSettingsHeaderSave(label, fn) {
+      const wrap = document.getElementById('settingsHeaderSaveWrap');
+      const btn = document.getElementById('settingsHeaderSave');
+      if (!wrap || !btn) return;
+      _settingsHeaderSaveFn = fn || null;
+      if (!fn) { wrap.classList.remove('has-save'); return; }
+      const t = btn.querySelector('.btn-text'); if (t) t.textContent = label;
+      wrap.classList.add('has-save');
+    }
+    function _settingsHeaderSaveRun() { if (_settingsHeaderSaveFn) _settingsHeaderSaveFn(); }
+
+    // Desktop Settings category rail (>=1024px). Mirrors the shown tab's active state and INHERITS the
+    // top-strip tab gating: a rail item whose stab-<id> button is hidden (by applyRoleRestrictions /
+    // audience) is hidden too, so owner/estimator/feature gating flows through automatically. Harmless on
+    // mobile where the rail is display:none.
+    function _syncSettingsRail(activeTab) {
+      const rail = document.getElementById('settingsRail');
+      if (!rail) return;
+      rail.querySelectorAll('.srail-item').forEach(function (item) {
+        const t = item.getAttribute('data-stab');
+        const btn = document.getElementById('stab-' + t);
+        const hidden = !btn || btn.style.display === 'none';
+        item.style.display = hidden ? 'none' : '';
+        item.classList.toggle('active', t === activeTab);
+      });
+    }
+
+    // Save handler for the Location and Time Zone franchise portlets. saveFranchiseInfo() reads EVERY field
+    // by id regardless of which card it now lives in, so there is exactly ONE save path — this wrapper just
+    // adds a per-card spinner (always-show-loading) and mirrors the canonical franchiseFeedback into the
+    // clicked card's own feedback slot. Do NOT split saveFranchiseInfo().
+    async function _saveFranchiseFromCard(btnEl, fbId) {
+      const fb = fbId && document.getElementById(fbId);
+      if (fb) { fb.textContent = ''; fb.className = 'settings-feedback'; }
+      if (btnEl) btnEl.classList.add('loading');
+      try { await saveFranchiseInfo(); }
+      finally { if (btnEl) btnEl.classList.remove('loading'); }
+      const src = document.getElementById('franchiseFeedback');
+      if (fb && src) { fb.textContent = src.textContent; fb.className = src.className; }
     }
 
     // ===== ROUTE CLASSIFICATION (Settings → Routes) =====
@@ -30078,9 +30262,11 @@ Please review the estimate below. If you have any questions or would like to adj
       if (_nickEl) _nickEl.value = cs.companyNickname || '';
     }
 
-    async function saveProposalSettings() {
-      const btn = document.getElementById('proposalSettingsSaveBtn');
-      const feedbackEl = document.getElementById('proposalSettingsFeedback');
+    async function saveProposalSettings(btnId, fbId) {
+      // btnId/fbId let the desktop header save drive the header button's spinner + feedback.
+      // No-arg (the in-card mobile button's onclick) keeps the original in-card ids — unchanged behavior.
+      const btn = document.getElementById(btnId || 'proposalSettingsSaveBtn');
+      const feedbackEl = document.getElementById(fbId || 'proposalSettingsFeedback');
       btn.classList.add('loading');
       feedbackEl.textContent = '';
       if (!currentUser.costSettings) currentUser.costSettings = {};
@@ -30473,9 +30659,11 @@ Please review the estimate below. If you have any questions or would like to adj
       'containerRateDefault','containerIncludedTonsDefault','containerOverageDefault'
     ];
 
-    async function saveCostSettings() {
-      const btn = document.getElementById('costSettingsSaveBtn');
-      const feedbackEl = document.getElementById('costSettingsFeedback');
+    async function saveCostSettings(btnId, fbId) {
+      // btnId/fbId let the desktop header save drive the header button's spinner + feedback.
+      // No-arg (the in-card mobile button's onclick) keeps the original in-card ids — unchanged behavior.
+      const btn = document.getElementById(btnId || 'costSettingsSaveBtn');
+      const feedbackEl = document.getElementById(fbId || 'costSettingsFeedback');
       btn.classList.add('loading');
       feedbackEl.textContent = '';
       const vals = {};
@@ -33452,7 +33640,7 @@ Please review the estimate below. If you have any questions or would like to adj
             '<input type="number" class="form-input" id="signsCfgHiddenDays" value="' + (cfg.hiddenSignDays || 60) + '" min="1" inputmode="numeric">' +
           '</div>' +
         '</div>' +
-        '<button onclick="saveSignsConfig()" style="width:100%;padding:12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;color:var(--accent-text);cursor:pointer;">Save Settings</button>' +
+        '<button class="js-tab-primary-save" onclick="saveSignsConfig()" style="width:100%;padding:12px;background:var(--accent-green);border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;color:var(--accent-text);cursor:pointer;">Save Settings</button>' +
         '<div id="signsCfgFeedback" style="font-size:12px;margin-top:6px;min-height:16px;text-align:center;"></div>';
     }
 
