@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.130.7 | 2026-08-19">
+  <meta name="crewlogic-version" content="v5.130.8 | 2026-08-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -762,6 +762,15 @@
        A left category rail replaces the top tab strip and the active tab's content becomes the portlet
        grid. Below 1024px NONE of this applies — the mobile top-tab strip + stacked cards are unchanged. */
     #settingsRail { display: none; }
+    /* Desktop page-level header save (right of the settings user card). Hidden on mobile — mobile keeps the
+       in-card saves. On desktop the in-card PRIMARY save (.js-tab-primary-save) hides and the header save runs it. */
+    #settingsHeaderSaveWrap { display: none; }
+    #settingsHeaderSave { width: auto; margin: 0; padding: 10px 18px; white-space: nowrap; }
+    @media (min-width: 1024px) {
+      #settingsUserCard { align-items: center; }
+      #settingsHeaderSaveWrap.has-save { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+      #settingsScreen .js-tab-primary-save { display: none; }
+    }
     @media (min-width: 1024px) {
       /* rail replaces the top strip */
       #settingsTabBar { display: none !important; }
@@ -2023,6 +2032,15 @@
             <div class="user-card-email" id="settingsEmail">—</div>
             <div class="user-card-franchise" id="settingsFranchise">—</div>
           </div>
+          <!-- Desktop page-level PRIMARY save (right of the header), consistent across Settings pages. Set
+               per tab by _setSettingsHeaderSave(); sub-cards with distinct saves (Vonigo, Branding, telematics
+               tokens/secrets) keep their own in-card buttons. Desktop-only; mobile keeps the in-card save. -->
+          <div id="settingsHeaderSaveWrap">
+            <div class="settings-feedback" id="settingsHeaderFeedback" style="margin:0;"></div>
+            <button class="settings-save-btn" id="settingsHeaderSave" onclick="_settingsHeaderSaveRun()">
+              <div class="spinner"></div><span class="btn-text">Save</span>
+            </button>
+          </div>
         </div>
 
         <!-- Settings Tabs -->
@@ -2060,7 +2078,7 @@
               <label class="settings-input-label">Office Phone</label>
               <input type="tel" class="form-input" id="settingsPhone" placeholder="(555) 123-4567" autocomplete="off">
             </div>
-            <button class="settings-save-btn" id="franchiseSaveBtn" onclick="saveFranchiseInfo()">
+            <button class="settings-save-btn js-tab-primary-save" id="franchiseSaveBtn" onclick="saveFranchiseInfo()">
               <div class="spinner"></div>
               <span class="btn-text">Save company info</span>
             </button>
@@ -2800,7 +2818,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               <button onclick="renderRouteClassTab(true)" style="padding:6px 12px;background:var(--btn-surface);color:var(--text-primary);border:1px solid var(--btn-surface-border);border-radius:var(--radius-sm);font-size:12px;font-weight:700;cursor:pointer;">↻ Reload</button>
             </div>
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">
-              Classify each Vonigo route so CrewLogic knows which are estimate routes vs collection, etc. Your choice here is authoritative — it overrides Vonigo's route type (which is often mistyped). Used to scope Estimate Costing and group the dispatch board. Pre-filled from Vonigo; change any that are wrong.
+              Classify each Vonigo route so CrewLogic knows which are estimate routes vs collection, etc. Your choice here is authoritative — it overrides Vonigo's route type (which is often mistyped). <b>This drives the route-type filter on the Dispatch screen</b> (which routes you can show/hide on the board) and scopes Estimate Costing. Pre-filled from Vonigo; change any that are wrong.
             </div>
             <div id="routeClassList">Loading…</div>
           </div>
@@ -17197,7 +17215,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Sync the desktop category rail to whatever tab is currently shown (owner defaults to Franchise;
         // estimator path already ran showSettingsTab via applyRoleRestrictions). Inherits tab gating.
         const _actBtn = document.querySelector('#settingsTabBar .settings-tab.active');
-        _syncSettingsRail(_actBtn ? _actBtn.id.replace('stab-', '') : 'franchise');
+        const _openTab = _actBtn ? _actBtn.id.replace('stab-', '') : 'franchise';
+        _syncSettingsRail(_openTab);
+        // Register the desktop header PRIMARY save for the tab shown on open (showSettingsTab isn't always
+        // called on first open). Mirrors the per-tab wiring in showSettingsTab.
+        if (_openTab === 'franchise') _setSettingsHeaderSave('Save company info', () => _saveFranchiseFromCard(document.getElementById('settingsHeaderSave'), 'settingsHeaderFeedback'));
+        else _setSettingsHeaderSave(null);
       }
       if (module === 'priceLookup') {
         const isEstimatorRole = (currentUser.role || 'estimator') !== 'owner';
@@ -29038,7 +29061,25 @@ RECYCLING & DONATION
       if (tab === 'routes') renderRouteClassTab();
       // Keep the desktop category rail's active highlight in sync with the shown tab (no-op on mobile).
       _syncSettingsRail(tab);
+      // Desktop page-level header save (right of the user card): the tab's PRIMARY save. Tabs whose config is
+      // all per-item / per-credential saves (trucks, tools, pricing, routes, account) get NO header save and
+      // keep their own in-card buttons. Phase 2 wires cost/proposal/signs as they're portletized.
+      if (tab === 'franchise') _setSettingsHeaderSave('Save company info', () => _saveFranchiseFromCard(document.getElementById('settingsHeaderSave'), 'settingsHeaderFeedback'));
+      else _setSettingsHeaderSave(null);
     }
+    // Register (or clear) the desktop header PRIMARY save for the active tab. Toggles .has-save (CSS shows it
+    // only >=1024). fn=null clears it (tab has no single page save).
+    let _settingsHeaderSaveFn = null;
+    function _setSettingsHeaderSave(label, fn) {
+      const wrap = document.getElementById('settingsHeaderSaveWrap');
+      const btn = document.getElementById('settingsHeaderSave');
+      if (!wrap || !btn) return;
+      _settingsHeaderSaveFn = fn || null;
+      if (!fn) { wrap.classList.remove('has-save'); return; }
+      const t = btn.querySelector('.btn-text'); if (t) t.textContent = label;
+      wrap.classList.add('has-save');
+    }
+    function _settingsHeaderSaveRun() { if (_settingsHeaderSaveFn) _settingsHeaderSaveFn(); }
 
     // Desktop Settings category rail (>=1024px). Mirrors the shown tab's active state and INHERITS the
     // top-strip tab gating: a rail item whose stab-<id> button is hidden (by applyRoleRestrictions /
