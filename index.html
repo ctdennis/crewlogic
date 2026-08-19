@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.130.5 | 2026-08-18">
+  <meta name="crewlogic-version" content="v5.130.6 | 2026-08-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -748,6 +748,35 @@
     .settings-save-btn.loading .btn-text { display: none; }
     .settings-save-btn.loading .spinner { display: block; }
     .settings-save-btn .spinner { border-top-color: var(--accent-text); }
+
+    /* ===== DESKTOP PAGE STANDARD — reusable fluid portlet grid (docs/desktop-page-standard.md) =====
+       repeat(3,1fr): 3 columns that stretch/shrink with the viewport. align-items:start: every column
+       starts on the same top line (clean rows, not a staggered stream). Collapses 3 → 2 → 1 as it
+       narrows, so phones still get a single stack. Reusable by any portletized settings tab / page. */
+    .page-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 18px; align-items: start; }
+    @media (max-width: 820px) { .page-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+    @media (max-width: 520px) { .page-grid { grid-template-columns: 1fr; } }
+    .page-grid > .settings-card { margin-bottom: 0; }  /* grid gap owns the spacing */
+
+    /* ===== SETTINGS DESKTOP FRAMEWORK (additive; visible ONLY >=1024px) =====
+       A left category rail replaces the top tab strip and the active tab's content becomes the portlet
+       grid. Below 1024px NONE of this applies — the mobile top-tab strip + stacked cards are unchanged. */
+    #settingsRail { display: none; }
+    @media (min-width: 1024px) {
+      /* rail replaces the top strip */
+      #settingsTabBar { display: none !important; }
+      /* two-column shell: fixed rail + fluid content. id+class beats .settings-section.active (L663). */
+      #settingsScreen.active { display: grid; grid-template-columns: 200px minmax(0,1fr); column-gap: 24px; align-items: start; }
+      #settingsScreen.active > *:not(#settingsRail) { grid-column: 2; min-width: 0; }
+      #settingsRail { display: block; grid-column: 1; grid-row: 1; position: sticky; top: 14px; align-self: start;
+        background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 8px; }
+      #settingsRail .srail-h { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); opacity: .7; font-weight: 800; padding: 6px 10px 8px; }
+      #settingsRail .srail-item { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 9px; color: var(--text-secondary); font-weight: 600; font-size: 13.5px; cursor: pointer; user-select: none; margin-bottom: 1px; }
+      #settingsRail .srail-item:hover { background: var(--bg-input); color: var(--text-primary); }
+      #settingsRail .srail-item.active { background: rgba(0,238,118,0.13); color: var(--text-primary); box-shadow: inset 3px 0 0 var(--accent-green); }
+      #settingsRail .srail-item.active .srail-i { color: var(--accent-green); }
+      #settingsRail .srail-i { width: 18px; text-align: center; flex: 0 0 auto; font-size: 15px; }
+    }
 
     .settings-feedback {
       font-size: 13px; text-align: center; margin-top: 10px; min-height: 20px;
@@ -1536,11 +1565,18 @@
             <div class="dn-sub" data-nav="estimateCosting" onclick="_shellNav('estimateCosting',this)">
               <b>Margin Analysis</b><small>profit &amp; margin review of Vonigo estimates</small>
             </div>
+            <div class="dn-sub" data-nav="estimatesDashboard" onclick="_shellNav('estimatesDashboard',this)">
+              <b>Estimates Desk</b><small>estimates + the schedule on one screen</small>
+            </div>
           </div>
         </div>
 
         <div class="dn-item" data-nav="bizdev" onclick="_shellNav('bizdev',this)">
           <span class="dn-ic">📈</span> Business Development
+        </div>
+
+        <div class="dn-item" data-nav="pipeline" onclick="_shellNav('pipeline',this)">
+          <span class="dn-ic">🔄</span> Follow-up Pipeline
         </div>
 
         <div class="dn-item" data-nav="backupSchedule" onclick="_shellNav('backupSchedule',this)">
@@ -1552,12 +1588,17 @@
             <span class="dn-ic">🧰</span> Yard Signs &amp; Other Tools <span class="dn-caret">▸</span>
           </div>
           <div class="dn-sub-wrap">
+            <div class="dn-sub" data-nav="volumeCheck" onclick="_shellNav('volumeCheck',this)"><b>Volume Check</b></div>
             <div class="dn-sub" data-nav="signs" onclick="_shellNav('signs',this)"><b>Yard Signs</b></div>
             <div class="dn-sub" onclick="_shellNav('recycling',this)"><b>Recycling</b></div>
             <div class="dn-sub" data-nav="trucks" onclick="_shellNav('trucks',this)"><b>Where Are My Trucks?</b></div>
+            <div class="dn-sub" data-nav="truckAlerts" onclick="_shellNav('truckAlerts',this)"><b>Truck Alerts</b></div>
             <div class="dn-sub" data-nav="priceLookup" onclick="_shellNav('priceLookup',this)"><b>Price Lookup</b></div>
             <div class="dn-sub" data-nav="promos" onclick="_shellNav('promos',this)"><b>Coupons / Campaigns</b></div>
             <div class="dn-sub" data-nav="jobPlan" onclick="_shellNav('jobPlan',this)"><b>Job Plan</b></div>
+            <div class="dn-sub" data-nav="manageJobs" onclick="_shellNav('manageJobs',this)"><b>Manage Jobs</b></div>
+            <div class="dn-sub" data-nav="disposalRouter" onclick="_shellNav('disposalRouter',this)"><b>Job Router</b></div>
+            <div class="dn-sub" data-nav="router" onclick="_shellNav('router',this)"><b>Route Optimizer</b></div>
           </div>
         </div>
       </div>
@@ -1955,6 +1996,23 @@
 
       <!-- SETTINGS -->
       <div class="settings-section" id="settingsScreen">
+
+        <!-- Desktop category rail (>=1024px only; mirrors the home nav look). Each item drives the EXISTING
+             showSettingsTab(). A category is hidden when its top-strip tab button is hidden, so owner/estimator
+             /feature gating (applyRoleRestrictions) is inherited automatically via _syncSettingsRail(). -->
+        <nav id="settingsRail" aria-label="Settings categories">
+          <div class="srail-h">Settings</div>
+          <div class="srail-item" data-stab="franchise" onclick="showSettingsTab('franchise')"><span class="srail-i">🏢</span> Franchise</div>
+          <div class="srail-item" data-stab="cost" onclick="showSettingsTab('cost')"><span class="srail-i">💰</span> Cost</div>
+          <div class="srail-item" data-stab="proposal" onclick="showSettingsTab('proposal')"><span class="srail-i">📄</span> Proposal</div>
+          <div class="srail-item" data-stab="pricing" onclick="showSettingsTab('pricing')"><span class="srail-i">★</span> Pricing</div>
+          <div class="srail-item" data-stab="signs" onclick="showSettingsTab('signs')"><span class="srail-i">🪧</span> Yard Signs</div>
+          <div class="srail-item" data-stab="tools" onclick="showSettingsTab('tools')"><span class="srail-i">🛠</span> Tools</div>
+          <div class="srail-item" data-stab="trucks" onclick="showSettingsTab('trucks')"><span class="srail-i">🚚</span> Trucks</div>
+          <div class="srail-item" data-stab="routes" onclick="showSettingsTab('routes')"><span class="srail-i">🧭</span> Routes</div>
+          <div class="srail-item" data-stab="account" onclick="showSettingsTab('account')"><span class="srail-i">⚙️</span> Account</div>
+        </nav>
+
         <div class="section-title fade-in">Settings</div>
 
         <!-- User card -->
@@ -1984,43 +2042,29 @@
 
         <!-- TAB: Franchise -->
         <div id="stab-content-franchise">
+         <div class="page-grid">
 
-          <!-- Vonigo credentials -->
-          <div class="settings-card fade-in fade-in-delay-2" id="vonigoCard">
-            <div class="settings-card-title">Vonigo Integration</div>
-
-            <div style="margin-bottom:0;">
-              <div id="vonigoStatusBadge" class="config-status missing" style="display:inline-flex;align-items:center;gap:6px;">
-                <span class="config-status-dot"></span>
-                <span id="vonigoStatusText">Not configured</span>
-                <span id="vonigoChangeLink" onclick="toggleVonigoForm(event)"
-                  style="display:none;color:white;cursor:pointer;font-size:13px;border-left:1px solid rgba(255,255,255,0.4);padding-left:8px;margin-left:2px;">
-                  Change
-                </span>
-              </div>
+          <!-- Company Identity (keeps the franchiseInfoCard id + the canonical saveFranchiseInfo() button) -->
+          <div class="settings-card fade-in fade-in-delay-2 js-franchise-info" id="franchiseInfoCard">
+            <div class="settings-card-title">Company Identity</div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Company / Franchise Name</label>
+              <input type="text" class="form-input" id="settingsFranchiseName" placeholder="The Junkluggers of Akron-Canton" autocomplete="organization">
+              <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Appears on PDFs and customer-facing proposals.</div>
             </div>
-
-            <div id="vonigoForm" style="display:none;">
-              <div class="settings-input-group">
-                <label class="settings-input-label">Vonigo username</label>
-                <input type="text" class="form-input" id="settingsVonigoUser"
-                  placeholder="First.Last" autocomplete="off" autocapitalize="off">
-                <div class="form-hint">Your Vonigo login username (e.g. John.Smith)</div>
-              </div>
-
-              <div class="settings-input-group">
-                <label class="settings-input-label">Vonigo password</label>
-                <input type="password" class="form-input" id="settingsVonigoPass"
-                  placeholder="••••••••" autocomplete="current-password">
-                <div class="form-hint">Sent securely over HTTPS, never stored in the app</div>
-              </div>
-
-              <button class="settings-save-btn" id="settingsSaveBtn" onclick="saveVonigoCredentials()">
-                <div class="spinner"></div>
-                <span class="btn-text">Save credentials</span>
-              </button>
-              <div class="settings-feedback" id="settingsFeedback"></div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Website URL</label>
+              <input type="url" class="form-input" id="settingsWebsite" placeholder="https://www.yourcompany.com" autocomplete="off">
             </div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Office Phone</label>
+              <input type="tel" class="form-input" id="settingsPhone" placeholder="(555) 123-4567" autocomplete="off">
+            </div>
+            <button class="settings-save-btn" id="franchiseSaveBtn" onclick="saveFranchiseInfo()">
+              <div class="spinner"></div>
+              <span class="btn-text">Save company info</span>
+            </button>
+            <div class="settings-feedback" id="franchiseFeedback"></div>
           </div>
 
           <!-- Branding -->
@@ -2071,18 +2115,9 @@
             <div class="settings-feedback" id="brandingFeedback"></div>
           </div>
 
-          <!-- Franchise Info -->
-          <div class="settings-card fade-in fade-in-delay-3" id="franchiseInfoCard">
-            <div class="settings-card-title">Company Info</div>
-            <div class="settings-input-group">
-              <label class="settings-input-label">Company / Franchise Name</label>
-              <input type="text" class="form-input" id="settingsFranchiseName" placeholder="The Junkluggers of Akron-Canton" autocomplete="organization">
-              <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Appears on PDFs and customer-facing proposals.</div>
-            </div>
-            <div class="settings-input-group">
-              <label class="settings-input-label">Office Phone</label>
-              <input type="tel" class="form-input" id="settingsPhone" placeholder="(555) 123-4567" autocomplete="off">
-            </div>
+          <!-- Location & Service Area (re-homed from the old Company Info card; saveFranchiseInfo reads by id) -->
+          <div class="settings-card fade-in fade-in-delay-3 js-franchise-info" id="locationCard">
+            <div class="settings-card-title">Location &amp; Service Area</div>
             <div class="settings-input-group">
               <label class="settings-input-label">Office Address</label>
               <input type="text" class="form-input" id="settingsOfficeAddress" placeholder="123 Main Street" autocomplete="off">
@@ -2102,25 +2137,70 @@
               </div>
             </div>
             <div class="settings-input-group">
-              <label class="settings-input-label">Time zone <span style="color:var(--text-muted);font-weight:400;">— drives your schedule board, job alerts and "today's jobs". Suggested from your state; change it if your office is in a different zone.</span></label>
-              <select class="form-input" id="settingsOfficeTimezone" onchange="_tzMarkChosen()"></select>
-              <div id="settingsTimezoneHint" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
-            </div>
-            <div class="settings-input-group">
               <label class="settings-input-label">States served <span style="color:var(--text-muted);font-weight:400;">— for town price lookup; comma-separated (e.g. MA, RI). Defaults to your office state.</span></label>
               <input type="text" class="form-input" id="settingsServiceStates" placeholder="MA, RI" autocomplete="off">
             </div>
-            <div class="settings-input-group">
-              <label class="settings-input-label">Website URL</label>
-              <input type="url" class="form-input" id="settingsWebsite" placeholder="https://www.yourcompany.com" autocomplete="off">
-            </div>
-            <button class="settings-save-btn" id="franchiseSaveBtn" onclick="saveFranchiseInfo()">
+            <button class="settings-save-btn" onclick="_saveFranchiseFromCard(this,'locationFeedback')">
               <div class="spinner"></div>
-              <span class="btn-text">Save company info</span>
+              <span class="btn-text">Save</span>
             </button>
-            <div class="settings-feedback" id="franchiseFeedback"></div>
+            <div class="settings-feedback" id="locationFeedback"></div>
           </div>
 
+          <!-- Vonigo Integration (credentials) -->
+          <div class="settings-card fade-in fade-in-delay-2" id="vonigoCard">
+            <div class="settings-card-title">Vonigo Integration</div>
+
+            <div style="margin-bottom:0;">
+              <div id="vonigoStatusBadge" class="config-status missing" style="display:inline-flex;align-items:center;gap:6px;">
+                <span class="config-status-dot"></span>
+                <span id="vonigoStatusText">Not configured</span>
+                <span id="vonigoChangeLink" onclick="toggleVonigoForm(event)"
+                  style="display:none;color:white;cursor:pointer;font-size:13px;border-left:1px solid rgba(255,255,255,0.4);padding-left:8px;margin-left:2px;">
+                  Change
+                </span>
+              </div>
+            </div>
+
+            <div id="vonigoForm" style="display:none;">
+              <div class="settings-input-group">
+                <label class="settings-input-label">Vonigo username</label>
+                <input type="text" class="form-input" id="settingsVonigoUser"
+                  placeholder="First.Last" autocomplete="off" autocapitalize="off">
+                <div class="form-hint">Your Vonigo login username (e.g. John.Smith)</div>
+              </div>
+
+              <div class="settings-input-group">
+                <label class="settings-input-label">Vonigo password</label>
+                <input type="password" class="form-input" id="settingsVonigoPass"
+                  placeholder="••••••••" autocomplete="current-password">
+                <div class="form-hint">Sent securely over HTTPS, never stored in the app</div>
+              </div>
+
+              <button class="settings-save-btn" id="settingsSaveBtn" onclick="saveVonigoCredentials()">
+                <div class="spinner"></div>
+                <span class="btn-text">Save credentials</span>
+              </button>
+              <div class="settings-feedback" id="settingsFeedback"></div>
+            </div>
+          </div>
+
+          <!-- Time Zone (re-homed; saveFranchiseInfo reads settingsOfficeTimezone by id) -->
+          <div class="settings-card fade-in fade-in-delay-3 js-franchise-info" id="timezoneCard">
+            <div class="settings-card-title">Time Zone</div>
+            <div class="settings-input-group">
+              <label class="settings-input-label">Office time zone <span style="color:var(--text-muted);font-weight:400;">— drives your schedule board, job alerts and "today's jobs". Suggested from your state; change it if your office is in a different zone.</span></label>
+              <select class="form-input" id="settingsOfficeTimezone" onchange="_tzMarkChosen()"></select>
+              <div id="settingsTimezoneHint" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
+            </div>
+            <button class="settings-save-btn" onclick="_saveFranchiseFromCard(this,'timezoneFeedback')">
+              <div class="spinner"></div>
+              <span class="btn-text">Save</span>
+            </button>
+            <div class="settings-feedback" id="timezoneFeedback"></div>
+          </div>
+
+         </div><!-- end page-grid -->
         </div><!-- end franchise tab -->
 
         <!-- TAB: Cost Analysis -->
@@ -8768,7 +8848,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         ['franchise', 'cost', 'proposal', 'pricing', 'signs', 'tools', 'trucks', 'account'].forEach(function (t) {
           const b = document.getElementById('stab-' + t); if (b) b.style.display = ''; // (pricebook/customers/routes are shown by their own conditional logic below)
         });
-        const _fInfo = document.getElementById('franchiseInfoCard'); if (_fInfo) _fInfo.style.display = '';
+        // Company Identity / Location / Time Zone were split out of the old franchiseInfoCard; gate them together.
+        document.querySelectorAll('.js-franchise-info').forEach(function (el) { el.style.display = ''; });
         // Show team card
         const teamCard = document.getElementById('teamMembersCard');
         if (teamCard) teamCard.style.display = 'block';
@@ -8803,8 +8884,8 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         // Credentials / ownership cards stay OWNER-ONLY even inside a granted tab:
         const vonigoCard = document.getElementById('vonigoCard');
         if (vonigoCard) vonigoCard.style.display = 'none';                                   // Vonigo credentials
-        const franchiseInfoCard = document.getElementById('franchiseInfoCard');
-        if (franchiseInfoCard) franchiseInfoCard.style.display = _grants['cfg_franchise'] ? '' : 'none';
+        // Company Identity / Location / Time Zone (all .js-franchise-info) stay OWNER-ONLY unless cfg_franchise granted.
+        document.querySelectorAll('.js-franchise-info').forEach(function (el) { el.style.display = _grants['cfg_franchise'] ? '' : 'none'; });
 
         // Hide Submit to Vonigo button
         const submitBtn = document.getElementById('estSubmitBtn');
@@ -17110,12 +17191,21 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       }
       if (module === 'estimates') { initEstimatesList(); showSecondaryToolbar('list'); }
       if (module === 'settings') {
+        // Desktop full-bleed (>=1024px): un-cap the shell like the home dashboard so the left category rail
+        // + 3-col portlet grid use the full window. Reuses .hd-fullbleed (a generic full-bleed utility, gated
+        // to >=1024 in CSS so it's inert on mobile); hideAll() already clears maxWidth + removes hd-fullbleed on leave.
+        const _sShell = document.querySelector('.app-shell'); if (_sShell) _sShell.style.maxWidth = 'none';
+        const _sContent = document.querySelector('.app-content'); if (_sContent) _sContent.classList.add('hd-fullbleed');
         populateSettings();
         applyRoleRestrictions(); // recompute tab/setup access with the now-loaded tileToggles (init runs before toggles fetch)
         if (currentUser && currentUser.role === 'owner') loadTeamMembers();
         // Open a specific tab if one was requested (e.g. the "Set up Price Book" CTA) — done here,
         // after the Settings screen is actually shown, so it survives the leave-prompt detour.
         if (_pendingSettingsTab) { showSettingsTab(_pendingSettingsTab); _pendingSettingsTab = null; }
+        // Sync the desktop category rail to whatever tab is currently shown (owner defaults to Franchise;
+        // estimator path already ran showSettingsTab via applyRoleRestrictions). Inherits tab gating.
+        const _actBtn = document.querySelector('#settingsTabBar .settings-tab.active');
+        _syncSettingsRail(_actBtn ? _actBtn.id.replace('stab-', '') : 'franchise');
       }
       if (module === 'priceLookup') {
         const isEstimatorRole = (currentUser.role || 'estimator') !== 'owner';
@@ -28954,6 +29044,38 @@ RECYCLING & DONATION
       if (tab === 'trucks') renderTrucksTab();
       // Render route classification tab
       if (tab === 'routes') renderRouteClassTab();
+      // Keep the desktop category rail's active highlight in sync with the shown tab (no-op on mobile).
+      _syncSettingsRail(tab);
+    }
+
+    // Desktop Settings category rail (>=1024px). Mirrors the shown tab's active state and INHERITS the
+    // top-strip tab gating: a rail item whose stab-<id> button is hidden (by applyRoleRestrictions /
+    // audience) is hidden too, so owner/estimator/feature gating flows through automatically. Harmless on
+    // mobile where the rail is display:none.
+    function _syncSettingsRail(activeTab) {
+      const rail = document.getElementById('settingsRail');
+      if (!rail) return;
+      rail.querySelectorAll('.srail-item').forEach(function (item) {
+        const t = item.getAttribute('data-stab');
+        const btn = document.getElementById('stab-' + t);
+        const hidden = !btn || btn.style.display === 'none';
+        item.style.display = hidden ? 'none' : '';
+        item.classList.toggle('active', t === activeTab);
+      });
+    }
+
+    // Save handler for the Location and Time Zone franchise portlets. saveFranchiseInfo() reads EVERY field
+    // by id regardless of which card it now lives in, so there is exactly ONE save path — this wrapper just
+    // adds a per-card spinner (always-show-loading) and mirrors the canonical franchiseFeedback into the
+    // clicked card's own feedback slot. Do NOT split saveFranchiseInfo().
+    async function _saveFranchiseFromCard(btnEl, fbId) {
+      const fb = fbId && document.getElementById(fbId);
+      if (fb) { fb.textContent = ''; fb.className = 'settings-feedback'; }
+      if (btnEl) btnEl.classList.add('loading');
+      try { await saveFranchiseInfo(); }
+      finally { if (btnEl) btnEl.classList.remove('loading'); }
+      const src = document.getElementById('franchiseFeedback');
+      if (fb && src) { fb.textContent = src.textContent; fb.className = src.className; }
     }
 
     // ===== ROUTE CLASSIFICATION (Settings → Routes) =====
