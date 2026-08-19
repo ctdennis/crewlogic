@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.130.9 | 2026-08-19">
+  <meta name="crewlogic-version" content="v5.131.0 | 2026-08-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -9724,11 +9724,22 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         _hdStat({ label: 'Recycling (MTD)', k: mo.recyclingCollectedMtd, fmt: 'money', green: true, sub: 'collected this month', go: 'openRecycling()' }),
         _hdStat({ label: 'Vonigo outages (MTD)', k: rl.vonigoOutagesThisMonth, fmt: 'int', amber: true, sub: 'this month', go: "openModule('backupSchedule')" }),
       ].join('');
+      // CREW ON ROUTE TODAY — each person assigned to a route today, alphabetical, route alongside.
+      const crew = Array.isArray(d.crewToday) ? d.crewToday : [];
+      let crewHtml = '';
+      if (crew.length) {
+        const rows = crew.map((c, i) => '<div style="display:flex;justify-content:space-between;gap:14px;padding:8px 0;font-size:13.5px;' + (i ? 'border-top:1px solid var(--border);' : '') + '">'
+          + '<span style="font-weight:600;color:var(--text-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _bsEsc(c.name) + '</span>'
+          + '<span style="color:var(--text-muted);white-space:nowrap;">' + _bsEsc(c.route) + '</span></div>').join('');
+        crewHtml = '<div class="hd-sec"><div class="hd-sech"><h3>Crew on route today</h3><div class="hd-rule"></div></div>'
+          + '<div class="hd-stat" style="max-width:560px;cursor:default;padding-top:4px;">' + rows + '</div></div>';
+      }
       let html = '';
       if (hero.trim()) html += '<div class="hd-hero">' + hero + '</div>';
       if (band.trim()) html += '<div class="hd-band">' + band + '</div>';
       html += _hdSec('Estimates', estGrid);
       html += _hdSec('Operations &amp; reliability', opsGrid);
+      html += crewHtml;
       return html || '<div style="color:var(--text-muted);padding:24px 4px;">No stats to show yet.</div>';
     }
     function _hdHeaderHtml(greeting, name, dateStr, ops, vonigoUp) {

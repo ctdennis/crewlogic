@@ -209,9 +209,10 @@ Deno.serve(async (req: Request) => {
       ? Math.max(0, jobsToday - jobsCompletedToday) : null;
     // activeRoutesToday + bookedRevenueToday — from the source snapshot joined to today's non-cancelled appts.
     let activeRoutesToday: number | null = null, bookedRevenueToday: number | null = null;
+    let crewToday: { name: string; route: string }[] | null = null;
     const opsSnap = await safe('ops.snapshotToday', async () => {
       const { data, error } = await db.from('job_source_snapshot')
-        .select('import_total, route_name, job_appointments!inner(scheduled_date, status)')
+        .select('import_total, route_name, crew_display, job_appointments!inner(scheduled_date, status)')
         .eq('franchise_id', fid)
         .eq('job_appointments.scheduled_date', todayStr)
         .neq('job_appointments.status', 'cancelled');
@@ -223,6 +224,24 @@ Deno.serve(async (req: Request) => {
       for (const r of opsSnap) { const rn = str(r.route_name); if (rn) routes.add(rn); }
       activeRoutesToday = routes.size;
       bookedRevenueToday = Math.round(sumField(opsSnap, 'import_total') * 100) / 100;
+      // Crew roster: each person assigned to a route today, alphabetical, with their route. Deduped by
+      // person+route (a person shows once per route even if on several of that route's jobs).
+      const seen = new Set<string>();
+      const roster: { name: string; route: string }[] = [];
+      for (const r of opsSnap) {
+        const route = str(r.route_name);
+        const crew = Array.isArray(r.crew_display) ? r.crew_display : [];
+        for (const c of crew as Record<string, unknown>[]) {
+          const name = str(c && c.name);
+          if (!name) continue;
+          const key = name.toLowerCase() + '|' + route.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          roster.push({ name, route });
+        }
+      }
+      roster.sort((a, b) => a.name.localeCompare(b.name) || a.route.localeCompare(b.route));
+      crewToday = roster;
     }
 
     // ══════════════════════════ ESTIMATES ══════════════════════════
@@ -339,6 +358,7 @@ Deno.serve(async (req: Request) => {
       generatedAt: new Date().toISOString(),
       franchiseTz: tz,
       ops: { jobsToday, activeRoutesToday, bookedRevenueToday, jobsCompletedToday, jobsRemainingToday },
+      crewToday,
       estimates: { created30d, conversionRate30d, inVonigoValue30d, inVonigoCount30d, crewlogicValue30d, crewlogicCount30d },
       bizdev: { pipelineEstimates, newLeads24h, cancellationsToReschedule, pipelineTotalValue },
       money: { revenueThisWeek, revenueThisMonth, recyclingCollectedMtd },
