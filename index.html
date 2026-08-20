@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.131.2 | 2026-08-19">
+  <meta name="crewlogic-version" content="v5.131.3 | 2026-08-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1046,6 +1046,13 @@
       /* Stacked-with-bigger-photos (Phase 1): enlarge the selected room's inline photo thumbnails.
          Inline width/height on the imgs (renderCharges) require !important to override. */
       #estimateEditorScreen.est-desk #estChargesList img[id^="photo-thumb-"] { width: 132px !important; height: 99px !important; }
+    }
+
+    /* Desktop: flow the estimate cards into a responsive grid so the list uses the full width
+       (instead of a single narrow centered column). Mobile (<1024px) keeps the single column. */
+    @media (min-width: 1024px) {
+      #estimatesScreen #estimatesList { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px; align-items: start; }
+      #estimatesScreen #estimatesList > .estimates-empty { grid-column: 1 / -1; }
     }
 
     .est-label-input {
@@ -17285,7 +17292,15 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         }
         initRouteOptimizer();
       }
-      if (module === 'estimates') { initEstimatesList(); showSecondaryToolbar('list'); }
+      if (module === 'estimates') {
+        initEstimatesList(); showSecondaryToolbar('list');
+        // Desktop: use the width — un-cap the shell and flow the estimate cards into a grid (CSS below).
+        // hideAll() clears maxWidth + removes hd-fullbleed on leave.
+        if (window.innerWidth >= 1024) {
+          ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) el.style.maxWidth = 'none'; });
+          const _c = document.querySelector('.app-content'); if (_c) _c.classList.add('hd-fullbleed');
+        }
+      }
       if (module === 'settings') {
         // Desktop full-bleed (>=1024px): un-cap the shell like the home dashboard so the left category rail
         // + 3-col portlet grid use the full window. Reuses .hd-fullbleed (a generic full-bleed utility, gated
