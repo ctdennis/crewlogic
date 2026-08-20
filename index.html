@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.131.0 | 2026-08-19">
+  <meta name="crewlogic-version" content="v5.131.2 | 2026-08-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -785,7 +785,14 @@
       #settingsRail .srail-item.active { background: rgba(0,238,118,0.13); color: var(--text-primary); box-shadow: inset 3px 0 0 var(--accent-green); }
       #settingsRail .srail-item.active .srail-i { color: var(--accent-green); }
       #settingsRail .srail-i { width: 18px; text-align: center; flex: 0 0 auto; font-size: 15px; }
+      /* Contain long Facilities / holiday lists so one tall portlet doesn't shove the others off-screen
+         (owner 2026-08-19). Each list scrolls internally; the +Add buttons below it stay visible. */
+      #settingsDisposalSitesList, #settingsRecyclingSitesList, #settingsDonationSitesList,
+      #settingsDonationHolidaysList, #settingsDisposalHolidaysList { max-height: 320px; overflow-y: auto; }
     }
+
+    /* Per-category explainer line at the top of each Settings tab (what it controls + why). */
+    .settings-intro { font-size: 12.5px; color: var(--text-muted); line-height: 1.5; margin: -2px 0 16px; max-width: 780px; }
 
     .settings-feedback {
       font-size: 13px; text-align: center; margin-top: 10px; min-height: 20px;
@@ -994,6 +1001,52 @@
        normal full-screen + mobile editor width is unchanged. */
     #estimatesDashboardScreen #estimateEditorScreen { max-width: none !important; width: 100% !important; margin: 0 !important; }
     #estimatesDashboardScreen #estDashEditorPane { display: block; }
+
+    /* ===== Desktop Estimate Editor — room-drill (Phase 1, FW-68) =========================================
+       Additive, desktop-only. The rail + pinned Quote bar are display:none by default, so mobile (<1024px)
+       and the (already-2-pane) Estimates Desk never see them. The room-drill layout only exists when
+       openEstimateEditor() adds `.est-desk` to #estimateEditorScreen at >=1024px in the full-screen path. */
+    #estDeskRail, #estDeskTopbar { display: none; }
+    @media (min-width: 1024px) {
+      /* Content shifts right to clear the fixed rooms rail (rail spans var(--dn-w)..+214px in the viewport). */
+      #estimateEditorScreen.est-desk { padding-left: 210px; }
+      #estimateEditorScreen.est-desk #estDeskTopbar {
+        display: flex; align-items: center; justify-content: space-between; gap: 16px;
+        margin: 0 0 14px; padding: 10px 14px; background: var(--bg-card);
+        border: 1px solid var(--border); border-radius: var(--radius-sm);
+      }
+      #estDeskTopbar .edt-ctx { font-size: 13px; color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #estDeskTopbar .edt-qt { display: flex; align-items: baseline; gap: 9px; flex-shrink: 0; }
+      #estDeskTopbar .edt-amt { font-family: 'Space Mono', monospace; font-size: 20px; font-weight: 700; color: var(--accent-green); }
+      #estDeskTopbar .edt-mrg { font-size: 11px; font-weight: 700; color: var(--accent-green); background: rgba(0,238,118,0.12); border: 1px solid var(--accent-green); border-radius: 6px; padding: 2px 7px; }
+
+      #estimateEditorScreen.est-desk #estDeskRail {
+        display: flex; flex-direction: column;
+        position: fixed; left: var(--dn-w); width: 214px; bottom: 0; /* top set inline by JS (header height) */
+        background: var(--bg-secondary); border-right: 1px solid var(--border);
+        overflow: hidden; z-index: 90; padding: 8px 6px; /* rooms scroll internally; sections pin */
+      }
+      #estDeskRail .edr-rooms { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
+      #estDeskRail .edr-sections { flex: 0 0 auto; border-top: 1px solid var(--border); margin-top: 6px; padding-top: 6px; }
+      #estDeskRail .edr-hd { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 6px 8px 10px; }
+      #estDeskRail .edr-hd .t { font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--text-muted); font-weight: 800; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #estDeskRail .edr-plus { margin-left: auto; width: 24px; height: 24px; border-radius: 7px; background: var(--accent-green); color: var(--accent-text); border: none; font-size: 16px; font-weight: 800; cursor: pointer; line-height: 1; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+      #estDeskRail .edr-room, #estDeskRail .edr-sec { display: flex; align-items: center; gap: 8px; padding: 8px 9px; border-radius: 8px; cursor: pointer; margin: 2px 3px; color: var(--text-secondary); }
+      #estDeskRail .edr-room:hover, #estDeskRail .edr-sec:hover { background: var(--bg-card); color: var(--text-primary); }
+      #estDeskRail .edr-room.on, #estDeskRail .edr-sec.on { background: rgba(0,238,118,0.13); color: var(--text-primary); box-shadow: inset 3px 0 0 var(--accent-green); }
+      #estDeskRail .edr-room .body { min-width: 0; flex: 1; }
+      #estDeskRail .edr-room .nm { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #estDeskRail .edr-room .meta { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #estDeskRail .edr-room .amt { font-family: 'Space Mono', monospace; font-size: 11px; color: var(--accent-green); flex-shrink: 0; }
+      #estDeskRail .edr-room .cnt { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
+      #estDeskRail .edr-split { margin: 8px 9px; border-top: 1px solid var(--border); }
+      #estDeskRail .edr-sec { font-weight: 600; font-size: 12px; }
+      #estDeskRail .edr-sec .i { width: 16px; text-align: center; flex-shrink: 0; }
+      #estDeskRail .edr-sec .r { margin-left: auto; font-family: 'Space Mono', monospace; font-size: 10.5px; color: var(--text-muted); flex-shrink: 0; }
+      /* Stacked-with-bigger-photos (Phase 1): enlarge the selected room's inline photo thumbnails.
+         Inline width/height on the imgs (renderCharges) require !important to override. */
+      #estimateEditorScreen.est-desk #estChargesList img[id^="photo-thumb-"] { width: 132px !important; height: 99px !important; }
+    }
 
     .est-label-input {
       width: 100%; padding: 10px 0; background: none; border: none;
@@ -2060,6 +2113,7 @@
 
         <!-- TAB: Franchise -->
         <div id="stab-content-franchise">
+          <div class="settings-intro">Your Vonigo connection, branding, and the company details that appear on customer proposals and PDFs.</div>
          <div class="page-grid">
 
           <!-- Company Identity (keeps the franchiseInfoCard id + the canonical saveFranchiseInfo() button) -->
@@ -2215,6 +2269,7 @@
 
         <!-- TAB: Cost Analysis -->
         <div id="stab-content-cost" style="display:none;">
+          <div class="settings-intro">The rates and facilities behind every estimate's margin — crew rate, fuel, disposal &amp; recycling costs, wait times, and the sites where loads are dropped.</div>
          <!-- Desktop: 3-col portlet grid (page-grid), tops aligned, ordered big→small so rows balance.
               Mobile: collapses to one stacked column. Every input id + save handler preserved. -->
          <div class="page-grid">
@@ -2398,6 +2453,7 @@
 
         <!-- TAB: Proposal -->
         <div id="stab-content-proposal" style="display:none;">
+          <div class="settings-intro">What the customer sees on the proposal PDF — your tagline, about text, service area, terms, and the email that sends it.</div>
          <!-- Desktop: portlet grid. Mobile: stacked. Proposal Content + Customer Email are saved by the
               page PRIMARY save (saveProposalSettings). The per-user SMS template keeps its OWN save. -->
          <div class="page-grid">
@@ -2484,6 +2540,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         <!-- TAB: Account -->
         <!-- TAB: Trucks (telematics) — owners only -->
         <div id="stab-content-trucks" style="display:none;">
+          <div class="settings-intro">Connect your GPS / telematics provider (Motive or Linxup) so trucks and geofence alerts appear on the Dispatch screen.</div>
           <div class="settings-card fade-in fade-in-delay-2">
             <div class="settings-card-title">Truck Tracking (Telematics)</div>
             <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">
@@ -2595,6 +2652,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         </div><!-- end trucks tab -->
 
         <div id="stab-content-account" style="display:none;">
+          <div class="settings-intro">Your team members, guest access, billing, and account settings.</div>
          <!-- Desktop: cards fan across the portlet grid (display:none cards drop out of flow cleanly).
               No page header save — every card keeps its own buttons/actions. Conditional visibility unchanged. -->
          <div class="page-grid">
@@ -2696,6 +2754,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
         <!-- TAB: Customer Pricing -->
         <div id="stab-content-pricing" style="display:none;">
+          <div class="settings-intro">Custom price lists for specific customers — commercial accounts or negotiated rates that override your standard pricing.</div>
          <!-- Desktop: list + add/edit form side by side (form is display:none until +Add). Per-item saves; no page header save. -->
          <div class="page-grid">
           <div class="settings-card fade-in fade-in-delay-2" id="customerPricingCard">
@@ -2799,6 +2858,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
         <!-- TAB: Yard Signs -->
         <div id="stab-content-signs" style="display:none;">
+          <div class="settings-intro">How long yard signs stay active on the map before they gray out and then hide.</div>
           <div class="settings-card fade-in fade-in-delay-2">
             <div class="settings-card-title">Yard Sign Settings</div>
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">Configure how long signs stay active before they age out and are hidden.</div>
@@ -2808,6 +2868,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
         <!-- TAB: Tools -->
         <div id="stab-content-tools" style="display:none;">
+          <div class="settings-intro">Your equipment list. These control what appears in the work plan on the Dispatch screen.</div>
           <div class="settings-card fade-in fade-in-delay-2">
             <div class="settings-card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
               <span>Tools Inventory</span>
@@ -2824,6 +2885,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
         <!-- TAB: Routes (route classification) -->
         <div id="stab-content-routes" style="display:none;">
+          <div class="settings-intro">Classify each Vonigo route. This drives the route-type filter on the Dispatch screen (show/hide routes on the board) and scopes Estimate Costing.</div>
           <div class="settings-card fade-in fade-in-delay-2">
             <div class="settings-card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
               <span>Route Classification</span>
@@ -9314,6 +9376,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       _stopTrucksAutoRefresh();
       // Restore the app shell + content to their default (480px) width; the desktop dashboard widens them.
       ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) { el.style.maxWidth = ''; el.classList.remove('ec-wide', 'hd-fullbleed'); } });
+      _estDeskTeardown(); // desktop room-drill editor: drop .est-desk, disconnect observers, un-hide charge cards
       allScreens.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -20910,6 +20973,204 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         populateCostAnalysisFields();
         updateCostAnalysis();
         _suppressAutoSave = false;
+      }
+
+      // Desktop (>=1024px) room-drill layout. No-op on mobile and inside the Estimates Desk pane.
+      _estDeskSetup();
+    }
+
+    // ===== DESKTOP ESTIMATE EDITOR — room-drill (Phase 1, FW-68) =====================================
+    // Additive, desktop-only (>=1024px), and skipped when the editor is embedded in the Estimates Desk
+    // pane (that screen supplies its own 2-pane layout). A thin rooms-rail drives WHICH charge is shown;
+    // it REUSES renderCharges() / updateTotals() / the existing section toggles — no pricing, photo, save,
+    // or Vonigo-submit logic is touched, and no input id is changed. Below 1024px none of this runs, so
+    // the mobile stacked editor is byte-for-byte unchanged.
+    let _estDeskRoom = 0;          // selected charge index shown in the detail column
+    let _estDeskSec = null;        // selected estimate-level section ('totals'|'terms'|'cost'|'container') or null
+    let _estDeskChargesObs = null; // watches #estChargesList so add/remove/edit rebuilds the rail + one-room view
+    let _estDeskTotalsObs = null;  // watches the volume footer so the pinned Quote/Margin stays live
+
+    function _estDeskActive() {
+      const ee = document.getElementById('estimateEditorScreen');
+      return !!(ee && ee.classList.contains('est-desk'));
+    }
+    function _estDeskEligible() {
+      const ee = document.getElementById('estimateEditorScreen');
+      if (!ee) return false;
+      if (window.innerWidth < 1024) return false;
+      if (ee.closest('#estDashEditorPane')) return false; // Estimates Desk owns its own layout
+      return true;
+    }
+    function _estDeskEnsureEls() {
+      const ee = document.getElementById('estimateEditorScreen');
+      if (!ee) return;
+      if (!document.getElementById('estDeskTopbar')) {
+        const tb = document.createElement('div');
+        tb.id = 'estDeskTopbar';
+        tb.innerHTML = '<div class="edt-ctx" id="estDeskCtx"></div>'
+          + '<div class="edt-qt"><span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Quote</span>'
+          + '<span class="edt-amt" id="estDeskQtAmt">$0.00</span>'
+          + '<span class="edt-mrg" id="estDeskQtMrg" style="display:none;"></span></div>';
+        ee.insertBefore(tb, ee.firstChild);
+      }
+      if (!document.getElementById('estDeskRail')) {
+        const rail = document.createElement('div');
+        rail.id = 'estDeskRail';
+        ee.appendChild(rail);
+      }
+    }
+    function _estDeskSetup() {
+      const ee = document.getElementById('estimateEditorScreen');
+      if (!ee) return;
+      if (!_estDeskEligible()) { _estDeskTeardown(); return; }
+      _estDeskEnsureEls();
+      ee.classList.add('est-desk');
+      const content = document.querySelector('.app-content');
+      if (content) content.classList.add('hd-fullbleed'); // un-cap so the editor uses the full window (hideAll clears it)
+      const hdr = document.querySelector('.app-header');
+      const rail = document.getElementById('estDeskRail');
+      if (hdr && rail) rail.style.top = hdr.offsetHeight + 'px'; // pin under the (variable-height) sticky header
+      _estDeskRoom = 0; _estDeskSec = null;
+      _estDeskBuildRail();
+      _estDeskApplyRoom(0);
+      _estDeskSyncTotals();
+      // Keep the rail + one-room view in sync when renderCharges() rebuilds the list (add/remove/edit/collapse).
+      if (!_estDeskChargesObs) {
+        const list = document.getElementById('estChargesList');
+        if (list) {
+          _estDeskChargesObs = new MutationObserver(() => {
+            if (!_estDeskActive()) return;
+            _estDeskBuildRail();
+            if (_estDeskSec) _estDeskShowAllCards(); else _estDeskApplyRoom(_estDeskRoom);
+          });
+          _estDeskChargesObs.observe(list, { childList: true });
+        }
+      }
+      // Keep the pinned Quote/Margin live off the existing footer values (no updateTotals edit needed).
+      if (!_estDeskTotalsObs) {
+        const foot = document.getElementById('estVolumeFooter');
+        if (foot) {
+          _estDeskTotalsObs = new MutationObserver(() => { if (_estDeskActive()) _estDeskSyncTotals(); });
+          _estDeskTotalsObs.observe(foot, { childList: true, subtree: true, characterData: true });
+        }
+      }
+      // Re-pin once the header height settles after first paint (editor toolbar can change its height).
+      requestAnimationFrame(() => { if (_estDeskActive() && hdr && rail) rail.style.top = hdr.offsetHeight + 'px'; });
+    }
+    function _estDeskTeardown() {
+      const ee = document.getElementById('estimateEditorScreen');
+      if (ee) ee.classList.remove('est-desk');
+      if (_estDeskChargesObs) { try { _estDeskChargesObs.disconnect(); } catch (e) {} _estDeskChargesObs = null; }
+      if (_estDeskTotalsObs) { try { _estDeskTotalsObs.disconnect(); } catch (e) {} _estDeskTotalsObs = null; }
+      _estDeskShowAllCards(); // un-hide any charge cards the one-room view hid, so the list is pristine again
+    }
+    function _estDeskShowAllCards() {
+      const list = document.getElementById('estChargesList');
+      if (list) Array.from(list.children).forEach(ch => { ch.style.display = ''; });
+    }
+    function _estDeskBuildRail() {
+      const rail = document.getElementById('estDeskRail');
+      if (!rail || !currentEstimate) return;
+      const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      const charges = currentEstimate.charges || [];
+      const nameEl = document.getElementById('estClientName');
+      const cust = ((currentEstimate.clientName || (nameEl && nameEl.value) || '').split(',')[0] || '').trim() || 'Estimate';
+      // Rail = fixed header + SCROLLING rooms list + PINNED estimate-level sections at the bottom, so the
+      // sections stay reachable no matter how many rooms (they don't flow off-screen). (owner 2026-08-19)
+      let h = '<div class="edr-hd"><span class="t">Rooms &middot; ' + esc(cust) + '</span>'
+        + '<button class="edr-plus" title="Add item" onclick="toggleManualMenu(event)">&#65291;</button></div>';
+      h += '<div class="edr-rooms">';
+      if (!charges.length) {
+        h += '<div style="padding:8px 10px;color:var(--text-muted);font-size:11.5px;line-height:1.5;">No items yet. Tap &#65291; to add one.</div>';
+      }
+      charges.forEach((c, i) => {
+        const on = (_estDeskSec === null && i === _estDeskRoom) ? ' on' : '';
+        const nPh = Array.isArray(c.photos) ? c.photos.length : (c.photoUrl ? 1 : 0);
+        const cnt = nPh ? '<span class="cnt">&#128247;' + nPh + '</span>' : '';
+        if (c.type === 'volume') {
+          const qty = parseFloat(c.truckQty) || 1;
+          const vol = (c.truckLabel || '—') + (qty !== 1 ? ' ×' + qty : '');
+          h += '<div class="edr-room' + on + '" onclick="_estDeskSelRoom(' + i + ')">'
+            + '<div class="body"><div class="nm">' + esc(c.room || '(no room)') + '</div>'
+            + (c.area ? '<div class="meta">' + esc(c.area) + '</div>' : '')
+            + '</div><span class="amt">' + esc(vol) + '</span>' + cnt + '</div>';
+        } else {
+          const tot = (parseFloat(c.qty) || 0) * (parseFloat(c.unitPrice) || 0);
+          const totFmt = (tot < 0 ? '-' : '') + '$' + Math.abs(tot).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+          h += '<div class="edr-room' + on + '" onclick="_estDeskSelRoom(' + i + ')">'
+            + '<div class="body"><div class="nm">' + esc(c.name || '(item)') + '</div>'
+            + '<div class="meta">' + esc(c.type || '') + '</div></div>'
+            + '<span class="amt">' + totFmt + '</span>' + cnt + '</div>';
+        }
+      });
+      h += '</div>'; // end .edr-rooms (scrollable)
+      const gt = document.getElementById('estGrandTotal');
+      const secRow = (key, icon, label, right) =>
+        '<div class="edr-sec' + (_estDeskSec === key ? ' on' : '') + '" onclick="_estDeskSelSec(\'' + key + '\')">'
+        + '<span class="i">' + icon + '</span> ' + label + (right ? '<span class="r">' + esc(right) + '</span>' : '') + '</div>';
+      h += '<div class="edr-sections">'; // pinned bottom block — always visible
+      h += secRow('totals', '🧮', 'Total Volume &amp; Pricing', (gt && gt.textContent) || '');
+      h += secRow('terms', '📝', 'Special Terms', '');
+      h += secRow('cost', '📊', 'Cost Analysis', '');
+      h += secRow('container', '📦', 'Container vs Truck', '');
+      h += '</div>';
+      rail.innerHTML = h;
+    }
+    function _estDeskSelRoom(i) {
+      _estDeskSec = null; _estDeskRoom = i;
+      _estDeskBuildRail();
+      _estDeskApplyRoom(i);
+    }
+    function _estDeskSelSec(sec) {
+      _estDeskSec = sec;
+      _estDeskShowAllCards();     // restore the full list so estimate-level sections are scrollable
+      _estDeskBuildRail();
+      const openIfClosed = (bodyId, toggleFn) => {
+        const b = document.getElementById(bodyId);
+        if (b && b.style.display === 'none') { try { toggleFn(); } catch (e) {} }
+        return b;
+      };
+      let target = null;
+      if (sec === 'totals') target = document.getElementById('estVolumeFooter');
+      else if (sec === 'terms') target = openIfClosed('specialTermsBody', toggleSpecialTerms);
+      else if (sec === 'cost') target = openIfClosed('costAnalysisBody', toggleCostAnalysis);
+      else if (sec === 'container') target = openIfClosed('containerCompContent', toggleContainerComparison);
+      if (target && target.scrollIntoView) target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
+    function _estDeskApplyRoom(idx) {
+      const list = document.getElementById('estChargesList');
+      if (!list) return;
+      const charges = (currentEstimate && currentEstimate.charges) || [];
+      if (!charges.length) { _estDeskShowAllCards(); return; }
+      if (idx == null || idx < 0 || idx >= charges.length) idx = 0;
+      _estDeskRoom = idx;
+      let target = null;
+      Array.from(list.children).forEach(ch => {
+        const hdr = ch.querySelector('[data-charge-idx]');
+        const ci = hdr ? parseInt(hdr.getAttribute('data-charge-idx')) : NaN;
+        if (!isNaN(ci) && ci === idx) { ch.style.display = ''; target = ch; }
+        else ch.style.display = 'none'; // hides other cards AND the Volume/Surcharges section-header rows
+      });
+      if (target) {
+        const detail = target.lastElementChild; // force this room's collapsible detail open in the drill
+        if (detail) detail.style.display = 'block';
+        if (target.scrollIntoView) target.scrollIntoView({ block: 'nearest' });
+      }
+    }
+    function _estDeskSyncTotals() {
+      const amtEl = document.getElementById('estDeskQtAmt');
+      const g = document.getElementById('estGrandTotal');
+      if (amtEl && g) amtEl.textContent = g.textContent || '$0.00';
+      const mrgEl = document.getElementById('estDeskQtMrg');
+      const md = document.getElementById('estActualMarginDisplay');
+      if (mrgEl) {
+        const shown = md && md.style.display !== 'none' && (md.textContent || '').trim();
+        if (shown) { mrgEl.textContent = (md.textContent || '').trim(); mrgEl.style.display = ''; }
+        else { mrgEl.style.display = 'none'; }
+      }
+      const ctxEl = document.getElementById('estDeskCtx');
+      if (ctxEl && currentEstimate) {
+        ctxEl.textContent = [currentEstimate.clientName || '', currentEstimate.address || ''].filter(Boolean).join('  ·  ');
       }
     }
 
