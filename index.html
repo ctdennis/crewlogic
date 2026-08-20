@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.131.6 | 2026-08-20">
+  <meta name="crewlogic-version" content="v5.131.7 | 2026-08-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <script>
     // DEV-ONLY desktop preview: on the dev host, add ?desktop to the URL to force the >=1024px desktop
@@ -1022,10 +1022,11 @@
        Additive, desktop-only. The rail + pinned Quote bar are display:none by default, so mobile (<1024px)
        and the (already-2-pane) Estimates Desk never see them. The room-drill layout only exists when
        openEstimateEditor() adds `.est-desk` to #estimateEditorScreen at >=1024px in the full-screen path. */
-    #estDeskRail, #estDeskTopbar { display: none; }
+    #estDeskRail, #estDeskTopbar, #estDeskEstRail { display: none; }
     @media (min-width: 1024px) {
-      /* Content shifts right to clear the fixed rooms rail (rail spans var(--dn-w)..+214px in the viewport). */
-      #estimateEditorScreen.est-desk { padding-left: 210px; }
+      /* Content shifts right to clear BOTH fixed rails: the estimates rail (var(--dn-w)..+248px) and the
+         rooms rail (var(--dn-w)+248px..+248px+214px). Phase 2 (FW-68) adds the persistent estimates column. */
+      #estimateEditorScreen.est-desk { padding-left: calc(210px + 248px); }
       #estimateEditorScreen.est-desk #estDeskTopbar {
         display: flex; align-items: center; justify-content: space-between; gap: 16px;
         margin: 0 0 14px; padding: 10px 14px; background: var(--bg-card);
@@ -1038,10 +1039,42 @@
 
       #estimateEditorScreen.est-desk #estDeskRail {
         display: flex; flex-direction: column;
-        position: fixed; left: var(--dn-w); width: 214px; bottom: 0; /* top set inline by JS (header height) */
+        /* Phase 2: sits AFTER the estimates rail (var(--dn-w) + 248px), so the two rails never overlap. */
+        position: fixed; left: calc(var(--dn-w) + 248px); width: 214px; bottom: 0; /* top set inline by JS (header height) */
         background: var(--bg-secondary); border-right: 1px solid var(--border);
         overflow: hidden; z-index: 90; padding: 8px 6px; /* rooms scroll internally; sections pin */
       }
+
+      /* ===== Estimates rail (Phase 2, FW-68) — persistent column of all estimates, LEFT of the rooms rail.
+         Layout is app-nav | estimates | rooms | room detail. z-index 91 so it sits above the rooms rail (90).
+         Desktop-only + .est-desk gated; default display:none (above), so mobile is byte-for-byte unchanged. */
+      #estimateEditorScreen.est-desk #estDeskEstRail {
+        display: flex; flex-direction: column;
+        position: fixed; left: var(--dn-w); width: 248px; bottom: 0; /* top set inline by JS (header height) */
+        background: var(--bg-secondary); border-right: 1px solid var(--border);
+        overflow: hidden; z-index: 91; padding: 8px 6px;
+      }
+      #estDeskEstRail .ede-hd { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 6px 8px 8px; }
+      #estDeskEstRail .ede-hd .t { font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--text-muted); font-weight: 800; flex-shrink: 0; }
+      #estDeskEstRail .ede-plus { margin-left: auto; width: 24px; height: 24px; border-radius: 7px; background: var(--accent-green); color: var(--accent-text); border: none; font-size: 16px; font-weight: 800; cursor: pointer; line-height: 1; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+      #estDeskEstRail .ede-search { flex: 0 0 auto; margin: 0 3px 6px; }
+      #estDeskEstRail .ede-search input { width: 100%; background: var(--bg-input); border: 1px solid var(--border); border-radius: 7px; padding: 6px 9px; color: var(--text-primary); font-size: 12px; font-family: inherit; outline: none; }
+      #estDeskEstRail .ede-search input:focus { border-color: var(--accent-green); }
+      #estDeskEstRail .ede-list { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
+      #estDeskEstRail .ede-row { padding: 8px 9px; border-radius: 8px; cursor: pointer; margin: 2px 3px; }
+      #estDeskEstRail .ede-row:hover { background: var(--bg-card); }
+      #estDeskEstRail .ede-row.on { background: rgba(0,238,118,0.13); box-shadow: inset 3px 0 0 var(--accent-green); }
+      #estDeskEstRail .ede-r1 { display: flex; align-items: baseline; gap: 8px; }
+      #estDeskEstRail .ede-nm { font-weight: 700; font-size: 12.5px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+      #estDeskEstRail .ede-amt { margin-left: auto; font-family: 'Space Mono', monospace; font-size: 11.5px; color: var(--accent-green); flex-shrink: 0; }
+      #estDeskEstRail .ede-r2 { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+      #estDeskEstRail .ede-addr { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+      #estDeskEstRail .ede-badge { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; padding: 1px 6px; border-radius: 5px; white-space: nowrap; flex-shrink: 0; }
+      #estDeskEstRail .ede-badge.draft { color: var(--text-muted); border: 1px solid var(--btn-surface-border); }
+      #estDeskEstRail .ede-badge.submitted { color: var(--accent-blue); border: 1px solid var(--accent-blue); }
+      #estDeskEstRail .ede-badge.won { color: var(--accent-green); border: 1px solid var(--accent-green); }
+      #estDeskEstRail .ede-badge.lost { color: var(--accent-red); border: 1px solid var(--accent-red); }
+      #estDeskEstRail .ede-empty { padding: 12px 10px; color: var(--text-muted); font-size: 11.5px; line-height: 1.5; }
       #estDeskRail .edr-rooms { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
       #estDeskRail .edr-sections { flex: 0 0 auto; border-top: 1px solid var(--border); margin-top: 6px; padding-top: 6px; }
       #estDeskRail .edr-hd { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 6px 8px 10px; }
@@ -21071,6 +21104,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         rail.id = 'estDeskRail';
         ee.appendChild(rail);
       }
+      // Phase 2: the persistent Estimates rail (col 2 of app-nav | estimates | rooms | detail).
+      if (!document.getElementById('estDeskEstRail')) {
+        const eRail = document.createElement('div');
+        eRail.id = 'estDeskEstRail';
+        ee.appendChild(eRail);
+      }
     }
     function _estDeskSetup() {
       const ee = document.getElementById('estimateEditorScreen');
@@ -21082,9 +21121,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (content) content.classList.add('hd-fullbleed'); // un-cap so the editor uses the full window (hideAll clears it)
       const hdr = document.querySelector('.app-header');
       const rail = document.getElementById('estDeskRail');
+      const eRail = document.getElementById('estDeskEstRail');
       if (hdr && rail) rail.style.top = hdr.offsetHeight + 'px'; // pin under the (variable-height) sticky header
+      if (hdr && eRail) eRail.style.top = hdr.offsetHeight + 'px'; // estimates rail pins the same way
       _estDeskRoom = 0; _estDeskSec = null;
       _estDeskBuildRail();
+      _estDeskBuildEstRail(); // Phase 2: the persistent estimates column (rebuilt so the active row tracks the open estimate)
       _estDeskApplyRoom(0);
       _estDeskSyncTotals();
       // Keep the rail + one-room view in sync when renderCharges() rebuilds the list (add/remove/edit/collapse).
@@ -21108,7 +21150,12 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         }
       }
       // Re-pin once the header height settles after first paint (editor toolbar can change its height).
-      requestAnimationFrame(() => { if (_estDeskActive() && hdr && rail) rail.style.top = hdr.offsetHeight + 'px'; });
+      requestAnimationFrame(() => {
+        if (_estDeskActive() && hdr) {
+          if (rail) rail.style.top = hdr.offsetHeight + 'px';
+          if (eRail) eRail.style.top = hdr.offsetHeight + 'px';
+        }
+      });
     }
     function _estDeskTeardown() {
       const ee = document.getElementById('estimateEditorScreen');
@@ -21172,6 +21219,62 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       h += secRow('cost', '📊', 'Cost Analysis', '');
       h += secRow('container', '📦', 'Container vs Truck', '');
       h += '</div>';
+      rail.innerHTML = h;
+    }
+
+    // ===== Estimates rail (Phase 2, FW-68) — col 2 of the desktop drill. Lists window._cachedEstimates
+    // (populated by renderEstimatesList when the user came from the list — the normal path). Clicking a row
+    // REUSES openEstimate(id) — the exact same call the mobile list card makes — so no load/switch logic is
+    // duplicated. The active row tracks currentEstimate.estimateID. Additive + desktop-gated; no save/pricing
+    // /photo/submit logic touched, no input id changed. ===================================================
+    let _estDeskEstSearch = '';
+    function _estDeskEstRowsHtml() {
+      const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      const all = Array.isArray(window._cachedEstimates) ? window._cachedEstimates : [];
+      let list = all.filter(e => e && e.status !== 'deleted');
+      if (!all.length) {
+        return '<div class="ede-empty">Open an estimate from the Estimates list to see your other estimates here.</div>';
+      }
+      const q = (_estDeskEstSearch || '').trim().toLowerCase();
+      if (q) {
+        list = list.filter(e => (String(e.clientName || '') + ' ' + String(e.address || '') + ' ' + String(e.label || '')).toLowerCase().includes(q));
+      }
+      if (!list.length) return '<div class="ede-empty">No estimates match &quot;' + esc(q) + '&quot;.</div>';
+      const curId = (currentEstimate && currentEstimate.estimateID != null) ? String(currentEstimate.estimateID) : '';
+      const badge = { draft: 'Draft', submitted: 'Submitted', won: 'Won', lost: 'Lost' };
+      return list.map(e => {
+        const eid = String(e.estimateID);
+        const st = (e.status || 'draft');
+        const bCls = badge[st] ? st : 'draft';
+        const bTxt = badge[st] || 'Draft';
+        const nm = e.clientName || e.label || 'Untitled Estimate';
+        const price = parseFloat(e.totalPrice) || 0;
+        const amt = '$' + price.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+        const on = (eid === curId) ? ' on' : '';
+        return '<div class="ede-row' + on + '" onclick="openEstimate(\'' + eid.replace(/'/g, "\\'") + '\')">'
+          + '<div class="ede-r1"><span class="ede-nm">' + esc(nm) + '</span><span class="ede-amt">' + amt + '</span></div>'
+          + '<div class="ede-r2"><span class="ede-addr">' + esc(e.address || '&mdash;') + '</span>'
+          + '<span class="ede-badge ' + bCls + '">' + bTxt + '</span></div></div>';
+      }).join('');
+    }
+    function _estDeskRenderEstList() {
+      // Repaint ONLY the list body — keeps the search input's focus/caret intact while filtering
+      // (per the UI-state-preservation rule; never rebuild the whole rail on each keystroke).
+      const body = document.querySelector('#estDeskEstRail .ede-list');
+      if (body) body.innerHTML = _estDeskEstRowsHtml();
+    }
+    function _estDeskEstFilter(v) {
+      _estDeskEstSearch = v || '';
+      _estDeskRenderEstList();
+    }
+    function _estDeskBuildEstRail() {
+      const rail = document.getElementById('estDeskEstRail');
+      if (!rail) return;
+      const esc = s => String(s == null ? '' : s).replace(/["&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      let h = '<div class="ede-hd"><span class="t">Estimates</span>'
+        + '<button class="ede-plus" title="New estimate" onclick="newEstimateDoc()">&#65291;</button></div>';
+      h += '<div class="ede-search"><input type="text" placeholder="🔍 Search" value="' + esc(_estDeskEstSearch) + '" oninput="_estDeskEstFilter(this.value)"></div>';
+      h += '<div class="ede-list">' + _estDeskEstRowsHtml() + '</div>';
       rail.innerHTML = h;
     }
     function _estDeskSelRoom(i) {
