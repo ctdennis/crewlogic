@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.131.3 | 2026-08-19">
+  <meta name="crewlogic-version" content="v5.131.4 | 2026-08-19">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -1046,6 +1046,28 @@
       /* Stacked-with-bigger-photos (Phase 1): enlarge the selected room's inline photo thumbnails.
          Inline width/height on the imgs (renderCharges) require !important to override. */
       #estimateEditorScreen.est-desk #estChargesList img[id^="photo-thumb-"] { width: 132px !important; height: 99px !important; }
+    }
+
+    /* ===== Desktop Estimate Editor — room drill-down refinements (Phase 1.1, FW-68) ====================
+       Additive, desktop-only. `room-view` is set on #estimateEditorScreen (by JS) whenever a ROOM is the
+       selected rail item; it is removed for the estimate-level rail items (Estimate info / Totals / Terms /
+       Cost / Container). None of this exists below 1024px or without .est-desk, so the mobile editor is
+       byte-for-byte unchanged. */
+    @media (min-width: 1024px) {
+      /* Room view shows ONLY the selected room: hide every estimate-LEVEL chrome block. The compact
+         customer/address context stays in #estDeskTopbar (always visible). */
+      #estimateEditorScreen.est-desk.room-view .est-hide-in-room { display: none !important; }
+
+      /* Two-column the shown room card: fields | photos. .rr-fields / .rr-photos are inert block wrappers
+         on mobile (they just stack); the flex only turns on for the drilled room that actually has photos. */
+      #estimateEditorScreen.est-desk.room-view #estChargesList .rr-body.has-photos { display: flex !important; gap: 16px; align-items: flex-start; }
+      #estimateEditorScreen.est-desk.room-view #estChargesList .rr-body.has-photos .rr-fields { flex: 1 1 auto; min-width: 0; }
+      #estimateEditorScreen.est-desk.room-view #estChargesList .rr-body.has-photos .rr-photos { flex: 0 0 46%; max-width: 560px; border-left: 1px solid var(--border); padding-left: 16px; }
+      #estimateEditorScreen.est-desk.room-view #estChargesList .rr-body.has-photos .rr-photos img[id^="photo-thumb-"] { width: 150px !important; height: 112px !important; }
+      /* No photos → fields take the full width; the Add-Photo / Analyze buttons sit below (no flex applied). */
+
+      /* Constrain the estimate cover photo so it never stretches into a distorted full-width banner. */
+      #estimateEditorScreen.est-desk #coverPhotoImg { max-height: 220px !important; width: auto !important; height: auto !important; max-width: 100% !important; object-fit: cover; }
     }
 
     /* Desktop: flow the estimate cards into a responsive grid so the list uses the full width
@@ -2919,7 +2941,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         <div id="estUsageStripEditor"></div>
 
         <!-- JOB LOOKUP — first thing, compact inline row -->
-        <div id="estStepZip" style="margin-bottom:8px;">
+        <div id="estStepZip" class="est-hide-in-room" style="margin-bottom:8px;">
           <div style="display:flex;gap:6px;align-items:center;">
             <input type="text" class="form-input" id="estJobIDStep1" placeholder="Vonigo Job #" style="font-family:'Space Mono',monospace;font-size:11px;letter-spacing:1px;padding:4px 10px;max-width:110px;line-height:1.4;" inputmode="numeric" onkeydown="if(event.key==='Enter')lookupEstimateJobStep1()">
             <button id="estZipBtn" onclick="lookupEstimateJobStep1()" style="padding:4px 10px;background:var(--accent-green);color:var(--accent-text);border:1px solid var(--accent-green);border-radius:var(--radius-sm);font-weight:600;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0;line-height:1.4;">
@@ -2934,7 +2956,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         <!-- INLINE JOB PICKER — auto-loads when starting a new estimate.
              Hides itself once a job is successfully loaded. The user can
              always type a job # manually above instead. -->
-        <div id="inlineJobPicker" style="display:none;margin-bottom:12px;">
+        <div id="inlineJobPicker" class="est-hide-in-room" style="display:none;margin-bottom:12px;">
           <div style="display:flex;gap:6px;margin-bottom:8px;">
             <button id="scheduleTabYesterday" onclick="loadSchedulePicker(-1)" style="flex:1;padding:6px;background:transparent;color:var(--text-muted);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px;font-weight:600;cursor:pointer;">Yesterday</button>
             <button id="scheduleTabToday" onclick="loadSchedulePicker(0)" style="flex:1;padding:6px;background:var(--accent-green);color:var(--accent-text);border:1px solid var(--accent-green);border-radius:var(--radius-sm);font-size:11px;font-weight:700;cursor:pointer;">Today</button>
@@ -2947,7 +2969,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
         <!-- NATIVE (no-CRM): customer-first entry. Pick a saved customer to auto-fill client
              info and load pricing from their ZIP. ZIP/address entry is the manual fallback. -->
-        <div id="estCustomerPicker" style="display:none;margin-bottom:8px;">
+        <div id="estCustomerPicker" class="est-hide-in-room" style="display:none;margin-bottom:8px;">
           <div class="form-label">Customer</div>
           <input type="text" class="form-input" id="estCustSearchInput" placeholder="Search customers by name / address / email…" oninput="estCustomerSearch()" autocomplete="off">
           <div id="estCustSearchResults" style="margin-top:6px;"></div>
@@ -2955,7 +2977,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         </div>
 
         <!-- Manual ZIP fallback if job has no ZIP -->
-        <div id="estManualZipRow" style="display:none;gap:8px;margin-top:8px;">
+        <div id="estManualZipRow" class="est-hide-in-room" style="display:none;gap:8px;margin-top:8px;">
           <input type="text" class="form-input" id="estZip" maxlength="5" inputmode="numeric" placeholder="ZIP code" style="width:130px;font-family:'Space Mono',monospace;font-size:18px;text-align:center;letter-spacing:2px;" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
           <button class="zip-lookup-btn" onclick="loadEstimatePricing()" style="flex:1;padding:12px;background:var(--accent-green);color:var(--accent-text);border:none;border-radius:var(--radius-sm);font-weight:700;cursor:pointer;">
             <span class="btn-text">Load Prices</span>
@@ -2963,10 +2985,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         </div>
 
         <!-- LABEL + COVER PHOTO — shown after lookup -->
-        <input type="text" class="est-label-input" id="estLabel" placeholder="Estimate label (e.g. Smith - Full House)" oninput="autoSaveDraft()" style="margin-top:8px;">
+        <input type="text" class="est-label-input est-hide-in-room" id="estLabel" placeholder="Estimate label (e.g. Smith - Full House)" oninput="autoSaveDraft()" style="margin-top:8px;">
 
         <!-- NEGOTIATED RATE BADGE -->
-        <div id="negotiatedRateBadge" style="display:none;margin-top:6px;margin-bottom:2px;">
+        <div id="negotiatedRateBadge" class="est-hide-in-room" style="display:none;margin-top:6px;margin-bottom:2px;">
           <div style="display:inline-flex;align-items:center;gap:6px;background:rgba(0,238,118,0.12);border:1px solid var(--accent-green);border-radius:20px;padding:4px 10px;cursor:pointer;" onclick="showNegotiatedRateDetail()">
             <span style="color:var(--accent-green);font-size:12px;font-weight:700;">★ Negotiated rate applied</span>
             <span id="negotiatedRateName" style="font-size:11px;color:var(--text-muted);"></span>
@@ -2974,7 +2996,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         </div>
 
         <!-- COVER PHOTO -->
-        <div style="margin-bottom:16px;margin-top:8px;">
+        <div class="est-hide-in-room" style="margin-bottom:16px;margin-top:8px;">
           <div id="coverPhotoPreview" style="display:none;position:relative;margin-bottom:8px;">
             <img id="coverPhotoImg" style="width:100%;height:160px;object-fit:cover;border-radius:var(--radius-sm);border:1px solid var(--border);" />
             <button onclick="removeCoverPhoto()" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.6);border:none;border-radius:50%;width:26px;height:26px;color:white;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;">&#215;</button>
@@ -2993,7 +3015,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         <div id="estMainContent" style="display:none;">
 
           <!-- CLIENT INFO — compact bar, expandable -->
-          <div id="estClientInfoBar" style="margin-top:8px;margin-bottom:4px;display:none;align-items:flex-start;justify-content:space-between;gap:8px;">
+          <div id="estClientInfoBar" class="est-hide-in-room" style="margin-top:8px;margin-bottom:4px;display:none;align-items:flex-start;justify-content:space-between;gap:8px;">
             <div style="flex:1;min-width:0;">
               <div id="estClientNameDisplay" style="font-size:15px;font-weight:700;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
               <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:5px;">
@@ -3008,7 +3030,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <button onclick="toggleClientInfoExpanded()" style="background:none;border:1px solid var(--border);color:var(--text-muted);font-size:11px;cursor:pointer;flex-shrink:0;padding:5px 10px;border-radius:4px;">edit</button>
           </div>
           <!-- Expanded client fields -->
-          <div id="estClientInfoExpanded" style="display:block;">
+          <div id="estClientInfoExpanded" class="est-hide-in-room" style="display:block;">
             <div class="form-group" style="margin-top:8px;">
               <div class="form-label">Client Name</div>
               <input type="text" class="form-input" id="estClientName" placeholder="Last, First" oninput="autoSaveDraft();updateClientInfoBar()">
@@ -3030,7 +3052,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
               <div style="font-family:'Space Mono',monospace;font-size:15px;color:var(--accent-green);" id="estJobIDDisplay">—</div>
             </div>
           </div>
-          <div class="form-group">
+          <div class="form-group est-hide-in-room">
             <div class="form-label" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;" onclick="toggleNotes()">
               <span>Notes</span>
               <span id="notesToggleIcon" style="font-size:11px;color:var(--text-muted);">▼ expand</span>
@@ -3041,10 +3063,10 @@ Please review the estimate below. If you have any questions, don't hesitate to r
             <div id="notesPreview" style="font-size:12px;color:var(--text-muted);font-style:italic;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
           </div>
 
-          <hr class="form-divider">
+          <hr class="form-divider est-hide-in-room">
 
           <!-- UNIFIED CHARGES SECTION -->
-          <div class="est-section-header" style="margin-bottom:12px;margin-top:0;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <div class="est-section-header est-hide-in-room" style="margin-bottom:12px;margin-top:0;display:flex;justify-content:space-between;align-items:center;gap:8px;">
             <div class="est-section-title">Charges</div>
             <button id="analyzeAllBtn" onclick="analyzeAllCharges()" style="display:none;padding:6px 10px;background:var(--bg-card);color:var(--accent-green);border:1px solid var(--accent-green);border-radius:var(--radius-sm);font-size:11px;font-weight:600;cursor:pointer;">✨ Analyze All</button>
           </div>
@@ -21074,7 +21096,7 @@ Please review the estimate below. If you have any questions, don't hesitate to r
     }
     function _estDeskTeardown() {
       const ee = document.getElementById('estimateEditorScreen');
-      if (ee) ee.classList.remove('est-desk');
+      if (ee) { ee.classList.remove('est-desk'); ee.classList.remove('room-view'); }
       if (_estDeskChargesObs) { try { _estDeskChargesObs.disconnect(); } catch (e) {} _estDeskChargesObs = null; }
       if (_estDeskTotalsObs) { try { _estDeskTotalsObs.disconnect(); } catch (e) {} _estDeskTotalsObs = null; }
       _estDeskShowAllCards(); // un-hide any charge cards the one-room view hid, so the list is pristine again
@@ -21095,6 +21117,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       let h = '<div class="edr-hd"><span class="t">Rooms &middot; ' + esc(cust) + '</span>'
         + '<button class="edr-plus" title="Add item" onclick="toggleManualMenu(event)">&#65291;</button></div>';
       h += '<div class="edr-rooms">';
+      // Estimate info — top rail item. Clears room-view so the estimate-level chrome (cover photo, Vonigo
+      // look-up, client info, notes) shows again; that's where the user edits customer/cover/lookup.
+      h += '<div class="edr-sec' + (_estDeskSec === 'info' ? ' on' : '') + '" onclick="_estDeskSelSec(\'info\')">'
+        + '<span class="i">📋</span> Estimate info</div>';
+      h += '<div class="edr-split"></div>';
       if (!charges.length) {
         h += '<div style="padding:8px 10px;color:var(--text-muted);font-size:11.5px;line-height:1.5;">No items yet. Tap &#65291; to add one.</div>';
       }
@@ -21132,14 +21159,25 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       rail.innerHTML = h;
     }
     function _estDeskSelRoom(i) {
+      const ee = document.getElementById('estimateEditorScreen');
+      if (ee) ee.classList.add('room-view'); // room selected → hide estimate-level chrome, show only the room
       _estDeskSec = null; _estDeskRoom = i;
       _estDeskBuildRail();
       _estDeskApplyRoom(i);
     }
     function _estDeskSelSec(sec) {
+      const ee = document.getElementById('estimateEditorScreen');
+      if (ee) ee.classList.remove('room-view'); // estimate-level item → reveal the estimate chrome again
       _estDeskSec = sec;
       _estDeskShowAllCards();     // restore the full list so estimate-level sections are scrollable
       _estDeskBuildRail();
+      if (sec === 'info') {
+        // Estimate info: just show the top chrome (cover photo / look-up / client / notes) and scroll to it.
+        const tb = document.getElementById('estDeskTopbar');
+        if (tb && tb.scrollIntoView) tb.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        else window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
       const openIfClosed = (bodyId, toggleFn) => {
         const b = document.getElementById(bodyId);
         if (b && b.style.display === 'none') { try { toggleFn(); } catch (e) {} }
@@ -21153,10 +21191,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
       if (target && target.scrollIntoView) target.scrollIntoView({ block: 'start', behavior: 'smooth' });
     }
     function _estDeskApplyRoom(idx) {
+      const ee = document.getElementById('estimateEditorScreen');
       const list = document.getElementById('estChargesList');
       if (!list) return;
       const charges = (currentEstimate && currentEstimate.charges) || [];
-      if (!charges.length) { _estDeskShowAllCards(); return; }
+      // No items yet → drop room-view so the estimate chrome (look-up / add item) is visible.
+      if (!charges.length) { if (ee) ee.classList.remove('room-view'); _estDeskShowAllCards(); return; }
+      if (ee) ee.classList.add('room-view'); // showing a room → hide estimate-level chrome, clear section state
+      _estDeskSec = null;
       if (idx == null || idx < 0 || idx >= charges.length) idx = 0;
       _estDeskRoom = idx;
       let target = null;
@@ -23028,8 +23070,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           html += '</div>'; // end inner collapse toggle div
           html += '</div>'; // end outer header div
 
-          // Collapsible detail body
-          html += '<div style="display:' + (isCollapsed ? 'none' : 'block') + ';padding:10px 12px;border-top:1px solid var(--border);">';
+          // Collapsible detail body. Desktop room-drill splits this into fields | photos (see .rr-body CSS);
+          // has-photos marks cards that actually have thumbnails so the two-column flex only turns on then.
+          const _rrNPhotos = Array.isArray(charge.photos) ? charge.photos.length : (charge.photoUrl ? 1 : 0);
+          html += '<div class="rr-body' + (_rrNPhotos > 0 ? ' has-photos' : '') + '" style="display:' + (isCollapsed ? 'none' : 'block') + ';padding:10px 12px;border-top:1px solid var(--border);">';
+
+          // Fields column (Rows 1–4). Plain block wrapper on mobile — no visual change.
+          html += '<div class="rr-fields">';
 
           // Row 1: Room + Area + Delete
           html += '<div class="room-row-top">';
@@ -23070,10 +23117,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
           // Row 4: Excluded
           html += '<input class="form-input" style="width:100%;margin-top:6px;" placeholder="Not included" value="' + (charge.notIncluded||'').replace(/"/g,'&quot;') + '" data-idx="' + globalIdx + '" data-field="notIncluded" oninput="updateChargeFromInput(this)">';
 
-          // Row 5: Photos
+          // Row 5: Photos — photos column in the desktop room-drill. Plain block wrapper on mobile.
+          html += '</div>'; // end .rr-fields
           if (!charge.photos) charge.photos = charge.photoUrl ? [charge.photoUrl] : [];
           const photos = charge.photos;
-          html += '<div style="margin-top:8px;">';
+          html += '<div class="rr-photos" style="margin-top:8px;">';
           if (photos.length > 0) {
             html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">';
             photos.forEach((url, pi) => {
