@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.131.7 | 2026-08-20">
+  <meta name="crewlogic-version" content="v5.131.8 | 2026-08-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <script>
     // DEV-ONLY desktop preview: on the dev host, add ?desktop to the URL to force the >=1024px desktop
@@ -17364,8 +17364,11 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         initRouteOptimizer();
       }
       if (module === 'estimates') {
+        // Desktop (>=1024): land straight in the Phase 2 drill — auto-open the most recent estimate so the
+        // "list" is the compact estimates rail (mock v3), not the big-card page. One-shot flag consumed by
+        // renderEstimatesList once the list loads; if there are no estimates it just shows the empty list.
+        if (window.innerWidth >= 1024) window._estAutoOpenOnDesktop = true;
         initEstimatesList(); showSecondaryToolbar('list');
-        // Desktop: use the width — un-cap the shell and flow the estimate cards into a grid (CSS below).
         // hideAll() clears maxWidth + removes hd-fullbleed on leave.
         if (window.innerWidth >= 1024) {
           ['.app-shell', '.app-content'].forEach(sel => { const el = document.querySelector(sel); if (el) el.style.maxWidth = 'none'; });
@@ -20435,6 +20438,13 @@ Please review the estimate below. If you have any questions, don't hesitate to r
         html += '</div>';
       });
       listEl.innerHTML = html;
+      // Desktop one-shot: entering "CrewLogic Estimates" opens the most recent estimate into the Phase 2
+      // drill (the estimates rail becomes the list). Cleared so filter/search re-renders don't re-trigger it.
+      if (window._estAutoOpenOnDesktop && window.innerWidth >= 1024 && filtered.length) {
+        window._estAutoOpenOnDesktop = false;
+        openEstimate(String(filtered[0].estimateID));
+        return;
+      }
       resolvePhotoThumbnails();
 
       // Event delegation is set up once in initEstimatesList, not here
