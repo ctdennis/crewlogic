@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.131.8 | 2026-08-20">
+  <meta name="crewlogic-version" content="v5.131.9 | 2026-08-20">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <script>
     // DEV-ONLY desktop preview: on the dev host, add ?desktop to the URL to force the >=1024px desktop
@@ -20524,10 +20524,14 @@ Please review the estimate below. If you have any questions, don't hesitate to r
 
       // Always load fresh from Supabase — bypasses n8n payload stripping issues
       try {
-        const rows = await supabaseFetch(
-          '/rest/v1/estimates?estimate_id=eq.' + estimateID +
-          '&select=*'
-        );
+        // Retry the fetch a couple times — a transient connectivity blip (e.g. flaky wifi) shouldn't boot the
+        // user back to the full list. Only give up (catch below) after retries are exhausted.
+        let rows = null;
+        for (let attempt = 0; attempt < 3 && (!rows || !rows.length); attempt++) {
+          if (attempt) await new Promise(r => setTimeout(r, 700 * attempt));
+          try { rows = await supabaseFetch('/rest/v1/estimates?estimate_id=eq.' + estimateID + '&select=*'); }
+          catch (e) { rows = null; }
+        }
         if (!rows || !rows.length) throw new Error('Not found in Supabase');
         const row = rows[0];
         // payload column is the source of truth for charges/photos/descriptions
