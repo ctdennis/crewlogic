@@ -77,6 +77,51 @@ proposal) from the same author. The prompt should pick/blend register from cues 
 (job type, customer relationship, whether reuse-value items are present) rather than emit one fixed
 template — and expose a light tone/formality control for the estimator.
 
+## Sample 3 (proposal + donation discount + scheduling offer)
+> Hello Selden,
+>
+> Thank you for the opportunity to provide a proposal for the removal of items from your property
+> in Westport. We appreciate the opportunity to work with you.
+>
+> This is a not-to-exceed proposal, meaning the price will not exceed the amount shown unless
+> additional items are added to the scope of work. If the actual volume is less than estimated, the
+> final price will be reduced accordingly. Based on the items we expect to be able to donate, reuse,
+> and recycle, I've also included a $450 discount.
+>
+> Our team is fully insured and professionally trained, and we take pride in completing each project
+> efficiently and respectfully.
+>
+> We can have the work completed as early as Tuesday or Wednesday of next week, or we're happy to
+> schedule for whatever date and time is most convenient for you.
+>
+> Please let me know if you have any questions about the proposal or would like to discuss
+> scheduling.
+>
+> We look forward to working with you.
+>
+> Best,
+> Charles
+
+**What Sample 3 adds to the style guide (vs 1 & 2):**
+- Confirms the **"not-to-exceed" pricing paragraph** is a near-stock building block across proposals
+  (appears in 2 & 3 with slight rewording) — a reusable clause the prompt should include when the
+  estimate is a not-to-exceed job.
+- Introduces a **specific discount tied to donation/reuse/recycle value** ("$450 discount"). Note
+  the pricing-safety line: the email may *state a discount that is actually on the estimate*, but it
+  must **read the number from the estimate**, never invent one (ties to the
+  `pricing-change-full-path-verification` discipline — a customer-facing dollar figure must match
+  the estimate exactly).
+- Adds a **proactive scheduling offer** ("as early as Tuesday or Wednesday next week, or whatever is
+  convenient") — a soft call-to-action toward booking. Whether to include, and how specific to be,
+  likely depends on real availability (could tie into Vonigo availability someday; for v1 keep it
+  generic or estimator-editable).
+- "Best," sign-off — a third signature style, reinforcing signature/closing as a variable.
+
+**Running takeaway (3 samples):** structure is converging — greeting → thanks + name the job/place
+→ not-to-exceed pricing clause (when applicable) + any real discount → trust/values → optional
+scheduling CTA → low-pressure close → signature. Tone flexes casual↔formal by job. **Any dollar
+figure in the email must be pulled from the estimate, never generated.**
+
 ## Open questions (to resolve once the sample corpus is in)
 - **Sample corpus:** owner to provide several more examples (different job types) → these become the
   few-shot examples / style guide for the prompt. The corpus is the key input; hold prompt design
