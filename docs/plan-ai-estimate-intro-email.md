@@ -13,6 +13,25 @@ from the walkthrough) and drafts the **initial contact email to the customer** t
 the estimate. The estimator reviews/edits, then sends. Goal: a warm, specific, human-sounding note
 that references the real details of the job — not a generic template.
 
+## How it's sent — email is the COVER NOTE, the PDF carries the totals (owner directive 2026-08-21)
+The estimate is sent as a **PDF attachment**; this email is the **cover note** that rides with it.
+**Owner preference: the customer should read the TOTALS in the estimate PDF, not in the email —
+reading the price inside the estimate "sells the service better."**
+
+So the email's job is to convey the estimate's **TERMS**, not its dollar totals:
+- **INCLUDE (the terms):** the not-to-exceed condition, the "price comes down if volume is less"
+  adjustment, the donation/reuse/recycle approach, insured + professionally trained, handle-with-care
+  offer, and scheduling/availability. These are the *terms in the estimate*, described in plain
+  language — they build trust and set expectations.
+- **EXCLUDE / push to the PDF:** the actual **dollar totals** (grand total, line-item prices). Let
+  the attached estimate be where the numbers land. This also removes the risk of the email quoting a
+  number that doesn't match the estimate.
+- **Discounts:** describe a discount **qualitatively / as a term** ("we've applied a discount for the
+  items we expect to donate and reuse") rather than restating the exact dollar figure in the email —
+  the amount shows on the estimate. (Sample 3's explicit "$450" is the kind of number that, per this
+  preference, generally belongs in the PDF, not the email body. If a specific figure is ever included,
+  it must be read verbatim from the estimate, never generated.)
+
 ## Owner's reference sample (camper removal)
 > Bob,
 >
@@ -139,7 +158,9 @@ figure in the email must be pulled from the estimate, never generated.**
 
 ## Guardrails
 - Draft is **always estimator-reviewed before sending** — never auto-sent.
-- No pricing numbers invented; the email describes what's in the estimate, doesn't recompute it.
+- **Email = terms, not totals.** Keep dollar totals in the attached PDF (owner preference above); the
+  email conveys the estimate's terms. Never invent or recompute a number; if any figure appears it is
+  read verbatim from the estimate.
 - Additive to the estimate flow; no change to pricing/PDF/Vonigo submit.
 
 ## Next step
