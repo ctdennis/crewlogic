@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="crewlogic-version" content="v5.131.0 | 2026-08-19">
+  <meta name="crewlogic-version" content="v5.131.1 | 2026-08-21">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -26,6 +26,14 @@
     // Initialize on DOM ready — no GIS library needed
     window.addEventListener('DOMContentLoaded', function() {
       initAuth();
+      // If the user tapped "Sign in with Google" while the main app <script> was still
+      // streaming/parsing (slow mobile / in-flight wifi), the pre-init stub below only recorded
+      // the intent (it must NOT fire the retired hand-built accounts.google.com flow → Google 400).
+      // The real Supabase OAuth handler now exists — run it. See triggerGoogleSignIn stub below.
+      if (window.__googleSignInPending) {
+        window.__googleSignInPending = false;
+        try { triggerGoogleSignIn(); } catch (e) {}
+      }
     });
 
     // Also try on hashchange in case hash arrives after load
@@ -35,25 +43,26 @@
       }
     });
 
+    // PRE-INIT STUB for the login button. The REAL Google sign-in handler lives in the main app
+    // <script> (Supabase GoTrue: supabaseClient.auth.signInWithOAuth) and OVERRIDES this function
+    // once that ~15k-line block has parsed. On slow mobile / in-flight wifi the login button renders
+    // (near the top of <body>) and is tappable for several seconds BEFORE that override lands.
+    //
+    // This stub used to fire a hand-built accounts.google.com authorize URL pointing at the retired
+    // crewlogic-oauth-callback edge fn. That redirect_uri is no longer a valid target for the current
+    // OAuth client, so an early tap produced Google's "400. That's an error … malformed" page (the
+    // recurring mobile-only login failure). Do NOT reinstate that flow here.
+    //
+    // Instead: record the intent + show a spinner. The DOMContentLoaded handler above flushes the
+    // pending tap into the real Supabase handler the moment the app is ready.
     function triggerGoogleSignIn() {
+      window.__googleSignInPending = true;
       const btn = document.getElementById('googleSignInBtn');
       const statusEl = document.getElementById('loginStatus');
+      const spinner = document.getElementById('loginSpinner');
       if (btn) { btn.style.opacity = '0.6'; btn.style.pointerEvents = 'none'; }
-      if (statusEl) { statusEl.textContent = 'Redirecting to Google...'; statusEl.style.color = '#94a3b8'; }
-      const GOOGLE_CLIENT_ID = '183516161425-i97sjngldvkd5tffj1kfjdj31285177p.apps.googleusercontent.com';
-      // OAuth callback is now a Supabase Edge Function (was n8n)
-      const OAUTH_REDIRECT = 'https://ozfkpxyachigfpcmvekz.supabase.co/functions/v1/crewlogic-oauth-callback';
-      const APP_URL = 'https://crewlogicai.com';
-      const params = new URLSearchParams({
-        client_id: GOOGLE_CLIENT_ID,
-        redirect_uri: OAUTH_REDIRECT,
-        response_type: 'code',
-        scope: 'openid email profile',
-        hd: 'junkluggers.com',
-        access_type: 'online',
-        prompt: 'select_account'
-      });
-      window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
+      if (spinner) { spinner.style.display = 'block'; }
+      if (statusEl) { statusEl.textContent = 'Starting sign-in…'; statusEl.style.color = '#94a3b8'; }
     }
   </script>
   <style>
