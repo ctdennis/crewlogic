@@ -274,16 +274,16 @@ data to allow it; ship without it.
 - **Live geofence auto-confirm** → **IN SCOPE** for v1: a truck's real facility arrival confirms the
   planned disposal row and feeds the live ETA (§6b).
 
-**Still open:**
-1. **Facility selection** — does the user pick the facility, or does it auto-default to nearest/cheapest
-   (the existing disposal-finder) with an override?
-2. **History-gate specifics** — is the 3-month window **per facility** (vs franchise-wide)? If a facility
-   has < 3 mo but others have more, per-facility default fallback?
-3. **Billing unit** — per-job-read *(recommended)* vs flat per-refresh.
-4. **Pac-Man check** — per-segment sliders + disposal-row choices are richer than "one slider + one pin."
-   The common path stays low-touch (press AI, defaults fill in, only touch a slider on an exception), but
-   confirm you're happy with the added depth — or we trim (e.g., collapse each segment slider to 3
-   presets: Light / AI / Heavy).
+**Resolved (owner, 2026-08-22) — all remaining §15 decisions closed:**
+1. **Facility selection** → **auto-default to nearest/cheapest** (the existing disposal-finder) **with a
+   manual override**.
+2. **History-gate specifics** → **per-facility 3-month gate**: a facility with < 3 mo of clean data uses
+   the Cost-settings default while facilities with enough history use their real dwell average.
+3. **Billing unit** → **per-job-read**.
+4. **Pac-Man depth** → **keep the full per-segment sliders** (the exception-only workflow keeps the common
+   path low-touch; no trim to Light/AI/Heavy presets).
+
+**§15 is now fully resolved — Phase 2 (disposal-row time cost) is unblocked to build.**
 
 ---
 
