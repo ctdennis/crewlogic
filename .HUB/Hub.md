@@ -69,7 +69,7 @@ use by a prod tenant"; keep those distinct.
 | FW-25 | Open | New-estimate onboarding prompt |
 | FW-26 | Partial | Native price-book onboarding — "no price book" notice done; home tile remains |
 | FW-27 | Open | Phase 2 onboarding wizard |
-| FW-28 | Open | Streamline the Settings environment |
+| FW-28 | ✅ Done — closed 2026-08-22, subsumed by [[FW-68]] Settings desktop redesign (category rail + 3-column portlet grid + per-tab intro/explainers + contained Facilities scroll). Desktop Settings streamlined; mobile Settings intentionally left unchanged (FW-68 is desktop-gated). Owner closed. | Streamline the Settings environment |
 | FW-29 | Done | Hide unused home cards — shipped as Epic C per-user tile toggles (migration 0037; `tileToggles` index.html:6035, `_applyTileMap` index.html:7804). Owner confirmed 2026-07-18 that self-serve hiding was never the intent, so the owner-assigned toggles close this |
 | FW-30 | Open | index.html size / architecture review |
 | FW-31 | Done | Payments + pricing model (BUILD shipped dormant; activation = FW-32) |
